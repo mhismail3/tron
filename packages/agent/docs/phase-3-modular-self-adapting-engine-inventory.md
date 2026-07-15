@@ -538,14 +538,14 @@ independent review and mainline integration. It keeps removed dependencies
 absent unless a selected module owns the request and the accepted
 `P3MSA-INV-007` dependency governance path approves it.
 
-The accepted slice strengthens the primitive cleanup dependency guard so the
-removed dependency catalog remains source-backed by the feature index and
-accepted Phase 2 Slice 22A evidence, while Phase 3 reappearance requires an
-approved `module_dependency_request`, approved `module_dependency_policy`,
-module owner rationale, risk class, tests, removal path, and `Cargo.toml` /
-`Cargo.lock` parity evidence. The guard denies direct manifest or lockfile
-reappearance of removed dependency names without that approved module
-rationale.
+The accepted slice historically strengthened a primitive-cleanup dependency
+guard using the then-retained Slice 22A catalog; that guard and catalog were
+later retired. Current governance belongs to
+`packages/agent/src/domains/module_dependencies/mod.rs` under accepted
+`P3MSA-INV-007`, where an approved `module_dependency_request`, approved
+`module_dependency_policy`, module owner rationale, risk class, tests, removal
+path, and `Cargo.toml` / `Cargo.lock` parity evidence govern any dependency
+reappearance.
 
 The rejected shape remains forbidden: no speculative dependency restoration,
 no runtime dependency restoration, no `portable-pty`, interpreter,

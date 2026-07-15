@@ -753,9 +753,9 @@ without an approved module-owned dependency request and policy decision.
 
 Minimal shape:
 
-- a Phase 3-aware dependency guard that keeps the removed dependency catalog
-  source-backed by the feature index, the accepted Phase 2 Slice 22A policy,
-  and accepted `P3MSA-INV-007` module dependency request/policy governance;
+- historical Slice 24K policy evidence for the retired cleanup guard and its
+  catalog, with current governance owned by `domains/module_dependencies`
+  under accepted `P3MSA-INV-007` request/decision/policy contracts;
 - static checks that deny reappearance in `Cargo.toml` or `Cargo.lock` without
   a selected module owner, rationale, risk class, tests, removal path,
   manifest/lockfile parity evidence, and approved `module_dependency_policy`;

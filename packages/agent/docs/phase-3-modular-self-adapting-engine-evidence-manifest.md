@@ -16,8 +16,8 @@ and
 The Phase 3 plan is derived from repository artifacts instead of chat-only
 state. The audit covered:
 
-- the historical feature index comparing the primitive baseline with
-  `origin/next/modular-capability-engine`;
+- the retained BPRC backlog lineage derived from the historical comparison
+  with `origin/next/modular-capability-engine`;
 - the Phase 1 iOS affordance progress ledger;
 - the completed Phase 2 agent-execution restoration scorecard, evidence
   manifest, narrative inventory, and TSV;
@@ -1424,14 +1424,14 @@ accepted Phase 3 Slice 24J baseline
 Implementation branch:
 `codex/phase-3-slice-24k-speculative-dependency-restoration`
 
-Slice 24K strengthens the existing primitive cleanup dependency guard so
-removed dependency reappearance is rejected unless it is source-backed by an
-approved module-owned dependency path. The guard still uses the feature-index
-removed dependency catalog and accepted Phase 2 Slice 22A evidence, and now
-also requires accepted `P3MSA-INV-007` module dependency governance:
-`module_dependency_request`, `module_dependency_policy`, module owner
-rationale, risk class, tests, removal path, and `Cargo.toml` / `Cargo.lock`
-parity evidence.
+Slice 24K historically strengthened a primitive-cleanup dependency guard so
+removed dependency reappearance required an approved module-owned path. That
+cleanup guard and its frozen catalog were later retired. Current governance is
+owned by `packages/agent/src/domains/module_dependencies/mod.rs` under accepted
+`P3MSA-INV-007`: `module_dependency_request`, `module_dependency_policy`,
+module owner rationale, risk class, tests, removal path, and `Cargo.toml` /
+`Cargo.lock` parity evidence remain the governing contract, without package-
+manager execution or dependency restoration.
 
 Rejected scope remains deferred or forbidden: no speculative dependency
 restoration, no runtime dependency restoration, no dependency additions, no

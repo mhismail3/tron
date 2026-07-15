@@ -260,7 +260,6 @@ Inspected planning sources:
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.md`
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`
 - `packages/agent/docs/ios-affordance-restoration-progress.md`
-- `packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md`
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.md`
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`
@@ -527,7 +526,7 @@ Likely files/areas: `packages/agent/docs`, README, iOS architecture docs, and
 static inventory rows.
 
 Old evidence paths: IARM progress Phase 2 reminder, IARM TSV Phase 2 rows,
-BPRC backlog rows, feature index.
+and retained BPRC backlog rows.
 
 Acceptance criteria: plan artifacts exist, source-backed scope is complete,
 TSV has one row per feature family, and validations in the evidence manifest
@@ -566,8 +565,8 @@ Likely files/areas: `packages/agent/src/engine/catalog`,
 `packages/ios-app/Sources/Engine/Protocol/Catalog`.
 
 Old evidence paths: `BPRC-FEATURE-01`, `IARM-SURFACE-005`,
-`IARM-SURFACE-007`, `IARM-SURFACE-008`,
-`primitive-baseline-vs-modular-capability-engine-feature-index.md` section 1.
+`IARM-SURFACE-007`, and `IARM-SURFACE-008`; the BPRC row retains the
+frozen comparison lineage.
 
 Acceptance criteria: catalog facts are resource-backed, hidden/internal/admin
 functions remain protected, conformance evidence is durable, replay includes
@@ -645,8 +644,8 @@ inventories. Slice 3 does not add profile settings or native iOS controls;
 memory policy is resource-backed and iOS remains on generic resource/runtime
 facts until a workflow proves native settings/audit UI is needed.
 
-Old evidence paths: `BPRC-FEATURE-10`, `IARM-SURFACE-034`,
-feature index section 10.
+Old evidence paths: `BPRC-FEATURE-10` and `IARM-SURFACE-034`;
+the BPRC row retains the frozen comparison lineage.
 
 Acceptance criteria: no hidden prompt memory; records carry provenance,
 confidence, expiry, sensitivity, edit/delete/export/migration state; disabled
@@ -684,8 +683,8 @@ Likely files/areas: `domains/filesystem`, `domains/capability/operations`,
 `engine/authority/grants/paths.rs`, resource kernel, iOS generic result
 rendering.
 
-Old evidence paths: `BPRC-FEATURE-02`, `IARM-SURFACE-035`,
-feature index section 2.
+Old evidence paths: `BPRC-FEATURE-02` and `IARM-SURFACE-035`;
+the BPRC row retains the frozen comparison lineage.
 
 Acceptance criteria: canonical path containment, preview before destructive
 changes, patch/diff resources, rollback strategy, no network authority, output
@@ -724,8 +723,8 @@ Likely files/areas: `engine/durability/queue`, `engine/durability/streams`,
 `engine/durability/resources`, future `domains/jobs`, future external worker
 packages, iOS process/job surfaces only after protocol stability.
 
-Old evidence paths: `BPRC-FEATURE-03`, `BPRC-FEATURE-15`,
-`IARM-SURFACE-024`, feature index sections 3 and 15.
+Old evidence paths: `BPRC-FEATURE-03`, `BPRC-FEATURE-15`, and
+`IARM-SURFACE-024`; the BPRC rows retain the frozen comparison lineage.
 
 Acceptance criteria: bounded output, cancellation, timeout, dead-letter or
 terminal state, replayable logs, no-network or declared-network policy,
@@ -1025,7 +1024,7 @@ Future areas: `domains/worktree`, branch/PR resources, conflict workflows, and
 iOS SourceChanges only after a stable higher-level source-control contract.
 
 Old evidence paths: `BPRC-FEATURE-05`, `BPRC-FEATURE-16`,
-`IARM-SURFACE-025`, `IARM-SURFACE-029`, feature index sections 5 and 16.
+`IARM-SURFACE-025`, and `IARM-SURFACE-029`; the BPRC rows retain lineage.
 
 Slice 6A acceptance criteria: Slice 6A covers trusted-path repo detection,
 branch or detached HEAD identity, upstream/ahead-behind,
@@ -1632,8 +1631,8 @@ plan resources, user question resources, answers, and inbox events.
 Likely files/areas: `domains/agent/loop`, `engine/durability/queue`,
 resources/events, iOS `Interaction` protocol and future Work surface.
 
-Old evidence paths: `BPRC-FEATURE-08`, `IARM-SURFACE-027`,
-`IARM-SURFACE-028`, feature index section 8.
+Old evidence paths: `BPRC-FEATURE-08`, `IARM-SURFACE-027`, and
+`IARM-SURFACE-028`; the BPRC row retains the frozen comparison lineage.
 
 Acceptance criteria: interruptible goals, explicit ownership, question expiry,
 answer provenance, queue backpressure, cancellation, replay, and no fake local
@@ -1846,8 +1845,8 @@ HTML/text extraction, browser status if added, and source provenance.
 Likely files/areas: future `domains/web`, future external browser/research
 workers, resource store, model context assembly, iOS generic source rendering.
 
-Old evidence paths: `BPRC-FEATURE-04`, `IARM-SURFACE-030`, feature index
-section 4.
+Old evidence paths: `BPRC-FEATURE-04` and
+`IARM-SURFACE-030`.
 
 Acceptance criteria: network access is never smuggled through process
 execution, source records carry URL/time/hash/provider, sensitive data is
@@ -2240,8 +2239,8 @@ Likely files/areas: `domains/worker_lifecycle`, `engine/runtime`,
 `engine/catalog`, `engine/authority`, future MCP/source modules, iOS Agent
 Cockpit.
 
-Old evidence paths: `BPRC-FEATURE-06`, `BPRC-FEATURE-14`,
-`IARM-SURFACE-032`, feature index sections 6 and 14.
+Old evidence paths: `BPRC-FEATURE-06`, `BPRC-FEATURE-14`, and
+`IARM-SURFACE-032`; the BPRC rows retain the frozen comparison lineage.
 
 Acceptance criteria: package proposal is inert until approved; install is
 auditable; scoped tokens bind subject/session/workspace; conformance must pass;
@@ -2283,8 +2282,8 @@ profile selection, result resources, delegation authority, and merge decisions.
 Likely files/areas: `domains/agent/loop`, future `domains/subagents`, jobs,
 worker packages, iOS capability evidence and generated surfaces.
 
-Old evidence paths: `BPRC-FEATURE-07`, `IARM-SURFACE-026`, feature index
-section 7.
+Old evidence paths: `BPRC-FEATURE-07` and
+`IARM-SURFACE-026`.
 
 Acceptance criteria: every subagent has parent trace, authority, workspace,
 model profile, cancellation path, result resource, and replay evidence.
@@ -2329,8 +2328,8 @@ Slice 11A files/areas: `domains/procedural`, `capability::execute` operation
 adapters/schema guidance, engine resource definitions, provider message
 converter guidance, Phase 2 docs, README, and static inventories.
 
-Old evidence paths: `BPRC-FEATURE-10`, `IARM-SURFACE-021`,
-`IARM-SURFACE-034`, feature index section 10.
+Old evidence paths: `BPRC-FEATURE-10`, `IARM-SURFACE-021`, and
+`IARM-SURFACE-034`; the BPRC row retains the frozen comparison lineage.
 
 Acceptance criteria: every active procedure has provenance, lineage, evals,
 scope, trigger, prompt-inclusion reason, rollback, and disable behavior.
@@ -2367,7 +2366,7 @@ does.
 Likely files/areas: engine trigger runtime, queue, resources, future
 `domains/scheduler`, iOS schedule surfaces after contract.
 
-Old evidence paths: `BPRC-FEATURE-17`, feature index section 17.
+Old evidence path: `BPRC-FEATURE-17`, the retained backlog lineage.
 
 Acceptance criteria: durable schedule schema, timezone/missed-run policy,
 authority on each run, cancellation, replay, retention, and no hidden cron
@@ -2581,14 +2580,14 @@ expansion, runtime execution, repo-managed skills, and deploy/update flows out
 of scope until separately selected and reviewed.
 Accepted Slice 22A closes the dependency policy parity portion of
 `P2AER-INV-023` / `BPRC-FEATURE-24`: Dependency Restoration Review Foundation.
-It adds a source-backed dependency policy guard that derives the
-removed-dependency catalog from feature index section 24 and checks
-`packages/agent/Cargo.toml` plus `packages/agent/Cargo.lock` so removed
-dependencies cannot reappear without an owning module and Phase 2 rationale.
-No dependencies are restored, no runtime/package behavior changes, no
-profile/settings migration, no public `/engine` expansion, no fixed iOS panels
-or Swift UI work, no repo-managed skills, and no deploy/update behavior are
-included.
+It historically added a source-backed cleanup guard for the then-retained
+removed-dependency catalog and Cargo manifest/lockfile absence. That guard was
+later retired. Current dependency governance belongs to
+`packages/agent/src/domains/module_dependencies/mod.rs` under accepted
+`P3MSA-INV-007`; `Cargo.toml` and `Cargo.lock` remain manifest truth.
+Dependencies are not restored; runtime/package behavior, profile/settings
+migration, public `/engine` expansion, fixed iOS panels or Swift UI work,
+repo-managed skills, and deploy/update behavior remain absent.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,

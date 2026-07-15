@@ -10,7 +10,7 @@ restoration begins. It records three kinds of truth:
 
 - active baseline artifacts and gates that must remain current;
 - foundational engine/iOS substrate that future features may build on;
-- restoration backlog rows for every feature bucket in the feature index.
+- restoration backlog rows preserving all 24 frozen comparison buckets.
 
 ## Controlled Vocabulary
 
@@ -69,10 +69,9 @@ Every future feature restoration slice must define and verify:
 
 ## Restoration Backlog
 
-The TSV contains one `restoration_backlog` row for each feature bucket from
-`primitive-baseline-vs-modular-capability-engine-feature-index.md`. Each row is
-`not_in_baseline` and points to the future constraint that must be resolved
-before implementation.
+The TSV contains one `restoration_backlog` row for each of the 24 frozen
+comparison buckets. Each row is `not_in_baseline` and points to the future
+constraint that must be resolved before implementation.
 
 ## Current Boundary
 

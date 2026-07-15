@@ -23,7 +23,7 @@ The plan was derived from repository artifacts instead of chat history. The
 audit covered:
 
 - Phase 1 iOS affordance map, inventory, TSV, evidence, and progress ledger;
-- BPRC restoration backlog and primitive feature index;
+- retained BPRC restoration backlog lineage;
 - current README architecture, capabilities, event, settings, database, iOS,
   testing, and invariant sections;
 - current Rust crate and domain `mod.rs` docs for the retained primitive
@@ -2883,7 +2883,7 @@ Validation evidence:
 | --- | --- | --- |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed. |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants dependency_restoration_review_is_source_backed_by_phase_two_policy -- --nocapture` | exit 0 | New focused source-backed dependency policy guard passed after proving `P2AER-INV-023` / `BPRC-FEATURE-24` candidate evidence, exact feature-index dependency catalog coverage, and Cargo absence checks. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants dependency_restoration_review_is_source_backed_by_phase_two_policy -- --nocapture` | exit 0 | At Slice 22A acceptance, the focused cleanup guard proved `P2AER-INV-023` / `BPRC-FEATURE-24` coverage and Cargo absence; it was later retired when current governance moved to `domains/module_dependencies` under `P3MSA-INV-007`. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed with Slice 22A kept as `pending_review`. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed with Slice 22A implementation-candidate docs/evidence. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 17 PCC tests passed, including the new dependency-restoration policy guard and the existing dead-dependency absence scan. |

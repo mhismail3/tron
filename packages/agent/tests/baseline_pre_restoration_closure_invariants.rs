@@ -17,8 +17,6 @@ const PHASE_TWO_EVIDENCE_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md";
 const PHASE_TWO_INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv";
-const FEATURE_INDEX_PATH: &str =
-    "packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md";
 const TARGET_PATH: &str = "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs";
 const TARGET_NAME: &str = "baseline_pre_restoration_closure_invariants";
 const BASE_COMMIT: &str = "1545da37d3c6186fbc6613789bae3d4a5481f976";
@@ -205,7 +203,6 @@ fn bprc_artifacts_lineage_and_readme_wiring_exist() {
         EVIDENCE_PATH,
         INVENTORY_PATH,
         INVENTORY_TSV_PATH,
-        FEATURE_INDEX_PATH,
         TARGET_PATH,
     ] {
         assert!(repo_path(path).exists(), "missing BPRC artifact: {path}");
@@ -255,7 +252,7 @@ fn bprc_scorecard_weights_sum_to_100_and_are_closed() {
         ("BPRC-1", ("Active-doc truth cleanup", 10)),
         (
             "BPRC-2",
-            ("Feature-index conversion into restoration backlog", 10),
+            ("Frozen comparison conversion into restoration backlog", 10),
         ),
         ("BPRC-3", ("Successor-feature absence guards", 10)),
         ("BPRC-4", ("Baseline residue and dead-surface audit", 10)),
@@ -283,7 +280,7 @@ fn bprc_scorecard_weights_sum_to_100_and_are_closed() {
 #[test]
 fn bprc_inventory_is_structured_and_covers_backlog_and_artifacts() {
     let rows = parse_inventory_rows();
-    assert!(rows.len() >= 42, "BPRC inventory row count regressed");
+    assert!(rows.len() >= 41, "BPRC inventory row count regressed");
     let allowed_record_types = BTreeSet::from([
         "artifact",
         "baseline_reference",
@@ -382,7 +379,6 @@ fn bprc_inventory_is_structured_and_covers_backlog_and_artifacts() {
         "BPRC-INV-008",
         "BPRC-INV-009",
         "BPRC-INV-010",
-        "BPRC-INV-011",
         "BPRC-INV-012",
         "BPRC-INV-016",
         "BPRC-INV-017",

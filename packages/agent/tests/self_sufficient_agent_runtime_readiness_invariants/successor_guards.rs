@@ -53,8 +53,6 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
         || path == "packages/agent/docs/restoration-retrospective-audit-status.md"
         || path == "packages/agent/tests/ios_affordance_restoration_map_invariants.rs"
         || path == "packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs"
-        || path
-            == "packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md"
         || path.starts_with("packages/agent/docs/baseline-pre-restoration-closure-")
         || path == "packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv"
         || path == "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs"
@@ -383,7 +381,10 @@ fn successor_terms_are_classified_and_do_not_claim_implementation() {
         .map(|row| row[1].clone())
         .collect();
     let mut unclassified = Vec::new();
-    for path in active_text_files() {
+    for path in active_text_files()
+        .into_iter()
+        .filter(|path| repo_path(path).is_file())
+    {
         let source = read_repo_file(&path);
         if has_successor_term(&source)
             && !classified_successor_term_path(&path, &source)
