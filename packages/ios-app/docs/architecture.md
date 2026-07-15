@@ -561,7 +561,9 @@ those paths are not production recovery modes.
 it passes one strongly captured client into every page of that operation.
 Incremental pagination, cursor advancement, and in-operation ancestor resolution therefore
 finish through one server generation even if composition selects another server
-while the operation is suspended. The two types rebuild local session/event
+while the operation is suspended. Fork orchestration uses that same captured
+client for the fork request, ancestor fetch, full-history sync, and cached
+server-origin tag. The two types rebuild local session/event
 projections from server session lists and event-sync APIs. Session-list refresh
 uses immutable creation-key server cursors in 200-row pages beneath one
 `snapshotAsOf` boundary, with independent page/no-progress limits and a

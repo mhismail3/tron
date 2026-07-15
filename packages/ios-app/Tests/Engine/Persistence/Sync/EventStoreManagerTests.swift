@@ -797,6 +797,103 @@ final class CachedSessionTests: XCTestCase {
         await manager.shutdown()
     }
 
+    func testForkKeepsInitiatingClientForForkAncestorsHistoryAndOrigin() async throws {
+        let database = testState.makeDatabase(fileName: "captured-fork-sync.db")
+        try await database.initialize()
+        var sourceSession = createTestSession(
+            id: "source-session-a",
+            workingDirectory: "/tmp/tron-fixtures/source-a"
+        )
+        sourceSession.serverOrigin = "127.0.0.1:65507"
+        try await database.sessions.insert(sourceSession)
+
+        let clientA = makeEngineClient(port: 65507)
+        let clientB = makeEngineClient(port: 65506)
+        let transportA = makeConnectedTransport(port: 65507)
+        let transportB = makeConnectedTransport(port: 65506)
+        clientA.session = SessionClient(transport: transportA)
+        clientA.eventSync = EventSyncClient(transport: transportA)
+        clientB.session = SessionClient(transport: transportB)
+        clientB.eventSync = EventSyncClient(transport: transportB)
+
+        var manager: EventStoreManager!
+        var clientAReads: [String] = []
+        var clientBWrites = 0
+        var clientBReads = 0
+        transportA.writeHandler = { functionId, _, _, _ in
+            guard functionId.rawValue == "session::fork" else {
+                throw EngineConnectionError.invalidResponse
+            }
+            manager.updateEngineClient(clientB)
+            return SessionForkResult(
+                newSessionId: "fork-session-a",
+                forkedFromEventId: "source-event-a",
+                forkedFromSessionId: "source-session-a",
+                rootEventId: "fork-root-a"
+            )
+        }
+        transportA.readHandler = { functionId, _, _ in
+            clientAReads.append(functionId.rawValue)
+            switch functionId.rawValue {
+            case "tree::get_ancestors":
+                return TreeGetAncestorsResult(
+                    events: [
+                        self.makeRawEvent(
+                            id: "source-event-a",
+                            sessionId: "source-session-a",
+                            sequence: 1
+                        )
+                    ]
+                )
+            case "events::get_history":
+                return EventsGetHistoryResult(
+                    events: [
+                        self.makeRawEvent(
+                            id: "fork-root-a",
+                            parentId: "source-event-a",
+                            sessionId: "fork-session-a",
+                            sequence: 1
+                        )
+                    ],
+                    hasMore: false,
+                    oldestEventId: nil
+                )
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+        transportB.writeHandler = { _, _, _, _ in
+            clientBWrites += 1
+            throw EngineConnectionError.invalidResponse
+        }
+        transportB.readHandler = { _, _, _ in
+            clientBReads += 1
+            throw EngineConnectionError.invalidResponse
+        }
+        manager = EventStoreManager(
+            eventDB: database,
+            engineClient: clientA,
+            defaults: testState.defaults
+        )
+
+        let forkSessionId = try await manager.forkSession("source-session-a")
+
+        let cachedFork = try await database.sessions.get(forkSessionId)
+        XCTAssertEqual(forkSessionId, "fork-session-a")
+        XCTAssertTrue(clientAReads.contains("tree::get_ancestors"))
+        XCTAssertTrue(clientAReads.contains("events::get_history"))
+        XCTAssertEqual(clientBWrites, 0)
+        XCTAssertEqual(clientBReads, 0)
+        XCTAssertEqual(cachedFork?.serverOrigin, clientA.serverOrigin)
+        XCTAssertEqual(cachedFork?.eventCount, 1)
+        XCTAssertEqual(cachedFork?.headEventId, "fork-root-a")
+        let cachedSourceEvent = try await database.events.get("source-event-a")
+        let cachedForkEvent = try await database.events.get("fork-root-a")
+        XCTAssertNotNil(cachedSourceEvent)
+        XCTAssertNotNil(cachedForkEvent)
+        await manager.shutdown()
+    }
+
     func testFullSyncFetchFailurePreservesExistingProjection() async throws {
         let database = testState.makeDatabase(fileName: "full-sync-fetch-failure.db")
         try await database.initialize()
