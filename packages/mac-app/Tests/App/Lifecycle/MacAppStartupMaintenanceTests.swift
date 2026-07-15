@@ -148,7 +148,6 @@ struct MacAppStartupMaintenanceTests {
             serverProcess: ServerProcessInfo(
                 pid: 42,
                 uptime: "00:01",
-                command: "\(tmp.path)/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                 isDevServer: true
             ),
             launchAgentManager: mock

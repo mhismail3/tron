@@ -3,7 +3,6 @@ import Foundation
 struct ServerProcessInfo: Equatable, Sendable {
     var pid: Int
     var uptime: String?
-    var command: String?
     var isDevServer: Bool
 }
 
@@ -24,7 +23,6 @@ enum ServerProcessProbe {
         return ServerProcessInfo(
             pid: pid,
             uptime: resolvedUptime,
-            command: resolvedCommand,
             isDevServer: isDevServerCommand(resolvedCommand)
         )
     }

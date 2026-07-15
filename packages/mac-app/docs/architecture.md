@@ -132,6 +132,10 @@ not independently maintained resources.
 
 `LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. `LaunchAgentLoader` in the same owner applies the shared load policy: return the registration outcome directly, except an already-loaded service is restarted so an app replacement cannot leave an older helper image running. The shared async `Subprocess` runner lives under `Support/Foundation` so health probing, launch-agent diagnostics, and process-control callers do not make `Server/Health` a second ownership bucket. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server engine protocol.
 
+`LaunchAgentRuntimeInfo` retains only launchd fields consumed by replacement,
+refresh, or status UI policy: PID/uptime, parent bundle identity/version, helper
+executable path, and launch-constraint refresh state.
+
 ### Wizard visual system
 
 The wizard uses one fixed-size glass canvas with pinned header, progress, and
@@ -248,7 +252,9 @@ poller's stream buffers only its newest snapshot,
 so a stalled menu consumer cannot accumulate obsolete 30-second status values;
 cancelling the menu consumer, or terminating or releasing the stream, invokes
 `onTermination` and cancels the producer task. `ServerProcessProbe` owns local
-port-process discovery plus `/bin/ps` command and elapsed-time lookups. The
+port-process discovery plus `/bin/ps` command and elapsed-time lookups. It reads
+the command only long enough to derive dev-server ownership; its projection
+retains only PID, uptime, and that derived flag for policy/UI consumers. The
 poller uses it after a successful ping; `LiveLaunchAgentManager` still parses
 launchd's PID but reuses the same elapsed-time lookup. This lets `tron dev`
 takeover report the `Tron-Dev.app` process instead of stale LaunchAgent metadata

@@ -10,7 +10,7 @@ struct DevServerStopperTests {
         let result = await DevServerStopper.stop(
             port: 9847,
             probe: { _ in
-                ServerProcessInfo(pid: 12, uptime: nil, command: "tron --port 9847", isDevServer: false)
+                ServerProcessInfo(pid: 12, uptime: nil, isDevServer: false)
             },
             signal: { pid, sig in
                 signals.append(pid: pid, signal: sig)
@@ -34,7 +34,6 @@ struct DevServerStopperTests {
                     return ServerProcessInfo(
                         pid: 24_680,
                         uptime: "00:00:09",
-                        command: "/Users/example/.tron/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                         isDevServer: true
                     )
                 }
@@ -62,7 +61,6 @@ struct DevServerStopperTests {
                 ServerProcessInfo(
                     pid: 24_680,
                     uptime: "00:00:09",
-                    command: "/Users/example/.tron/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                     isDevServer: true
                 )
             },

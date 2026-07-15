@@ -321,7 +321,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 from: result.stdout
             ),
             parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
-            programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout),
             executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
             needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
         )
