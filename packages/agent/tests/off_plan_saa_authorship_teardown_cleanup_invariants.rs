@@ -672,9 +672,7 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md" => {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
-        "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md"
-        | "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv"
-        | "packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md"
+        "packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md"
         | "packages/agent/docs/provider-model-boundary-discipline-inventory.md"
         | "packages/agent/docs/provider-model-boundary-discipline-scorecard.md"
         | "packages/agent/tests/provider_model_boundary_discipline_invariants.rs"
@@ -682,8 +680,7 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         | "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv" => {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
-        "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
-        | "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
+        "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md"

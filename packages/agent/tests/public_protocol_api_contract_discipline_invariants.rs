@@ -400,7 +400,6 @@ fn ppacd_evidence_manifest_records_required_command_results() {
         "cargo test --manifest-path packages/agent/Cargo.toml shared::server::error_mapping --lib -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types --lib -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture",

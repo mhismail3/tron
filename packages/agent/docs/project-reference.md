@@ -165,16 +165,6 @@ Current living entry points:
   cleanup source inventory taxonomy and proof notes.
 - `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv`:
   machine-readable cleanup inventory used by static gates.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md`:
-  completed Data Integrity Storage Evolution Migration Discipline scorecard for
-  SQLite storage ownership, schema drift rejection, generation/archive rules,
-  WAL/checkpoint behavior, runtime hygiene, and closeout proof.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md`:
-  companion evidence manifest for DSEMD command results and residual risks.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md`:
-  completed storage surface taxonomy and ownership notes.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
-  machine-readable DSEMD storage inventory used by static gates.
 - `packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md`:
   completed Public Protocol API Contract Discipline scorecard for `/engine`
   public methods, wire schemas, context boundaries, response/error/event
@@ -426,10 +416,6 @@ Current living entry points:
 - `packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs`:
   cleanup scorecard, evidence, inventory, provider execute narrowing,
   memory/rule removal, static target, README, and predecessor-inventory gates.
-- `packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`:
-  completed Data Integrity Storage Evolution Migration Discipline gates for
-  scorecard/evidence, inventory coverage, README/CI wiring, storage source
-  contracts, negative corruption guards, and final closeout claims.
 - `packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs`:
   completed Public Protocol API Contract Discipline gates for scorecard/evidence,
   inventory coverage, README/CI wiring, public `/engine` method/schema shape,
@@ -531,7 +517,6 @@ tron/
 |   +-- asc-jwt             Local App Store Connect JWT helper
 |   +-- install-hooks.sh    Installs repo-managed commit hooks
 |   +-- personal-info-guard.sh
-|   +-- reset-db            Local database reset helper
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
@@ -2846,6 +2831,8 @@ Agent soul / system prompt
 Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v4-*` and starts fresh. Non-current product/session data is archived, not migrated or read by the new runtime. Pre-unified database artifacts are archived the same way and are never read as active storage.
 
 The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
+
+Tron intentionally exposes no database-only reset script. `session::delete` owns one session's destructive transaction: it removes that session's event and session rows, clears its in-memory sequence/compaction state, and emits the session-deleted lifecycle event. Blob retention and other audit/durability records remain governed by their own owners; session deletion is not a whole-database reset. For a complete local reset, stop every process that owns the resolved Tron home and reversibly move that entire home aside before restarting; do not delete selected SQLite tables, blobs, or WAL/SHM files in place.
 
 Retained session rows, event rows, Agent Trace-style records, bounded
 server/iOS logs, and compressed content-addressed blobs share that same SQLite

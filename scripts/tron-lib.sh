@@ -2,7 +2,7 @@
 # tron-lib.sh - Shared library for Tron CLI scripts
 #
 # SINGLE SOURCE OF TRUTH for all paths, config, and shared functions.
-# Sourced by: scripts/tron, scripts/tron-cli, scripts/reset-db
+# Sourced by: scripts/tron and scripts/tron-cli
 #
 # Do NOT execute this file directly.
 

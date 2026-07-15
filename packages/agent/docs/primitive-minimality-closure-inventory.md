@@ -40,9 +40,9 @@ Machine-readable rows live in
 - Provider catalog metadata remains even when one field is not read in the
   narrow cargo-check path because catalogs feed API metadata and model-support
   decisions.
-- Engine trace and resource query helpers remain because ODA, DSEMD, SOL, and
-  replay evidence rely on inspectable substrate, not only current transport
-  callers.
+- Engine trace and resource query helpers remain because their authority,
+  durability, ODA, SOL, and replay owner tests rely on inspectable substrate,
+  not only current transport callers.
 - Historical scorecards and inventories remain append-oriented proof. PMC
   reduces live behavior and classifies proof artifacts; it does not erase
   provenance.

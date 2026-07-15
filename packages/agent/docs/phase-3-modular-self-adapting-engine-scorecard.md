@@ -881,8 +881,7 @@ the default Phase 3 closeout set is:
 - `public_protocol_api_contract_discipline_invariants`
 - `configuration_profile_environment_discipline_invariants` when settings are
   touched
-- `data_integrity_storage_evolution_migration_discipline_invariants` when
-  storage is touched
+- `db_path_guard` when storage paths or the documented table catalog are touched
 - `primitive_code_cleanup_invariants`
 - `true_primitive_cleanup_invariants`
 - `scripts/personal-info-guard.sh`

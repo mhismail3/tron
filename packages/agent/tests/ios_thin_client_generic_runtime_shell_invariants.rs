@@ -651,7 +651,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "configuration-profile-environment-discipline-inventory.tsv",
         "release-install-upgrade-rollback-discipline-inventory.tsv",
         "observability-diagnostics-auditability-inventory.tsv",
-        "data-integrity-storage-evolution-migration-discipline-inventory.tsv",
     ];
     for predecessor in predecessors {
         assert!(
@@ -665,7 +664,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv",
         "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
-        "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv",
     ] {
         let predecessor = read_repo_file(path);
         assert!(

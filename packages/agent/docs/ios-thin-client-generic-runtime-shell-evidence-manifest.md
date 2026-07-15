@@ -19,7 +19,7 @@ Stale branch policy: `codex/ios-thin-client-generic-runtime-shell` at `3cec727e1
 | Server error/recovery | IOSTC-6 | `ConnectionErrorClassifierTests`, `EngineConnectionReconnectTests`, `ServerRestartingPluginTests`, `StreamingRecoveryTests`, `SendBlockReasonTests`, and settings unavailable-state source prove narrow disconnected, reconnecting, unauthorized, restart, and retry/send-disabled behavior. |
 | Diagnostics/persistence | IOSTC-7 | `DiagnosticsRedactorTests`, `DiagnosticsBundleBuilderTests`, `ClientLogIngestionServiceTests`, `MetricKitDiagnosticsStoreTests`, `DatabaseSchemaTests`, `EventDatabaseTests`, and repository tests prove redacted bounded diagnostics and projection-cache ownership. |
 | Generated project proof | IOSTC-8 | `project.yml` is the source; `TronMobile.xcodeproj/project.pbxproj` contains the focused test files used for simulator validation; CI and release workflows regenerate and diff the tracked project. |
-| Predecessor wiring | IOSTC-9 | HRA, PCC, TPC, PPACD, CPE, RIURD, ODA, DSEMD, SACB, CSD, and SOL inventories now include IOSTC classification or predecessor rows where their closed guards require discoverability. |
+| Predecessor wiring | IOSTC-9 | HRA, PCC, TPC, PPACD, CPE, RIURD, ODA, SACB, CSD, and SOL inventories include IOSTC classification or predecessor rows where their closed guards require discoverability. |
 
 ## Verification Matrix
 

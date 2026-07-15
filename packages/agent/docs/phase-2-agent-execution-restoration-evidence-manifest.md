@@ -2196,7 +2196,7 @@ Accepted validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | exit 0 | Provider prompt guidance includes repository-tree operations and metadata-only/raw-content rejection language. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants --quiet` | exit 0 | HRA passed after Fix 1 added the Slice 14D current ownership-map rows matching the HRA file-inventory rows. |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, focused repository-tree/grant tests, and HRA | exit 0 | Accepting re-review verified branch/head/ancestry, repository-tree behavior, selector coverage, and HRA inventory coverage at `80e95921943fd6a26bc9186210b0a27d24aa415c`. |
-| BPRC, IARM, SACB, HRA, TMB, TPC/PCC, DESI, CSD, public-protocol, performance-resource, PMBD, DSEMD, personal-info guard, `git diff --check`, ignored-file check, and no-managed-skills check | exit 0 | Static inventories, provider/protocol/storage/performance surfaces, hygiene, and no repo-managed first-party skills matched accepted Slice 14D scope. |
+| BPRC, IARM, SACB, HRA, TMB, TPC/PCC, DESI, CSD, public-protocol, performance-resource, PMBD, personal-info guard, `git diff --check`, ignored-file check, and no-managed-skills check | exit 0 | Static inventories, provider/protocol/storage/performance surfaces, hygiene, and no repo-managed first-party skills matched accepted Slice 14D scope. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; accepting re-review found no repository-tree/import DRC findings. |
 
 Deferred scope remains unchanged: no raw file contents, no blob bytes, no
@@ -2723,8 +2723,9 @@ Mainline merge commit:
 
 Accepted scope:
 
-- Strengthens the retained DSEMD static gate with
-  `readme_database_schema_table_catalog_matches_sqlite_sources`, which parses
+- Adds the source-owned
+  `project_reference_database_table_catalog_matches_active_sqlite_sources`
+  guard, which parses
   active SQLite table declarations from `v001_schema.sql`, shared storage
   schema setup, and engine durability/authority/resource SQLite schema sources,
   then requires the README Database Schema table catalog to match.
@@ -2748,7 +2749,6 @@ Validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml shared::storage --lib -- --nocapture` | exit 0 | 12 shared storage tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::sqlite::migrations --lib -- --nocapture` | exit 0 | 4 migration tests passed for the single fresh primitive schema. |
 | `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability --lib -- --nocapture` | exit 0 | 43 engine durability tests passed, including SQLite storage-discipline coverage. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture` | exit 0 | 7 DSEMD tests passed, including README/schema-source table catalog parity. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed with Slice 20A implementation-candidate docs/evidence. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed with `P2AER-INV-021` marked `pending_review`. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | 7 public-protocol tests passed; Slice 20A adds no public `/engine` expansion. |
@@ -2756,8 +2756,8 @@ Validation evidence:
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
-| Independent review thread `019f0276-48fc-7cd1-9a26-d6cf580bed7e` | exact verdict `slice accepted` | Review verified branch/head cleanliness, baseline ancestry, full diff, README/schema-source table parity, no migrations or runtime schema behavior changes, pending-review wording before acceptance, focused storage/migration/durability tests, DSEMD, DESI, BPRC, PPACD, hygiene checks, and no repo-managed skills. |
-| Mainline focused Slice 20A regressions | exit 0 | On merged `main`, shared storage tests, session event-store SQLite migration tests, engine durability tests, and DSEMD README/schema-source table-catalog parity passed. |
+| Independent review thread `019f0276-48fc-7cd1-9a26-d6cf580bed7e` | exact verdict `slice accepted` | Review verified branch/head cleanliness, baseline ancestry, full diff, README/schema-source table parity, no migrations or runtime schema behavior changes, pending-review wording before acceptance, focused storage/migration/durability tests, DESI, BPRC, PPACD, hygiene checks, and no repo-managed skills. |
+| Mainline focused Slice 20A regressions | exit 0 | On merged `main`, shared storage tests, session event-store SQLite migration tests, engine durability tests, and source-owned table-catalog parity passed. |
 | Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, DESI, PPACD, and BPRC passed on merged `main`; check emitted only existing dead-code warnings. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
 

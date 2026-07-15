@@ -414,10 +414,6 @@ fn predecessor_inventory_rows_record_perf_as_next_original_slice() {
             "Performance / Resource Governance extends PPACD frame/payload boundary proof",
         ),
         (
-            "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv",
-            "Performance / Resource Governance extends DSEMD storage/WAL/retention proof",
-        ),
-        (
             "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
             "Performance / Resource Governance extends ODA bounded diagnostics proof",
         ),

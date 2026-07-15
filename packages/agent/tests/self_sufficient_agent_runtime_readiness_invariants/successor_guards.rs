@@ -60,8 +60,6 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
         || path == "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs"
         || path == "packages/agent/docs/provider-model-boundary-discipline-scorecard.md"
         || path == "packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md"
-        || path
-            == "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
         || path == "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
         || path == "packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs"
         || path == "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
@@ -346,7 +344,6 @@ fn evidence_manifest_records_required_commands_without_placeholders() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture",

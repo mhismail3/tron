@@ -33,7 +33,6 @@ and
 | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::error_mapping --lib -- --nocapture` | pass | 19 passed; 0 failed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types --lib -- --nocapture` | pass | 70 passed; 0 failed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | pass | 7 passed; 0 failed. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture` | pass | 6 passed; 0 failed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture` | pass | 11 passed; 0 failed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | pass | 9 passed; 0 failed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | pass | 17 passed; 0 failed. |

@@ -67,7 +67,6 @@ Final command results recorded during closeout:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants --quiet` | passed |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants --quiet` | passed |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants --quiet` | passed |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants --quiet` | passed |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants --quiet` | passed after restoring replay-manifest protocol docs wording |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | passed |
 | `scripts/tron ci fmt check clippy test` | passed after SACB inventory row updates |
