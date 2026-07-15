@@ -83,8 +83,12 @@ struct MacSourceGuardTests {
         }
 
         let liveManager = try Self.read(macRoot, "Sources/Server/LaunchAgent/LiveLaunchAgentManager.swift")
+        let processProbe = try Self.read(macRoot, "Sources/Server/ProcessControl/ServerProcessProbe.swift")
         #expect(liveManager.contains("SMAppService"))
         #expect(liveManager.contains("LaunchAgentManaging"))
+        #expect(liveManager.contains("ServerProcessProbe.processElapsedTime(pid: pid)"))
+        #expect(!liveManager.contains("\"etime=\""))
+        #expect(processProbe.contains("\"etime=\""))
 
         let launchAgentContract = try Self.read(macRoot, "Sources/Server/LaunchAgent/LaunchAgentManaging.swift")
         let installStep = try Self.read(macRoot, "Sources/Wizard/Steps/InstallStep.swift")

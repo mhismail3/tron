@@ -42,7 +42,7 @@ enum ServerProcessProbe {
         command?.contains("/Tron-Dev.app/Contents/MacOS/tron") == true
     }
 
-    private static func processElapsedTime(pid: Int) async -> String? {
+    static func processElapsedTime(pid: Int) async -> String? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
             arguments: ["-p", "\(pid)", "-o", "etime="]

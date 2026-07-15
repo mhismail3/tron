@@ -246,10 +246,12 @@ version/port; snapshots derive tone and store only orthogonal process, host,
 and credential metadata. The poller's stream buffers only its newest snapshot,
 so a stalled menu consumer cannot accumulate obsolete 30-second status values;
 cancelling the menu consumer, or terminating or releasing the stream, invokes
-`onTermination` and cancels the producer task. On a successful ping the poller
-asks the local port owner for PID/uptime, so `tron dev` takeover reports the
-`Tron-Dev.app` process instead of stale LaunchAgent metadata and marks the
-header `Dev Server active`.
+`onTermination` and cancels the producer task. `ServerProcessProbe` owns local
+port-process discovery plus `/bin/ps` command and elapsed-time lookups. The
+poller uses it after a successful ping; `LiveLaunchAgentManager` still parses
+launchd's PID but reuses the same elapsed-time lookup. This lets `tron dev`
+takeover report the `Tron-Dev.app` process instead of stale LaunchAgent metadata
+and marks the header `Dev Server active`.
 If `system::ping` fails, the poller asks launchd whether `com.tron.server` is
 loaded; unloaded maps to paused, loaded-but-unreachable maps to failed.
 Explicit menu actions that should leave the server running (`Restart server`,

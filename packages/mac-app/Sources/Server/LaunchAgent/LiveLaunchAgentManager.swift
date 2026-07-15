@@ -309,7 +309,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let pid = parsePID(from: result.stdout)
         let uptime: String?
         if let pid {
-            uptime = await processElapsedTime(pid: pid)
+            uptime = await ServerProcessProbe.processElapsedTime(pid: pid)
         } else {
             uptime = nil
         }
@@ -359,16 +359,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return value.isEmpty ? nil : value
         }
         return nil
-    }
-
-    private func processElapsedTime(pid: Int) async -> String? {
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-p", "\(pid)", "-o", "etime="]
-        )
-        guard result.exitCode == 0 else { return nil }
-        let uptime = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return uptime.isEmpty ? nil : uptime
     }
 
     private func isPortBound(_ port: Int) async -> Bool {
