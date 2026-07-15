@@ -64,7 +64,7 @@ struct MenuBarItemBuilderTests {
     func runningSnapshot() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
+        let setup = Self.makeSetup(in: tmp, port: 9848)
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",

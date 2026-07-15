@@ -81,7 +81,8 @@ enum MenuBarItemBuilder {
     }
 
     static func headerContent(snapshot: ServerStatusSnapshot, paths: EnvironmentSetup) -> MenuHeaderContent {
-        let address = snapshot.tailscaleIP.map { "\($0):\(paths.serverPort)" } ?? "Tailscale unavailable"
+        let port = snapshot.state.runningPort ?? paths.serverPort
+        let address = snapshot.tailscaleIP.map { "\($0):\(port)" } ?? "Tailscale unavailable"
         let health: MenuHeaderContent.Health
         switch snapshot.state {
         case .running:
@@ -168,6 +169,11 @@ enum ServerStatusState: Equatable, Sendable {
         return false
     }
 
+    var runningPort: Int? {
+        if case .running(_, let port) = self { return port }
+        return nil
+    }
+
     var tooltip: String {
         switch self {
         case .checking:
@@ -205,8 +211,6 @@ enum ServerStatusState: Equatable, Sendable {
 struct ServerStatusSnapshot: Equatable {
     var state: ServerStatusState
     var tone: MenuBarTone { state.tone }
-    var version: String?
-    var port: Int?
     var tailscaleIP: String?
     var bearerToken: String?
     var processID: Int?
@@ -215,8 +219,6 @@ struct ServerStatusSnapshot: Equatable {
 
     init(
         state: ServerStatusState,
-        version: String? = nil,
-        port: Int? = nil,
         tailscaleIP: String? = nil,
         bearerToken: String? = nil,
         processID: Int? = nil,
@@ -224,14 +226,6 @@ struct ServerStatusSnapshot: Equatable {
         isDevServerActive: Bool = false
     ) {
         self.state = state
-        switch state {
-        case .running(let stateVersion, let statePort):
-            self.version = version ?? stateVersion
-            self.port = port ?? statePort
-        default:
-            self.version = version
-            self.port = port
-        }
         self.tailscaleIP = tailscaleIP
         self.bearerToken = bearerToken
         self.processID = processID

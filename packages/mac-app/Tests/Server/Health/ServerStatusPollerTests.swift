@@ -65,8 +65,6 @@ struct ServerStatusPollerTests {
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.tone == .running)
         #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
-        #expect(snapshot.version == "0.5.0")
-        #expect(snapshot.port == 9847)
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.bearerToken == "abc123")
         #expect(snapshot.processID == 16027)
@@ -99,7 +97,6 @@ struct ServerStatusPollerTests {
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .paused)
         #expect(snapshot.tone == .paused)
-        #expect(snapshot.version == nil)
         #expect(snapshot.bearerToken == nil)
     }
 

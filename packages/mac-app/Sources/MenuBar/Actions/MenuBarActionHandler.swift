@@ -142,7 +142,7 @@ final class MenuBarActionHandler {
 
     private func stopDevServer() async {
         let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
-        let port = current.port ?? setup.serverPort
+        let port = current.state.runningPort ?? setup.serverPort
         applyBusy(.stoppingDevServer)
 
         switch await setup.stopDevServer(port) {
@@ -323,7 +323,6 @@ final class MenuBarActionHandler {
         let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
         menuBarController?.applySnapshot(ServerStatusSnapshot(
             state: .busy(action),
-            port: current.port ?? setup.serverPort,
             tailscaleIP: current.tailscaleIP,
             bearerToken: current.bearerToken,
             processID: current.processID,

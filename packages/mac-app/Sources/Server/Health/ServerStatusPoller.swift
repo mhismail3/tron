@@ -59,7 +59,6 @@ actor ServerStatusPoller {
         case .unauthorized:
             return ServerStatusSnapshot(
                 state: .unauthorized,
-                port: setup.serverPort,
                 tailscaleIP: setup.readTailscaleIPFromSettings(),
                 bearerToken: token
             )
@@ -80,7 +79,6 @@ actor ServerStatusPoller {
         let isLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
         return ServerStatusSnapshot(
             state: isLoaded ? .failed(reason: reason) : .paused,
-            port: setup.serverPort,
             tailscaleIP: setup.readTailscaleIPFromSettings(),
             bearerToken: token
         )

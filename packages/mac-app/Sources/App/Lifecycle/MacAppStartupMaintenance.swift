@@ -109,7 +109,6 @@ enum MacAppStartupMaintenance {
         await MainActor.run {
             controller?.applySnapshot(ServerStatusSnapshot(
                 state: .busy(.starting),
-                port: setup.serverPort,
                 tailscaleIP: setup.readTailscaleIPFromSettings(),
                 bearerToken: setup.readBearerToken()
             ))
