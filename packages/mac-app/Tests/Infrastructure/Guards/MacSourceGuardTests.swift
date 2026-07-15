@@ -120,6 +120,16 @@ struct MacSourceGuardTests {
         }
     }
 
+    @Test("status poller keeps a latest-only bounded stream")
+    func statusPollerKeepsLatestOnlyBoundedStream() throws {
+        let macRoot = try Self.macAppRoot()
+        let source = try Self.read(macRoot, "Sources/Server/Health/ServerStatusPoller.swift")
+
+        #expect(source.contains("AsyncStream(bufferingPolicy: .bufferingNewest(1))"))
+        #expect(source.contains("continuation.onTermination"))
+        #expect(source.contains("task.cancel()"))
+    }
+
     @Test("helper-resource layout preserves tracked helper skeletons")
     func helperResourceLayoutPreservesTrackedHelperSkeletons() throws {
         let macRoot = try Self.macAppRoot()

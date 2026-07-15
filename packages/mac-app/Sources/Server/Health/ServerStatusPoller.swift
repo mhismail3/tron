@@ -15,13 +15,13 @@ actor ServerStatusPoller {
         self.interval = interval
     }
 
-    /// Returns an `AsyncStream` that emits an immediate snapshot on
-    /// subscription, then one snapshot per `interval`. Cancellation
-    /// stops the timer.
+    /// Returns a latest-only `AsyncStream` that emits an immediate snapshot on
+    /// subscription, then one snapshot per `interval`. A stalled menu consumer
+    /// retains only the newest status, and cancellation stops the timer.
     func snapshots() -> AsyncStream<ServerStatusSnapshot> {
         let setup = self.setup
         let interval = self.interval
-        return AsyncStream { continuation in
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 while !Task.isCancelled {
                     let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)

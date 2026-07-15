@@ -221,9 +221,13 @@ The menu bar renders an explicit server state rather than a generic dot:
 `running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
 and `paused` is gray. `ServerStatusState` owns that tone and the running
 version/port; snapshots derive tone and store only orthogonal process, host,
-and credential metadata. On a successful ping the poller asks the
-local port owner for PID/uptime, so `tron dev` takeover reports the `Tron-Dev.app` process
-instead of stale LaunchAgent metadata and marks the header `Dev Server active`.
+and credential metadata. The poller's stream buffers only its newest snapshot,
+so a stalled menu consumer cannot accumulate obsolete 30-second status values;
+cancelling the menu consumer, or terminating or releasing the stream, invokes
+`onTermination` and cancels the producer task. On a successful ping the poller
+asks the local port owner for PID/uptime, so `tron dev` takeover reports the
+`Tron-Dev.app` process instead of stale LaunchAgent metadata and marks the
+header `Dev Server active`.
 If `system::ping` fails, the poller asks launchd whether `com.tron.server` is
 loaded; unloaded maps to paused, loaded-but-unreachable maps to failed.
 Explicit menu actions that should leave the server running (`Restart server`,
