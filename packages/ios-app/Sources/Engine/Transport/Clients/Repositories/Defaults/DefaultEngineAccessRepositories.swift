@@ -23,7 +23,7 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
     }
 
     func disconnect() async {
-        await client.disconnect()
+        client.disconnect()
     }
 
     func verifyConnection() async -> Bool {

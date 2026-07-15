@@ -40,7 +40,7 @@ extension DependencyContainer {
 
     /// Disconnect from the server
     func disconnect() async {
-        await engineClient.disconnect()
+        engineClient.disconnect()
     }
 
     /// Set background state for battery optimization

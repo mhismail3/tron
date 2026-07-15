@@ -461,9 +461,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         activeServerStartupTask = nil
 
         let oldClient = engineClient
-        Task {
-            await oldClient.disconnect()
-        }
+        oldClient.disconnect()
 
         let url = pairedServerStore.activeServer.map {
             Self.buildServerURL(host: $0.host, port: String($0.port))
@@ -514,7 +512,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             guard !Task.isCancelled, self?.engineClient === newClient else {
                 // A connect can finish after a newer generation has already
                 // disconnected this client. Retire it again after completion.
-                await newClient.disconnect()
+                newClient.disconnect()
                 return
             }
             await self?.reloadServerSettings()

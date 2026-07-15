@@ -228,7 +228,7 @@ final class EngineClient: EngineTransport {
         }
     }
 
-    func disconnect() async {
+    func disconnect() {
         logger.info("Disconnecting from server", category: .engine)
         observationTask?.cancel()
         observationTask = nil
@@ -313,7 +313,7 @@ final class EngineClient: EngineTransport {
     }
 
     func reconnect() async {
-        await disconnect()
+        disconnect()
         try? await Task.sleep(for: .milliseconds(500))
         await connect()
     }

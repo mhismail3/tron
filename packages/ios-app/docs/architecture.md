@@ -482,7 +482,8 @@ bundle and connection-lifecycle forwarding, while `DependencyContainer` keeps
 application assembly and active-server selection. Post-switch connection and
 settings startup is one cancel-and-replace task bound to the installed
 `EngineClient` identity; superseded work cannot connect or update a newer
-generation, while retirement of each replaced client remains unconditional.
+generation. Replaced-client teardown is synchronous at the `EngineClient`
+owner and completes before the replacement services are installed.
 
 `DependencyContainerRuntimeIO` is the single immutable runtime-I/O seam. Its
 production value preserves live URL-session attempts, the production

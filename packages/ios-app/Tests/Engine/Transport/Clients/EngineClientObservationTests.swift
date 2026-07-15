@@ -15,9 +15,9 @@ struct EngineClientObservationTests {
     }
 
     @Test("Disconnect cancels observation and resets state")
-    func testDisconnectResetsState() async {
+    func testDisconnectResetsState() {
         let rpc = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        await rpc.disconnect()
+        rpc.disconnect()
         #expect(rpc.connectionState == .disconnected)
     }
 
@@ -53,10 +53,10 @@ struct EngineClientObservationTests {
     }
 
     @Test("Multiple disconnect calls are safe")
-    func testMultipleDisconnects() async {
+    func testMultipleDisconnects() {
         let rpc = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        await rpc.disconnect()
-        await rpc.disconnect()
+        rpc.disconnect()
+        rpc.disconnect()
         #expect(rpc.connectionState == .disconnected)
     }
 
@@ -88,13 +88,13 @@ struct EngineClientObservationTests {
         )
 
         await rpc.manualRetry()
-        await rpc.disconnect()
+        rpc.disconnect()
         await rpc.reconnect()
 
         #expect(recorder.requests.count >= 2)
         #expect(rpc.engineConnection?.urlSession == nil)
         #expect(rpc.engineConnection?.engineConnectionTask == nil)
-        await rpc.disconnect()
+        rpc.disconnect()
     }
 
     @Test("Connect policy discards stale disconnected transports")

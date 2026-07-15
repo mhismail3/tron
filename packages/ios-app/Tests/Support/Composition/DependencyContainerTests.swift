@@ -202,6 +202,25 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, attemptsBeforeSwitch)
     }
 
+    func test_serverSwitchRetiresReplacedClientBeforeInstallingReplacement() async {
+        let (container, first) = pairedContainer(host: "127.0.0.1", port: 65505)
+        let replacedClient = container.engineClient
+        await replacedClient.connect()
+        XCTAssertNotNil(replacedClient.engineConnection)
+
+        let second = PairedServer(
+            id: "replacement",
+            label: "Replacement",
+            host: "127.0.0.1",
+            port: 65504
+        )
+        container.replacePairedServers([first, second], activeServer: second)
+
+        XCTAssertNil(replacedClient.engineConnection)
+        XCTAssertEqual(replacedClient.connectionState, .disconnected)
+        XCTAssert(container.engineClient !== replacedClient)
+    }
+
     // MARK: - Active Server Update Tests
 
     func test_selectPairedServer_recreatesEngineClient() async throws {
