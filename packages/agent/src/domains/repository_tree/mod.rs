@@ -30,7 +30,8 @@
 //! not accept raw repository contents, raw import payloads, unbounded trees,
 //! absolute paths, unsafe relative paths, blob bytes, or secret-like caller
 //! material. Snapshot timestamps are supplied by `capability::execute` or tests;
-//! this domain does not sample wall-clock time directly.
+//! this domain does not sample wall-clock time directly. Services borrow the
+//! engine host directly and own no parallel dependency or engine-state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -39,11 +40,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{REPOSITORY_TREE_SNAPSHOT_KIND, REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID};
 

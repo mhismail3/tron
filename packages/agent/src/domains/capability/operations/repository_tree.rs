@@ -13,12 +13,9 @@ pub(super) async fn repository_tree_snapshot(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let repository_tree_deps = crate::domains::repository_tree::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::repository_tree::service::record_repository_tree_snapshot_value_at(
-            &repository_tree_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
             operation_at,
@@ -35,11 +32,8 @@ pub(super) async fn repository_tree_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let repository_tree_deps = crate::domains::repository_tree::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::repository_tree::service::list_repository_tree_value(
-        &repository_tree_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -59,11 +53,8 @@ pub(super) async fn repository_tree_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let repository_tree_deps = crate::domains::repository_tree::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::repository_tree::service::inspect_repository_tree_value(
-        &repository_tree_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
