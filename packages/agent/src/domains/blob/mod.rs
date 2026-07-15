@@ -1,7 +1,8 @@
 //! blob domain worker.
 //!
 //! This module owns the small blob namespace end-to-end: contract metadata,
-//! registration dependencies, handler binding, and operation execution.
+//! handler binding, and operation execution. Handlers borrow the shared event
+//! store directly and own no parallel dependency or storage-state container.
 
 use base64::Engine;
 
@@ -20,30 +21,14 @@ use std::sync::Arc;
 
 const STREAM_TOPICS: &[&str] = &[];
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    event_store: Arc<EventStore>,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            event_store: deps.event_store.clone(),
-        }
-    }
-}
-
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    {
-        let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::worker::domain_worker_module(
-            "blob",
-            STREAM_TOPICS,
-            function_registrations(capabilities()?, domain_deps)?,
-        )
-    }
+    crate::domains::registration::worker::domain_worker_module(
+        "blob",
+        STREAM_TOPICS,
+        function_registrations(capabilities()?, Arc::clone(&deps.event_store))?,
+    )
 }
 
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
@@ -62,7 +47,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
 }
 
 operation_bindings! {
-    deps = Deps;
+    deps = Arc<EventStore>;
     hidden = [];
     bindings = [
         "get" => |invocation, deps| {
@@ -71,7 +56,10 @@ operation_bindings! {
     ];
 }
 
-async fn blob_get_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+async fn blob_get_value(
+    payload: &Value,
+    event_store: &Arc<EventStore>,
+) -> Result<Value, CapabilityError> {
     let blob_id = payload
         .get("blobId")
         .and_then(Value::as_str)
@@ -79,7 +67,7 @@ async fn blob_get_value(payload: &Value, deps: &Deps) -> Result<Value, Capabilit
             message: "missing 'blobId' parameter".into(),
         })?
         .to_owned();
-    let event_store = deps.event_store.clone();
+    let event_store = Arc::clone(event_store);
     run_blocking_task("blob::get", move || {
         let blob = event_store
             .get_blob(&blob_id)
@@ -99,4 +87,27 @@ async fn blob_get_value(payload: &Value, deps: &Deps) -> Result<Value, Capabilit
         }))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::server::test_support::make_test_context;
+
+    #[tokio::test]
+    async fn get_returns_stored_blob_metadata_and_content() {
+        let event_store = make_test_context().event_store;
+        let blob_id = event_store
+            .store_blob(b"hello", "text/plain")
+            .expect("store blob");
+
+        let value = blob_get_value(&json!({"blobId": blob_id}), &event_store)
+            .await
+            .expect("get blob");
+
+        assert_eq!(value["blobId"], blob_id);
+        assert_eq!(value["mimeType"], "text/plain");
+        assert_eq!(value["data"], "aGVsbG8=");
+        assert_eq!(value["sizeBytes"], 5);
+    }
 }
