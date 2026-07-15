@@ -38,7 +38,9 @@ identifies the right owner for each kind of change.
 Tron uses a **takeover model**: a long-running production server lives inside
 `/Applications/Tron.app` and is registered through ServiceManagement. When you
 run `tron dev`, the dev binary takes over port 9847 from the prod server until
-you stop it.
+you stop it. The command completes exactly one dev-profile build before it
+stops the installed helper; `-b` places that build before optional `-t` tests,
+while without `-b` the tests run first.
 
 ```bash
 # One-time setup (checks prerequisites, builds, and links the workspace CLI).

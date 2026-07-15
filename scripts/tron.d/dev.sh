@@ -125,7 +125,7 @@ cmd_dev() {
                 echo "Usage: tron dev [options]"
                 echo ""
                 echo "Options:"
-                echo "  -b, --build       Build before starting (dev-server profile)"
+                echo "  -b, --build       Build before optional tests (always builds once)"
                 echo "  -t, --test        Run tests before starting"
                 echo "  -d, --background  Run in background (logs to database and $DEV_BACKGROUND_LOG)"
                 echo "  --json            Emit final machine-readable server status on stdout"
@@ -151,6 +151,13 @@ cmd_dev() {
         esac
     done
 
+    if [ "$do_background" = true ] \
+        && { ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; }; then
+        print_error "--wait must be a positive integer number of seconds"
+        return 2
+    fi
+
+    # Schedule one build before takeover; `-b` keeps it before optional tests.
     if [ "$do_build" = true ]; then
         build_rust_dev
     fi
@@ -162,6 +169,10 @@ cmd_dev() {
                 exit 1
             fi
         fi
+    fi
+
+    if [ "$do_build" != true ]; then
+        build_rust_dev
     fi
 
     if [ "$do_background" = true ]; then
@@ -213,10 +224,8 @@ dev_start_foreground() {
     echo -e "${YELLOW}Installed service stopped. Ctrl+C to stop dev and restart it.${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
-    local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
-    create_app_bundle "$DEV_BUNDLE" "$dev_src"
+    # Wrap the built binary so macOS TCC permissions persist across rebuilds.
+    create_app_bundle "$DEV_BUNDLE" "$DEV_SERVER_BINARY"
     codesign_bundle "$DEV_BUNDLE"
 
     RUST_LOG="${RUST_LOG:-info,ort=error}" "$DEV_BINARY" --port "$PROD_PORT"
@@ -225,10 +234,6 @@ dev_start_foreground() {
 dev_start_background() {
     local output_json="${1:-false}"
     local wait_seconds="${2:-30}"
-    if ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; then
-        print_error "--wait must be a positive integer number of seconds"
-        return 2
-    fi
 
     # Stop any previous dev takeover job before bootstrapping a fresh one.
     # launchd can keep a loaded-but-not-running job after a forced process kill;
@@ -256,13 +261,10 @@ dev_start_background() {
         fi
     fi
 
-    # Build, then wrap in an app bundle so macOS TCC permissions persist across
-    # rebuilds. Any preparation failure after takeover begins must restore the
-    # installed helper before returning.
-    local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
-    if ! cargo build --profile dev-server \
-            --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron \
-        || ! create_app_bundle "$DEV_BUNDLE" "$dev_src" \
+    # Wrap the built binary so macOS TCC permissions persist across rebuilds.
+    # Any preparation failure after takeover begins must restore the installed
+    # helper before returning.
+    if ! create_app_bundle "$DEV_BUNDLE" "$DEV_SERVER_BINARY" \
         || ! codesign_bundle "$DEV_BUNDLE"; then
         print_error "Failed to prepare signed dev takeover bundle"
         restart_installed_service_after_dev 12

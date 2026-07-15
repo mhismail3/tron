@@ -67,6 +67,39 @@ fn is_text_mac_source(path: &str) -> bool {
     .any(|suffix| path.ends_with(suffix))
 }
 
+fn probe_dev_command(args: &[&str]) -> (i32, String, String) {
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(
+            r#"
+source "$DEV_SCRIPT"
+require_project_dir() { :; }
+load_dev_relay_environment() { :; }
+print_error() { printf '%s\n' "$1" >&2; }
+build_rust_dev() { printf '%s\n' build; }
+run_tests() { printf '%s\n' test; }
+dev_start_foreground() { printf '%s\n' start-foreground; }
+dev_start_background() { printf '%s\n' start-background; }
+cmd_dev "$@"
+"#,
+        )
+        .arg("bash")
+        .args(args)
+        .env("DEV_SCRIPT", repo_path("scripts/tron.d/dev.sh"))
+        .output()
+        .expect("dev build sequence probe should start");
+    let stdout = String::from_utf8(output.stdout)
+        .expect("dev build sequence probe output should be UTF-8")
+        .lines()
+        .collect::<Vec<_>>()
+        .join(",");
+    let stderr = String::from_utf8(output.stderr)
+        .expect("dev build sequence probe error should be UTF-8")
+        .trim()
+        .to_owned();
+    (output.status.code().unwrap_or(-1), stdout, stderr)
+}
+
 #[test]
 fn port_9847_and_process_ownership_are_source_guarded() {
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
@@ -90,10 +123,35 @@ fn port_9847_and_process_ownership_are_source_guarded() {
         !dev.contains("cmd_manual_deploy") && !dev.contains("manual-deploy"),
         "dev workflow must not invoke manual deploy"
     );
+    assert!(
+        !dev.contains("cargo build --profile dev-server"),
+        "cmd_dev must delegate its one build to the workspace build owner"
+    );
+    let build_sequences: [(&[&str], &str); 4] = [
+        (&[], "build,start-foreground"),
+        (&["-t"], "test,build,start-foreground"),
+        (&["-b"], "build,start-foreground"),
+        (&["-bdt"], "build,test,start-background"),
+    ];
+    for (args, expected) in build_sequences {
+        let (status, actual, stderr) = probe_dev_command(args);
+        assert_eq!(status, 0, "cmd_dev failed for {args:?}: {stderr}");
+        assert_eq!(
+            actual, expected,
+            "cmd_dev must build exactly once before takeover for {args:?}"
+        );
+    }
+    let invalid_waits: [&[&str]; 2] = [&["-d", "--wait", "0"], &["-bdt", "--wait", "soon"]];
+    for args in invalid_waits {
+        let (status, output, error) = probe_dev_command(args);
+        assert_eq!(status, 2, "invalid --wait must exit 2 for {args:?}");
+        assert!(output.is_empty(), "invalid --wait must not start work");
+        assert_eq!(error, "--wait must be a positive integer number of seconds");
+    }
     let failed_background_sign = Command::new("bash")
         .args([
             "-c",
-            "source \"$1\"; print_status() { :; }; print_error() { last_error=\"$1\"; }; launchd_stop() { :; }; launchctl() { return 1; }; service_is_running() { return 0; }; wait_for_port_free() { return 0; }; cargo() { return 0; }; create_app_bundle() { return 0; }; restart_installed_service_after_dev() { restored=true; }; DEV_PLIST_NAME=test.dev; PLIST_NAME=test.prod; PROD_PORT=9847; TRON_HOME=/nonexistent; RUST_WORKSPACE=/nonexistent; DEV_BUNDLE=/nonexistent/Tron-Dev.app; DEV_BINARY=/nonexistent/tron; DEV_PLIST_PATH=/nonexistent/dev.plist; RUN_DIR=/nonexistent; DEV_BACKGROUND_PID_FILE=/nonexistent/pid; if create_dev_launchd_plist; then exit 11; fi; run_failure() { restored=false; last_error=; case \"$1\" in sign) codesign_bundle() { return 1; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to prepare signed dev takeover bundle' ;; mkdir) codesign_bundle() { return 0; }; mkdir() { return 1; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to create dev takeover runtime directory' ;; log) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/nonexistent/log; create_dev_launchd_plist() { return 0; }; expected='Failed to initialize dev takeover log' ;; plist) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 1; }; expected='Failed to create dev takeover LaunchAgent' ;; esac; if dev_start_background false 1; then return 10; fi; test \"$restored\" = true && test \"$last_error\" = \"$expected\"; }; run_failure sign && run_failure mkdir && run_failure log && run_failure plist",
+            "source \"$1\"; print_status() { :; }; print_error() { last_error=\"$1\"; }; launchd_stop() { :; }; launchctl() { return 1; }; service_is_running() { return 0; }; wait_for_port_free() { return 0; }; create_app_bundle() { return 0; }; restart_installed_service_after_dev() { restored=true; }; DEV_PLIST_NAME=test.dev; PLIST_NAME=test.prod; PROD_PORT=9847; TRON_HOME=/nonexistent; RUST_WORKSPACE=/nonexistent; DEV_SERVER_BINARY=/nonexistent/source-tron; DEV_BUNDLE=/nonexistent/Tron-Dev.app; DEV_BINARY=/nonexistent/tron; DEV_PLIST_PATH=/nonexistent/dev.plist; RUN_DIR=/nonexistent; DEV_BACKGROUND_PID_FILE=/nonexistent/pid; if create_dev_launchd_plist; then exit 11; fi; run_failure() { restored=false; last_error=; case \"$1\" in sign) codesign_bundle() { return 1; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to prepare signed dev takeover bundle' ;; mkdir) codesign_bundle() { return 0; }; mkdir() { return 1; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to create dev takeover runtime directory' ;; log) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/nonexistent/log; create_dev_launchd_plist() { return 0; }; expected='Failed to initialize dev takeover log' ;; plist) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 1; }; expected='Failed to create dev takeover LaunchAgent' ;; esac; if dev_start_background false 1; then return 10; fi; test \"$restored\" = true && test \"$last_error\" = \"$expected\"; }; run_failure sign && run_failure mkdir && run_failure log && run_failure plist",
             "bash",
             repo_path("scripts/tron.d/dev.sh")
                 .to_str()
