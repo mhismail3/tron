@@ -267,6 +267,10 @@ extension SourceGuardTests {
             contentsOf: root.appendingPathComponent("Tests/Infrastructure/Fixtures/IsolatedTestState.swift"),
             encoding: .utf8
         )
+        let pairing = try String(
+            contentsOf: root.appendingPathComponent("Sources/Support/Pairing/Onboarding/PairingProbe.swift"),
+            encoding: .utf8
+        )
 
         #expect(client.contains("private let sessionAttemptDirective: (URLRequest) -> EngineSessionAttemptDirective"))
         #expect(client.contains("sessionAttemptDirective: sessionAttemptDirective"))
@@ -281,6 +285,9 @@ extension SourceGuardTests {
         #expect(fixture.contains("sessionAttemptDirective: { [attemptRecorder] request in"))
         #expect(fixture.contains("pairedServerTokenStore: tokenBackend.makeStore()"))
         #expect(fixture.contains("makePairingProbe: { pairingProbe }"))
+        #expect(fixture.contains("private final class HostedTestPairingProbe: PairingProbing"))
+        #expect(!pairing.contains("HostedTestPairingProbe"))
+        #expect(!pairing.contains("StubPairingProbe"))
         #expect(!runtime.contains("TRON_APP_RUNTIME_MODE"))
     }
 

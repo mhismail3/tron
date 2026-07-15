@@ -76,11 +76,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     private let runtimeIO: DependencyContainerRuntimeIO
 
-    /// Default pairing probe used by the onboarding PairingStep. Held here
-    /// so tests + previews can swap a `StubPairingProbe` without rebuilding
-    /// the container. Lazy because a fresh probe spins up its own URLSession
-    /// on every call and we don't need one until the user lands on the
-    /// Pairing step.
+    /// Default pairing probe used by the onboarding PairingStep. Held here so
+    /// tests can inject an inert implementation without rebuilding the
+    /// container. Lazy because a fresh production probe spins up its own
+    /// URLSession and we don't need one until the user lands on Pairing.
     @ObservationIgnored
     lazy var pairingProbe: any PairingProbing = runtimeIO.makePairingProbe()
 

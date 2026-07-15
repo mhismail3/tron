@@ -53,8 +53,8 @@ enum PairingProbeOutcome: Equatable, Sendable {
 }
 
 /// Probe contract used by the onboarding PairingStep to verify a (host,
-/// port, token) tuple before committing it. Mocked in tests via
-/// `StubPairingProbe`; production uses `URLSessionPairingProbe`.
+/// port, token) tuple before committing it. Production uses
+/// `URLSessionPairingProbe`; test targets provide their own inert implementation.
 @MainActor
 protocol PairingProbing: Sendable {
     /// Fire one probe and resolve to a classified outcome. Never throws —
@@ -433,25 +433,3 @@ final class ProbeSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchec
         }
     }
 }
-
-// MARK: - Test stub
-
-#if DEBUG
-/// In-memory `PairingProbing` for tests + SwiftUI previews. Never
-/// touches the network. The next outcome is what `probe()` returns; the
-/// last call's parameters are captured for assertions.
-@MainActor
-final class StubPairingProbe: PairingProbing {
-    var nextOutcome: PairingProbeOutcome = .ok(serverVersion: nil)
-    private(set) var lastHost: String?
-    private(set) var lastPort: Int?
-    private(set) var lastToken: String?
-
-    func probe(host: String, port: Int, token: String) async -> PairingProbeOutcome {
-        lastHost = host
-        lastPort = port
-        lastToken = token
-        return nextOutcome
-    }
-}
-#endif

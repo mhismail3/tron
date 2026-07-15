@@ -497,10 +497,10 @@ owner and completes before the replacement services are installed.
 production value preserves live URL-session attempts, the production
 `PairedServerTokenStore` Keychain backend, and `URLSessionPairingProbe`.
 Hosted tests inject a handled-attempt recorder, a task-owned in-memory token
-backend, and `StubPairingProbe`; that directive is forwarded into the initial
-`EngineClient` and every active-server rebuild. No process-mode boolean or
-environment lookup inside transport, pairing, or token storage may bypass the
-composition boundary.
+backend, and a test-target inert pairing probe; that directive is forwarded
+into the initial `EngineClient` and every active-server rebuild. No process-mode
+boolean or environment lookup inside transport, pairing, or token storage may
+bypass the composition boundary.
 
 `PairedServerTokenStore.Backend` is an immutable, checked `Sendable` strategy;
 each of its three stored operations is `@Sendable`. Production operations

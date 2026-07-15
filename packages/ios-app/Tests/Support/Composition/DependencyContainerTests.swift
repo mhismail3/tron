@@ -140,7 +140,12 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(recorder.requests.count, 4)
         XCTAssertNil(container.engineClient.engineConnection?.urlSession)
         XCTAssertNil(container.engineClient.engineConnection?.engineConnectionTask)
-        XCTAssert(container.pairingProbe is StubPairingProbe)
+        let pairingOutcome = await container.pairingProbe.probe(
+            host: "hosted-tests.invalid",
+            port: 1,
+            token: "fixture"
+        )
+        XCTAssertEqual(pairingOutcome, .ok(serverVersion: nil))
         await container.connectionRepository.disconnect()
     }
 

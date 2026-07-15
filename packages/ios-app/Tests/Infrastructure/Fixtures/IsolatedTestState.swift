@@ -254,6 +254,13 @@ final class HostedEngineAttemptRecorder: @unchecked Sendable {
     }
 }
 
+@MainActor
+private final class HostedTestPairingProbe: PairingProbing {
+    func probe(host _: String, port _: Int, token _: String) async -> PairingProbeOutcome {
+        .ok(serverVersion: nil)
+    }
+}
+
 /// The only general-purpose owner for test defaults, local databases,
 /// Documents roots, and visual artifacts. Every instance is registered before
 /// its state is exposed and cleanup drains managers before closing databases.
@@ -268,7 +275,6 @@ final class IsolatedTestState {
     private var databases: [EventDatabase] = []
     private var eventStoreManagers: [EventStoreManager] = []
     private(set) var attemptRecorders: [HostedEngineAttemptRecorder] = []
-    private(set) var pairingProbes: [StubPairingProbe] = []
     private let tokenBackendRegistry = HostedTestTokenBackendRegistry()
     private let keychainLifecycleEmitter: HostedTestKeychainLifecycleEmitter
     private let suiteLifecycle: HostedTestSuiteLifecycle
@@ -346,7 +352,7 @@ final class IsolatedTestState {
         let tokenBackend = HostedTestPairedServerTokenBackend(emitter: keychainLifecycleEmitter)
         tokenBackendRegistry.register(tokenBackend)
         let attemptRecorder = HostedEngineAttemptRecorder()
-        let pairingProbe = StubPairingProbe()
+        let pairingProbe = HostedTestPairingProbe()
         let container = DependencyContainer(
             storage: DependencyContainerStorage(
                 defaults: defaults,
@@ -363,7 +369,6 @@ final class IsolatedTestState {
         )
         eventStoreManagers.append(container.eventStoreManager)
         attemptRecorders.append(attemptRecorder)
-        pairingProbes.append(pairingProbe)
         return container
     }
 
@@ -397,7 +402,6 @@ final class IsolatedTestState {
         let ownedDatabases = databases
         databases.removeAll()
         attemptRecorders.removeAll()
-        pairingProbes.removeAll()
         let cleanupRegistration = processCleanupRegistration
         processCleanupRegistration = nil
         let stateID = id

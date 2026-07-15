@@ -171,8 +171,8 @@ unchanged.
 
 Every hosted `DependencyContainer` must come from `IsolatedTestState`. Its
 immutable runtime-I/O configuration uses a handled-attempt recorder for direct,
-retry, reconnect, and rebuilt-client paths, `StubPairingProbe` for pairing, and
-a task-owned in-memory `PairedServerTokenStore.Backend`. Do not construct a
+retry, reconnect, and rebuilt-client paths, a test-target inert pairing probe,
+and a task-owned in-memory `PairedServerTokenStore.Backend`. Do not construct a
 live session, `URLSessionPairingProbe`, the production token backend, or an
 OAuth owner in a hosted unit-test path.
 
