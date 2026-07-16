@@ -100,12 +100,7 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
     }
 
     deinit {
-        lock.lock()
-        for continuation in continuations.values {
-            continuation.finish()
-        }
-        continuations.removeAll()
-        lock.unlock()
+        finish()
     }
 }
 
