@@ -51,12 +51,11 @@ pub(crate) fn function_registrations<D>(
     specs: Vec<CapabilitySpec>,
     deps: D,
     bindings: Vec<OperationBinding<D>>,
-    hidden_operation_keys: &[&'static str],
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>>
 where
     D: Clone + Send + Sync + 'static,
 {
-    validate_bindings(&specs, &bindings, hidden_operation_keys)?;
+    validate_bindings(&specs, &bindings)?;
     specs
         .into_iter()
         .map(|spec| {
@@ -90,7 +89,6 @@ where
 fn validate_bindings<D>(
     specs: &[CapabilitySpec],
     bindings: &[OperationBinding<D>],
-    hidden_operation_keys: &[&'static str],
 ) -> crate::engine::Result<()> {
     let mut spec_keys = BTreeSet::new();
     for spec in specs {
@@ -102,10 +100,6 @@ fn validate_bindings<D>(
         }
     }
 
-    let hidden_keys = hidden_operation_keys
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
     let mut binding_keys = BTreeSet::new();
     for binding in bindings {
         if !binding_keys.insert(binding.operation_key) {
@@ -114,11 +108,9 @@ fn validate_bindings<D>(
                 binding.operation_key
             )));
         }
-        if !spec_keys.contains(binding.operation_key)
-            && !hidden_keys.contains(binding.operation_key)
-        {
+        if !spec_keys.contains(binding.operation_key) {
             return Err(EngineError::PolicyViolation(format!(
-                "handler operation key '{}' has no domain contract or hidden function",
+                "handler operation key '{}' has no domain contract",
                 binding.operation_key
             )));
         }
@@ -129,13 +121,6 @@ fn validate_bindings<D>(
             return Err(EngineError::PolicyViolation(format!(
                 "domain contract operation key '{}' has no handler binding",
                 spec.operation_key
-            )));
-        }
-    }
-    for hidden in hidden_operation_keys {
-        if !binding_keys.contains(hidden) {
-            return Err(EngineError::PolicyViolation(format!(
-                "hidden operation key '{hidden}' has no handler binding"
             )));
         }
     }
@@ -177,7 +162,6 @@ macro_rules! operation_bindings {
                 specs,
                 deps,
                 operation_bindings(),
-                &[],
             )
         }
 
@@ -193,54 +177,6 @@ macro_rules! operation_bindings {
                 ),+
             ]
         }
-    };
-
-    (
-        deps = $deps_ty:ty;
-        hidden = [$($hidden_key:expr),* $(,)?];
-        bindings = [
-            $(
-                $operation_key:expr => |$invocation:ident, $deps:ident| $body:block
-            ),+ $(,)?
-        ];
-    ) => {
-        pub(crate) fn function_registrations(
-            specs: Vec<$crate::domains::registration::catalog::CapabilitySpec>,
-            deps: $deps_ty,
-        ) -> $crate::engine::Result<Vec<$crate::domains::registration::worker::DomainFunctionRegistration>> {
-            $crate::domains::registration::bindings::function_registrations(
-                specs,
-                deps,
-                operation_bindings(),
-                HIDDEN_OPERATION_KEYS,
-            )
-        }
-
-        pub(crate) fn handler_for_operation(
-            operation_key: impl AsRef<str>,
-            deps: $deps_ty,
-        ) -> $crate::engine::Result<std::sync::Arc<dyn $crate::engine::InProcessFunctionHandler>> {
-            $crate::domains::registration::bindings::handler_for_operation(
-                operation_key.as_ref(),
-                deps,
-                operation_bindings(),
-            )
-        }
-
-        fn operation_bindings() -> Vec<$crate::domains::registration::bindings::OperationBinding<$deps_ty>> {
-            vec![
-                $(
-                    $crate::domains::registration::bindings::OperationBinding::new(
-                        $operation_key,
-                        |$invocation: &$crate::engine::Invocation, $deps: &$deps_ty| {
-                            std::boxed::Box::pin(async move $body)
-                        },
-                    )
-                ),+
-            ]
-        }
-
-        const HIDDEN_OPERATION_KEYS: &[&str] = &[$($hidden_key),*];
     };
 }
 
@@ -286,7 +222,6 @@ mod tests {
             vec![spec("one"), spec("two")],
             DummyDeps,
             vec![binding("one")],
-            &[],
         ) {
             Ok(_) => panic!("missing binding must be rejected"),
             Err(err) => err,
@@ -304,7 +239,6 @@ mod tests {
             vec![spec("one")],
             DummyDeps,
             vec![binding("one"), binding("two")],
-            &[],
         ) {
             Ok(_) => panic!("extra binding must be rejected"),
             Err(err) => err,
@@ -314,17 +248,5 @@ mod tests {
                 .contains("handler operation key 'two' has no domain contract"),
             "unexpected error: {err}"
         );
-    }
-
-    #[test]
-    fn registrations_accept_hidden_bindings_when_declared() {
-        let regs = function_registrations(
-            vec![spec("one")],
-            DummyDeps,
-            vec![binding("one"), binding("hidden")],
-            &["hidden"],
-        )
-        .expect("hidden binding should be allowed when declared");
-        assert_eq!(regs.len(), 1);
     }
 }

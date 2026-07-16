@@ -25,7 +25,8 @@
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
 //! Domain method names are internal operation keys for service routing only.
-//! Only canonical function ids are registered.
+//! Only canonical function ids are registered. Every handler binding is owned
+//! by a domain contract; composition has no hidden-operation exceptions.
 
 pub(crate) mod bindings;
 pub(crate) mod catalog;
