@@ -116,6 +116,10 @@ executable, LaunchAgent plist, signature, and registration classification.
 `EnvironmentSetup.launchAgentPlistPath` directly to `LaunchAgentManaging` for
 registration. The composition seam does not duplicate those helper paths or
 revalidate them through a second planner.
+`MacAppStartupMaintenance` owns one ordered launch decision: managed wizard
+completion records the current build, while ordinary launches skip when they
+are not onboarded, cannot manage the helper, observe dev takeover, or already
+recorded the build; only the absence of a skip reason permits a restart.
 `PairingURLBuilder` and `QRCodeGenerator` are likewise emitter-only production
 owners. The iOS `PairingURLParser` owns runtime consumption; QR decoding stays
 in the Mac test target so the wrapper does not ship a second inverse parser or

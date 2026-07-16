@@ -177,6 +177,15 @@ struct MacAppStartupMaintenanceTests {
             launchAgentManager: mock
         )
 
+        let existingLaunch = await MacAppStartupMaintenance.run(
+            setup: setup,
+            controller: nil,
+            context: .existingOnboardedLaunch
+        )
+
+        #expect(existingLaunch == .skipped(.notOnboarded))
+        #expect(setup.readRecordedAppVersion() == nil)
+
         let result = await MacAppStartupMaintenance.run(
             setup: setup,
             controller: nil,
