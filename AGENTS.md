@@ -42,9 +42,9 @@ No setting should exist only on the server or only in the iOS UI.
 
 The primitive branch does not ship repo-managed first-party skills under
 `packages/agent/skills/`. Do not reintroduce that directory, skill-copy wiring,
-or built-in skill prompt context during the primitive teardown. Future skills
-belong to a successor self-adapting-agent scorecard and must be agent-authored
-state or generated runtime behavior, not bootstrap harness behavior.
+or built-in skill prompt context. Future skills must be agent-authored state or
+generated runtime behavior with a source-owned contract, not bootstrap harness
+behavior.
 
 ## Deployment
 
@@ -91,8 +91,8 @@ Documentation follows progressive disclosure:
    installation, and release behavior.
 3. Rust `mod.rs` docs, iOS/Mac architecture docs, source contracts, migrations,
    and tests are the implementation-level truth.
-4. Scorecards and evidence manifests record completed audits; they are not
-   copied into the root README.
+4. Git history records completed audits. Current claims must live with their
+   source owner, owning documentation, or focused boundary tests.
 
 Whenever you touch a source-backed surface, update its owning docs in the same
 commit:
@@ -102,7 +102,7 @@ commit:
 | Product purpose, supported clients, setup, or primary developer workflow | `README.md` |
 | Rust module ownership | the nearest `mod.rs`; update `project-reference.md` only if the cross-cutting architecture changed |
 | CLI commands | `scripts/tron --help`, command-owning docs/comments, `CONTRIBUTING.md` when contributor workflow changes, and `project-reference.md` |
-| Capability contracts or provider-visible operations | domain contract docs, capability scorecard/inventory, and `project-reference.md` when the public model surface changes |
+| Capability contracts or provider-visible operations | domain contract docs and tests, plus `project-reference.md` when the public model surface changes |
 | Events, settings, auth, database schema, paths, installation, or release behavior | the source-owning docs/tests and the matching `project-reference.md` section |
 | iOS or Mac top-level architecture | the package architecture docs; update the root README only when the product-level map changes |
 

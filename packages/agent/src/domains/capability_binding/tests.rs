@@ -4934,10 +4934,10 @@ fn request_payload(key: &str) -> Value {
         }],
         "evidenceRefs": [{
             "kind": "evidence",
-            "resourceId": "evidence:scorecard_row",
-            "role": "scorecard"
+            "resourceId": "evidence:source_contract",
+            "role": "source_contract"
         }],
-        "evidenceRequirements": "Provider safe contract and scorecard evidence must exist before any later routing work.",
+        "evidenceRequirements": "Provider-safe contract and source-owned validation evidence must exist before any later routing work.",
         "authorityConstraints": {
             "networkPolicy": "none",
             "authorityScopes": ["capability.execute", "git.read", "resource.read"],
@@ -4995,8 +4995,8 @@ fn shadow_request_payload(key: &str) -> Value {
         }],
         "evidenceRefs": [{
             "kind": "evidence",
-            "resourceId": "evidence:shadow-scorecard",
-            "role": "scorecard"
+            "resourceId": "evidence:shadow-contract",
+            "role": "source_contract"
         }],
         "authorityConstraints": {
             "networkPolicy": "none",

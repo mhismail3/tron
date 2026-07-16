@@ -65,7 +65,7 @@
 //!   enter startup through source-backed domain contracts and inventory lineage;
 //! - stream, state, queue, catalog, grant, worker, trace records, generated UI,
 //!   and the generic `resource` kernel are retained only where covered by the
-//!   primitive loop and the completed cleanup/ownership scorecards;
+//!   primitive loop, source-owned contracts, and focused boundary tests;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   shared-state mutations, so the host can acquire/release one domain resource
 //!   from payload fields plus causal context such as `sessionId`, record

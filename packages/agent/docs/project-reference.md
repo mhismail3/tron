@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with one server-truth Dashboard cockpit; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
+Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The `worker_lifecycle` domain owns local launchable-package lifecycle while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with one server-truth Dashboard cockpit; fixed product panels are absent from supported baseline behavior. Features follow an iii-aligned Worker / Function / Trigger contract: capabilities enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
 
 This document is the detailed cross-cutting reference behind the concise root
 README. The Rust codebase remains self-documenting: `packages/agent/src/lib.rs`
@@ -84,9 +84,9 @@ this reference and its owning source documentation in the same commit.
 ## Architecture Ownership
 
 Durable architecture documentation lives beside the code it describes. This
-reference owns cross-cutting product behavior; it is not an index of completed
-audits. Historical scorecards and evidence may explain a past decision, but
-current code, module docs, package docs, and boundary tests are authoritative.
+reference owns cross-cutting product behavior; it is not an audit ledger.
+Current code, module docs, package docs, focused tests, and Git history are the
+authoritative implementation and decision record.
 
 Use these owners:
 
@@ -2213,42 +2213,10 @@ The strict root schema is defined in `packages/agent/src/domains/settings/profil
 
 ### Key Configuration
 
-```jsonc
-{
-  "version": "0.1.0",
-  "name": "tron",
-
-  "server": {
-    "heartbeatIntervalMs": 30000,   // WebSocket heartbeat; 1000-600000 ms
-    "defaultModel": "claude-sonnet-4-6",
-    "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
-    "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
-    "transcription": {
-      "enabled": false              // Opt-in local Parakeet/MLX composer speech-to-text
-    }
-  },
-
-  "agent": {
-    "maxTurns": 250
-  },
-
-  "context": {
-    "compactor": {
-      "maxTokens": 25000,           // Context budget
-      "compactionThreshold": 0.85,  // Hard ceiling that triggers compaction
-      "targetTokens": 10000,        // Target token count after compaction
-      "charsPerToken": 4,           // Token estimation factor
-      "bufferTokens": 4000,         // Response buffer
-      "triggerTokenThreshold": 0.70,// Soft threshold for proactive compaction
-      "preserveRecentCount": 5      // Always preserve N most recent messages
-    }
-  },
-
-  "retry":  { "maxRetries": 3 },
-
-  "session": {}
-}
-```
+The canonical defaults and field-level comments live in
+`packages/agent/defaults/profiles/default/profile.toml`; the strict Rust schema
+and validation bounds live in `domains/settings/profile/types/`. Keep examples
+out of this reference so they cannot become a second copy of profile defaults.
 
 Database diagnostic verbosity is fixed at the managed `info` level with
 managed dependency filters. `RUST_LOG` may filter optional terminal output but

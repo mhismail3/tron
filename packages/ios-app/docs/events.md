@@ -115,7 +115,7 @@ the UI rather than presented as raw chain-of-thought. Legacy OpenAI
 also rendered as reasoning summaries based on their persisted `providerType`
 so old sessions do not overpromise raw thinking.
 
-## DRC-9 replay manifest/event parity
+## Replay manifest/event parity
 
 `model.provider_request` is a persisted metadata-only session event used by the
 server replay manifest. It is decoded in the stored event enum and summarized as

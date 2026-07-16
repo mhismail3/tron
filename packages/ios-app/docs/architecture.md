@@ -58,15 +58,8 @@ push service owns token callbacks; the app retries registration after pairing,
 connection, and foreground transitions. Per-install identity plus server-side
 bundle/environment identity keeps side-by-side variants independent.
 
-The historical iOS Affordance Restoration Map classifies every deleted or
-renamed old iOS path without restoring deleted product panels. It is retained
-as source-backed old-path coverage, not as current planning or execution state;
-this document and focused tests own current iOS behavior.
-The full Phase 2 agent-execution restoration plan now lives in
-`packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md` and
-covers capability discovery, filesystem, jobs, workers, subagents, approvals,
-web, git/worktrees, skills/rules/memory, MCP, scheduling, program execution,
-and matching database/event/settings/dependency work.
+This document and focused concern-owned tests define current iOS behavior;
+historical deleted-path campaigns remain available through Git history.
 
 ## Retained Surface
 
@@ -125,9 +118,9 @@ and matching database/event/settings/dependency work.
 
 The primary source tree must not contain fixed product roots, repository
 workflow panels, assistant-management panels, extension-source panels, or their
-matching state/client objects. Static source guards and the cleanup invariant
-test are the regression gates for this boundary; product names live only in
-scorecards, evidence manifests, inventory docs, and static absence tests.
+matching state/client objects. Static source guards and focused
+product-boundary tests are the regression gates for this boundary; retired
+product names do not remain as active app structure.
 Protocol code must also avoid broad product DTO buckets, product event payload
 files, public product clients, and product table models. Accepted DTOs live
 under server-domain owners such as worker lifecycle, module activity, and
@@ -471,8 +464,8 @@ files live under `Engine/Transport/Clients` as thin method wrappers over
 `/engine` frames; system, message, and log operations use concrete
 `SystemClient`, `MessageClient`, and `LogsClient` domains rather than a
 miscellaneous facade. They must not encode product policy. Any fixed
-workflow-specific client removed in PET-8 must stay removed unless a later
-scorecard row proves it is boot infrastructure.
+workflow-specific client must stay removed unless a source-owned product
+contract proves it is required boot infrastructure.
 
 Every WebSocket connect or manual-retry attempt builds the completed upgrade
 request and consults its injected `EngineSessionAttemptDirective` before
@@ -563,7 +556,7 @@ Transport tests mirror the production owners: retry policy tests live under
 `Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under
 `Tests/Engine/Transport/WebSocket`.
 
-DRC-9 replay manifest/event parity remains a server/iOS boundary rule. Replay
+Replay manifest/event parity remains a server/iOS boundary rule. Replay
 exports remain server-owned capability results, not live or persisted iOS
 events. iOS decodes the metadata-only `model.provider_request` audit event for
 stored-event parity, but replay manifests stay outside the iOS event plugin and

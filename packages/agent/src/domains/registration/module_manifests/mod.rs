@@ -3,6 +3,9 @@
 //! Domain registration owns which manifests exist at startup. The engine sees
 //! only generic typed resources and reconciles these source-owned payloads
 //! without importing feature contracts.
+//! Provider-visible `phase3_inventory` evidence references are compatibility
+//! values whose retained row owner is
+//! `docs/phase-3-modular-self-adapting-engine-inventory.tsv`.
 
 mod import_update;
 mod notification_delivery;

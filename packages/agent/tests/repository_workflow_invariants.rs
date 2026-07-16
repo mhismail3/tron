@@ -23,6 +23,38 @@ fn read_repo_file(path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
 }
 
+#[test]
+fn logs_cli_owns_bounded_quoted_filters() {
+    let logs_script = read_repo_file("scripts/tron-lib.d/logs.sh");
+    for required in [
+        "-w|--workspace",
+        "-t|--trace",
+        "local value=${1//\\'/\\'\\'}",
+        "join_conditions()",
+        "joined=\"$joined AND $condition\"",
+        "where_clause=\"WHERE $(join_conditions \"${conditions[@]}\")\"",
+        r#"'workspaceId', workspace_id"#,
+        r#"'traceId', trace_id"#,
+        r#"session_id = $(sql_quote_literal "$session")"#,
+        r#"workspace_id = $(sql_quote_literal "$workspace")"#,
+        r#"trace_id = $(sql_quote_literal "$trace")"#,
+        "search_literal=$(sql_quote_literal \"$search\")",
+        "if ! [[ \"$limit\" =~ ^[0-9]+$ ]] || [ \"$limit\" -lt 1 ]; then",
+    ] {
+        assert!(
+            logs_script.contains(required),
+            "tron logs lost bounded SQL guard `{required}`"
+        );
+    }
+    assert!(!logs_script.contains("session_id LIKE '%$session%'"));
+    assert!(!logs_script.contains("IFS=' AND '; echo"));
+
+    let service_script = read_repo_file("scripts/tron-lib.d/service.sh");
+    let runtime_cli = read_repo_file("scripts/tron-lib.sh");
+    assert!(runtime_cli.contains("errors)    query_logs --level error --limit 20"));
+    assert!(!service_script.contains("cmd_errors()") && !service_script.contains("FROM logs"));
+}
+
 fn git_output(args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)

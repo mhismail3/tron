@@ -101,7 +101,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
         messages: std::sync::Arc::from([Message::user("Hello")]),
         capabilities: Some(vec![test_tool()]),
         working_directory: Some("/workspace".into()),
-        agent_state_context: Some("Remember the teardown scorecard.".into()),
+        agent_state_context: Some("Remember the source-owned contract.".into()),
         memory_prompt_context: None,
         server_origin: Some("localhost:9847".into()),
     };
@@ -110,7 +110,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
     let instructions = request.instructions.expect("instructions are required");
 
     assert!(instructions.contains("Agent soul"));
-    assert!(instructions.contains("Remember the teardown scorecard."));
+    assert!(instructions.contains("Remember the source-owned contract."));
     assert!(instructions.contains("Server: localhost:9847"));
     assert!(instructions.contains("Current working directory: /workspace"));
     assert!(instructions.contains("Use only `capability::execute`"));

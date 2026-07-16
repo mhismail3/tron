@@ -2,6 +2,68 @@ use super::*;
 
 use std::collections::BTreeMap;
 
+use crate::engine::{EnqueueInvocation, MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_PAYLOAD_BYTES};
+
+fn bounded_queue_request(queue: &str, payload: Value) -> EnqueueInvocation {
+    EnqueueInvocation {
+        queue: queue.to_owned(),
+        function_id: fid("queue::bounded"),
+        payload,
+        actor_id: actor("queue-boundary-test"),
+        actor_kind: ActorKind::Agent,
+        authority_grant_id: grant("queue-boundary-grant"),
+        authority_scopes: vec!["queue.test".to_owned()],
+        runtime_metadata: BTreeMap::new(),
+        trace_id: trace("queue-boundary-trace"),
+        parent_invocation_id: None,
+        trigger_id: None,
+        session_id: Some("queue-boundary-session".to_owned()),
+        workspace_id: Some("queue-boundary-workspace".to_owned()),
+        idempotency_key: None,
+    }
+}
+
+#[tokio::test]
+async fn queue_rejects_active_depth_and_payload_overflow() {
+    let handle = EngineHostHandle::new_in_memory().expect("in-memory engine host");
+    for index in 0..MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE {
+        handle
+            .enqueue_invocation(bounded_queue_request(
+                "bounded-depth",
+                json!({ "index": index }),
+            ))
+            .await
+            .expect("item below active-depth bound should enqueue");
+    }
+
+    let depth_error = handle
+        .enqueue_invocation(bounded_queue_request(
+            "bounded-depth",
+            json!({ "index": "overflow" }),
+        ))
+        .await
+        .expect_err("queue must reject active-depth overflow");
+    assert!(
+        depth_error
+            .to_string()
+            .contains("active depth limit exceeded")
+    );
+
+    let payload_error = EngineHostHandle::new_in_memory()
+        .expect("in-memory engine host")
+        .enqueue_invocation(bounded_queue_request(
+            "bounded-payload",
+            json!({ "payload": "x".repeat(MAX_QUEUE_PAYLOAD_BYTES + 1) }),
+        ))
+        .await
+        .expect_err("queue must reject oversized payloads");
+    assert!(
+        payload_error
+            .to_string()
+            .contains("queue payload exceeds maximum size")
+    );
+}
+
 #[tokio::test]
 async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
     let handle = EngineHostHandle::new_in_memory().unwrap();

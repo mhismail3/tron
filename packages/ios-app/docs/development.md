@@ -430,8 +430,7 @@ Tests/
 ```
 
 Active hierarchy and targeted hard-budget enforcement live in
-`SourceGuardTests` and do not depend on point-in-time line counts recorded in
-archived scorecards.
+`SourceGuardTests` and do not depend on point-in-time campaign line counts.
 
 ## Debugging
 

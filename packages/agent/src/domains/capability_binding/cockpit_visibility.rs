@@ -1459,7 +1459,7 @@ fn status_projection(ownership_class: &str) -> StatusProjection {
         ),
         _ => (
             "Deferred",
-            "Ownership is intentionally unresolved until a future scorecard slice.",
+            "Ownership is intentionally unresolved until a source-owned contract is accepted.",
             true,
             false,
             false,
