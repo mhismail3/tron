@@ -211,7 +211,6 @@ final class MockCompactionContext: CompactionContext {
 
     var flushPendingTextUpdatesCalled = false
     var finalizeStreamingMessageCalled = false
-    var resetStreamingManagerCalled = false
 
     func flushPendingTextUpdates() {
         flushPendingTextUpdatesCalled = true
@@ -221,16 +220,5 @@ final class MockCompactionContext: CompactionContext {
         finalizeStreamingMessageCalled = true
     }
 
-    func resetStreamingManager() {
-        resetStreamingManagerCalled = true
-    }
-
-    // MARK: - LoggingContext
-
-    func logVerbose(_ message: String) {}
-    func logDebug(_ message: String) {}
     func logInfo(_ message: String) {}
-    func logWarning(_ message: String) {}
-    func logError(_ message: String) {}
-    func showError(_ message: String) {}
 }

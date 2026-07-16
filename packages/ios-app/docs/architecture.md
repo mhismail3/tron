@@ -347,6 +347,8 @@ Transcript mutations go through the
 `MessageMutating` helpers in `Session/Chat/Navigation/MessageIndex.swift`; in
 place updates must use `updateMessage(at:)` so message-id and capability-id
 lookups cannot drift while streaming text, thinking, and tool chips update.
+The compaction coordinator context exposes only message mutation, info logging,
+and the two stream-finalization actions it consumes.
 
 ## Chat Visual Affordances
 

@@ -3,10 +3,14 @@ import SwiftUI
 
 /// Context required by CompactionCoordinator.
 @MainActor
-protocol CompactionContext: LoggingContext, StreamingManaging, MessageMutating {
+protocol CompactionContext: MessageMutating {
     var isCompacting: Bool { get set }
     var compactionInProgressMessageId: UUID? { get set }
     var contextState: ContextTrackingState { get }
+
+    func logInfo(_ message: String)
+    func flushPendingTextUpdates()
+    func finalizeStreamingMessage()
 }
 
 /// Coordinates context compaction event handling for ChatViewModel.
