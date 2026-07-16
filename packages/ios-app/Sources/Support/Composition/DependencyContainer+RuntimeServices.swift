@@ -30,18 +30,7 @@ extension DependencyContainer {
         )
     }
 
-    // MARK: - Connection Management
-
-    /// Connect to the server
-    func connect() async {
-        guard pairedServerStore.activeServer != nil else { return }
-        await engineClient.connect()
-    }
-
-    /// Disconnect from the server
-    func disconnect() async {
-        engineClient.disconnect()
-    }
+    // MARK: - Application Connection Lifecycle
 
     /// Set background state for battery optimization
     func setBackgroundState(_ inBackground: Bool) {

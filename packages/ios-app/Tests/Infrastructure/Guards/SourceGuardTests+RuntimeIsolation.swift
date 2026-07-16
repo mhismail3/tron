@@ -99,7 +99,7 @@ extension SourceGuardTests {
         }
         IsolatedTestState.withState(label: "safe") { state in
             let container = state.makeContainer()
-            await container.connect()
+            await container.connectionRepository.connect()
             await container.manualRetry()
             container.selectPairedServer(server)
             _ = try container.forgetPairedServer(server)
@@ -174,7 +174,7 @@ extension SourceGuardTests {
                 "repository attempt derives from live EngineClient"
             ),
             (
-                "let container = DependencyContainer(storage: storage)\nawait container.connect()",
+                "let container = DependencyContainer(storage: storage)\nawait container.connectionRepository.connect()",
                 "container connect derives from direct composition"
             ),
             (
