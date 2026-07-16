@@ -703,7 +703,13 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let bundle = read_repo_file("scripts/tron.d/bundle.sh");
     assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
     assert!(!bundle.contains("$script_dir/AppIcon.icns"));
-    assert!(bundle.contains("\"$PROJECT_DIR/VERSION.env\""));
+    assert!(bundle.contains("\"$SCRIPT_DIR/tron-version\" print"));
+    assert!(bundle.contains("TRON_APPLE_MARKETING_VERSION)"));
+    assert!(bundle.contains("TRON_APPLE_BUILD)"));
+    assert!(!bundle.contains("bundle_version_env_value"));
+    assert!(!bundle.contains("\"$PROJECT_DIR/VERSION.env\""));
+    assert!(!bundle.contains("${3:-}"));
+    assert!(!bundle.contains("%%-*"));
     assert!(!bundle.contains("workspace-path"));
     assert!(bundle.contains("print_error \"Code signing failed\""));
     assert!(!repo_path("scripts/tron-lib.d/bundle.sh").exists());

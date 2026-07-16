@@ -1,37 +1,25 @@
 #!/bin/bash
 # bundle.sh - workspace bundle construction/signing; sourced by scripts/tron.
 
-bundle_version_env_value() {
-    local key="$1"
-    local version_file="$PROJECT_DIR/VERSION.env"
-    [ -f "$version_file" ] || return 1
-    awk -F= -v key="$key" '
-        $1 == key {
-            sub(/\r$/, "", $2)
-            print $2
-            found = 1
-            exit
-        }
-        END { if (!found) exit 1 }
-    ' "$version_file"
-}
-
 create_app_bundle() {
     local bundle_path="$1"
     local binary_src="$2"
-    local canonical_version="${3:-}"
-    if [ -z "$canonical_version" ]; then
-        canonical_version="$(bundle_version_env_value TRON_VERSION)" || {
-            print_error "Cannot create app bundle without VERSION.env"
-            return 1
-        }
-    fi
-    local marketing_version="${canonical_version%%-*}"
-    local build_version
-    build_version="$(bundle_version_env_value TRON_APPLE_BUILD)" || {
-        print_error "Cannot create app bundle without TRON_APPLE_BUILD in VERSION.env"
+    local version_fields canonical_version marketing_version build_version key value
+    version_fields="$("$SCRIPT_DIR/tron-version" print)" || {
+        print_error "Cannot create app bundle without valid version metadata"
         return 1
     }
+    while IFS='=' read -r key value; do
+        case "$key" in
+            TRON_VERSION) canonical_version="$value" ;;
+            TRON_APPLE_MARKETING_VERSION) marketing_version="$value" ;;
+            TRON_APPLE_BUILD) build_version="$value" ;;
+        esac
+    done <<< "$version_fields"
+    if [ -z "${canonical_version:-}" ] || [ -z "${marketing_version:-}" ] || [ -z "${build_version:-}" ]; then
+        print_error "Version helper omitted required bundle metadata"
+        return 1
+    fi
 
     # Delete the entire .app bundle, not just its contents. macOS App
     # Management TCC protects files *inside* .app bundles from modification
