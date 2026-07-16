@@ -7,19 +7,19 @@ use super::service::{
     decide_module_lifecycle_value_at, ensure_runtime_allowed, inspect_module_lifecycle_value,
     request_module_lifecycle_value_at,
 };
-use super::{Deps, MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID};
+use super::{MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceLocation, EngineResourceScope, FunctionId, Invocation, InvocationId,
-    MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, RiskLevel, TraceId,
-    builtin_resource_type_definitions,
+    EngineHostHandle, EngineResourceLocation, EngineResourceScope, FunctionId, Invocation,
+    InvocationId, MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, RiskLevel,
+    TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-26T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     install_decision_id: String,
     lifecycle_id: String,
@@ -30,13 +30,11 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let scope = EngineResourceScope::Session(session_id.clone());
         let install_decision_id = format!("module_install_decision:{label}-candidate");
-        deps.engine_host
+        engine_host
             .create_resource(CreateResource {
                 resource_id: Some(install_decision_id.clone()),
                 kind: MODULE_INSTALL_DECISION_KIND.to_owned(),
@@ -60,7 +58,7 @@ impl Fixture {
             .expect("seed install candidate");
         let lifecycle_id = module_lifecycle_resource_id(&scope, &install_decision_id);
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -76,7 +74,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_LIFECYCLE_STATE_KIND],
@@ -87,7 +85,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             install_decision_id,
             lifecycle_id,
@@ -141,7 +139,7 @@ impl Fixture {
             &self.session_id,
         );
         let request = crate::domains::approval::service::request_approval_value(
-            &self.deps.engine_host,
+            &self.engine_host,
             &request_invocation,
             &request_invocation.payload,
         )
@@ -161,7 +159,7 @@ impl Fixture {
             &self.session_id,
         );
         crate::domains::approval::service::decide_approval_value(
-            &self.deps.engine_host,
+            &self.engine_host,
             &decision_invocation,
             &decision_invocation.payload,
         )
@@ -204,7 +202,7 @@ fn module_lifecycle_resource_type_is_registered_with_metadata_only_bounds() {
 async fn lifecycle_request_decision_inspect_and_runtime_denial_are_bounded() {
     let fixture = Fixture::new("module-lifecycle-disable").await;
     let request = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "lifecycle-request",
             request_payload(&fixture.install_decision_id, "disable"),
@@ -218,7 +216,7 @@ async fn lifecycle_request_decision_inspect_and_runtime_denial_are_bounded() {
     let version_id = request["moduleLifecycleVersionId"].as_str().unwrap();
     let approval = fixture.approval("disable-approval", "disable").await;
     let decision = decide_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "lifecycle-decision",
             json!({
@@ -244,7 +242,7 @@ async fn lifecycle_request_decision_inspect_and_runtime_denial_are_bounded() {
     .expect("decide lifecycle");
     assert_eq!(decision["status"], json!("disabled"));
     let inspected = inspect_module_lifecycle_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation(
             "inspect-lifecycle",
             json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
@@ -259,7 +257,7 @@ async fn lifecycle_request_decision_inspect_and_runtime_denial_are_bounded() {
     );
     assert_no_leaks("module lifecycle projection", &inspected);
     let denied = ensure_runtime_allowed(
-        &fixture.deps,
+        &fixture.engine_host,
         &EngineResourceScope::Session(fixture.session_id.clone()),
         &fixture.lifecycle_id,
     )
@@ -273,7 +271,7 @@ async fn lifecycle_request_decision_inspect_and_runtime_denial_are_bounded() {
 async fn lifecycle_request_after_decision_records_fresh_pending_transition() {
     let fixture = Fixture::new("module-lifecycle-follow-up").await;
     let disable_request = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "disable-request",
             request_payload(&fixture.install_decision_id, "disable"),
@@ -288,7 +286,7 @@ async fn lifecycle_request_after_decision_records_fresh_pending_transition() {
         .expect("disable request version");
     let approval = fixture.approval("follow-up-disable", "disable").await;
     let disable_decision = decide_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "disable-decision",
             json!({
@@ -319,7 +317,7 @@ async fn lifecycle_request_after_decision_records_fresh_pending_transition() {
         .to_owned();
 
     let enable_request = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "enable-request",
             request_payload(&fixture.install_decision_id, "enable"),
@@ -345,7 +343,7 @@ async fn lifecycle_request_after_decision_records_fresh_pending_transition() {
     );
 
     let inspected = inspect_module_lifecycle_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation(
             "inspect-follow-up",
             json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
@@ -374,7 +372,7 @@ async fn pending_same_action_with_different_idempotency_is_not_stale_replay() {
     let fixture = Fixture::new("module-lifecycle-pending-idempotency").await;
     let disable_payload = request_payload(&fixture.install_decision_id, "disable");
     let first_request = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation("disable-pending", disable_payload.clone()),
         &disable_payload,
         default_operation_at(),
@@ -389,7 +387,7 @@ async fn pending_same_action_with_different_idempotency_is_not_stale_replay() {
     assert_eq!(first_request["idempotentReplay"], json!(false));
 
     let replay = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation("disable-pending", disable_payload.clone()),
         &disable_payload,
         default_operation_at() + Duration::seconds(1),
@@ -403,7 +401,7 @@ async fn pending_same_action_with_different_idempotency_is_not_stale_replay() {
     duplicate_payload["reason"] =
         json!("A later request must not stale-replay the old pending transition.");
     let denied = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation("disable-pending-fresh-key", duplicate_payload.clone()),
         &duplicate_payload,
         default_operation_at() + Duration::seconds(2),
@@ -417,7 +415,7 @@ async fn pending_same_action_with_different_idempotency_is_not_stale_replay() {
     );
 
     let inspected = inspect_module_lifecycle_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation(
             "inspect-pending-idempotency",
             json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
@@ -441,7 +439,7 @@ async fn pending_same_action_with_different_idempotency_is_not_stale_replay() {
 async fn rollback_requires_ready_proof_refs_and_prerequisite_candidate() {
     let fixture = Fixture::new("module-lifecycle-rollback").await;
     let denied = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "rollback-denied",
             json!({
@@ -463,7 +461,7 @@ async fn rollback_requires_ready_proof_refs_and_prerequisite_candidate() {
     assert!(denied.contains("rollback requires ready"), "{denied}");
 
     let missing = request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "missing-install",
             request_payload("module_install_decision:missing", "disable"),
@@ -484,7 +482,7 @@ async fn rollback_requires_ready_proof_refs_and_prerequisite_candidate() {
 async fn lifecycle_inspect_requires_exact_resource_selector() {
     let fixture = Fixture::new("module-lifecycle-selector").await;
     request_module_lifecycle_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "selector-request",
             request_payload(&fixture.install_decision_id, "disable"),
@@ -495,7 +493,7 @@ async fn lifecycle_inspect_requires_exact_resource_selector() {
     .await
     .expect("request lifecycle");
     let broad_grant = derive_grant(
-        &fixture.deps,
+        &fixture.engine_host,
         "selector-broad",
         &[READ_SCOPE, RESOURCE_READ_SCOPE],
         &[MODULE_LIFECYCLE_STATE_KIND],
@@ -503,7 +501,7 @@ async fn lifecycle_inspect_requires_exact_resource_selector() {
     )
     .await;
     let denied = inspect_module_lifecycle_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "selector-denied",
             json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
@@ -577,14 +575,13 @@ fn request_payload(install_decision_id: &str, action: &str) -> Value {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("module-lifecycle-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

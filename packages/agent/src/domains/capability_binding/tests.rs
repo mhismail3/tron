@@ -873,9 +873,6 @@ impl RouteFixture {
             "none",
         )
         .await;
-        let lifecycle_deps = crate::domains::module_lifecycle::Deps {
-            engine_host: self.deps.engine_host.clone(),
-        };
         let lifecycle_request_payload = json!({
             "moduleInstallDecisionResourceId": install_decision_id,
             "lifecycleAction": "enable",
@@ -884,7 +881,7 @@ impl RouteFixture {
         });
         let lifecycle_request =
             crate::domains::module_lifecycle::service::request_module_lifecycle_value_at(
-                &lifecycle_deps,
+                &self.deps.engine_host,
                 &invocation(
                     &format!("{key}-lifecycle-request"),
                     lifecycle_request_payload.clone(),
@@ -916,7 +913,7 @@ impl RouteFixture {
         });
         let lifecycle_decision =
             crate::domains::module_lifecycle::service::decide_module_lifecycle_value_at(
-                &lifecycle_deps,
+                &self.deps.engine_host,
                 &invocation(
                     &format!("{key}-lifecycle-decision"),
                     lifecycle_decision_payload.clone(),

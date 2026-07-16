@@ -58,12 +58,9 @@ pub(crate) async fn validate_accepted_shadow_projection(
         "module_lifecycle_state",
     )?;
     validate_module_lifecycle_resource_id(&lifecycle_resource_id)?;
-    let lifecycle_deps = crate::domains::module_lifecycle::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let lifecycle_authorization =
         crate::domains::module_lifecycle::service::ensure_runtime_allowed(
-            &lifecycle_deps,
+            &deps.engine_host,
             &scope,
             &lifecycle_resource_id,
         )
@@ -217,12 +214,9 @@ pub(crate) async fn request_module_runtime_value_at(
     let lifecycle_resource_id = required_string(payload, "moduleLifecycleResourceId")?;
     validate_module_lifecycle_resource_id(&lifecycle_resource_id)?;
     require_exact_resource_selector(&grant, &lifecycle_resource_id, "module_runtime_request")?;
-    let lifecycle_deps = crate::domains::module_lifecycle::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let lifecycle_authorization =
         crate::domains::module_lifecycle::service::ensure_runtime_allowed(
-            &lifecycle_deps,
+            &deps.engine_host,
             &scope,
             &lifecycle_resource_id,
         )

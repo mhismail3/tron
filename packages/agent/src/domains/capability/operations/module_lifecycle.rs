@@ -13,11 +13,8 @@ pub(super) async fn module_lifecycle_request(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_lifecycle_deps = crate::domains::module_lifecycle::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_lifecycle::service::request_module_lifecycle_value_at(
-        &module_lifecycle_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -35,11 +32,8 @@ pub(super) async fn module_lifecycle_decision(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_lifecycle_deps = crate::domains::module_lifecycle::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_lifecycle::service::decide_module_lifecycle_value_at(
-        &module_lifecycle_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -56,11 +50,8 @@ pub(super) async fn module_lifecycle_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_lifecycle_deps = crate::domains::module_lifecycle::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_lifecycle::service::list_module_lifecycle_value(
-        &module_lifecycle_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -80,11 +71,8 @@ pub(super) async fn module_lifecycle_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_lifecycle_deps = crate::domains::module_lifecycle::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_lifecycle::service::inspect_module_lifecycle_value(
-        &module_lifecycle_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
