@@ -147,34 +147,6 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
         XCTAssertEqual(second.sequenceHighWaterMark, 2)
     }
 
-    func testSameSessionLiveStreamsDoNotCancelEachOther() {
-        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let first = ChatViewModel(
-            engineClient: engineClient,
-            sessionId: "shared-session",
-            eventStoreManager: nil
-        )
-        let second = ChatViewModel(
-            engineClient: engineClient,
-            sessionId: "shared-session",
-            eventStoreManager: nil
-        )
-
-        first.startLiveEventStream()
-        second.startLiveEventStream()
-
-        XCTAssertTrue(first.liveEventStreamIsActiveForTesting)
-        XCTAssertTrue(second.liveEventStreamIsActiveForTesting)
-
-        first.stopLiveEventStream()
-
-        XCTAssertFalse(first.liveEventStreamIsActiveForTesting)
-        XCTAssertTrue(second.liveEventStreamIsActiveForTesting)
-
-        second.stopLiveEventStream()
-        XCTAssertFalse(second.liveEventStreamIsActiveForTesting)
-    }
-
     func testWatermarkResetForNewReconstructionCycle() {
         // After a new reconstruction sets watermark, the filter honors it.
         viewModel.sequenceHighWaterMark = 42

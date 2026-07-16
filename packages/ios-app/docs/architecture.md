@@ -312,9 +312,9 @@ connectivity fact. `ChatView` derives its immediate `InputBarConfig`
 transport-safety gate from that state, while `InteractionPolicy` remains the
 shared debounced read-only policy.
 Workspace existence is likewise not cached in the client; any future
-invalidation must arrive through authoritative engine or session state. Chat
-event-pipeline tests use `@testable` access to the internal
-dispatcher and buffer instead of production-only test shims;
+invalidation must arrive through authoritative engine or session state. Every
+mounted model owns and cancels its live-event task; event-pipeline tests use
+`@testable` access to the internal dispatcher and buffer without production test shims.
 PhotosPicker transfers use a narrow I/O adapter and one cancel-and-replace task
 that never retains the view model across data loading or image preparation.
 Chat-scoped error routing lives in

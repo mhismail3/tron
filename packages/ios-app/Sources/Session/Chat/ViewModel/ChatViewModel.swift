@@ -339,10 +339,6 @@ final class ChatViewModel {
         eventTask = nil
     }
 
-    var liveEventStreamIsActiveForTesting: Bool {
-        eventTask != nil
-    }
-
     /// Single cancel-and-replace owner for the current PhotosPicker selection.
     @ObservationIgnored
     var selectedImageTask: Task<Void, Never>?
