@@ -34,9 +34,10 @@ use self::persistence::{
     persist_interrupted_message, persist_model_provider_request_audit,
 };
 use self::result::determine_turn_stop_reason;
-use self::turn_context::{build_turn_context, resolve_provider_primitive_surface};
+use self::turn_context::build_turn_context;
 use crate::domains::agent::r#loop::errors::StopReason;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+use crate::domains::agent::r#loop::primitive_surface;
 use crate::domains::agent::r#loop::stream_processor;
 use crate::domains::agent::r#loop::types::TurnResult;
 
@@ -153,38 +154,42 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         "turn start persisted and broadcast"
     );
 
-    let primitive_surface =
-        match resolve_provider_primitive_surface(engine_host, session_id, workspace_id).await {
-            Ok(capabilities) => capabilities,
-            Err(error) => {
-                let error_msg =
-                    format!("failed to resolve live engine capability surface: {error}");
-                error!(session_id, turn, error = %error_msg);
-                let failure = FailureEnvelope::new(
-                    ENGINE_TOOL_SURFACE_FAILED,
-                    FailureCategory::Engine,
-                    error_msg.clone(),
-                    true,
-                    true,
-                    FailureOrigin::Engine,
-                );
-                emit_turn_failure(
-                    emitter,
-                    session_id,
-                    turn,
-                    run_context,
-                    sequence_counter,
-                    &failure,
-                    None,
-                );
-                return TurnResult {
-                    success: false,
-                    error: Some(error_msg),
-                    stop_reason: Some(StopReason::Error),
-                    ..Default::default()
-                };
-            }
-        };
+    let primitive_surface = match primitive_surface::resolve_provider_primitive_surface(
+        engine_host,
+        session_id,
+        workspace_id,
+    )
+    .await
+    {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            let error_msg = format!("failed to resolve live engine capability surface: {error}");
+            error!(session_id, turn, error = %error_msg);
+            let failure = FailureEnvelope::new(
+                ENGINE_TOOL_SURFACE_FAILED,
+                FailureCategory::Engine,
+                error_msg.clone(),
+                true,
+                true,
+                FailureOrigin::Engine,
+            );
+            emit_turn_failure(
+                emitter,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
     info!(
         component = "agent.turn",
         agent_event = "primitive_surface_resolved",

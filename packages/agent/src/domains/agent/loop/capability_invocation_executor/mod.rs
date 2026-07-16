@@ -62,9 +62,8 @@ use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, failure_result};
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
-    CAPABILITY_ENGINE_HOST_UNAVAILABLE, CAPABILITY_ENGINE_RESULT_MISSING,
-    CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID, ENGINE_POLICY_VIOLATION,
-    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    CAPABILITY_ENGINE_RESULT_MISSING, CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID,
+    ENGINE_POLICY_VIOLATION, FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -230,7 +229,7 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     pub emit_lifecycle_events: bool,
     pub turn: i64,
     pub invocation_abort_registry: &'a InvocationAbortRegistry,
-    pub engine_host: Option<&'a EngineHostHandle>,
+    pub engine_host: &'a EngineHostHandle,
     pub run_id: Option<&'a str>,
     pub provider_type: &'a str,
     pub trace_id: Option<&'a TraceId>,
@@ -326,9 +325,9 @@ pub async fn execute_capability_invocation(
             ctx.parent_invocation_id,
             None,
         )
-    } else if let Some(engine_host) = ctx.engine_host {
+    } else {
         execute_capability_primitive_via_engine(
-            engine_host,
+            ctx.engine_host,
             engine_target,
             &model_primitive_name,
             &invocation_id,
@@ -344,30 +343,6 @@ pub async fn execute_capability_invocation(
             &per_invocation_cancel,
         )
         .await
-    } else {
-        let failure = FailureEnvelope::new(
-            CAPABILITY_ENGINE_HOST_UNAVAILABLE,
-            FailureCategory::Unavailable,
-            format!(
-                "Engine host is required to execute capability primitive '{model_primitive_name}'"
-            ),
-            false,
-            false,
-            FailureOrigin::Capability,
-        );
-        return CapabilityInvocationExecutionResult {
-            result: capability_failure_result(
-                failure,
-                &model_primitive_name,
-                &invocation_id,
-                session_id,
-                ctx.trace_id,
-                ctx.parent_invocation_id,
-                None,
-            ),
-            duration_ms: duration_ceil_ms(start.elapsed()),
-            stops_turn,
-        };
     };
 
     let result_stops_turn = capability_result.stop_turn.unwrap_or(false);

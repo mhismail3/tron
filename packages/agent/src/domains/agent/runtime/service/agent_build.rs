@@ -81,7 +81,7 @@ pub(super) async fn build_prompt_agent(
             initial_turn_count,
             compactor_settings.into(),
             invocation_abort_registry,
-            Some(engine_host),
+            engine_host,
         ),
     );
 

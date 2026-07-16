@@ -16,7 +16,7 @@ pub struct CreateAgentOpts {
     pub initial_turn_count: u32,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
     pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
-    pub engine_host: Option<crate::engine::EngineHostHandle>,
+    pub engine_host: crate::engine::EngineHostHandle,
 }
 
 impl CreateAgentOpts {
@@ -26,7 +26,7 @@ impl CreateAgentOpts {
         initial_turn_count: u32,
         compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
         invocation_abort_registry: Arc<InvocationAbortRegistry>,
-        engine_host: Option<crate::engine::EngineHostHandle>,
+        engine_host: crate::engine::EngineHostHandle,
     ) -> Self {
         Self {
             responder,
@@ -113,7 +113,7 @@ mod tests {
             0,
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
             Arc::new(InvocationAbortRegistry::new()),
-            None,
+            crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
         )
     }
 

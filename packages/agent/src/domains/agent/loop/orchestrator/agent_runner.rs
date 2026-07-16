@@ -242,7 +242,7 @@ mod tests {
                 compaction_trigger_config:
                     crate::domains::agent::context::types::CompactionTriggerConfig::default(),
                 invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
-                engine_host: None,
+                engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
             },
             session_id,
         );

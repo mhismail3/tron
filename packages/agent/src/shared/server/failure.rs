@@ -87,8 +87,6 @@ pub const JOURNAL_CREATE_FAILED: &str = "JOURNAL_CREATE_FAILED";
 pub const ASSISTANT_PERSIST_FAILED: &str = "ASSISTANT_PERSIST_FAILED";
 /// Requested model-facing capability primitive is not present in the resolved surface.
 pub const CAPABILITY_PRIMITIVE_NOT_FOUND: &str = "CAPABILITY_PRIMITIVE_NOT_FOUND";
-/// Capability execution requires an engine host but none is available.
-pub const CAPABILITY_ENGINE_HOST_UNAVAILABLE: &str = "CAPABILITY_ENGINE_HOST_UNAVAILABLE";
 /// Engine invocation completed without a capability result payload.
 pub const CAPABILITY_ENGINE_RESULT_MISSING: &str = "CAPABILITY_ENGINE_RESULT_MISSING";
 /// Engine invocation returned a payload that is not a valid capability result.

@@ -1,4 +1,7 @@
 //! `TronAgent` multi-turn primitive loop.
+//!
+//! The agent owns one required engine host for its lifetime. Turn contexts and
+//! capability execution borrow that host; they do not model a hostless runtime.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
@@ -41,7 +44,7 @@ pub struct AgentDeps {
     pub context_manager: ContextManager,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
     pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
-    pub engine_host: Option<crate::engine::EngineHostHandle>,
+    pub engine_host: crate::engine::EngineHostHandle,
 }
 
 pub struct TronAgent {
@@ -59,7 +62,7 @@ pub struct TronAgent {
     persister: Option<Arc<EventPersister>>,
     sequence_counter: Option<Arc<AtomicI64>>,
     invocation_abort_registry: Arc<InvocationAbortRegistry>,
-    engine_host: Option<crate::engine::EngineHostHandle>,
+    engine_host: crate::engine::EngineHostHandle,
 }
 
 impl TronAgent {
@@ -194,7 +197,7 @@ impl TronAgent {
                 server_origin: self.config.server_origin.as_deref(),
                 sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),
                 invocation_abort_registry: self.invocation_abort_registry.as_ref(),
-                engine_host: self.engine_host.as_ref(),
+                engine_host: &self.engine_host,
             })
             .await;
 

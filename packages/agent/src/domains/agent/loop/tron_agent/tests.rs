@@ -214,25 +214,32 @@ fn test_context_manager(model: &str) -> ContextManager {
     })
 }
 
-fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
+fn make_deps_with_host(
+    responder: impl ModelResponder + 'static,
+    engine_host: crate::engine::EngineHostHandle,
+) -> AgentDeps {
     AgentDeps {
         responder: Arc::new(responder),
         context_manager: test_context_manager("mock-model"),
         compaction_trigger_config:
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
         invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
-        engine_host: None,
+        engine_host,
     }
+}
+
+fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
+    make_deps_with_host(
+        responder,
+        crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+    )
 }
 
 fn make_primitive_loop_deps(
     responder: impl ModelResponder + 'static,
     engine_host: crate::engine::EngineHostHandle,
 ) -> AgentDeps {
-    AgentDeps {
-        engine_host: Some(engine_host),
-        ..make_deps(responder)
-    }
+    make_deps_with_host(responder, engine_host)
 }
 
 #[test]

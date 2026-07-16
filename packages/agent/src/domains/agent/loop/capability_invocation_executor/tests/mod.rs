@@ -11,8 +11,7 @@ use crate::engine::{
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::failure::{
-    CAPABILITY_ENGINE_HOST_UNAVAILABLE, CAPABILITY_PRIMITIVE_NOT_FOUND, ENGINE_HANDLER_FAILED,
-    RUNTIME_CANCELLED,
+    CAPABILITY_PRIMITIVE_NOT_FOUND, ENGINE_HANDLER_FAILED, RUNTIME_CANCELLED,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -96,6 +95,7 @@ fn capability_exec_ctx<'a>(
     emitter: &'a Arc<EventEmitter>,
     cancel: &'a CancellationToken,
     invocation_abort_registry: &'a InvocationAbortRegistry,
+    engine_host: &'a EngineHostHandle,
 ) -> CapabilityInvocationExecutionContext<'a> {
     CapabilityInvocationExecutionContext {
         primitive_surface: surface,
@@ -106,7 +106,7 @@ fn capability_exec_ctx<'a>(
         emit_lifecycle_events: true,
         turn: 1,
         invocation_abort_registry,
-        engine_host: None,
+        engine_host,
         run_id: Some("run-1"),
         provider_type: "openai",
         trace_id: None,
@@ -130,7 +130,8 @@ async fn unknown_model_primitive_fails_before_execution() {
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
+    let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let call = CapabilityInvocationDraft::new("tc1", "Missing", Default::default());
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
     assert!(result.result.is_error.unwrap_or(false));
@@ -147,31 +148,14 @@ async fn unknown_model_primitive_fails_before_execution() {
 }
 
 #[tokio::test]
-async fn catalog_target_requires_engine_host_for_execution() {
-    let surface = surface_with_echo();
-    let emitter = Arc::new(EventEmitter::new());
-    let cancel = CancellationToken::new();
-    let registry = Arc::new(InvocationAbortRegistry::new());
-    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    let call = CapabilityInvocationDraft::new(
-        "tc1",
-        "execute",
-        payload_object(&json!({"operation": "observe", "input": "failure probe"})),
-    );
-    let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
-    assert!(result.result.is_error.unwrap_or(false));
-    assert_failure_code(&result.result, CAPABILITY_ENGINE_HOST_UNAVAILABLE);
-    assert!(result.stops_turn);
-}
-
-#[tokio::test]
 async fn cancelled_model_primitive_returns_canonical_failure() {
     let surface = surface_with_echo();
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     cancel.cancel();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
+    let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
 
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
@@ -199,8 +183,7 @@ async fn model_capability_invocation_invokes_execute_primitive_through_engine() 
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&server.engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &server.engine_host);
 
     let mut args = serde_json::Map::new();
     args.insert(
@@ -354,8 +337,7 @@ async fn run_cancellation_probe(
     engine_host: EngineHostHandle,
     invocation_id: &'static str,
 ) -> CapabilityInvocationExecutionResult {
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &parent, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &parent, &registry, &engine_host);
     let call = CapabilityInvocationDraft::new(
         invocation_id,
         "execute",
@@ -516,8 +498,7 @@ async fn engine_handler_failure_returns_canonical_capability_result() {
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let call = CapabilityInvocationDraft::new(
         "tc1",
         "execute",
@@ -589,8 +570,7 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let tempdir = tempfile::tempdir().expect("working directory");
     let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
 
@@ -664,10 +644,9 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let trace_id = TraceId::new("agent-trace").expect("trace id");
     let parent_invocation_id = InvocationId::new("agent-run-turn").expect("invocation id");
-    ctx.engine_host = Some(&engine_host);
     ctx.trace_id = Some(&trace_id);
     ctx.parent_invocation_id = Some(&parent_invocation_id);
     let tempdir = tempfile::tempdir().expect("working directory");
@@ -809,8 +788,7 @@ async fn caller_idempotency_rejects_changed_payload_across_provider_calls() {
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let tempdir = tempfile::tempdir().expect("working directory");
     let working_directory = crate::shared::foundation::paths::normalize_working_directory(
         tempdir.path().to_str().expect("utf8 tempdir"),
@@ -974,8 +952,7 @@ async fn malformed_exact_payload_stops_before_engine_handler() {
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let call = CapabilityInvocationDraft::new(
         "provider-call-invalid-contract",
         "execute",
@@ -1009,8 +986,7 @@ async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostH
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let tempdir = tempfile::tempdir().expect("working directory");
     let working_directory = crate::shared::foundation::paths::normalize_working_directory(
         tempdir.path().to_str().expect("utf8 tempdir"),

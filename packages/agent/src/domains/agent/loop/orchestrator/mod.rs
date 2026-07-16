@@ -8,7 +8,7 @@
 //! | `session_manager` | Cache-coordinated session lifecycle, reconstructed-state cache, prompt eviction guard |
 //! | `session_reconstructor` | Rebuild the runtime execution projection from persisted events |
 //! | `agent_runner` | High-level primitive run and event ordering |
-//! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
+//! | `agent_factory` | Creates `TronAgent` instances with their required provider and engine host owners |
 //! | `event_persister` | Reconciles live sequence counters before direct transactional event-store writes |
 //! | `turn_accumulator` | In-memory per-session scratchpad of in-flight turn content for `session.reconstruct` |
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of ordered partial LLM output |

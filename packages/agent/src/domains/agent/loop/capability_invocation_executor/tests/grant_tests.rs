@@ -351,8 +351,7 @@ async fn web_fetch_runtime_grant_rejects_partial_robots_proof_before_execution()
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let registry = Arc::new(InvocationAbortRegistry::new());
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
-    ctx.engine_host = Some(&engine_host);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let tempdir = tempfile::tempdir().expect("working directory");
     let call = CapabilityInvocationDraft::new(
         "tc1",

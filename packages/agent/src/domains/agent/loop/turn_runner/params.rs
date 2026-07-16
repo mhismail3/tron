@@ -43,6 +43,6 @@ pub struct TurnParams<'a> {
     /// registers a child `CancellationToken` so `agent.abortCapabilityInvocation` can cancel it
     /// independently of the turn token.
     pub invocation_abort_registry: &'a InvocationAbortRegistry,
-    /// Optional engine host for engine-owned capability invocation.
-    pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
+    /// Required engine host for live primitive discovery and capability invocation.
+    pub engine_host: &'a crate::engine::EngineHostHandle,
 }

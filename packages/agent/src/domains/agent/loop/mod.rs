@@ -18,6 +18,10 @@
 //! rejected before durable trace insertion still rely on direct bounded failure
 //! result evidence; adding a pre-trace failure record is a separate tracing
 //! slice.
+//!
+//! Every `TronAgent` owns a required engine host for its full lifetime. Each
+//! turn borrows that host to resolve the live provider primitive surface and to
+//! execute provider-requested capability invocations through the same engine.
 
 #![deny(unsafe_code)]
 
