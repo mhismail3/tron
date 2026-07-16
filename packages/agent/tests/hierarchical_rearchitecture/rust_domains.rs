@@ -35,7 +35,6 @@ fn rust_session_domain_uses_lifecycle_query_reconstruction_owners() {
 fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
     let required = [
         "packages/agent/src/domains/session/event_store/envelope/mod.rs",
-        "packages/agent/src/domains/session/event_store/factory/mod.rs",
         "packages/agent/src/domains/session/event_store/reconstruction/mod.rs",
         "packages/agent/src/domains/session/event_store/store/event_store/mod.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
@@ -43,6 +42,7 @@ fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
     ];
     let banned = [
         "packages/agent/src/domains/session/event_store/event",
+        "packages/agent/src/domains/session/event_store/factory/mod.rs",
         "packages/agent/src/domains/session/event_store/store/event_store.rs",
         "packages/agent/src/domains/session/event_store/store/tests.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs",
@@ -65,7 +65,7 @@ fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
 
     assert!(
         missing.is_empty() && present_banned.is_empty(),
-        "Session event-store must expose owned module files after HRA-6; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+        "Session event-store must expose only active owned modules after HRA-6; missing: {missing:#?}; retired paths still present: {present_banned:#?}"
     );
     assert!(
         !session_event_store_source.contains("#[path ="),

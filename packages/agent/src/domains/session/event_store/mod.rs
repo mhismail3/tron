@@ -8,7 +8,6 @@
 //! - **Session events**: [`SessionEvent`] flat struct with typed payload access
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
-//! - **Event factory**: Scoped event creation with auto-generated IDs and timestamps
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
 //! - **Provider request audits**: bounded `model.provider_request` structure and
 //!   digest evidence persisted before model streams without duplicating bulk media
@@ -24,7 +23,6 @@
 //! | Module | Responsibility |
 //! |--------|----------------|
 //! | `envelope` | Broadcast envelope creation and event type cataloging. |
-//! | `factory` | Event ID creation and chain append helpers. |
 //! | `identity` | Explicit event/session/workspace identities for replay-critical constructors. |
 //! | `reconstruction` | Provider-context reconstruction from persisted event history. |
 //! | `sqlite` | Connection, migration, repository, lock, and row-type boundary. |
@@ -35,9 +33,10 @@
 //! ## Entry Points
 //!
 //! `EventStore` is the high-level transactional facade for session/event truth.
-//! `EventFactory` and `EventChainBuilder` build append-ready events, while
-//! `reconstruct_from_events` rebuilds provider-facing message context from the
-//! durable event stream.
+//! Its create, fork, and append methods own current identity generation,
+//! automatic parent/sequence allocation, and durable writes; explicit-identity
+//! variants preserve deterministic replay. `reconstruct_from_events` rebuilds
+//! provider-facing message context from the durable event stream.
 //!
 //! ## Dependency Direction
 //!
@@ -62,6 +61,8 @@
 //!   cannot silently broaden session/workspace/trace scope.
 //! - Durable event payloads and client logs call the shared foundation
 //!   redaction policy directly; the session domain does not shadow that owner.
+//! - Session roots, forks, and generic appends are created only through
+//!   `EventStore`; no parallel factory or manual chain-head owner exists.
 //! - Replay/import paths use explicit identities instead of ambient time or
 //!   UUID generation when durable IDs/timestamps must be stable.
 //! - The event log is append-only for normal lifecycle operations. Archiving
@@ -79,7 +80,6 @@
 
 pub mod envelope;
 pub mod errors;
-pub mod factory;
 pub mod identity;
 pub mod reconstruction;
 pub mod sqlite;
@@ -91,7 +91,6 @@ pub use envelope::{
     ALL_BROADCAST_EVENT_TYPES, BroadcastEventType, EventEnvelope, create_event_envelope,
 };
 pub use errors::{EventStoreError, Result};
-pub use factory::{EventChainBuilder, EventFactory};
 pub use identity::{
     EventIdentity, SessionCreationIdentity, SessionForkIdentity, SessionIdentity, WorkspaceIdentity,
 };
