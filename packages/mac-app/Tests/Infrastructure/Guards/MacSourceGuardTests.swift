@@ -99,6 +99,18 @@ struct MacSourceGuardTests {
         #expect(subprocess.contains("enum Subprocess"))
         #expect(subprocess.contains("ProcessResult"))
 
+        let menuController = try Self.read(macRoot, "Sources/MenuBar/Controller/MenuBarController.swift")
+        let actionHandler = try Self.read(macRoot, "Sources/MenuBar/Actions/MenuBarActionHandler.swift")
+        #expect(menuController.contains("private let setup: EnvironmentSetup"))
+        #expect(menuController.components(separatedBy: ".environment(\\.environmentSetup, setup)").count - 1 == 2)
+        for method in ["showPairingInfoWindow", "showLogsWindow"] {
+            #expect(menuController.contains("func \(method)()"))
+            #expect(actionHandler.contains("menuBarController?.\(method)()"))
+            #expect(!menuController.contains("\(method)(setup:"))
+        }
+        #expect(!actionHandler.contains("private func showPairingInfo()"))
+        #expect(!actionHandler.contains("private func viewLogs()"))
+
         let project = try Self.read(macRoot, "project.yml")
         for owner in [
             "Debug:\n          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.dev",

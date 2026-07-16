@@ -262,8 +262,10 @@ version/port; consumers pattern-match `ServerPingResult` directly, while
 snapshots store only orthogonal process and host metadata. The status poller,
 pairing window, log window, and feedback action each read the bearer token
 through `EnvironmentSetup.readBearerToken` at the point of use and never retain
-it in presentation state. `MenuBarLogReader` accepts the token as request input
-and does not own credential storage or path resolution.
+it in presentation state. `MenuBarController` owns the setup used to compose
+the pairing and log windows; `MenuBarActionHandler` dispatches those typed
+window actions without resupplying composition. `MenuBarLogReader` accepts the
+token as request input and does not own credential storage or path resolution.
 The poller is an immutable `Sendable` value. `MenuBarController` owns and
 cancels its consumer task, while each stream owns its producer task and buffers
 only the newest snapshot so a stalled consumer cannot accumulate obsolete

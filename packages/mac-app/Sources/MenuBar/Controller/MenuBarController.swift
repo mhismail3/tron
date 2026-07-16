@@ -91,7 +91,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    func showPairingInfoWindow(setup: EnvironmentSetup) {
+    func showPairingInfoWindow() {
         if let pairingInfoWindowController {
             pairingInfoWindowController.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -117,7 +117,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func showLogsWindow(setup: EnvironmentSetup) {
+    func showLogsWindow() {
         if let logsWindowController {
             logsWindowController.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)

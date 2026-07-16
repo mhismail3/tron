@@ -33,9 +33,9 @@ final class MenuBarActionHandler {
     func perform(_ action: MenuBarAction) async {
         switch action {
         case .showPairingInfo:
-            showPairingInfo()
+            menuBarController?.showPairingInfoWindow()
         case .viewLogs:
-            viewLogs()
+            menuBarController?.showLogsWindow()
         case .sendFeedback:
             await sendFeedback()
         case .pauseServer:
@@ -178,14 +178,6 @@ final class MenuBarActionHandler {
             await MenuBarNotifier.post(title: "Stop dev server failed", body: message)
             await presentNonBlockingError(title: "Stop dev server failed", message: message)
         }
-    }
-
-    private func showPairingInfo() {
-        menuBarController?.showPairingInfoWindow(setup: setup)
-    }
-
-    private func viewLogs() {
-        menuBarController?.showLogsWindow(setup: setup)
     }
 
     private func sendFeedback() async {
