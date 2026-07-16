@@ -15,22 +15,6 @@ final class InputBarState {
 
     var reasoningLevel: String = "medium"
 
-    // MARK: - Clear All
-
-    /// Reset all input state to initial values
-    func clear() {
-        text = ""
-        selectedImages = []
-        attachments = []
-    }
-
-    /// Clear all pending composer state.
-    func clearAll() {
-        text = ""
-        selectedImages = []
-        attachments = []
-    }
-
     /// Remove attachments incompatible with the given capability.
     /// Returns count of removed attachments.
     @discardableResult
@@ -51,19 +35,12 @@ final class InputBarState {
         return hasher.finalize()
     }
 
-    /// Whether there is any draft content worth persisting.
-    var hasDraftContent: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !attachments.isEmpty
-    }
-
     // MARK: - Computed Properties
 
-    /// Whether there is any content to send
+    /// Whether there is any content to send or persist as a draft.
     var hasContent: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
-
 }
 
 /// Why the send button is unavailable, if at all.

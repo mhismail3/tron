@@ -196,7 +196,8 @@ encoding, size, transport, or protocol failure removes the optimistic row and
 restores the exact composer state. `hello.ok` supplies the server's canonical
 frame budget, and `EngineConnection` checks the final encoded JSON byte count
 before sending so an oversized attachment cannot force a disconnect or erase a
-retryable prompt.
+retryable prompt. `InputBarState.hasContent` is the single composer-content
+predicate shared by send availability and draft retention.
 
 `ContextControlSheet` presents Session Briefing as a mobile-first progressive
 disclosure surface. The top level is narrative plus compact metric strips; the

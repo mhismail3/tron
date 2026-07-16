@@ -115,7 +115,7 @@ final class DraftStore {
             return
         }
 
-        guard inputBarState.hasDraftContent else {
+        guard inputBarState.hasContent else {
             if lastSavedFingerprints[sessionId] != nil {
                 await clearDraft(sessionId: sessionId)
             }

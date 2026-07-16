@@ -549,10 +549,6 @@ final class ChatViewModel {
         runningCapabilityInvocationCount > 0
     }
 
-    var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
-    }
-
     var currentModel: String {
         services.events.currentModel
     }
