@@ -170,36 +170,6 @@ struct EngineClientObservationTests {
         #expect(nextSchedule)
     }
 
-    @Test("Stream cursor store records subscription tail before first event")
-    func testStreamCursorStorePersistsSubscriptionTail() {
-        IsolatedTestState.withDefaults(label: "engine-client-observation-cursor") { defaults in
-            let store = EngineStreamCursorStore(userDefaults: defaults)
-            let key = EngineStreamCursorKey(
-                serverOrigin: "127.0.0.1:9847",
-                topic: "events.session",
-                sessionId: "session-a",
-                workspaceId: nil,
-                filterHash: "sessionId=session-a"
-            )
-
-            store.save(EngineStreamCursor(rawValue: 44), for: key)
-            store.save(EngineStreamCursor(rawValue: 12), for: key)
-
-            #expect(store.cursor(for: key) == EngineStreamCursor(rawValue: 44))
-        }
-    }
-
-    @Test("Session live subscriptions do not replay durable stream cursors")
-    func testSessionSubscriptionsStartAtLiveTail() {
-        #expect(EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(stored: nil) == nil)
-        #expect(EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
-            stored: EngineStreamCursor(rawValue: 0)
-        ) == nil)
-        #expect(EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
-            stored: EngineStreamCursor(rawValue: 4_572)
-        ) == nil)
-    }
-
     @Test("Stream ACK coalescer reschedules when events arrive during flush")
     func testStreamAckCoalescerReschedulesDuringFlush() {
         var coalescer = EngineStreamAckCoalescer()

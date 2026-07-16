@@ -62,10 +62,6 @@ final class EngineStreamScopeTests: XCTestCase {
 
         XCTAssertEqual(filters["sessionId"]?.stringValue, "session-123")
         XCTAssertEqual(filters["workspaceId"]?.stringValue, "workspace-456")
-        XCTAssertEqual(
-            EngineClient.sessionEventFilterHash(sessionId: "session-123", workspaceId: "workspace-456"),
-            "sessionId=session-123;workspaceId=workspace-456"
-        )
     }
 }
 

@@ -201,39 +201,32 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         );
     }
 
-    let cursor_store = read_repo_file(
-        "packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift",
-    );
-    for required in [
-        "serverOrigin: String",
-        "filterHash: String",
-        "Session history is never restored from this store",
-        "save(_ cursor: EngineStreamCursor",
-        "guard existing.map({ cursor > $0 }) ?? true else { return }",
-        "removeAll()",
-    ] {
-        assert!(
-            cursor_store.contains(required),
-            "Engine stream cursor lifecycle missing `{required}`"
-        );
-    }
-
     let engine_client =
         read_repo_file("packages/ios-app/Sources/Engine/Transport/WebSocket/EngineClient.swift");
     for required in [
         "Session history is reconstructed through `session::reconstruct`.",
-        "sessionEventSubscriptionCursor(stored: EngineStreamCursor?) -> EngineStreamCursor?",
-        "nil",
+        "private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription]",
+        "cursor: nil",
         "clearActiveStreamSubscriptions(reason: \"explicit disconnect\")",
-        "streamCursorStore.save(cursor, for: key)",
+        "guard let subscriptionId = delivery.subscriptionId",
         "scheduleStreamAck(subscriptionId: subscriptionId, cursor: cursor)",
         "streamAckCoalescer.removeAll()",
         "streamSubscriptions.removeAll()",
-        "streamSubscriptionKeysById.removeAll()",
     ] {
         assert!(
             engine_client.contains(required),
             "EngineClient stream projection lifecycle missing `{required}`"
+        );
+    }
+    for forbidden in [
+        "EngineStreamCursorStore",
+        "streamCursorStore",
+        "streamSubscriptionKeysById",
+        "sessionEventSubscriptionCursor",
+    ] {
+        assert!(
+            !engine_client.contains(forbidden),
+            "EngineClient must not retain durable or duplicate stream cursor state `{forbidden}`"
         );
     }
 

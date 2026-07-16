@@ -21,7 +21,7 @@ This inventory maps the current iOS app as a thin `/engine` client and generic r
 ## Canonical Rules
 
 1. iOS is a client shell over `/engine`; Rust owns provider communication, model routing, session/event truth, execution, state, logs, settings persistence, and generated runtime data.
-2. iOS may cache and reconstruct server facts locally, but local SQLite, drafts, stream cursors, and paired-server metadata are projections or device preferences, not canonical server truth.
+2. iOS may cache and reconstruct server facts locally, but local SQLite, drafts, and paired-server metadata are projections or device preferences, not canonical server truth. Stream cursors remain connection-local ACK state.
 3. iOS renders server events, capability invocations, primitive results, and generated runtime surfaces generically. It must not add fixed product panels, repository workflow panels, assistant-management panels, extension-source panels, prompt libraries, audio/voice products, rules/memory surfaces, or self-adapting-agent UI.
 4. Pairing accepts only bare DNS names, IPv4 addresses, or unbracketed IPv6 addresses plus a bearer token; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels fail before network probing or persistence.
 5. Bearer tokens live in Keychain under per-server ids. Forgetting a server removes the token before metadata; failed setup hydration rolls back token and paired-server metadata.

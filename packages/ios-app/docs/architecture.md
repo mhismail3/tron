@@ -568,8 +568,9 @@ plugin registration, and stored-event reconstruction helpers.
 
 Engine invocation context carries session/workspace ids and trace metadata when
 needed. The server owns validation, routing, execution, idempotency, and event
-publication. iOS records delivered stream cursors for acknowledgement and
-diagnostics only; it does not use them as an alternate truth store.
+publication. iOS keeps delivered stream cursors only in connection-local ACK
+state and coalesces each subscription to its highest cursor; it does not persist
+them or use them as an alternate truth store.
 Replay exports remain server-owned: `session::replay_manifest` and the
 `execute` `replay_manifest` operation return canonical JSON capability results,
 not live or persisted iOS events. The only replay-specific persisted event iOS
@@ -637,9 +638,9 @@ precision; Foundation floating-point dates and SQLite `julianday` are not used
 because either can collapse distinct session creation times. Full session sync
 fetches its complete replacement and any fork ancestors before clearing the last
 usable local event rows; fork ancestor rows remain source-session history
-rather than copied client truth. Engine stream cursors are stored per server
-origin/topic/filter for ACK coalescing and diagnostics only; session history is
-reconstructed through server APIs, not replayed from cursor storage.
+rather than copied client truth. Engine stream cursors stay connection-local
+for ACK coalescing only; session history is reconstructed through server APIs,
+not replayed from client cursor storage.
 The manager owns one weak-idle global subscription lane plus predecessor-chained
 replacement and load lanes. Once a stream event is accepted, its database and
 completion effects are awaited inline; shutdown is idempotent and terminal,
