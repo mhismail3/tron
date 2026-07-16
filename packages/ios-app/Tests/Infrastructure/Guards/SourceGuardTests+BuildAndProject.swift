@@ -3,8 +3,8 @@ import Foundation
 
 extension SourceGuardTests {
 
-    @Test("icon generator owns only active asset-catalog outputs")
-    func testIconGeneratorOwnsOnlyActiveAssetCatalogOutputs() throws {
+    @Test("icon generator owns only active generated image outputs")
+    func testIconGeneratorOwnsOnlyActiveGeneratedImageOutputs() throws {
         let iosRoot = iosAppRoot()
         let generator = try String(
             contentsOf: iosRoot.appendingPathComponent("scripts/generate-icons.mjs"),
@@ -13,9 +13,7 @@ extension SourceGuardTests {
         let generatedAssets = [
             "Sources/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
             "Sources/Assets.xcassets/AppIconBeta.appiconset/icon-1024-beta.png",
-            "Sources/Assets.xcassets/TronLogo.imageset/tron-logo.png",
-            "Sources/Assets.xcassets/TronLogo.imageset/tron-logo@2x.png",
-            "Sources/Assets.xcassets/TronLogo.imageset/tron-logo@3x.png",
+            "docs/assets/tron-logo.png",
         ]
 
         for path in generatedAssets {
@@ -23,19 +21,27 @@ extension SourceGuardTests {
             #expect(generator.contains(URL(fileURLWithPath: path).lastPathComponent))
         }
         #expect(generator.contains("TronLogoVector.imageset"))
-        #expect(generator.contains("All 5 files generated and verified successfully."))
+        #expect(generator.contains("All 3 files generated and verified successfully."))
         for obsolete in [
             "IconLayers",
             "generateDepthLayer",
             "generateSolidBackground",
             "generateTemplateSvg",
             "writeFileSync",
+            "TronLogo.imageset",
+            "tron-logo@2x.png",
+            "tron-logo@3x.png",
         ] {
             #expect(!generator.contains(obsolete))
         }
         #expect(
             !FileManager.default.fileExists(
                 atPath: iosRoot.appendingPathComponent("Sources/Resources/IconLayers").path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: iosRoot.appendingPathComponent("Sources/Assets.xcassets/TronLogo.imageset").path
             )
         )
     }

@@ -26,7 +26,7 @@ updates the project-level version mirror from `VERSION.env`.
 
 `Sources/Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the
 authoritative logo source. The Bun/Sharp generator writes only the two app-icon
-PNGs and three in-app raster logo sizes that the asset catalogs reference:
+PNGs and the 100px README preview under `docs/assets/`:
 
 ```bash
 cd packages/ios-app
@@ -34,8 +34,9 @@ bun install --frozen-lockfile
 bun scripts/generate-icons.mjs
 ```
 
-Generated image outputs stay inside `Assets.xcassets`; loose icon-layer PNGs
-under `Sources/Resources` are not part of the app resource contract.
+The app renders the vector asset directly; no raster logo image set is bundled.
+Loose icon-layer PNGs under `Sources/Resources` are not part of the app resource
+contract.
 
 ### Server Connection
 

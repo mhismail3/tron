@@ -83,12 +83,10 @@ async function main() {
   // Beta icon: white logo on amber bg (iOS auto-generates dark/tinted)
   await generateAppIcon(whiteSvg, COLORS.amber, join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"));
 
-  console.log("Generating in-app raster logos...");
+  console.log("Generating README logo preview...");
 
-  const logoDir = join(ASSETS, "TronLogo.imageset");
-  await generateRasterLogo(emeraldSvg, 100, join(logoDir, "tron-logo.png"));
-  await generateRasterLogo(emeraldSvg, 200, join(logoDir, "tron-logo@2x.png"));
-  await generateRasterLogo(emeraldSvg, 300, join(logoDir, "tron-logo@3x.png"));
+  const readmeLogo = join(IOS_ROOT, "docs", "assets", "tron-logo.png");
+  await generateRasterLogo(emeraldSvg, 100, readmeLogo);
 
   console.log("\nVerifying outputs...");
 
@@ -97,10 +95,8 @@ async function main() {
     // App icons (1024x1024, no alpha needed)
     [join(ASSETS, "AppIcon.appiconset", "icon-1024.png"), 1024, 1024],
     [join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"), 1024, 1024],
-    // In-app logos (transparent)
-    [join(logoDir, "tron-logo.png"), 100, 100, true],
-    [join(logoDir, "tron-logo@2x.png"), 200, 200, true],
-    [join(logoDir, "tron-logo@3x.png"), 300, 300, true],
+    // README preview (transparent)
+    [readmeLogo, 100, 100, true],
   ];
 
   for (const [path, w, h, alpha] of checks) {
@@ -109,7 +105,7 @@ async function main() {
   }
 
   if (allOk) {
-    console.log("\nAll 5 files generated and verified successfully.");
+    console.log("\nAll 3 files generated and verified successfully.");
   } else {
     console.error("\nSome verifications failed!");
     process.exit(1);

@@ -1,7 +1,7 @@
 # Tron
 
 <p align="center">
-  <img src="packages/ios-app/Sources/Assets.xcassets/TronLogo.imageset/tron-logo.png" width="112" alt="Tron logo">
+  <img src="packages/ios-app/docs/assets/tron-logo.png" width="112" alt="Tron logo">
 </p>
 
 **A persistent, local-first coding agent for Mac and iPhone.**
