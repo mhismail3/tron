@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    EngineGrant, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineGrant, EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
     EngineResourceVersion, Invocation, ListResources, TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
     TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID, TOOL_SOURCE_PROPOSAL_KIND,
     TOOL_SOURCE_PROPOSAL_SCHEMA_ID,
@@ -9,16 +9,16 @@ use crate::engine::{
 use crate::shared::server::errors::CapabilityError;
 
 use super::validation::*;
-use super::{Deps, READ_SCOPE, SCHEMA_VERSION};
+use super::{READ_SCOPE, SCHEMA_VERSION};
 
 const RESOURCE_READ_SCOPE: &str = "resource.read";
 
 pub(crate) async fn list_tool_sources_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let grant = inspect_read_grant(deps, invocation, "tool_source_list").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "tool_source_list").await?;
     require_read_kind_selector(&grant, TOOL_SOURCE_PROPOSAL_KIND, "tool_source_list")?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -26,8 +26,7 @@ pub(crate) async fn list_tool_sources_value(
         .clamp(1, LIST_LIMIT_MAX);
     let include_archived = optional_bool(payload, "includeArchived")?.unwrap_or(false);
     let scope = resource_scope(invocation);
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(TOOL_SOURCE_PROPOSAL_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -43,8 +42,7 @@ pub(crate) async fn list_tool_sources_value(
     let truncated = resources.len() > limit;
     let mut proposals = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -68,11 +66,11 @@ pub(crate) async fn list_tool_sources_value(
 }
 
 pub(crate) async fn inspect_tool_source_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let grant = inspect_read_grant(deps, invocation, "tool_source_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "tool_source_inspect").await?;
     let resource_id = required_string(payload, "toolSourceResourceId")?;
     let resource_kind = if resource_id.starts_with(&format!("{TOOL_SOURCE_PROPOSAL_KIND}:")) {
         TOOL_SOURCE_PROPOSAL_KIND
@@ -99,8 +97,7 @@ pub(crate) async fn inspect_tool_source_value(
         .unwrap_or(INSPECT_SCHEMA_PREVIEW_DEFAULT)
         .clamp(1, INSPECT_SCHEMA_PREVIEW_MAX);
     let scope = resource_scope(invocation);
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -120,12 +117,11 @@ pub(crate) async fn inspect_tool_source_value(
 }
 
 async fn inspect_read_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
         .await
         .map_err(engine_error)?

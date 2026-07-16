@@ -1,10 +1,10 @@
 use serde_json::{Value, json};
 
 use super::service::{inspect_tool_source_value, list_tool_sources_value};
-use super::{Deps, READ_SCOPE, SCHEMA_VERSION};
+use super::{READ_SCOPE, SCHEMA_VERSION};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel,
+    EngineHostHandle, EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel,
     TOOL_SOURCE_CONFORMANCE_REPORT_KIND, TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID,
     TOOL_SOURCE_PROPOSAL_KIND, TOOL_SOURCE_PROPOSAL_SCHEMA_ID, TraceId, WorkerId,
     builtin_resource_type_definitions,
@@ -87,7 +87,7 @@ async fn read_operations_require_explicit_scope_kind_and_selector() {
         &["resource.read"],
         &fixture.session_id,
     );
-    let error = list_tool_sources_value(&fixture.deps, &missing_scope, &missing_scope.payload)
+    let error = list_tool_sources_value(&fixture.host, &missing_scope, &missing_scope.payload)
         .await
         .expect_err("tool_sources.read scope is required")
         .to_string();
@@ -110,7 +110,7 @@ async fn read_operations_require_explicit_scope_kind_and_selector() {
         &fixture.session_id,
     );
     let error =
-        list_tool_sources_value(&fixture.deps, &missing_selector, &missing_selector.payload)
+        list_tool_sources_value(&fixture.host, &missing_selector, &missing_selector.payload)
             .await
             .expect_err("kind selector is required")
             .to_string();
@@ -140,7 +140,7 @@ async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
         &[READ_SCOPE, "resource.read"],
         &fixture.session_id,
     );
-    let listed = list_tool_sources_value(&fixture.deps, &list_invocation, &list_invocation.payload)
+    let listed = list_tool_sources_value(&fixture.host, &list_invocation, &list_invocation.payload)
         .await
         .expect("proposal-only grant can list proposals");
     assert_eq!(listed["proposals"].as_array().unwrap().len(), 1);
@@ -153,7 +153,7 @@ async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
         &fixture.session_id,
     );
     inspect_tool_source_value(
-        &fixture.deps,
+        &fixture.host,
         &proposal_inspect_invocation,
         &proposal_inspect_invocation.payload,
     )
@@ -168,7 +168,7 @@ async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
         &fixture.session_id,
     );
     let error = inspect_tool_source_value(
-        &fixture.deps,
+        &fixture.host,
         &report_inspect_invocation,
         &report_inspect_invocation.payload,
     )
@@ -254,7 +254,7 @@ fn static_non_goal_guards_keep_tool_sources_inert() {
 }
 
 struct Fixture {
-    deps: Deps,
+    host: EngineHostHandle,
     session_id: String,
     read_grant_id: AuthorityGrantId,
 }
@@ -262,12 +262,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let read_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-read"),
             &[READ_SCOPE, "resource.read"],
             &[
@@ -282,7 +280,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            host,
             session_id,
             read_grant_id,
         }
@@ -305,7 +303,7 @@ impl Fixture {
             )
             .await;
         Self {
-            deps: self.deps.clone(),
+            host: self.host.clone(),
             session_id: session_id.to_owned(),
             read_grant_id,
         }
@@ -320,7 +318,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             scopes,
             resource_kinds,
@@ -338,8 +336,7 @@ impl Fixture {
         lifecycle: &str,
         payload: Value,
     ) -> String {
-        self.deps
-            .engine_host
+        self.host
             .create_resource(CreateResource {
                 resource_id: Some(resource_id.to_owned()),
                 kind: kind.to_owned(),
@@ -385,7 +382,7 @@ impl Fixture {
 
     async fn list(&self, key: &str) -> Value {
         let invocation = self.read_invocation(key, json!({"limit": 10}));
-        list_tool_sources_value(&self.deps, &invocation, &invocation.payload)
+        list_tool_sources_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("list proposals")
     }
@@ -395,14 +392,14 @@ impl Fixture {
             key,
             json!({"toolSourceResourceId": resource_id, "maxSchemaBytes": 100}),
         );
-        inspect_tool_source_value(&self.deps, &invocation, &invocation.payload)
+        inspect_tool_source_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("inspect tool source")
     }
 
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
         let invocation = self.read_invocation(key, json!({"toolSourceResourceId": resource_id}));
-        inspect_tool_source_value(&self.deps, &invocation, &invocation.payload)
+        inspect_tool_source_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
@@ -420,15 +417,14 @@ impl Fixture {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("tool-source-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

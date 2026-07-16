@@ -7,6 +7,8 @@
 //! `capability::execute` operation values `tool_source_list` and
 //! `tool_source_inspect`; inspect revalidates stored resource kind/schema
 //! before projecting payloads.
+//! Projection services borrow the composition-owned engine host directly and
+//! own no parallel dependency container.
 //!
 //! ## Submodules
 //!
@@ -33,11 +35,6 @@ pub(crate) const WORKER: &str = "tool_sources";
 pub(crate) const TOOL_SOURCE_TOPIC: &str = "tool_sources.lifecycle";
 pub(crate) const READ_SCOPE: &str = "tool_sources.read";
 pub(crate) const SCHEMA_VERSION: &str = "tron.tool_source.v1";
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) fn worker_module(
     _deps: &DomainRegistrationContext,

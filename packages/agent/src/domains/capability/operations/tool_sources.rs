@@ -11,11 +11,8 @@ pub(super) async fn tool_source_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let tool_deps = crate::domains::tool_sources::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let value = crate::domains::tool_sources::service::list_tool_sources_value(
-        &tool_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -35,11 +32,8 @@ pub(super) async fn tool_source_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let tool_deps = crate::domains::tool_sources::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let value = crate::domains::tool_sources::service::inspect_tool_source_value(
-        &tool_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
