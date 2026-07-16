@@ -21,11 +21,6 @@ extension ChatViewModel: TurnLifecycleContext {
         streamingManager.streamingMessageId
     }
 
-    /// Current streaming text content (TurnLifecycleContext)
-    var streamingText: String {
-        streamingManager.streamingText
-    }
-
     /// Whether there is active streaming (TurnLifecycleContext)
     var hasActiveStreaming: Bool {
         streamingManager.streamingMessageId != nil && !streamingManager.streamingText.isEmpty
@@ -130,20 +125,10 @@ extension ChatViewModel: TurnLifecycleContext {
         )
     }
 
-    /// Update total token usage display (TurnLifecycleContext)
-    func updateTotalTokenUsage(contextSize: Int, outputTokens: Int, cacheRead: Int?, cacheCreation: Int?) {
-        contextState.totalTokenUsage = TokenUsage(
-            inputTokens: contextSize,
-            outputTokens: outputTokens,
-            cacheReadTokens: cacheRead,
-            cacheCreationTokens: cacheCreation
-        )
-    }
-
     // MARK: - Session Persistence (Protocol Methods)
 
-    /// Update session tokens in database (TurnLifecycleContext)
-    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) async throws {
+    /// Persist ContextTrackingState's accumulated totals and this turn's context size.
+    func persistAccumulatedSessionTokens(lastTurnInputTokens: Int) async throws {
         guard let manager = eventStoreManager else { return }
         try await manager.updateSessionTokens(
             sessionId: sessionId,

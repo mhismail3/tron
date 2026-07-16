@@ -69,8 +69,8 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
 
     // MARK: - Session Persistence
 
-    /// Update session tokens in database
-    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) async throws
+    /// Persist the context-owned accumulated token totals and this turn's context size.
+    func persistAccumulatedSessionTokens(lastTurnInputTokens: Int) async throws
 
     /// Update session activity summary in database
     func updateSessionActivitySummary(lastAssistantResponse: String?)

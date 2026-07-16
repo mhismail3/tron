@@ -172,6 +172,10 @@ capability-completion, and live event callback installation lives in
 `ChatViewModel+RuntimeCallbacks.swift`. The target exposes chat/session
 primitives, not fixed product session-list APIs.
 
+Turn completion accumulates token totals and cost in `ContextTrackingState`
+before `TurnLifecycleContext` persists those totals with the current turn's
+context-window value; the coordinator does not pass a duplicate token snapshot.
+
 ## Stored Reconstruction
 
 `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` reconstructs

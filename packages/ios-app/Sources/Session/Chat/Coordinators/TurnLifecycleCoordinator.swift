@@ -215,16 +215,11 @@ final class TurnLifecycleCoordinator {
                 cost: pluginResult.cost ?? 0
             )
 
-            // Update session tokens in database
+            // Persist ContextTrackingState's accumulated totals with this turn's context size.
             Task {
                 do {
-                    try await context.updateSessionTokens(
-                        inputTokens: record.source.rawInputTokens,
-                        outputTokens: record.source.rawOutputTokens,
-                        lastTurnInputTokens: contextSize,
-                        cacheReadTokens: record.source.rawCacheReadTokens,
-                        cacheCreationTokens: record.source.rawCacheCreationTokens,
-                        cost: pluginResult.cost ?? 0
+                    try await context.persistAccumulatedSessionTokens(
+                        lastTurnInputTokens: contextSize
                     )
                 } catch {
                     context.logError("Failed to update session tokens: \(error.localizedDescription)")

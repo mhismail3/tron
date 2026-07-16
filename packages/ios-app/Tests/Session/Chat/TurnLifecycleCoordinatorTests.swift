@@ -24,7 +24,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     func testTurnStartFinalizesStreamingIfNeeded() {
         // Given
         mockContext.hasActiveStreaming = true
-        mockContext.streamingText = "Some text"
 
         // When
         let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
@@ -532,7 +531,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var turnStartMessageIndex: Int?
     var firstTextMessageIdForTurn: UUID?
     var streamingMessageId: UUID?
-    var streamingText: String = ""
     var hasActiveStreaming: Bool = false
     var currentModel: String = "claude-3-sonnet"
     var agentPhase: AgentPhase = .idle
@@ -605,11 +603,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
         // No-op for mock
     }
 
-    func updateTotalTokenUsage(contextSize: Int, outputTokens: Int, cacheRead: Int?, cacheCreation: Int?) {
-        // No-op for mock
-    }
-
-    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) throws {
+    func persistAccumulatedSessionTokens(lastTurnInputTokens: Int) async throws {
         // No-op for mock
     }
 
