@@ -2,9 +2,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::execution::{
-    cancel_subagent_value, launch_subagent_value, result_subagent_value, status_subagent_value,
-};
+use super::execution::{cancel_subagent_value, launch_subagent_value, status_subagent_value};
 use super::{Deps, READ_SCOPE, WRITE_SCOPE};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
@@ -48,10 +46,9 @@ async fn launch_records_delegated_module_worker_lifecycle_without_parent_merge()
     assert_eq!(task["activation"]["resultMerged"], json!(false));
     assert_eq!(task["delegation"]["jobRef"]["kind"], json!("job_process"));
 
-    let result = fixture.result("launch-result", resource_id).await;
-    assert_eq!(result["status"], json!("running"));
-    assert_eq!(result["result"]["status"], json!("running"));
-    assert_eq!(result["projection"]["resultMergePerformed"], json!(false));
+    assert_eq!(status["status"], json!("running"));
+    assert_eq!(task["result"]["status"], json!("running"));
+    assert_eq!(status["execution"]["resultMerged"], json!(false));
 }
 
 #[tokio::test]
@@ -134,9 +131,12 @@ async fn cancel_uses_freshness_and_is_idempotent_after_terminal_state() {
     assert_eq!(replay["status"], json!("cancelled"));
     assert_eq!(replay["idempotent"], json!(true));
 
-    let result = fixture.result("cancel-result", resource_id).await;
-    assert_eq!(result["result"]["status"], json!("cancelled"));
-    assert_eq!(result["execution"]["resultMerged"], json!(false));
+    let status = fixture.status("cancel-status", resource_id).await;
+    assert_eq!(
+        status["task"]["payload"]["result"]["status"],
+        json!("cancelled")
+    );
+    assert_eq!(status["execution"]["resultMerged"], json!(false));
 }
 
 #[tokio::test]
@@ -388,19 +388,6 @@ impl Fixture {
             .await
             .expect_err("status should fail")
             .to_string()
-    }
-
-    async fn result(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self
-            .read_invocation(
-                key,
-                json!({"subagentTaskResourceId": resource_id}),
-                Some(resource_id),
-            )
-            .await;
-        result_subagent_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("result")
     }
 
     async fn cancel(&self, key: &str, payload: Value) -> Value {

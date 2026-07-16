@@ -26,11 +26,14 @@
 //! result merging. The only activated path is the accepted
 //! jobs/program-execution module pack selected by exact payload fields and exact
 //! resource selectors. Completion is surfaced as merge-proposal evidence for
-//! review, not as hidden parent-state mutation. Delegated launch and follow-up
-//! grants must include exact module runtime, job, program-execution, lifecycle,
-//! and subagent-task selectors without implicit `agent_state` authority. Launch replay
-//! must recover the same delegated runtime/job/program refs from module
-//! supervision metadata before creating the parent task, or fail closed.
+//! review, not as hidden parent-state mutation. Result inspection must traverse
+//! the delegated module binding; no local or test-only result endpoint may
+//! return the persisted placeholder as if it were the production result.
+//! Delegated launch and follow-up grants must include exact module runtime, job,
+//! program-execution, lifecycle, and subagent-task selectors without implicit
+//! `agent_state` authority. Launch replay must recover the same delegated
+//! runtime/job/program refs from module supervision metadata before creating
+//! the parent task, or fail closed.
 //! The adapter seam for future module replacement is exact task/runtime/job
 //! authority plus reviewable merge-proposal parity: a replacement must preserve
 //! provider-safe refs, replay/idempotency evidence, bounded side effects, and

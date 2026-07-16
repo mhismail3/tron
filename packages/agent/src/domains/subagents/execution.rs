@@ -214,31 +214,6 @@ pub(crate) async fn status_subagent_value(
     }))
 }
 
-#[cfg(test)]
-pub(crate) async fn result_subagent_value(
-    deps: &Deps,
-    invocation: &Invocation,
-    payload: &Value,
-) -> Result<Value, CapabilityError> {
-    let (inspection, version, current) =
-        inspect_current_task(deps, invocation, payload, "subagent_result").await?;
-    let task = inspected_task(&inspection.resource, &version, &current);
-    Ok(json!({
-        "schemaVersion": SCHEMA_VERSION,
-        "operation": "subagent_result",
-        "status": inspection.resource.lifecycle,
-        "subagentTaskResourceId": inspection.resource.resource_id,
-        "subagentTaskVersionId": version.version_id,
-        "result": task["payload"]["result"].clone(),
-        "error": task["payload"]["error"].clone(),
-        "refs": task["payload"]["refs"].clone(),
-        "resourceRefs": [version_ref(&inspection.resource, &version, "subagent_task")],
-        "projection": {"rawPayloadReturned": false, "resultMergePerformed": false},
-        "execution": execution_readback_proof(),
-        "network": network_proof()
-    }))
-}
-
 pub(crate) async fn cancel_subagent_value(
     deps: &Deps,
     invocation: &Invocation,
