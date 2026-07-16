@@ -1,7 +1,7 @@
 //! Structured logging with `tracing` and optional `SQLite` transport.
 //!
 //! This module provides:
-//! - [`LogLevel`] enum with numeric values matching the TypeScript logging system
+//! - a crate-internal `LogLevel` enum with stable numeric values for persistence
 //! - managed `tracing` subscriber setup for terminal and database diagnostics
 //!
 //! # Architecture

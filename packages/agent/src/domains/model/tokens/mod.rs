@@ -5,7 +5,7 @@
 //! into server-owned context-window and billable buckets, and pricing returns
 //! either exact component costs or an explicit unavailable state. Downstream
 //! event payloads, session counters, DB denormalized columns, and iOS DTOs
-//! consume the typed [`TokenRecord`] rather than recomputing provider-specific
+//! consume the typed [`types::TokenRecord`] rather than recomputing provider-specific
 //! semantics locally. Reasoning/thought token counts are metadata-only audit
 //! facts; they do not imply raw hidden reasoning content is stored or displayed.
 //!
