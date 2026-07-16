@@ -58,7 +58,6 @@ pub struct LiveCatalog {
     functions: BTreeMap<FunctionId, FunctionEntry>,
     trigger_types: BTreeMap<TriggerTypeId, TriggerTypeEntry>,
     triggers: BTreeMap<TriggerId, TriggerEntry>,
-    invocations: Vec<InvocationRecord>,
     ledger: Box<dyn EngineLedgerStore>,
     grants: Arc<StdMutex<EngineGrantStoreBackend>>,
 }
@@ -79,7 +78,6 @@ impl LiveCatalog {
             functions: BTreeMap::new(),
             trigger_types: BTreeMap::new(),
             triggers: BTreeMap::new(),
-            invocations: Vec::new(),
             ledger,
             grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
                 InMemoryEngineGrantStore::new(),
@@ -101,10 +99,10 @@ impl LiveCatalog {
         self.revision
     }
 
-    /// Invocation ledger.
-    #[must_use]
-    pub fn invocations(&self) -> &[InvocationRecord] {
-        &self.invocations
+    /// All durable invocation records in append order for deep engine tests.
+    #[cfg(test)]
+    pub(in crate::engine) fn ledger_invocations(&self) -> Result<Vec<InvocationRecord>> {
+        self.ledger.list_invocations()
     }
 
     /// Durable catalog changes recorded by the engine ledger.

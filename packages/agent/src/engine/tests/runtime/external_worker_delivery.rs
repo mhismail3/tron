@@ -87,7 +87,7 @@ async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target
     assert_eq!(updated.status, QueueItemStatus::Ready);
     assert_eq!(updated.attempts, 1);
 
-    let records = handle.lock().await.catalog().invocations().to_vec();
+    let records = handle.lock().await.catalog().ledger_invocations().unwrap();
     assert!(
         !records.iter().any(|record| {
             record.function_id == fid("local_queue::echo")

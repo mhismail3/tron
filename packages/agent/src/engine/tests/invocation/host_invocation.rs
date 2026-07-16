@@ -51,7 +51,7 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
         .await;
     assert!(missing.error.is_some());
 
-    let records = catalog.invocations();
+    let records = catalog.ledger_invocations().unwrap();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].function_id.as_str(), "alpha::read");
     assert_eq!(records[0].actor_id, actor("agent"));
@@ -600,9 +600,8 @@ async fn engine_invoke_meta_does_not_block_discovery_while_child_runs() {
         json!({"x": 1})
     );
     let host = handle.lock().await;
-    let child_record = host
-        .catalog()
-        .invocations()
+    let records = host.catalog().ledger_invocations().unwrap();
+    let child_record = records
         .iter()
         .find(|record| record.function_id == fid("alpha::slow"))
         .unwrap();

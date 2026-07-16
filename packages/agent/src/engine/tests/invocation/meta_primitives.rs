@@ -467,9 +467,8 @@ async fn engine_invoke_delegates_with_parent_causality_and_target_policy() {
     assert!(replay.value.unwrap()["child"]["replayedFrom"].is_string());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-    let child_records: Vec<_> = host
-        .catalog()
-        .invocations()
+    let records = host.catalog().ledger_invocations().unwrap();
+    let child_records: Vec<_> = records
         .iter()
         .filter(|record| record.function_id == fid("alpha::write"))
         .collect();

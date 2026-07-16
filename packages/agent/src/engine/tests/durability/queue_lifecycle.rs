@@ -87,9 +87,8 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
     );
 
     let host = handle.lock().await;
-    let target_record = host
-        .catalog()
-        .invocations()
+    let records = host.catalog().ledger_invocations().unwrap();
+    let target_record = records
         .iter()
         .rev()
         .find(|record| record.function_id == fid("alpha::queued"))
@@ -101,7 +100,7 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
         target_record.idempotency_key.as_deref(),
         Some("queue-target-key")
     );
-    assert!(host.catalog().invocations().iter().any(|record| {
+    assert!(records.iter().any(|record| {
         record.result_value.as_ref().is_some_and(|value| {
             value.get("receiptId").and_then(Value::as_str) == Some(receipt.as_str())
         })
@@ -180,15 +179,12 @@ async fn trigger_dispatch_primitive_enqueues_and_drains_triggered_invocation() {
     );
 
     let host = handle.lock().await;
-    let dispatch_record = host
-        .catalog()
-        .invocations()
+    let records = host.catalog().ledger_invocations().unwrap();
+    let dispatch_record = records
         .iter()
         .find(|record| record.function_id == fid("trigger::dispatch"))
         .expect("dispatch invocation should be recorded");
-    let enqueued_record = host
-        .catalog()
-        .invocations()
+    let enqueued_record = records
         .iter()
         .find(|record| {
             record.function_id == fid("alpha::queued")
@@ -201,14 +197,12 @@ async fn trigger_dispatch_primitive_enqueues_and_drains_triggered_invocation() {
         Some(&dispatch_record.invocation_id)
     );
     assert_eq!(enqueued_record.authority_grant_id, grant("manual-grant"));
-    assert!(host.catalog().invocations().iter().any(|record| {
+    assert!(records.iter().any(|record| {
         record.result_value.as_ref().is_some_and(|value| {
             value.get("receiptId").and_then(Value::as_str) == Some(receipt.as_str())
         })
     }));
-    let drained_record = host
-        .catalog()
-        .invocations()
+    let drained_record = records
         .iter()
         .rev()
         .find(|record| {

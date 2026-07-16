@@ -241,7 +241,7 @@ async fn resource_backed_invocation_rejects_malformed_or_wrong_kind_refs_without
             "case {case} should reject with `{expected}`, got {:?}",
             result.error
         );
-        let records = handle.lock().await.catalog().invocations().to_vec();
+        let records = handle.lock().await.catalog().ledger_invocations().unwrap();
         let record = records
             .iter()
             .find(|record| record.invocation_id == result.invocation_id)
@@ -295,7 +295,7 @@ async fn resource_backed_refs_are_persisted_in_invocation_records() {
         .await;
     assert_eq!(result.error, None);
 
-    let records = handle.lock().await.catalog().invocations().to_vec();
+    let records = handle.lock().await.catalog().ledger_invocations().unwrap();
     let record = records
         .iter()
         .find(|record| record.invocation_id == result.invocation_id)

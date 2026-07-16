@@ -336,7 +336,7 @@ async fn rejected_grants_fail_before_handler_execution_or_successful_resource_re
             0,
             "case {case} must fail before handler execution"
         );
-        let records = handle.lock().await.catalog().invocations().to_vec();
+        let records = handle.lock().await.catalog().ledger_invocations().unwrap();
         let record = records
             .iter()
             .find(|record| record.invocation_id == result.invocation_id)
