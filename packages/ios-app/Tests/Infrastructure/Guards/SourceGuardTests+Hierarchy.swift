@@ -363,7 +363,6 @@ extension SourceGuardTests {
             "Sources/Support/Composition/DependencyContainer.swift",
             "Sources/Support/Composition/DependencyContainerStorage.swift",
             "Sources/Support/Composition/DependencyEnvironment.swift",
-            "Sources/Support/Composition/DependencyProviding.swift",
             "Sources/Support/Diagnostics/ClientLogIngestionService.swift",
             "Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift",
             "Sources/Support/Diagnostics/DiagnosticsRedactor.swift",

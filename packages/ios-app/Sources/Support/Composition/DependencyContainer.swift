@@ -20,7 +20,7 @@ extension Notification.Name {
 /// - Access in views: `@Environment(\.dependencies) var dependencies`
 @Observable
 @MainActor
-final class DependencyContainer: DependencyProviding, ServerSettingsProvider, AppSettingsProvider {
+final class DependencyContainer {
 
     // MARK: - App Settings (Persisted)
 
@@ -159,7 +159,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Whether the container has been fully initialized
     private(set) var isInitialized = false
 
-    // MARK: - ServerSettingsProvider
+    // MARK: - Active Server Selection
 
     var serverURL: URL {
         guard let server = pairedServerStore.activeServer else {
@@ -172,7 +172,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         pairedServerStore.activeServer?.origin ?? ""
     }
 
-    // MARK: - AppSettingsProvider
+    // MARK: - App Settings
 
     var effectiveWorkingDirectory: String {
         if workingDirectory.isEmpty {

@@ -168,10 +168,6 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
             encoding: .utf8
         )
-        let dependencyProviding = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyProviding.swift"),
-            encoding: .utf8
-        )
         let app = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/ProductionAppRoot.swift"),
             encoding: .utf8
@@ -213,7 +209,6 @@ extension SourceGuardTests {
         #expect(dependencyContainer.contains("clientLogIngestionService.start()"))
         #expect(dependencyContainer.contains("clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))"))
         #expect(dependencyContainer.contains("private(set) var engineClient: EngineClient"))
-        #expect(!dependencyProviding.contains("var engineClient: EngineClient { get }"))
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
         #expect(logsClient.contains("func ingestLogs("))
@@ -497,16 +492,9 @@ extension SourceGuardTests {
     }
 
 
-    @Test("DependencyProviding stays concrete-engine-client free")
-    func testDependencyProvidingDoesNotExposeEngineClient() throws {
+    @Test("UI and Session stay concrete-engine-client free")
+    func testUIAndSessionDoNotAccessEngineClient() throws {
         let iosRoot = iosAppRoot()
-        let protocolSource = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyProviding.swift"),
-            encoding: .utf8
-        )
-        #expect(!protocolSource.contains("var engineClient: EngineClient { get }"))
-        #expect(protocolSource.contains("var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint { get }"))
-        #expect(protocolSource.contains("var chatSessionServices: ChatSessionServices { get }"))
 
         var leaks: [String] = []
         for root in ["Sources/UI", "Sources/Session"] {

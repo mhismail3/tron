@@ -318,23 +318,6 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertEqual(container.effectiveWorkingDirectory, "/custom/path")
     }
 
-    // MARK: - Protocol Conformance Tests (use shared container - compile-time checks)
-
-    func test_container_conformsToDependencyProviding() async throws {
-        let _: any DependencyProviding = sharedContainer
-        XCTAssertTrue(true)
-    }
-
-    func test_container_conformsToServerSettingsProvider() async throws {
-        let _: any ServerSettingsProvider = sharedContainer
-        XCTAssertTrue(true)
-    }
-
-    func test_container_conformsToAppSettingsProvider() async throws {
-        let _: any AppSettingsProvider = sharedContainer
-        XCTAssertTrue(true)
-    }
-
     // MARK: - Initialization Tests
 
     func test_container_startsNotInitialized() async throws {
