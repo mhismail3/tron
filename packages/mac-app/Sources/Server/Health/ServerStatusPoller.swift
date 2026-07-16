@@ -2,11 +2,7 @@ import Foundation
 
 /// Periodic `system::ping` poller that drives the menu bar's status
 /// icon. Emits a `ServerStatusSnapshot` every 30 s (configurable).
-///
-/// Marked actor so multiple readers can `snapshots()` safely (in
-/// practice only the menu bar consumes it; the actor is for
-/// future-proofing the diagnostics page).
-actor ServerStatusPoller {
+struct ServerStatusPoller: Sendable {
     private let setup: EnvironmentSetup
     private let interval: TimeInterval
 

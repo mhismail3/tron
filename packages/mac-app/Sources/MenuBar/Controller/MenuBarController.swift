@@ -44,7 +44,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // Start polling - emits a snapshot every 30 s.
         pollerTask = Task { [weak self] in
             guard let self else { return }
-            for await snapshot in await self.poller.snapshots() {
+            for await snapshot in self.poller.snapshots() {
                 await MainActor.run {
                     self.applyPolledSnapshot(snapshot)
                 }

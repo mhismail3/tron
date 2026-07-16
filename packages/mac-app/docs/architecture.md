@@ -244,7 +244,7 @@ TronMacApp.main()
                 └─ MenuBarController
                     ├─ NSStatusItem with tinted Tron logo
                     ├─ typed MenuBarAction → controller-owned MenuBarActionHandler
-                    └─ 30s poller task → ServerStatusPoller.snapshot()
+                    └─ 30s poller task → ServerStatusPoller.snapshots()
                          ├─ setup.pingServer(token) → ServerPingResult
                          ├─ launchAgentManager.isLoaded() when ping fails
                          ├─ setup.readBearerToken()
@@ -260,10 +260,11 @@ pairing window, log window, and feedback action each read the bearer token
 through `EnvironmentSetup.readBearerToken` at the point of use and never retain
 it in presentation state. `MenuBarLogReader` accepts the token as request input
 and does not own credential storage or path resolution.
-The poller's stream buffers only its newest snapshot,
-so a stalled menu consumer cannot accumulate obsolete 30-second status values;
-cancelling the menu consumer, or terminating or releasing the stream, invokes
-`onTermination` and cancels the producer task. `ServerProcessProbe` owns local
+The poller is an immutable `Sendable` value. `MenuBarController` owns and
+cancels its consumer task, while each stream owns its producer task and buffers
+only the newest snapshot so a stalled consumer cannot accumulate obsolete
+30-second status values. Terminating or releasing the stream invokes
+`onTermination` and cancels its producer. `ServerProcessProbe` owns local
 port-process discovery plus `/bin/ps` command and elapsed-time lookups. It reads
 the command only long enough to derive dev-server ownership; its projection
 retains only PID, uptime, and that derived flag for policy/UI consumers. The
