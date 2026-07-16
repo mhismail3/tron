@@ -17,7 +17,6 @@ const INVENTORY_PATH: &str = "packages/agent/docs/performance-resource-governanc
 const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/performance-resource-governance-inventory.tsv";
 const TARGET_PATH: &str = "packages/agent/tests/performance_resource_governance_invariants.rs";
-const TARGET_NAME: &str = "performance_resource_governance_invariants";
 
 #[derive(Debug)]
 struct ScorecardRow {
@@ -105,21 +104,6 @@ fn perf_artifacts_and_static_gate_wiring_exist() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     assert!(scorecard.contains("codex/performance-resource-governance-current"));
     assert!(scorecard.contains("c99a5439d9538dfc88de2883bf6b4383c8e1c037"));
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README must mention PERF artifact or target: {required}"
-        );
-    }
 
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(workflow.contains("run: scripts/tron ci test"));

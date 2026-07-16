@@ -18,7 +18,6 @@ const PHASE_TWO_EVIDENCE_PATH: &str =
 const PHASE_TWO_INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv";
 const TARGET_PATH: &str = "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs";
-const TARGET_NAME: &str = "baseline_pre_restoration_closure_invariants";
 const BASE_COMMIT: &str = "1545da37d3c6186fbc6613789bae3d4a5481f976";
 
 #[derive(Debug)]
@@ -196,7 +195,7 @@ fn assert_phase_two_restored_domain_lineage(
 }
 
 #[test]
-fn bprc_artifacts_lineage_and_readme_wiring_exist() {
+fn bprc_artifacts_and_lineage_are_current() {
     assert_current_lineage_base();
     for path in [
         SCORECARD_PATH,
@@ -221,23 +220,6 @@ fn bprc_artifacts_lineage_and_readme_wiring_exist() {
         "Scope quarantine",
     ] {
         assert!(scorecard.contains(required), "scorecard missing {required}");
-    }
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-        "Worker / Function / Trigger",
-        "pre-restoration entry contract",
-    ] {
-        assert!(
-            readme.contains(required),
-            "README must mention BPRC artifact, target, or contract: {required}"
-        );
     }
 }
 

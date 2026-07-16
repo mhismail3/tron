@@ -15,7 +15,6 @@ const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv";
 const TARGET_PATH: &str =
     "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs";
-const TARGET_NAME: &str = "self_updating_worker_runtime_foundation_invariants";
 const BASELINE_COMMIT: &str = "4cb2387f1a872f9fabaf58bdd88330065113b914";
 
 #[derive(Debug)]
@@ -386,18 +385,7 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
 #[test]
 fn readme_and_evidence_record_current_behavior_and_commands() {
     let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-        "worker_lifecycle",
-        "worker_package",
-        "workspace/workers",
-        "Self-Updating Worker Runtime Foundation",
-    ] {
+    for required in ["worker_lifecycle", "worker_package", "workspace/workers"] {
         assert!(readme.contains(required), "README missing {required}");
     }
     let evidence = read_repo_file(EVIDENCE_PATH);

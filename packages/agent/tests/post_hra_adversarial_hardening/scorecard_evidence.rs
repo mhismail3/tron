@@ -4,7 +4,6 @@ use super::support::*;
 fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let manifest = read_repo_file(EVIDENCE_PATH);
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Post-HRA Adversarial Hardening Scorecard",
@@ -70,18 +69,6 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
         assert!(
             manifest.contains(required),
             "AHA evidence manifest missing required text: {required}"
-        );
-    }
-
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        "packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md",
-        INVARIANT_TEST_PATH,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README living architecture docs must link {required}"
         );
     }
 }

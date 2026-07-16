@@ -63,7 +63,6 @@ fn failure_semantics_campaign_harness_exists() {
     let scorecard = read_repo_file("packages/agent/docs/failure-semantics-scorecard.md");
     let inventory = read_repo_file("packages/agent/docs/failure-semantics-inventory.md");
     let manifest = read_repo_file("packages/agent/docs/failure-semantics-evidence-manifest.md");
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Failure Semantics Campaign Scorecard",
@@ -130,19 +129,6 @@ fn failure_semantics_campaign_harness_exists() {
         assert!(
             manifest.contains(required),
             "FSC evidence manifest missing required text: {required}"
-        );
-    }
-
-    for required in [
-        "packages/agent/docs/failure-semantics-scorecard.md",
-        "packages/agent/docs/failure-semantics-evidence-manifest.md",
-        "packages/agent/docs/failure-semantics-inventory.md",
-        "packages/agent/docs/failure-semantics-inventory.tsv",
-        "packages/agent/tests/failure_semantics_invariants.rs",
-    ] {
-        assert!(
-            readme.contains(required),
-            "README living-doc map must link {required}"
         );
     }
 }

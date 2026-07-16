@@ -4,7 +4,6 @@ use super::support::*;
 fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let manifest = read_repo_file(EVIDENCE_PATH);
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Post-AHA Adversarial Closeout Scorecard",
@@ -77,13 +76,6 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         assert!(
             manifest.contains(required),
             "PAC evidence manifest missing required text: {required}"
-        );
-    }
-
-    for required in [SCORECARD_PATH, EVIDENCE_PATH, INVARIANT_TEST_PATH] {
-        assert!(
-            readme.contains(required),
-            "README living architecture docs must link {required}"
         );
     }
 }

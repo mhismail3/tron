@@ -64,7 +64,7 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
 }
 
 #[test]
-fn ssarr_artifacts_lineage_branch_and_readme_wiring_exist() {
+fn ssarr_artifacts_and_lineage_are_current() {
     assert_current_lineage_base();
 
     for path in [
@@ -91,21 +91,6 @@ fn ssarr_artifacts_lineage_branch_and_readme_wiring_exist() {
         "readiness audit only",
     ] {
         assert!(scorecard.contains(required), "scorecard missing {required}");
-    }
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README must mention SSARR artifact or target: {required}"
-        );
     }
 }
 

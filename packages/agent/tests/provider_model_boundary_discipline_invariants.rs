@@ -11,7 +11,6 @@ const INVENTORY_PATH: &str = "packages/agent/docs/provider-model-boundary-discip
 const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/provider-model-boundary-discipline-inventory.tsv";
 const TARGET_PATH: &str = "packages/agent/tests/provider_model_boundary_discipline_invariants.rs";
-const TARGET_NAME: &str = "provider_model_boundary_discipline_invariants";
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -76,21 +75,6 @@ fn pmbd_artifacts_and_static_gate_wiring_exist() {
         assert!(
             repo_path(path).exists(),
             "required PMBD artifact missing: {path}"
-        );
-    }
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README must mention PMBD artifact or target: {required}"
         );
     }
 

@@ -21,7 +21,6 @@ const PHASE2_INVENTORY_PATH: &str =
 const PHASE2_INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv";
 const TARGET_PATH: &str = "packages/agent/tests/ios_affordance_restoration_map_invariants.rs";
-const TARGET_NAME: &str = "ios_affordance_restoration_map_invariants";
 const OLD_REFERENCE: &str = "ad5e484722c6f7abbe764126409494026216ad92";
 const BASELINE_COMMIT: &str = "a0b80c7d204cf9349a5f647ecbc58a8a37735e15";
 
@@ -369,7 +368,7 @@ fn old_deleted_or_renamed_ios_affordance_paths() -> Vec<String> {
 }
 
 #[test]
-fn artifacts_lineage_and_docs_wiring_exist() {
+fn artifacts_and_lineage_are_current() {
     assert_current_lineage_base();
     git_output(&["cat-file", "-e", &format!("{OLD_REFERENCE}^{{commit}}")]);
 
@@ -396,23 +395,6 @@ fn artifacts_lineage_and_docs_wiring_exist() {
             "Scope quarantine",
         ],
     );
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-        "iOS Affordance Restoration Map",
-        "Phase 2 agent-execution restoration",
-    ] {
-        assert!(
-            readme.contains(required),
-            "README must mention IARM artifact, target, or phase anchor: {required}"
-        );
-    }
 
     assert_contains_all(
         "packages/ios-app/docs/architecture.md",
@@ -699,24 +681,6 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
             "It is not the live Phase 1 queue",
         ],
     );
-    let readme = normalize_whitespace(&read_repo_file("packages/agent/docs/project-reference.md"));
-    for required in [
-        "historical Phase 1",
-        "original Phase 2 agent-execution anchor",
-        "original Phase 1 review queue as historical planning evidence",
-        "Current iOS behavior belongs to `packages/ios-app/docs/architecture.md`",
-        PHASE2_SCORECARD_PATH,
-        PHASE2_EVIDENCE_PATH,
-        PHASE2_INVENTORY_PATH,
-        PHASE2_INVENTORY_TSV_PATH,
-    ] {
-        let normalized_required = normalize_whitespace(required);
-        assert!(
-            readme.contains(&normalized_required),
-            "README must describe IARM historical/live state: {required}"
-        );
-    }
-
     for (path, forbidden) in [
         (
             EVIDENCE_PATH,

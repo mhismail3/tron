@@ -16,7 +16,6 @@ const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv";
 const TARGET_PATH: &str =
     "packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs";
-const TARGET_NAME: &str = "ios_self_adapting_agent_cockpit_baseline_invariants";
 const BASELINE_COMMIT: &str = "6aa395fddf8ad8cca8f485c6a96fa0e78862e653";
 
 #[derive(Debug)]
@@ -560,12 +559,10 @@ fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
     assert_contains_all(
         "packages/agent/docs/project-reference.md",
         &[
-            "ios-self-adapting-agent-cockpit-baseline-scorecard.md",
-            "Agent cockpit",
-            "worker lifecycle catalog",
+            "Dashboard cockpit",
+            "live worker lifecycle rows",
             "catalog decode degradation",
             "ui_surface",
-            TARGET_NAME,
         ],
     );
     assert_contains_all(

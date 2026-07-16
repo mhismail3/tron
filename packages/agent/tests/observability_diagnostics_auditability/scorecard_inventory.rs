@@ -11,7 +11,6 @@ fn oda_campaign_harness_is_linked_and_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Observability Diagnostics Auditability Scorecard",
@@ -70,19 +69,6 @@ fn oda_campaign_harness_is_linked_and_formalized() {
             "ODA inventory missing required text: {required}"
         );
     }
-
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        INVARIANT_TEST_PATH,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README living-doc map must link {required}"
-        );
-    }
 }
 
 #[test]
@@ -105,16 +91,9 @@ fn oda_scorecard_weights_sum_to_100_and_current_score_matches_closed_rows() {
 }
 
 #[test]
-fn oda_invariant_target_is_in_closeout_ci_lists() {
-    let target = "observability_diagnostics_auditability_invariants";
+fn oda_ci_delegates_to_the_dynamic_test_owner() {
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(workflow.contains("run: scripts/tron ci test"));
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    assert!(
-        readme.contains(target),
-        "README closeout CI documentation missing target: {target}"
-    );
 }
 
 #[test]

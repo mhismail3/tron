@@ -14,7 +14,6 @@ fn drc_docs_and_protocol_parity_are_current() {
         "`resultHash` or `payloadHash`",
         "payload-fingerprint request hashes",
         "The replay manifest is a capability result, not a persisted event type",
-        "cross-record replay references, offline roundtrip proof, docs parity",
     ] {
         assert!(
             readme.contains(required),

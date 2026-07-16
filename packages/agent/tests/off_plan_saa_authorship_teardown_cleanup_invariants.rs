@@ -312,17 +312,11 @@ fn active_saa_docs_tests_and_static_targets_are_absent() {
         );
     }
 
-    for path in ["packages/agent/docs/project-reference.md"] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(INVARIANT_TARGET),
-            "{path} must list the OPSAA invariant target"
-        );
-        assert!(
-            !source.contains(RETIRED_SAA_TARGET),
-            "{path} must not list retired SAA invariant target"
-        );
-    }
+    let reference = read_repo_file("packages/agent/docs/project-reference.md");
+    assert!(
+        !reference.contains(RETIRED_SAA_TARGET),
+        "project reference must not list retired SAA invariant target"
+    );
 
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(

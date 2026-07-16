@@ -14,7 +14,6 @@ const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv";
 const INVARIANT_PATH: &str =
     "packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs";
-const TARGET_NAME: &str = "public_protocol_api_contract_discipline_invariants";
 
 #[derive(Debug)]
 struct ScorecardRow {
@@ -257,23 +256,7 @@ fn ppacd_inventory_is_structured_and_covers_required_surfaces() {
 }
 
 #[test]
-fn ppacd_wiring_is_present_in_readme_local_ci_and_github_ci() {
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        INVARIANT_PATH,
-        TARGET_NAME,
-        "Public Protocol API Contract Discipline",
-    ] {
-        assert!(
-            readme.contains(required),
-            "README missing PPACD wiring text: {required}"
-        );
-    }
-
+fn ppacd_ci_delegates_to_the_local_test_owner() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     assert!(
         ci.contains("run: scripts/tron ci test"),

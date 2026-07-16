@@ -27,7 +27,6 @@ const CAPABILITY_BINDING_TESTS_PATH: &str =
     "packages/agent/src/domains/capability_binding/tests.rs";
 const RESOURCE_DEFINITIONS_PATH: &str =
     "packages/agent/src/engine/durability/resources/capability_binding_definitions.rs";
-const README_PATH: &str = "packages/agent/docs/project-reference.md";
 
 const ROUTE_OPERATIONS: [&str; 11] = [
     "capability_replacement_candidate_record",
@@ -137,7 +136,6 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
-    let readme = read_repo_file(README_PATH);
 
     for area in SCORECARD_AREAS {
         assert!(
@@ -169,9 +167,7 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
         "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md",
     ] {
         assert!(
-            scorecard.contains(required)
-                || evidence.contains(required)
-                || readme.contains(required),
+            scorecard.contains(required) || evidence.contains(required),
             "dynamic replacement artifacts missing required text: {required}"
         );
     }

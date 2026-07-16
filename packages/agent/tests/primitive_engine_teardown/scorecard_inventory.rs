@@ -5,7 +5,6 @@ fn primitive_engine_teardown_plan_stays_formalized() {
     let scorecard = read_repo_file("packages/agent/docs/primitive-engine-teardown-scorecard.md");
     let manifest =
         read_repo_file("packages/agent/docs/primitive-engine-teardown-evidence-manifest.md");
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
@@ -86,21 +85,11 @@ fn primitive_engine_teardown_plan_stays_formalized() {
             "primitive teardown evidence manifest missing required text: {required}"
         );
     }
-
-    assert!(
-        readme.contains("packages/agent/docs/primitive-engine-teardown-scorecard.md")
-            && readme.contains("completed")
-            && readme.contains("clean-break primitive engine teardown scorecard")
-            && readme
-                .contains("packages/agent/docs/primitive-engine-teardown-evidence-manifest.md"),
-        "README living-doc map must link the completed primitive teardown scorecard and evidence manifest"
-    );
 }
 
 #[test]
 fn primitive_engine_teardown_inventory_stays_exhaustive() {
     let inventory = read_repo_file("packages/agent/docs/primitive-engine-teardown-inventory.md");
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Primitive Engine Teardown Inventory",
@@ -248,12 +237,6 @@ fn primitive_engine_teardown_inventory_stays_exhaustive() {
             "primitive teardown inventory missing iOS view row for {view}"
         );
     }
-
-    assert!(
-        readme.contains("packages/agent/docs/primitive-engine-teardown-inventory.md"),
-        "README living-doc map must link the PET-1 primitive teardown inventory"
-    );
-
     for stale_phrase in [
         "still need final retain/delete proof",
         "must still audit",

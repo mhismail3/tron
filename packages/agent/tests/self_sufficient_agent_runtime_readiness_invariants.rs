@@ -15,7 +15,6 @@ const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv";
 const TARGET_PATH: &str =
     "packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs";
-const TARGET_NAME: &str = "self_sufficient_agent_runtime_readiness_invariants";
 const BASE_COMMIT: &str = "98b9a7eeb62afb9a844ffd7dd6cd8f591aab6de6";
 const STALE_BRANCH: &str = "codex/self-sufficient-agent-runtime-readiness";
 const STALE_BRANCH_HEAD: &str = "e62804694fa6578758d4f7e7c6cf12f334a13853";

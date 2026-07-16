@@ -8,8 +8,6 @@ pub(super) const INVENTORY_PATH: &str =
     "packages/agent/docs/determinism-replayability-inventory.md";
 pub(super) const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/determinism-replayability-inventory.tsv";
-pub(super) const INVARIANT_TEST_PATH: &str =
-    "packages/agent/tests/determinism_replayability_invariants.rs";
 
 pub(super) fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

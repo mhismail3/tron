@@ -17,7 +17,6 @@ const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv";
 const TARGET_PATH: &str =
     "packages/agent/tests/configuration_profile_environment_discipline_invariants.rs";
-const TARGET_NAME: &str = "configuration_profile_environment_discipline_invariants";
 
 #[derive(Debug)]
 struct ScorecardRow {
@@ -261,21 +260,6 @@ fn cpe_artifacts_and_static_gate_wiring_exist() {
         TARGET_PATH,
     ] {
         assert!(repo_path(path).exists(), "missing CPE artifact: {path}");
-    }
-
-    let reference = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-    ] {
-        assert!(
-            reference.contains(required),
-            "project reference must mention CPE artifact or target: {required}"
-        );
     }
 
     let workflow = read_repo_file(".github/workflows/ci.yml");

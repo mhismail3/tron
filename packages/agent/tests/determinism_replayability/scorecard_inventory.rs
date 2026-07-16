@@ -4,7 +4,6 @@ use super::support::*;
 fn drc_scorecard_and_evidence_are_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Determinism Replayability Scorecard",
@@ -68,19 +67,6 @@ fn drc_scorecard_and_evidence_are_formalized() {
         assert!(
             evidence.contains(required),
             "DRC evidence manifest missing required text: {required}"
-        );
-    }
-
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        INVARIANT_TEST_PATH,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README living architecture docs must link {required}"
         );
     }
 }

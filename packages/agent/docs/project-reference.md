@@ -81,370 +81,43 @@ this reference and its owning source documentation in the same commit.
 
 ---
 
-## Living Architecture Docs
+## Architecture Ownership
 
-The durable architecture docs live beside the code they describe. The root
-README is the map; source files, `mod.rs` docs, `INVARIANT:` comments, and
-concern-owned tests are the durable truth. One-off phase plans, migration
-rubrics, and audit snapshots are not kept as source-of-truth docs because they
-drift after the code changes.
+Durable architecture documentation lives beside the code it describes. This
+reference owns cross-cutting product behavior; it is not an index of completed
+audits. Historical scorecards and evidence may explain a past decision, but
+current code, module docs, package docs, and boundary tests are authoritative.
 
-Current living entry points:
+Use these owners:
 
-- `packages/agent/src/lib.rs`: Rust crate/module tree.
-- `packages/agent/src/engine/mod.rs`: engine fabric ownership.
-- `packages/agent/src/engine/durability/resources/mod.rs`: resource substrate ownership.
-- `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
-- `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
-  primitive and provider export.
-- `packages/agent/src/domains/capability/operations/operation_contract/metadata.rs`:
-  exhaustive runtime-owned operation family, owner, evolution class, and
-  replacement-constraint metadata used by binding validation, capability-pool
-  classification, and cockpit projection.
-- `packages/agent/src/domains/capability/pool.rs`: live typed classifier for
-  model-facing operations and startup-registered catalog functions. It derives
-  replacement class, visibility, minimality, and kernel-evolution constraints
-  from canonical operation/catalog owners and tests those live sources directly.
-- `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
-  scorecard for governed candidate, route, activation, event, rollback, and
-  supervised module-runtime replacement-route milestones.
-- `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
-  clean-break primitive engine teardown scorecard for stripping hard-coded
-  capabilities, policies, skills, rules, helper launch products, and fixed iOS product
-  surfaces down to the smallest provider loop, single `execute` primitive,
-  agent-owned state workspace, event/ledger truth, and dynamic client shell.
-- `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md`:
-  companion evidence manifest for the completed primitive engine teardown
-  scorecard.
-- `packages/agent/docs/primitive-engine-teardown-inventory.md`: PET-1
-  source-audited deletion map for every current Rust domain, engine primitive
-  worker, runner context plane, managed skill, doc, iOS source/view root, and
-  settings surface.
-- `packages/agent/docs/determinism-replayability-scorecard.md`: completed
-  Determinism Replayability Campaign scorecard for proving offline audit and
-  reconstruction replay from durable session, provider, trace, ledger, stream,
-  queue, and hash records.
-- `packages/agent/docs/determinism-replayability-evidence-manifest.md`:
-  companion evidence manifest for DRC row checkpoints, verification logs, and
-  residual replay risks.
-- `packages/agent/docs/determinism-replayability-inventory.md`: DRC replay
-  source, entropy, API, hash, and proof inventory.
-- `packages/agent/docs/determinism-replayability-inventory.tsv`:
-  machine-readable replay-critical source inventory used by DRC static gates.
-- `packages/agent/docs/failure-semantics-scorecard.md`: completed Failure
-  Semantics Campaign scorecard for enforcing one canonical error envelope
-  across provider/model errors, runtime turn failures, capability results,
-  transport responses, durable events, replay, and iOS projections.
-- `packages/agent/docs/failure-semantics-evidence-manifest.md`: companion
-  evidence manifest for FSC row checkpoints, verification logs, and residual
-  failure-contract risks.
-- `packages/agent/docs/failure-semantics-inventory.md`: completed FSC inventory of
-  server, engine, provider, runtime, transport, durable replay, and iOS failure
-  surfaces.
-- `packages/agent/docs/failure-semantics-inventory.tsv`: machine-readable FSC
-  failure-surface inventory used by static gates.
-- `packages/agent/docs/observability-diagnostics-auditability-scorecard.md`:
-  completed Observability Diagnostics Auditability scorecard for proving
-  session events, provider audits, primitive trace records, engine ledger rows,
-  logs, diagnostics bundles, runtime decisions, and CLI/dev diagnostics remain
-  inspectable through stable IDs without leaking secrets.
-- `packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md`:
-  companion evidence manifest for ODA row checkpoints, verification logs, and
-  residual observability risks.
-- `packages/agent/docs/observability-diagnostics-auditability-inventory.md`:
-  completed ODA source inventory taxonomy and proof notes.
-- `packages/agent/docs/observability-diagnostics-auditability-inventory.tsv`:
-  machine-readable ODA source inventory used by static gates.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-scorecard.md`:
-  completed cleanup scorecard for removing the off-plan authorship work before
-  continuing the original primitive-engine hardening meta-slices.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-evidence-manifest.md`:
-  companion evidence manifest for cleanup row checkpoints, verification logs,
-  and residual risks.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.md`:
-  cleanup source inventory taxonomy and proof notes.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv`:
-  machine-readable cleanup inventory used by static gates.
-- `packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md`:
-  completed Public Protocol API Contract Discipline scorecard for `/engine`
-  public methods, wire schemas, context boundaries, response/error/event
-  payloads, DTO parity, iOS transport decoders/encoders, and closeout proof.
-- `packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md`:
-  companion evidence manifest for PPACD command results and corrected findings.
-- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.md`:
-  completed public protocol surface taxonomy and ownership notes.
-- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv`:
-  machine-readable PPACD public protocol inventory used by static gates.
-- `packages/agent/docs/provider-model-boundary-discipline-scorecard.md`:
-  completed Provider / Model Boundary Discipline scorecard for provider/model
-  request, stream, auth, retry, error, catalog, token, audit, and redaction
-  boundaries across OpenAI, Anthropic, Google, Kimi, MiniMax, and Ollama.
-- `packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md`:
-  companion evidence manifest for PMBD lineage, stale-branch quarantine,
-  verification commands, and residual risks.
-- `packages/agent/docs/provider-model-boundary-discipline-inventory.md`:
-  completed PMBD provider/model boundary taxonomy and proof notes.
-- `packages/agent/docs/provider-model-boundary-discipline-inventory.tsv`:
-  machine-readable PMBD provider/model boundary inventory used by static gates.
-- `packages/agent/docs/performance-resource-governance-scorecard.md`:
-  completed Performance / Resource Governance scorecard for queue,
-  concurrency, stream, payload, timeout, shutdown, retention, startup,
-  runtime/iOS boundary, docs, CI, and verification hardening.
-- `packages/agent/docs/performance-resource-governance-evidence-manifest.md`:
-  companion evidence manifest for PERF lineage, stale-branch quarantine,
-  resource-boundary proofs, verification commands, and residual risks.
-- `packages/agent/docs/performance-resource-governance-inventory.md`:
-  completed PERF resource-governance taxonomy and proof notes.
-- `packages/agent/docs/performance-resource-governance-inventory.tsv`:
-  machine-readable PERF resource-governance inventory used by static gates.
-- `packages/agent/docs/configuration-profile-environment-discipline-scorecard.md`:
-  completed Configuration / Profile / Environment Discipline scorecard for
-  settings schema/default parity, sparse overlays, profile recovery, env
-  ownership, iOS settings parity, docs, CI, and verification.
-- `packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md`:
-  companion evidence manifest for CPE lineage, stale-branch quarantine,
-  settings/profile/env proofs, verification commands, and residual risks.
-- `packages/agent/docs/configuration-profile-environment-discipline-inventory.md`:
-  completed CPE settings/profile/env taxonomy and proof notes.
-- `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
-  machine-readable CPE settings/profile/env inventory used by static gates.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md`:
-  completed Self-Sufficient Agent Runtime Readiness scorecard for auditing
-  clean extension points for generated workers, learned rules/memory, tool
-  synthesis, and agent-authored state without implementing successor features.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md`:
-  companion evidence manifest for SSARR lineage, source audit, term
-  classification, verification commands, iOS no-touch rationale, and residual
-  readiness risks.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`:
-  completed SSARR readiness taxonomy and extension-point ownership notes.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv`:
-  machine-readable SSARR readiness inventory used by static gates.
-- `packages/agent/docs/primitive-minimality-closure-scorecard.md`: completed
-  Primitive Minimality Closure scorecard for the post-SSARR teardown pass over
-  dead provider helpers, stream residue, proof-layer parity, retained
-  suspicious surfaces, and final regression proof.
-- `packages/agent/docs/primitive-minimality-closure-evidence-manifest.md`:
-  companion evidence manifest for PMC baseline checks, removal batches, failed
-  attempts and fixes, retained-contract rationale, and final verification.
-- `packages/agent/docs/primitive-minimality-closure-inventory.md`: completed PMC
-  classification of removed runtime residue, retained provider/engine
-  contracts, historical evidence, and static gates.
-- `packages/agent/docs/primitive-minimality-closure-inventory.tsv`:
-  machine-readable PMC minimality inventory used by static gates.
-- `packages/agent/docs/baseline-pre-restoration-closure-scorecard.md`: completed
-  Baseline Pre-Restoration Closure scorecard for certifying the current
-  primitive baseline, iii-style worker/function/trigger alignment, restoration
-  backlog, active-doc cleanup, absence guards, entry contract, and final
-  pre-restoration verification.
-- `packages/agent/docs/baseline-pre-restoration-closure-evidence-manifest.md`:
-  companion evidence manifest for BPRC lineage, restoration backlog proof,
-  active-doc cleanup, gate wiring, validation commands, and residual risks.
-- `packages/agent/docs/baseline-pre-restoration-closure-inventory.md`:
-  completed BPRC classification of baseline artifacts, foundational substrate,
-  restoration backlog rows, and the pre-restoration entry contract.
-- `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`:
-  machine-readable BPRC inventory and restoration backlog used by static gates.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-scorecard.md`:
-  completed Self-Updating Worker Runtime Foundation scorecard for local package
-  lifecycle ownership, manifest validation, authority-derived launches,
-  conformance proof, resource/event evidence, rollback semantics, and
-  no fixed iOS/product-panel restoration.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-evidence-manifest.md`:
-  companion evidence manifest for SUWRF source changes, focused tests, static
-  gates, final closeout commands, iOS no-touch rationale, and failed
-  attempt/fix records.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md`:
-  completed SUWRF classification of new artifacts, lifecycle source files,
-  typed worker resource kinds, preserved boundaries, and validation gates.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv`:
-  machine-readable SUWRF inventory used by static gates.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`:
-  completed iOS Self-Adapting Agent Cockpit Baseline scorecard for the
-  user-facing worker lifecycle catalog, package actions, runtime `ui_surface`
-  rendering, and neutral glass cockpit shell; Phase 2 Slice 1 extends that
-  shell with catalog discovery and report evidence.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`:
-  companion evidence manifest for focused Swift tests, simulator validation,
-  static gates, and closeout commands.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md`:
-  completed IOSAC retained/absent surface inventory.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`:
-  machine-readable IOSAC inventory used by static gates.
-- `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`:
-  completed iOS Affordance Restoration Map scorecard for exhaustively
-  classifying removed old iOS affordances before any Phase 1 restoration
-  implementation.
-- `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`:
-  companion evidence manifest for IARM old-tree coverage, failed-attempt
-  policy, validation commands, and the historical Phase 1 handoff.
-- `packages/agent/docs/ios-affordance-restoration-map-inventory.md`:
-  completed IARM taxonomy, first-principles review rubric, historical Phase 1
-  queue, and original Phase 2 agent-execution anchor.
-- `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`:
-  machine-readable IARM coverage map used by static gates.
-- `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`:
-  completed planning scorecard for the Phase 2 agent-execution restoration
-  roadmap, primitive-vs-capability classifications, memory architecture, slice
-  ordering, validation gates, and handoff packet.
-- `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`:
-  companion evidence manifest for the Phase 2 planning scorecard.
-- `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`:
-  narrative inventory for Phase 2 feature families and current gaps.
-- `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`:
-  machine-readable Phase 2 feature-family inventory used by future slice
-  handoffs.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`:
-  completed scorecard for the Phase 3 modular self-adapting engine roadmap,
-  minimal-core boundary, first-principles implementation standard, module-plane
-  slices, feature-pack activation order, review/fix/re-review execution
-  protocol, and closeout status.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`:
-  companion evidence manifest for the completed Phase 3 scorecard and closeout
-  evidence.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`:
-  narrative inventory for completed Phase 3 module-plane foundations, feature
-  module packs, rejected old shapes, and deferred product decisions.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`:
-  machine-readable Phase 3 slice inventory used by completed handoffs and
-  closeout audits.
-- `packages/agent/docs/restoration-retrospective-audit-status.md`: active
-  retrospective audit tracker for the ordered completed-slice queue, audit
-  constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A, accepted Slice 6A through Slice 6E source-control
-  foundations, accepted Slice 7A goal/question foundation, and accepted Slice
-  8A through Slice 8E web source/provenance, citation, extraction, retention,
-  and robots policy foundations.
-- `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: completed
-  closeout campaign for adversarial audit findings after hierarchical
-  rearchitecture completion.
-- `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md`:
-  companion evidence manifest for the post-HRA adversarial hardening campaign.
-- `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md`:
-  redacted in-repo digest of the operator post-HRA adversarial hardening plan.
-- `packages/agent/docs/post-aha-adversarial-closeout-scorecard.md`: completed
-  closeout campaign for adversarial audit findings after AHA completion.
-- `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md`:
-  companion evidence manifest for the post-AHA adversarial closeout campaign.
-- `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
-  absence, traceability, schema, registration, and documentation gates for the
-  primitive branch.
-- `packages/agent/tests/determinism_replayability_invariants.rs`: completed DRC
-  gates for scorecard state, replay source inventory, entropy scan coverage,
-  provider request audit wiring, replay manifest hashing, stable ordering,
-  cross-record replay references, offline roundtrip proof, docs parity, and
-  closeout.
-- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: living Rust
-  crate-root, module-path, domain-owner, mirrored-test, and progressive-module
-  documentation guards retained from the hierarchy repair.
-- `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: completed
-  post-HRA adversarial hardening gates for source identity, deleted-doc
-  residue, CI parity, Rust physical ownership and module docs, and iOS
-  transport/source-guard contracts.
-- `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
-  post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
-  ownership, Rust module docs, CI parity, provenance, privacy, and residue.
-- `packages/agent/tests/true_modularity_boundary_invariants.rs`: living
-  source-backed guards for provider, engine, domain-worker, storage, transport,
-  iOS repository, and boundary-error dependency direction.
-- `packages/agent/tests/failure_semantics_invariants.rs`: completed FSC scorecard,
-  inventory, failure-surface, canonical-envelope, event-emission, transport,
-  provider, iOS parity, replay, and closeout gates.
-- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: living
-  source-backed guards for server bootstrap, runtime task ownership, durable
-  engine state, session/event storage, settings and secret custody, iOS local
-  projections, recovery/observability, and owner-private settings/auth writes,
-  with focused modules under
-  `packages/agent/tests/state_ownership_lifecycle/`.
-- `packages/agent/tests/observability_diagnostics_auditability_invariants.rs`:
-  completed ODA scorecard, evidence, inventory, source guard, logs filter,
-  diagnostics bundle, provider audit, runtime decision, CLI/dev UX, and final
-  closeout gates, with focused modules under
-  `packages/agent/tests/observability_diagnostics_auditability/`.
-- `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
-  living guards that scan the production Rust and Swift trees for unbounded
-  channels or streams, banned iOS scheduling patterns, missing stored-task
-  cancellation paths, external-worker backpressure, and exact terminal iOS task
-  drains, with focused modules under
-  `packages/agent/tests/concurrency_scheduling_discipline/`.
-- `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`:
-  nine living cross-cutting guards for public bearer and loopback boundaries,
-  public-context injection denial, grants and delegated budgets, capability
-  execution trust, external-worker ownership, internal invocation trust, secret
-  custody and redaction, and platform pairing lifecycle, with focused modules under
-  `packages/agent/tests/security_authority_capability_boundaries/`.
-- `packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs`:
-  cleanup scorecard, evidence, inventory, provider execute narrowing,
-  memory/rule removal, static target, README, and predecessor-inventory gates.
-- `packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs`:
-  completed Public Protocol API Contract Discipline gates for scorecard/evidence,
-  inventory coverage, README/CI wiring, public `/engine` method/schema shape,
-  iOS context/decoder narrowness, predecessor inventory rows, and final closeout
-  claims.
-- `packages/agent/tests/provider_model_boundary_discipline_invariants.rs`:
-  completed Provider / Model Boundary Discipline gates for scorecard/evidence,
-  inventory coverage, README/CI wiring, provider-native import confinement,
-  provider wire marker confinement, provider audit redaction/bounding, retry and
-  failure redaction, provider family test anchors, and predecessor inventory rows.
-- `packages/agent/tests/performance_resource_governance_invariants.rs`:
-  completed Performance / Resource Governance gates for scorecard/evidence,
-  resource inventory coverage, README/CI wiring, queue burst and payload
-  rejection, stream/frame/accumulator/WebSocket bounds, cancellation, shutdown,
-  retention, startup, runtime/iOS boundary, and predecessor inventory rows.
-- `packages/agent/tests/configuration_profile_environment_discipline_invariants.rs`:
-  completed CPE gates for scorecard/evidence, inventory coverage, default drift,
-  strict schema, sparse overlay, env ownership, iOS settings parity, Mac sparse
-  seed, README/CI wiring, and predecessor inventory rows.
-- `packages/agent/tests/release_install_lifecycle_invariants.rs`: source-owned
-  checks for contributor port/process ownership, hidden deploy absence,
-  setup/install/uninstall preservation, fail-closed deploy/rollback, generated
-  project policy, and hosted Mac release packaging.
-- `packages/agent/tests/repository_workflow_invariants.rs`: source-owned checks
-  for dynamic Cargo target scheduling, fail-fast local execution, fail-closed
-  GitHub aggregation, concise front-door documentation, and tracked ignore
-  hygiene.
-- `packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs`:
-  completed SSARR gates for readiness scorecard/evidence/inventory integrity,
-  successor-term classification, negative generated-worker/learned-memory/tool
-  synthesis guards, local/GitHub target parity, README wiring, stale branch
-  quarantine, and final closeout proof.
-- `packages/agent/tests/primitive_minimality_closure_invariants.rs`:
-  completed PMC gates for minimality scorecard/evidence/inventory integrity,
-  deleted provider helper absence, retained-contract classification,
-  local/GitHub target parity, README wiring, predecessor inventory rows, and
-  no public protocol/iOS behavior expansion.
-- `packages/agent/tests/baseline_pre_restoration_closure_invariants.rs`:
-  completed BPRC gates for pre-restoration scorecard/evidence/inventory
-  integrity, iii-style worker/function/trigger alignment, restoration backlog
-  coverage, active-doc current-baseline wording, old product-surface absence,
-  provider-visible execute minimality, and local/GitHub target parity.
-- `packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs`:
-  completed SUWRF gates for scorecard/evidence/inventory integrity, package
-  lifecycle separation from `/engine/workers`, worker resource-kind coverage,
-  provider-visible execute minimality, local/GitHub target parity, and no fixed
-  product-panel restoration.
-- `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`:
-  completed IOSAC gates for cockpit scorecard/evidence/inventory integrity,
-  worker lifecycle client function ids, dynamic `ui_surface` rendering,
-  protocol/repository boundaries, neutral glass theme tokens, focused Swift
-  test coverage, README/iOS docs, and local/GitHub static-gate parity. Phase 2
-  catalog discovery coverage is recorded in the P2AER inventory/evidence.
-- `packages/agent/tests/ios_affordance_restoration_map_invariants.rs`:
-  completed IARM gates for old iOS tree coverage, affordance classification
-  vocabulary, Phase 1 review queue, Phase 2 deferral anchor, README/iOS docs,
-  and local/GitHub static-gate parity.
-- `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
-- `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
-
-Remaining historical scorecard artifacts are retained as evidence only; live
-architecture guidance is owned by the current README, package docs, source
-module docs, and living boundary guards.
+- Rust topology and dependency direction: `packages/agent/src/lib.rs` and the
+  nearest `mod.rs` and `INVARIANT:` comments.
+- Engine fabric, resources, and primitive execution:
+  `packages/agent/src/engine/` and
+  `packages/agent/src/domains/capability/`.
+- Public transport and event contracts:
+  `packages/agent/src/transport/engine/` and
+  `packages/agent/src/shared/protocol/events/`.
+- Settings, credentials, and database schema:
+  `packages/agent/src/domains/settings/profile/types/`,
+  `packages/agent/src/domains/auth/credentials/`, and
+  `packages/agent/src/domains/session/event_store/sqlite/migrations/`.
+- iOS architecture and validation: `packages/ios-app/docs/` and the
+  authoritative `packages/ios-app/project.yml`.
+- Mac composition and packaging: `packages/mac-app/docs/` and the
+  authoritative `packages/mac-app/project.yml`.
+- CLI, configuration, and release behavior: `scripts/tron --help`,
+  `scripts/tron.d/`, `scripts/tron-lib.d/`, `VERSION.env`,
+  `scripts/tron-version`, and `.github/workflows/`.
+- Cross-boundary guards: focused targets under `packages/agent/tests/`,
+  discovered dynamically by `scripts/tron ci test`. Tests validate the owners
+  above; they do not make campaign artifacts part of the live architecture.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
-generated UI resources; domain-owned hidden files or tables are acceptable only
-as explicitly documented low-level cache/substrate boundaries with static gates,
-and they are not policy, lineage, or product truth.
+generated UI resources. Owner-private files or tables are acceptable only as
+documented cache or substrate boundaries with source-owned static guards; they
+are not policy, lineage, or product truth.
 
 ---
 
@@ -2366,9 +2039,9 @@ VCS revision when available, result/error hashes, and file attribution with
 content hashes. Model-facing trace reads intentionally project only safe trace
 and invocation refs, hashes, status/timing, safe errors, and redaction proof;
 provider tool-call ids and raw authority/idempotency metadata stay internal.
-The retained substrate workers are covered by completed primitive cleanup,
-state, scheduling, security, observability, storage, and resource-governance
-scorecards.
+The retained substrate workers are covered by the source-owned state,
+scheduling, security, observability, storage, and resource-governance boundary
+tests under `packages/agent/tests/`.
 
 Fixed helper-orchestration routes are not registered on the primitive teardown
 branch. Any future parallel helper behavior must be created by the agent
@@ -2979,7 +2652,10 @@ packages/ios-app/Sources/
   from projected counts. The primary chat shell does not mount a passive
   worker-runtime banner.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`. `DependencyContainerRuntimeIO` selects immutable transport-attempt, pairing-probe, and paired-token backends once at that boundary and forwards the attempt directive into both the initial `EngineClient` and every active-server rebuild. Production remains live URL-session transport plus `URLSessionPairingProbe` and the production Keychain backend; hosted unit tests inject handled attempts, a test-target inert pairing probe, and a task-owned in-memory token backend without environment checks inside those owners.
-- **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
+- **Generic runtime rendering**: server-owned runtime data, including data
+  written through agent operations, renders through
+  `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into
+  custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while the production `PairedServerTokenStore.Backend` preserves the exact `KeychainItem(service: "com.tron.mobile.bearer", account: serverId)` contract. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`. Hosted token backends are injected, memory-only, and emit balanced secret-free `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` identity records; they never call Keychain.
 - **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor. `EventStoreManager` predecessor-chains client replacement and load ownership, awaits database/completion effects for every accepted event, and uses one idempotent terminal drain: cancel/join the global lane, await `SessionRefreshService.shutdown()`, then cancel/join the load chain before an outer fixture closes its database. Shutdown does not finish the shared event bus or invent a process-termination hook.
@@ -2987,40 +2663,6 @@ packages/ios-app/Sources/
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Engine → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Engine shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings exposes the Logs sheet in every iOS build configuration from its toolbar so production installs can inspect or copy redacted local iOS logs without enabling verbose production logging; pairing lives under Settings -> Engine -> Servers without a duplicate Logs row. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with the active session id attached to each batch, client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic session-scoped batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
-- **IOSAC proof**:
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`,
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`,
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md`,
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`,
-  and
-  `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`
-  are the baseline static proof for the Agent cockpit, worker lifecycle catalog
-  bridge, package action confirmations, dynamic `ui_surface` rendering, and
-  neutral glass baseline; P2AER Slice 1 adds catalog discovery evidence on top.
-- **IARM proof**:
-  `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`,
-  `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`,
-  `packages/agent/docs/ios-affordance-restoration-map-inventory.md`,
-  `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`, and
-  `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` are the
-  current static proof for the functional-only iOS affordance restoration map.
-  The map exhaustively classifies deleted or renamed old iOS paths and preserves
-  the original Phase 1 review queue as historical planning evidence. It does
-  not mean those affordances are restored.
-  Current iOS behavior belongs to `packages/ios-app/docs/architecture.md`,
-  concern-owned iOS docs, and focused source tests. The durable Phase 2
-  agent-execution restoration record is maintained in
-  `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`,
-  `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
-  `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and
-  `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`.
-  The durable Phase 3 modular self-adapting engine plan is recorded in
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`,
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`,
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`, and
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`.
-  Retrospective audit ordering and review-only constraints are tracked in
-  `packages/agent/docs/restoration-retrospective-audit-status.md`.
 
 ### Data Flow
 

@@ -10,7 +10,6 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/primitive-minimality-closure-ev
 const INVENTORY_PATH: &str = "packages/agent/docs/primitive-minimality-closure-inventory.md";
 const INVENTORY_TSV_PATH: &str = "packages/agent/docs/primitive-minimality-closure-inventory.tsv";
 const TARGET_PATH: &str = "packages/agent/tests/primitive_minimality_closure_invariants.rs";
-const TARGET_NAME: &str = "primitive_minimality_closure_invariants";
 const BASE_COMMIT: &str = "7b03b51f5476f5764e3813666137897af2f3cd3d";
 const CLOSEOUT_COMMIT: &str = "b7443240e2b78397388b5f6b606f4ae3adaddfba";
 
@@ -117,7 +116,7 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
 }
 
 #[test]
-fn pmc_artifacts_lineage_and_readme_wiring_exist() {
+fn pmc_artifacts_and_lineage_are_current() {
     assert_current_lineage_base();
 
     for path in [
@@ -141,21 +140,6 @@ fn pmc_artifacts_lineage_and_readme_wiring_exist() {
         "Scope quarantine",
     ] {
         assert!(scorecard.contains(required), "scorecard missing {required}");
-    }
-
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    for required in [
-        SCORECARD_PATH,
-        EVIDENCE_PATH,
-        INVENTORY_PATH,
-        INVENTORY_TSV_PATH,
-        TARGET_PATH,
-        TARGET_NAME,
-    ] {
-        assert!(
-            readme.contains(required),
-            "README must mention PMC artifact or target: {required}"
-        );
     }
 }
 
