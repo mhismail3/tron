@@ -1,6 +1,6 @@
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
-use crate::domains::session::event_store::redaction::redact_sensitive_content;
 use crate::domains::session::event_store::sqlite::connection::PooledConnection;
+use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::observability::LogLevel;
 
 use super::EventStore;

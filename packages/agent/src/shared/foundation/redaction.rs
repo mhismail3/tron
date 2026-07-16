@@ -1,4 +1,4 @@
-//! Shared sensitive-data redaction helpers.
+//! Authoritative sensitive-data redaction policy.
 //!
 //! Provider errors, client logs, and durable event payloads can all carry
 //! provider-auth fragments when an upstream service returns a raw request,
@@ -125,6 +125,8 @@ mod tests {
             ("sk-proj-abcdefghijklmnopqrstuvwxyz", "sk-proj-****"),
             ("AKIAIOSFODNN7EXAMPLE", "AKIA****"),
             ("ghp_xxxxxxxxxxxxxxxxxxxx123456", "gh*_****"),
+            ("gho_xxxxxxxxxxxxxxxxxxxx123456", "gh*_****"),
+            ("xoxb-1234-5678-abcdefghijklmno", "xox*-****"),
             ("AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "AIzaSy****"),
         ] {
             let redacted = redact_sensitive_content(input);
@@ -134,9 +136,14 @@ mod tests {
     }
 
     #[test]
-    fn leaves_non_secret_text_unchanged() {
-        let text = "provider returned status code invalid_api_key";
-        assert_eq!(redact_sensitive_content(text), text);
+    fn leaves_non_secret_and_already_masked_text_unchanged() {
+        for text in [
+            "provider returned status code invalid_api_key",
+            "I sk-ip this line",
+            "sk-ant-****",
+        ] {
+            assert_eq!(redact_sensitive_content(text), text);
+        }
     }
 
     #[test]
@@ -147,5 +154,28 @@ mod tests {
         assert!(result.contains(r#""code":"INVALID_PARAMS""#));
         assert!(result.contains(r#""authorizationCode":"****""#));
         assert!(!result.contains("oauth-code-1234567890"));
+    }
+
+    #[test]
+    fn redacts_debug_description_auth_fields() {
+        let text = r#"AddNamedApiKeyParams(provider: "openai", apiKey: "sk-test-abcdefghijklmnopqrstuvwxyz") OAuth(code: "oauth-code-1234567890")"#;
+        let result = redact_sensitive_content(text);
+
+        assert!(!result.contains("sk-test-abcdefghijklmnopqrstuvwxyz"));
+        assert!(!result.contains("oauth-code-1234567890"));
+        assert!(result.contains(r#"apiKey: "****""#));
+        assert!(result.contains(r#"code: "****""#));
+        assert!(result.contains(r#"provider: "openai""#));
+    }
+
+    #[test]
+    fn redacts_unquoted_auth_fields() {
+        let text = "access_token=access-token-1234567890 client_secret:client-secret-1234567890";
+        let result = redact_sensitive_content(text);
+
+        assert!(!result.contains("access-token-1234567890"));
+        assert!(!result.contains("client-secret-1234567890"));
+        assert!(result.contains("access_token=****"));
+        assert!(result.contains("client_secret=****"));
     }
 }

@@ -60,6 +60,8 @@
 //!   evidence; provider request bytes remain owned by the model boundary.
 //! - Log query filters are applied in the storage owner so diagnostics callers
 //!   cannot silently broaden session/workspace/trace scope.
+//! - Durable event payloads and client logs call the shared foundation
+//!   redaction policy directly; the session domain does not shadow that owner.
 //! - Replay/import paths use explicit identities instead of ambient time or
 //!   UUID generation when durable IDs/timestamps must be stable.
 //! - The event log is append-only for normal lifecycle operations. Archiving
@@ -80,7 +82,6 @@ pub mod errors;
 pub mod factory;
 pub mod identity;
 pub mod reconstruction;
-pub mod redaction;
 pub mod sqlite;
 pub mod store;
 pub mod trace;

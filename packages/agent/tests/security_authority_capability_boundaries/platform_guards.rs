@@ -33,16 +33,16 @@ fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
         );
     }
 
-    let redaction = read_repo_file("packages/agent/src/domains/session/event_store/redaction.rs");
+    let redaction = read_repo_file("packages/agent/src/shared/foundation/redaction.rs");
     for required in [
         "redact_sensitive_content",
         "access_?token",
         "refresh_?token",
         "client_?secret",
         "authorization_?code",
-        "redacts_json_auth_fields",
+        "redacts_provider_and_oauth_secrets",
         "redacts_debug_description_auth_fields",
-        "redacts_unquoted_secret_key_values",
+        "redacts_unquoted_auth_fields",
     ] {
         assert!(
             redaction.contains(required),

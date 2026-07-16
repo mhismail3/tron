@@ -15,9 +15,9 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::TokenTotals;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::domains::session::event_store::{EventRow, SessionRow};
+use crate::shared::foundation::redaction::redact_sensitive_content;
 
 use super::{AppendOptions, EventStore};
-use crate::domains::session::event_store::redaction::redact_sensitive_content;
 
 fn resolve_payload_for_row(conn: &rusqlite::Connection, row: &EventRow) -> Result<Value> {
     crate::shared::storage::resolve_stored_json_value(conn, &row.payload).map_err(|error| {
