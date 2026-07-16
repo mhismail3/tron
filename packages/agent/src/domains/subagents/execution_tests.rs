@@ -214,10 +214,35 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
 #[tokio::test]
 async fn execution_validation_rejects_unbounded_or_execution_shaped_evidence() {
     let fixture = Fixture::new("validation").await;
+    let mut long_objective = launch_payload();
+    long_objective["objectiveSummary"] = json!("x".repeat(2_049));
+    let objective_error = fixture.launch_error("long-objective", long_objective).await;
+    assert!(
+        objective_error.contains("objectiveSummary exceeds"),
+        "{objective_error}"
+    );
+
     let mut too_large = launch_payload();
     too_large["evidenceRefs"] = json!([{"kind": "fixture", "id": "x".repeat(9_000)}]);
     let large = fixture.launch_error("too-large", too_large).await;
     assert!(large.contains("exceeds"), "{large}");
+
+    let mut secret = launch_payload();
+    secret["evidenceRefs"] =
+        json!([{"kind": "fixture", "id": "evidence-secret", "token": "Bearer denied"}]);
+    let secret_error = fixture.launch_error("secret", secret).await;
+    assert!(secret_error.contains("secret"), "{secret_error}");
+
+    let mut evidence_command = launch_payload();
+    evidence_command["evidenceRefs"] =
+        json!([{"kind": "fixture", "id": "evidence-command", "command": "run helper"}]);
+    let evidence_command_error = fixture
+        .launch_error("evidence-command", evidence_command)
+        .await;
+    assert!(
+        evidence_command_error.contains("execution field"),
+        "{evidence_command_error}"
+    );
 
     let mut command = launch_payload();
     command["handoffRefs"] = json!([{"command": "run hidden helper"}]);

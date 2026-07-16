@@ -1,5 +1,3 @@
-#[cfg(test)]
-use serde_json::Map;
 use serde_json::Value;
 
 use crate::engine::{EngineResourceScope, Invocation};
@@ -39,18 +37,6 @@ pub(super) fn optional_string(
         Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.clone())),
         Some(Value::String(_)) => Err(invalid(format!("{field} must not be empty"))),
         Some(_) => Err(invalid(format!("{field} must be a string"))),
-    }
-}
-
-#[cfg(test)]
-pub(super) fn optional_object(
-    payload: &Value,
-    field: &str,
-) -> Result<Option<Map<String, Value>>, CapabilityError> {
-    match payload.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::Object(value)) => Ok(Some(value.clone())),
-        Some(_) => Err(invalid(format!("{field} must be an object"))),
     }
 }
 

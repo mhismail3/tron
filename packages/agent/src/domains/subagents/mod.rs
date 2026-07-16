@@ -13,10 +13,11 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `execution` | Controlled launch/status/result/cancel lifecycle over delegated module refs |
+//! | `execution_tests` | Production-backed lifecycle, authority, idempotency, and validation coverage |
 //! | `projection` | Allowlisted, bounded, redacted read projections for list/inspect |
-//! | `service` | Read-only list/inspect projection plus test fixtures for task records |
+//! | `service` | Read-only list/inspect authorization and projection |
 //! | `validation` | Bounded payload readers and redaction/non-goal guards |
-//! | `tests` | Authority, scoping, idempotency, schema, and non-goal guards |
+//! | `tests` | Read scoping, projection, schema, and non-goal guards |
 //!
 //! # INVARIANT: delegated execution stays explicit and reviewable
 //!
@@ -47,11 +48,6 @@ pub(crate) const SUBAGENT_TASK_TOPIC: &str = "subagents.lifecycle";
 pub(crate) const READ_SCOPE: &str = "subagents.read";
 pub(crate) const WRITE_SCOPE: &str = "subagents.write";
 pub(crate) const SCHEMA_VERSION: &str = "tron.subagent_task.v1";
-
-#[cfg(test)]
-pub(crate) const CREATE_TASK_FUNCTION: &str = "subagents::create_task";
-#[cfg(test)]
-pub(crate) const UPDATE_TASK_FUNCTION: &str = "subagents::update_task";
 
 #[derive(Clone)]
 pub(crate) struct Deps {
