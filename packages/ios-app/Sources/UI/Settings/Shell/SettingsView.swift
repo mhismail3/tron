@@ -216,7 +216,7 @@ struct SettingsView: View {
             settingsState.clearServerSnapshot()
             return
         }
-        let isAlive = await connection.verifyConnection()
+        let isAlive = await dependencies.verifyConnection()
         guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
               dependencies.activeServerSelectionVersion == selectionVersion else {
             return

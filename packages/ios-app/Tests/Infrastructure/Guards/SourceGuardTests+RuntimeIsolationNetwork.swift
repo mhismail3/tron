@@ -323,9 +323,7 @@ extension SourceGuardTests {
                     violations.append("\(path): EngineConnection connect missing session-attempt directive")
                 }
             case "manualRetry":
-                if repositoryNames.contains(root) {
-                    violations.append("\(path): repository attempt derives from live EngineClient")
-                } else if containerNames.contains(root) {
+                if containerNames.contains(root) {
                     violations.append("\(path): container retry derives from direct composition")
                 } else if clientNames.contains(root) {
                     violations.append("\(path): EngineClient retry missing handled session-attempt directive")

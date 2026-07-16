@@ -456,9 +456,6 @@ private final class DeepLinkTestConnectionRepository: AppConnectionRepository {
 
     func connect() async {}
     func disconnect() async {}
-    func verifyConnection() async -> Bool { true }
-    func manualRetry() async {}
-    func setBackgroundState(_ inBackground: Bool) {}
 }
 
 @MainActor

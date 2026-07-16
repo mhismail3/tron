@@ -25,18 +25,6 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
     func disconnect() async {
         client.disconnect()
     }
-
-    func verifyConnection() async -> Bool {
-        await client.verifyConnection()
-    }
-
-    func manualRetry() async {
-        await client.manualRetry()
-    }
-
-    func setBackgroundState(_ inBackground: Bool) {
-        client.setBackgroundState(inBackground)
-    }
 }
 
 // MARK: - Default Session Event Repository

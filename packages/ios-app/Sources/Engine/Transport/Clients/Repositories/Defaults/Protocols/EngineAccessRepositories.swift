@@ -10,9 +10,6 @@ protocol AppConnectionRepository: AnyObject {
 
     func connect() async
     func disconnect() async
-    func verifyConnection() async -> Bool
-    func manualRetry() async
-    func setBackgroundState(_ inBackground: Bool)
 }
 
 // MARK: - Session Event Repository

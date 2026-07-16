@@ -466,7 +466,8 @@ of a generic invalid-response state.
 SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
 `EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
 They consume protocol-typed repositories and view models: `ChatSessionServices`
-for mounted chat sessions, `AppConnectionRepository` for connection state,
+for mounted chat sessions, `AppConnectionRepository` for observable connection
+state plus explicit connect/disconnect,
 `SessionEventRepository` for live events, `SettingsRepository` for settings
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
@@ -504,7 +505,7 @@ resource, module-activity, and package builders used by those suites.
 protocols to engine-owned clients. `DependencyContainerStorage` owns typed
 production/test resolution of defaults, Documents, and the event database;
 `DependencyContainer+RuntimeServices` owns the consumer-facing chat repository
-bundle plus paired-server-guarded app-lifecycle retry and verification.
+bundle plus paired-server-guarded background, retry, and verification policy.
 Consumer connect/disconnect belongs to `AppConnectionRepository`, while
 `DependencyContainer` keeps application assembly and active-server selection.
 Post-switch connection and settings startup is one cancel-and-replace task

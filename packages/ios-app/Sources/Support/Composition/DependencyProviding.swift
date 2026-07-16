@@ -26,7 +26,7 @@ protocol DependencyProviding: AnyObject {
     /// Agent repository for agent operations
     var agentRepository: AgentRepository { get }
 
-    /// Connection repository for app and session connection state.
+    /// Connection repository for app/session state and explicit connect/disconnect.
     var connectionRepository: any AppConnectionRepository { get }
 
     /// Live session event repository.

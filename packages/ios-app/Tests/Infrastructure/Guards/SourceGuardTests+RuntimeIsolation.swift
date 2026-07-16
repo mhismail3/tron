@@ -170,10 +170,6 @@ extension SourceGuardTests {
                 "EngineClient reconnect missing handled session-attempt directive"
             ),
             (
-                "let client = EngineClient(serverURL: url)\nlet repository = DefaultAppConnectionRepository(client: client)\nawait repository.manualRetry()",
-                "repository attempt derives from live EngineClient"
-            ),
-            (
                 "let container = DependencyContainer(storage: storage)\nawait container.connectionRepository.connect()",
                 "container connect derives from direct composition"
             ),
