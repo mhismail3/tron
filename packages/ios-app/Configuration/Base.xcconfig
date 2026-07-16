@@ -2,7 +2,6 @@
 
 // Deployment
 IPHONEOS_DEPLOYMENT_TARGET = 26.0
-SWIFT_VERSION = 6.0
 TRON_FEEDBACK_EMAIL =
 TRON_MAC_DOWNLOAD_URL = https:/$()/github.com/tron-owner/tron/releases
 
