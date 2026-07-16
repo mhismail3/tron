@@ -225,7 +225,6 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     var isProcessing = false
     var isTranscribing = false
     var inputText = ""
-    var maxRecordingDuration: TimeInterval = 300
 
     var nextTranscript = ""
     var nextData = Data(repeating: 1, count: 2_048)
@@ -239,7 +238,6 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     var loadedURL: URL?
     var transcribedMimeType: String?
     var errors: [String] = []
-    var shownErrors: [String] = []
     var onStartRecordingSuspended: (() -> Void)?
     var onTranscriptionStarted: (() -> Void)?
     private var startRecordingContinuation: CheckedContinuation<Void, Never>?
@@ -305,16 +303,6 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     func appendTranscriptionError(_ message: String) {
         errors.append(message)
     }
-
-    func showError(_ message: String) {
-        shownErrors.append(message)
-    }
-
-    func logVerbose(_ message: String) {}
-    func logDebug(_ message: String) {}
-    func logInfo(_ message: String) {}
-    func logWarning(_ message: String) {}
-    func logError(_ message: String) {}
 }
 
 private struct MockLocalizedError: LocalizedError {

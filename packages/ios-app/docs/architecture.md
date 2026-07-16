@@ -99,7 +99,10 @@ and matching database/event/settings/dependency work.
   needed. The context ring yields its slot while recorder-owned capture or
   coordinator-owned transcription is active, placing the waveform/status
   immediately beside the trailing stop/progress action, and returns only after
-  both lifecycle states end. Recording/transcription also owns the trailing
+  both lifecycle states end. `ComposerMicRecorder` owns the fixed five-minute
+  auto-stop policy; the coordinator context exposes readiness and recording
+  lifecycle actions without duplicating duration configuration.
+  Recording/transcription also owns the trailing
   action even when draft content exists; sending resumes only after both voice
   states clear. Message rendering
   preserves ordered/unordered list nesting and includes quiet blank
@@ -171,7 +174,7 @@ icon catalog, or fork-row state model.
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  model.list attachmentPolicy -> camera/photo/file data -> AttachmentImagePreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
-Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> ComposerMicCaptureEngine permission gate + bounded RMS meter -> cancellable transcription::audio -> InputBar
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup + fixed five-minute auto-stop -> ComposerMicCaptureEngine permission gate + bounded RMS meter -> cancellable transcription::audio -> InputBar
 Push:    AppDelegate token -> observable PushNotificationService -> system device::register (install + bundle + environment identity) -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel

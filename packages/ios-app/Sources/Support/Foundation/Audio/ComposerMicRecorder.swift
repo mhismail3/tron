@@ -3,6 +3,8 @@ import Foundation
 @Observable
 @MainActor
 final class ComposerMicRecorder {
+    private static let maxRecordingDuration: TimeInterval = 300
+
     enum RecorderError: LocalizedError {
         case permissionDenied
         case startFailed(String)
@@ -34,7 +36,7 @@ final class ComposerMicRecorder {
         }
     }
 
-    func startRecording(maxDuration: TimeInterval) async throws {
+    func startRecording() async throws {
         guard !isRecording else { return }
         try Task.checkCancellation()
         let hasPermission = await engine.requestPermission()
@@ -61,7 +63,7 @@ final class ComposerMicRecorder {
 
         autoStopTask?.cancel()
         autoStopTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(maxDuration))
+            try? await Task.sleep(for: .seconds(Self.maxRecordingDuration))
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 let (url, success) = self.stopRecording()
