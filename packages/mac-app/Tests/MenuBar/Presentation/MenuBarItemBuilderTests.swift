@@ -38,7 +38,7 @@ struct MenuBarItemBuilderTests {
         )
     }
 
-    @Test("paused snapshot: header reads paused, omits token, and falls back when Tailscale is missing")
+    @Test("paused snapshot: header reads paused and falls back when Tailscale is missing")
     func pausedSnapshot() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
@@ -55,7 +55,6 @@ struct MenuBarItemBuilderTests {
         } else {
             Issue.record("first item should be header")
         }
-        #expect(!items.map(\.title).contains { $0.contains("Pairing token") })
     }
 
     @Test("running snapshot: header reads running with endpoint")
@@ -66,7 +65,6 @@ struct MenuBarItemBuilderTests {
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",
-            bearerToken: "abcd1234efgh5678",
             processID: 16027,
             uptime: "01:07:42"
         )
@@ -83,7 +81,6 @@ struct MenuBarItemBuilderTests {
         } else {
             Issue.record("status should live in custom header")
         }
-        #expect(!items.map(\.title).contains { $0.contains("Pairing token") })
     }
 
     @Test("dev snapshot: header calls out active dev server")
@@ -371,16 +368,6 @@ struct MenuBarItemBuilderTests {
         } else {
             Issue.record("first item should be header")
         }
-    }
-
-    @Test("pairing token never appears in menu descriptors")
-    func pairingTokenStaysInPairingWindow() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847), bearerToken: "abc12345")
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
-        #expect(!items.contains { $0.title.contains("Pairing token") })
     }
 
     @Test("Open Tron folder uses the configured tronHome path")

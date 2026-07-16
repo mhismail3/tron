@@ -51,7 +51,6 @@ actor ServerStatusPoller {
             return ServerStatusSnapshot(
                 state: .running(version: info.version, port: info.port),
                 tailscaleIP: info.tailscaleIp ?? setup.readTailscaleIPFromSettings(),
-                bearerToken: token,
                 processID: serverProcess?.pid ?? runtimeInfo?.pid,
                 uptime: serverProcess?.uptime ?? runtimeInfo?.uptime,
                 isDevServerActive: serverProcess?.isDevServer == true
@@ -59,28 +58,22 @@ actor ServerStatusPoller {
         case .unauthorized:
             return ServerStatusSnapshot(
                 state: .unauthorized,
-                tailscaleIP: setup.readTailscaleIPFromSettings(),
-                bearerToken: token
+                tailscaleIP: setup.readTailscaleIPFromSettings()
             )
         case .unreachable:
-            return await launchdStateSnapshot(setup: setup, token: token, reason: "unreachable")
+            return await launchdStateSnapshot(setup: setup, reason: "unreachable")
         case .timeout:
-            return await launchdStateSnapshot(setup: setup, token: token, reason: "timeout")
+            return await launchdStateSnapshot(setup: setup, reason: "timeout")
         case .malformedResponse:
-            return await launchdStateSnapshot(setup: setup, token: token, reason: "malformed response")
+            return await launchdStateSnapshot(setup: setup, reason: "malformed response")
         }
     }
 
-    private static func launchdStateSnapshot(
-        setup: EnvironmentSetup,
-        token: String?,
-        reason: String
-    ) async -> ServerStatusSnapshot {
+    private static func launchdStateSnapshot(setup: EnvironmentSetup, reason: String) async -> ServerStatusSnapshot {
         let isLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
         return ServerStatusSnapshot(
             state: isLoaded ? .failed(reason: reason) : .paused,
-            tailscaleIP: setup.readTailscaleIPFromSettings(),
-            bearerToken: token
+            tailscaleIP: setup.readTailscaleIPFromSettings()
         )
     }
 }

@@ -255,8 +255,11 @@ The menu bar renders an explicit server state rather than a generic dot:
 `running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
 and `paused` is gray. `ServerStatusState` owns that tone and the running
 version/port; consumers pattern-match `ServerPingResult` directly, while
-snapshots store only orthogonal process, host, and credential metadata. The
-poller's stream buffers only its newest snapshot,
+snapshots store only orthogonal process and host metadata. The status poller
+reads the bearer token through `EnvironmentSetup.readBearerToken` only as input
+to each authenticated probe and never retains it in presentation state; the
+pairing window independently reads it fresh through the same composition seam.
+The poller's stream buffers only its newest snapshot,
 so a stalled menu consumer cannot accumulate obsolete 30-second status values;
 cancelling the menu consumer, or terminating or releasing the stream, invokes
 `onTermination` and cancels the producer task. `ServerProcessProbe` owns local

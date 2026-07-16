@@ -35,7 +35,10 @@ struct ServerStatusPollerTests {
             detectExistingInstall: { .none },
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
-            pingServer: { _ in pingResult },
+            pingServer: { receivedToken in
+                #expect(receivedToken == token)
+                return pingResult
+            },
             launchAgentManager: launchAgentManager,
             probeServerProcess: { _ in serverProcess },
             touchOnboardedSentinel: { }
@@ -64,7 +67,6 @@ struct ServerStatusPollerTests {
         #expect(snapshot.tone == .running)
         #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
         #expect(snapshot.tailscaleIP == "100.64.0.1")
-        #expect(snapshot.bearerToken == "abc123")
         #expect(snapshot.processID == 16027)
         #expect(snapshot.uptime == "01:07:42")
         #expect(snapshot.isDevServerActive == false)
@@ -94,7 +96,6 @@ struct ServerStatusPollerTests {
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .paused)
         #expect(snapshot.tone == .paused)
-        #expect(snapshot.bearerToken == nil)
     }
 
     @Test("unreachable + launchd loaded: failed")
@@ -103,7 +104,6 @@ struct ServerStatusPollerTests {
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .failed(reason: "unreachable"))
         #expect(snapshot.tone == .failed)
-        #expect(snapshot.bearerToken == "abc123")
     }
 
     @Test("timeout + launchd loaded maps to failed")
@@ -119,7 +119,6 @@ struct ServerStatusPollerTests {
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .unauthorized)
         #expect(snapshot.tone == .attention)
-        #expect(snapshot.bearerToken == "abc123")
     }
 
     @Test("malformed response + launchd loaded maps to failed")

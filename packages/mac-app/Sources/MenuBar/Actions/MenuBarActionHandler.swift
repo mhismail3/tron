@@ -324,7 +324,6 @@ final class MenuBarActionHandler {
         menuBarController?.applySnapshot(ServerStatusSnapshot(
             state: .busy(action),
             tailscaleIP: current.tailscaleIP,
-            bearerToken: current.bearerToken,
             processID: current.processID,
             uptime: current.uptime,
             isDevServerActive: current.isDevServerActive

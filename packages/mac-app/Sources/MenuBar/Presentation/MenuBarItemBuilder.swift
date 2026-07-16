@@ -207,12 +207,12 @@ enum ServerStatusState: Equatable, Sendable {
 }
 
 /// Snapshot consumed by `MenuBarItemBuilder` and produced by
-/// `ServerStatusPoller`.
+/// `ServerStatusPoller`. Probe credentials remain with the health and pairing
+/// owners and never enter this presentation value.
 struct ServerStatusSnapshot: Equatable {
     var state: ServerStatusState
     var tone: MenuBarTone { state.tone }
     var tailscaleIP: String?
-    var bearerToken: String?
     var processID: Int?
     var uptime: String?
     var isDevServerActive: Bool
@@ -220,14 +220,12 @@ struct ServerStatusSnapshot: Equatable {
     init(
         state: ServerStatusState,
         tailscaleIP: String? = nil,
-        bearerToken: String? = nil,
         processID: Int? = nil,
         uptime: String? = nil,
         isDevServerActive: Bool = false
     ) {
         self.state = state
         self.tailscaleIP = tailscaleIP
-        self.bearerToken = bearerToken
         self.processID = processID
         self.uptime = uptime
         self.isDevServerActive = isDevServerActive
