@@ -58,7 +58,7 @@ owner of distribution signing and notarization.
 
 ### Staging the bundled helper binaries
 
-`Tron.app` embeds the Rust agent inside signed helper apps at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/` and `Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/`. `Tron Server.app` has bundle id `com.tron.server` for production/local Release; `Tron Server Dev.app` has bundle id `com.tron.server.dev` for isolated Debug install testing. `tron` is the LaunchAgent entrypoint. Bundled helpers run with `--quiet` and do not inject a logging environment override; database diagnostics remain fixed engine policy. The helper binary is gitignored under each helper's `Contents/MacOS/` and produced by:
+`Tron.app` embeds the Rust agent inside signed helper apps at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/` and `Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/`. `Tron Server.app` has bundle id `com.tron.server` for production/local Release; `Tron Server Dev.app` has bundle id `com.tron.server.dev` for isolated Debug install testing. `tron` is the sole Cargo helper executable and LaunchAgent entrypoint. Bundled helpers run with `--quiet` and do not inject a logging environment override; database diagnostics remain fixed engine policy. The helper binary is gitignored under each helper's `Contents/MacOS/` and produced by:
 
 ```bash
 # Build + stage the release agent (default)

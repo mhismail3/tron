@@ -213,9 +213,7 @@ struct MacSourceGuardTests {
             .deletingLastPathComponent()
         let ignoredPayloads = [
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron-program-worker",
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns",
         ]
@@ -243,9 +241,7 @@ struct MacSourceGuardTests {
         #expect(script.contains("--clean"))
         #expect(block.contains("rm -f"))
         #expect(block.contains("$STAGING_PATH"))
-        #expect(block.contains("$WORKER_STAGING_PATH"))
         #expect(block.contains("$DEV_STAGING_PATH"))
-        #expect(block.contains("$DEV_WORKER_STAGING_PATH"))
         #expect(block.contains("$HELPER_RESOURCES/AppIcon.icns"))
         #expect(block.contains("$DEV_HELPER_RESOURCES/AppIcon.icns"))
         #expect(!block.contains("rm -rf"))

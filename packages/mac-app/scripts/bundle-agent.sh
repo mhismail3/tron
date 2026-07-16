@@ -49,8 +49,6 @@ DEV_HELPER_RESOURCES="$DEV_HELPER_CONTENTS/Resources"
 LAUNCH_AGENT_DIR="$LIBRARY_DIR/LaunchAgents"
 STAGING_PATH="$HELPER_MACOS/tron"
 DEV_STAGING_PATH="$DEV_HELPER_MACOS/tron"
-WORKER_STAGING_PATH="$HELPER_MACOS/tron-program-worker"
-DEV_WORKER_STAGING_PATH="$DEV_HELPER_MACOS/tron-program-worker"
 HELPER_INFO_PLIST="$HELPER_CONTENTS/Info.plist"
 DEV_HELPER_INFO_PLIST="$DEV_HELPER_CONTENTS/Info.plist"
 LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.plist"
@@ -80,7 +78,7 @@ done
 # --- clean mode ----------------------------------------------------------
 
 if [ "$do_clean" -eq 1 ]; then
-    rm -f "$STAGING_PATH" "$WORKER_STAGING_PATH" "$DEV_STAGING_PATH" "$DEV_WORKER_STAGING_PATH" \
+    rm -f "$STAGING_PATH" "$DEV_STAGING_PATH" \
         "$HELPER_RESOURCES/AppIcon.icns" "$DEV_HELPER_RESOURCES/AppIcon.icns"
     echo "cleaned ignored staged helper payloads"
     exit 0

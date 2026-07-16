@@ -9,9 +9,7 @@ DerivedData/
 
 # Generated helper payloads are staging/build outputs, never committed
 Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron
-Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker
 Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron
-Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron-program-worker
 Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns
 Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns
 
