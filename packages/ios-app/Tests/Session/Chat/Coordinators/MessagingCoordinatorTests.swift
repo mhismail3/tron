@@ -413,6 +413,10 @@ final class MockMessagingContext: MessagingContext {
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
     var agentPhase: AgentPhase = .idle
+    var isProcessing: Bool {
+        get { agentPhase.isProcessing }
+        set { agentPhase = newValue ? .processing : .idle }
+    }
     var draftStore: DraftStore?
     var currentTurn: Int = 0
     var sessionId: String = "test-session"

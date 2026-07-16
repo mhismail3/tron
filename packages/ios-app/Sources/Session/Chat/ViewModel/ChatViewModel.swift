@@ -3,7 +3,6 @@ import PhotosUI
 import UIKit
 
 // MARK: - Chat View Model
-// Note: CapabilityInvocationRecord is defined in EventStoreManager.swift
 
 @Observable
 @MainActor
@@ -14,6 +13,10 @@ final class ChatViewModel {
     var messages: [ChatMessage] = []
     /// Agent lifecycle phase for the primitive chat loop.
     var agentPhase: AgentPhase = .idle
+    var isProcessing: Bool {
+        get { agentPhase.isProcessing }
+        set { agentPhase = newValue ? .processing : .idle }
+    }
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
@@ -76,7 +79,7 @@ final class ChatViewModel {
         animationCoordinator.makeCapabilityInvocationVisible(invocationId)
     }
 
-    /// Logging methods (LoggingContext)
+    /// Logging methods (ChatCoordinatorContext)
     func logVerbose(_ message: String) {
         logger.verbose(message, category: .events)
     }
@@ -97,7 +100,7 @@ final class ChatViewModel {
         logger.error(message, category: .events)
     }
 
-    /// Show error to user (required by LoggingContext, used by all coordinators)
+    /// Show error to user (required by ChatCoordinatorContext).
     func showError(_ message: String) {
         handleError(message, severity: .fatal)
     }
@@ -180,9 +183,6 @@ final class ChatViewModel {
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
-
-    /// Track capability invocations for the current turn (for display purposes)
-    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end

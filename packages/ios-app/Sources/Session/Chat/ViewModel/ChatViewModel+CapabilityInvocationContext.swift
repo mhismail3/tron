@@ -10,7 +10,6 @@ extension ChatViewModel: CapabilityInvocationContext {
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
     // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
-    // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
 
     // MARK: - Protocol Methods
 

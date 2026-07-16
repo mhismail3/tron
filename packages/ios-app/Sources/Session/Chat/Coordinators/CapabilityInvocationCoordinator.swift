@@ -35,14 +35,6 @@ final class CapabilityInvocationCoordinator {
         context.runningCapabilityInvocationCount += 1
         context.makeCapabilityInvocationVisible(pluginResult.invocationId)
 
-        let record = CapabilityInvocationRecord(
-            invocationId: pluginResult.invocationId,
-            modelPrimitiveName: pluginResult.modelPrimitiveName,
-            arguments: "",
-            identity: pluginResult.identity
-        )
-        context.currentTurnCapabilityInvocations.append(record)
-
         let invocationStartedData = UIUpdateQueue.CapabilityInvocationStartData(
             invocationId: pluginResult.invocationId,
             modelPrimitiveName: pluginResult.modelPrimitiveName,
@@ -87,9 +79,6 @@ final class CapabilityInvocationCoordinator {
                 context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
             }
 
-            if let idx = context.currentTurnCapabilityInvocations.firstIndex(where: { $0.invocationId == pluginResult.invocationId }) {
-                context.currentTurnCapabilityInvocations[idx].arguments = pluginResult.formattedArguments
-            }
             return
         }
 
@@ -101,14 +90,6 @@ final class CapabilityInvocationCoordinator {
         context.currentCapabilityInvocationMessages[message.id] = message
         context.runningCapabilityInvocationCount += 1
         context.makeCapabilityInvocationVisible(pluginResult.invocationId)
-
-        let record = CapabilityInvocationRecord(
-            invocationId: pluginResult.invocationId,
-            modelPrimitiveName: pluginResult.modelPrimitiveName,
-            arguments: pluginResult.formattedArguments,
-            identity: pluginResult.identity
-        )
-        context.currentTurnCapabilityInvocations.append(record)
 
         let invocationStartedData = UIUpdateQueue.CapabilityInvocationStartData(
             invocationId: pluginResult.invocationId,
@@ -129,11 +110,6 @@ final class CapabilityInvocationCoordinator {
 
         context.finalizeThinkingMessageIfNeeded()
         context.resetThinkingForNewBlock()
-
-        if let idx = context.currentTurnCapabilityInvocations.firstIndex(where: { $0.invocationId == pluginResult.invocationId }) {
-            context.currentTurnCapabilityInvocations[idx].result = pluginResult.displayResult
-            context.currentTurnCapabilityInvocations[idx].isError = !pluginResult.success
-        }
 
         let invocationCompletedData = UIUpdateQueue.CapabilityInvocationEndData(
             invocationId: pluginResult.invocationId,

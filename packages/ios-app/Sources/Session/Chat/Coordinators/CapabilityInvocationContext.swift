@@ -1,17 +1,15 @@
 import Foundation
 
+/// Shared capability state consumed by invocation and turn lifecycle coordinators.
+@MainActor
+protocol CapabilityInvocationStateTracking: AnyObject {
+    var currentCapabilityInvocationMessages: [UUID: ChatMessage] { get set }
+}
+
 /// Protocol defining the context required by CapabilityInvocationCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of capability invocation event handling.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display
-/// - CapabilityInvocationStateTracking: Capability invocation state (currentCapabilityInvocationMessages, currentTurnCapabilityInvocations, etc.)
-/// - MessageMutating: Centralized message array mutations with automatic index sync
-///
-/// Note: Streaming methods (flushPendingTextUpdates, finalizeStreamingMessage) are declared
-/// directly rather than inheriting StreamingManaging, since resetStreamingManager is not needed.
 @MainActor
-protocol CapabilityInvocationContext: LoggingContext, CapabilityInvocationStateTracking, MessageMutating {
+protocol CapabilityInvocationContext: ChatCoordinatorContext, CapabilityInvocationStateTracking, MessageMutating {
 
     // MARK: - Messages State
 

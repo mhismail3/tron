@@ -194,6 +194,10 @@ final class MockConnectionContext: ConnectionContext {
     // MARK: - State
     var sessionId: String = "test-session"
     var agentPhase: AgentPhase = .idle
+    var isProcessing: Bool {
+        get { agentPhase.isProcessing }
+        set { agentPhase = newValue ? .processing : .idle }
+    }
     var shouldDismiss: Bool = false
     var isConnected: Bool = false
     var isReconstructing: Bool = false

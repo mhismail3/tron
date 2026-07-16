@@ -4,13 +4,11 @@ import Foundation
 ///
 /// This protocol allows ConnectionCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with connection and session state.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display (showError)
-/// - SessionIdentifiable: Session ID access
-/// - ProcessingTrackable: Processing state and session list updates
 @MainActor
-protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, LocalChatNotificationPresenting {
+protocol ConnectionContext: ChatCoordinatorContext, LocalChatNotificationPresenting {
+    var sessionId: String { get }
+    var isProcessing: Bool { get set }
+
     /// Whether the view should dismiss (e.g., session not found)
     var shouldDismiss: Bool { get set }
 
@@ -43,6 +41,8 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
 
     /// Drain events that were buffered during reconstruction
     func drainEventBuffer()
+
+    func setSessionProcessing(_ isProcessing: Bool)
 }
 
 /// Coordinates session connection, reconnection, and state reconstruction for ChatViewModel.

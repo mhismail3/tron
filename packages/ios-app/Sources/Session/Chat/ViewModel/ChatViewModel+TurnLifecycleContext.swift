@@ -10,11 +10,9 @@ extension ChatViewModel: TurnLifecycleContext {
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
     // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
-    // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
     // - thinkingMessageId: UUID?
     // - turnStartMessageIndex: Int?
     // - firstTextMessageIdForTurn: UUID?
-    // - isProcessing: Bool
 
     /// ID of the currently streaming message (TurnLifecycleContext)
     var streamingMessageId: UUID? {

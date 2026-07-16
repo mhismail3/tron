@@ -3,18 +3,6 @@ import Foundation
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 // Do NOT define a local logger property - it would shadow the global one
 
-// MARK: - Capability Call Record (for persistence)
-
-/// Tracks capability invocations during a turn for event-sourced persistence
-struct CapabilityInvocationRecord {
-    let invocationId: String
-    let modelPrimitiveName: String
-    var arguments: String
-    var identity: CapabilityIdentity = CapabilityIdentity()
-    var result: String?
-    var isError: Bool = false
-}
-
 // MARK: - Event Store Manager
 
 /// Central manager for event-sourced session state

@@ -2,30 +2,15 @@ import Foundation
 import PhotosUI
 import SwiftUI
 
-/// Protocol for chat contexts that can render temporary local timeline errors.
-@MainActor
-protocol LocalChatNotificationPresenting: AnyObject {
-    func appendLocalError(
-        dedupKey: String,
-        title: String,
-        message: String,
-        suggestion: String?
-    )
-}
-
 /// Protocol defining the context required by MessagingCoordinator.
 ///
 /// This protocol allows MessagingCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with message sending and state.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display (showError)
-/// - SessionIdentifiable: Session ID access
-/// - ProcessingTrackable: Processing state and session list updates
-/// - StreamingManaging: Streaming state management
-/// - SessionActivityUpdating: session activity summary updates
 @MainActor
-protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, SessionActivityUpdating, LocalChatNotificationPresenting {
+protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenting {
+    var sessionId: String { get }
+    var isProcessing: Bool { get set }
+
     /// The current input text
     var inputText: String { get set }
 
@@ -52,6 +37,11 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Abort the agent on the server
     func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws
+
+    func setSessionProcessing(_ isProcessing: Bool)
+    func resetStreamingManager()
+    func finalizeStreamingMessage()
+    func updateSessionActivitySummary(lastUserPrompt: String?, lastAssistantResponse: String?)
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)

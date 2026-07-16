@@ -2,15 +2,8 @@ import Foundation
 
 /// Protocol defining the context required by TurnLifecycleCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of turn lifecycle handling.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display
-/// - ProcessingTrackable: Processing state and setSessionProcessing
-/// - StreamingManaging: Streaming state management
-/// - CapabilityInvocationStateTracking: Capability invocation state (currentCapabilityInvocationMessages, currentTurnCapabilityInvocations, etc.)
-///
 @MainActor
-protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, CapabilityInvocationStateTracking, MessageMutating {
+protocol TurnLifecycleContext: ChatCoordinatorContext, CapabilityInvocationStateTracking, MessageMutating {
 
     // MARK: - Turn Tracking State
 
@@ -28,6 +21,10 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
 
     /// Whether there is active streaming (streamingMessageId != nil && !streamingText.isEmpty)
     var hasActiveStreaming: Bool { get }
+
+    func flushPendingTextUpdates()
+    func finalizeStreamingMessage()
+    func resetStreamingManager()
 
     // MARK: - Session State
 
@@ -71,6 +68,9 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
 
     /// Persist the context-owned accumulated token totals and this turn's context size.
     func persistAccumulatedSessionTokens(lastTurnInputTokens: Int) async throws
+
+    /// Update the session's processing state in the session list/database.
+    func setSessionProcessing(_ isProcessing: Bool)
 
     /// Update session activity summary in database
     func updateSessionActivitySummary(lastAssistantResponse: String?)

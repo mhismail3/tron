@@ -237,7 +237,6 @@ extension ChatViewModel {
         agentPhase = .idle
         runningCapabilityInvocationCount = 0
         currentCapabilityInvocationMessages.removeAll()
-        currentTurnCapabilityInvocations.removeAll()
         streamingManager.reset()
         thinkingState.markStreamingComplete()
         markThinkingMessageCompleteIfNeeded()
@@ -395,16 +394,6 @@ extension ChatViewModel {
                 logger.warning("Failed to encode capability arguments for \(modelPrimitiveName): \(error.localizedDescription)", category: .events)
             }
         }
-
-        // Add to current turn capability invocations for tracking
-        var record = CapabilityInvocationRecord(
-            invocationId: capabilityInvocation.invocationId,
-            modelPrimitiveName: modelPrimitiveName,
-            arguments: argsString
-        )
-        record.result = capabilityInvocation.result
-        record.isError = capabilityInvocation.isError ?? false
-        currentTurnCapabilityInvocations.append(record)
 
         let identity = CapabilityIdentity(
             modelPrimitiveName: modelPrimitiveName,

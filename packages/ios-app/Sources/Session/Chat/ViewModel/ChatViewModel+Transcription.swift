@@ -1,8 +1,6 @@
 import Foundation
 
 extension ChatViewModel: ChatTranscriptionContext {
-    var isProcessing: Bool { agentPhase.isProcessing }
-
     func requireTranscriptionReady() async throws {
         let models = try await services.transcription.listModels().models
         guard let model = models.first(where: \.default) ?? models.first else {
