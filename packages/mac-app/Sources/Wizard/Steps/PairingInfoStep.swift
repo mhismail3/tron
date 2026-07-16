@@ -235,10 +235,9 @@ struct PairingInfoStep: View {
         }
 
         let pingResult = await setup.pingServer(token)
-        let info: ServerInfo
         switch pingResult {
-        case .success(let serverInfo):
-            info = serverInfo
+        case .success:
+            break
         case .unauthorized:
             fail(.tokenRejected)
             return
@@ -255,7 +254,6 @@ struct PairingInfoStep: View {
         guard let host = firstNonEmpty(
             liveTailscale.displayIP,
             state.tailscaleStatus?.displayIP,
-            info.tailscaleIp,
             setup.readTailscaleIPFromSettings()
         ) else {
             fail(.noTailscaleIP)
@@ -264,7 +262,12 @@ struct PairingInfoStep: View {
 
         setup.cacheTailscaleIP(host)
 
-        let payload = PairingPayload(host: host, port: info.port, token: token, label: LocalComputerName.current())
+        let payload = PairingPayload(
+            host: host,
+            port: setup.serverPort,
+            token: token,
+            label: LocalComputerName.current()
+        )
         guard let url = PairingURLBuilder.makeURL(payload),
               let qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) else {
             fail(.qrGenerationFailed)

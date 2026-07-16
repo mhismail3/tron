@@ -106,13 +106,10 @@ enum ExistingInstallStatus: Equatable, Sendable {
     case registered(version: String?)
 }
 
-/// Subset of `system::ping` the wrapper needs. Decoded from the WS engine protocol
-/// response by `ServerPing`.
-struct ServerInfo: Equatable, Sendable {
+/// Canonical `system::ping` projection needed by the wrapper after the decoder
+/// validates the complete required response shape.
+struct ServerPingInfo: Equatable, Sendable {
     var version: String
-    var port: Int
-    var tailscaleIp: String?
-    var paired: Bool
 }
 
 /// Pairing payload shared with the iOS app via the

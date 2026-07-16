@@ -409,8 +409,8 @@ struct InstallStep: View {
         installStatusText = "Checking..."
         let token = setup.readBearerToken()
         switch await setup.pingServer(token) {
-        case .success(let info):
-            installStatusText = "Running on port \(info.port)"
+        case .success:
+            installStatusText = "Running on port \(setup.serverPort)"
         case .unauthorized:
             installStatusText = "Running; token needs refresh"
         case .unreachable:

@@ -6,7 +6,7 @@ import Testing
 struct ServerHealthAwaiterTests {
     @Test("returns success as soon as ping reports healthy")
     func returnsSuccess() async {
-        let expected = ServerInfo(version: "0.1.0-beta.7", port: 9847, paired: true)
+        let expected = ServerPingInfo(version: "0.1.0-beta.7")
         let calls = PingCallCounter(results: [
             .unreachable,
             .success(expected),

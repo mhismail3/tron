@@ -8,27 +8,47 @@ import Testing
 /// JSON-shape edge lives.
 @Suite("ServerPing.decodeFrame")
 struct ServerPingDecodeTests {
-    @Test("matching response projects the full server result")
-    func matchingResponseProjectsServerInfo() {
+    @Test("matching canonical response projects the server version")
+    func matchingCanonicalResponseProjectsServerVersion() {
         let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"pong":true,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}}}
         """
-        let expected = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
+        let expected = ServerPingInfo(version: "0.5.0")
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
     }
 
-    @Test("missing optional fields use defaults")
-    func missingOptionalFields() {
+    @Test("missing canonical ping fields is malformed")
+    func missingCanonicalFieldsIsMalformed() {
         let body = """
         {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{}}}}
         """
-        let expected = ServerInfo(
-            version: "",
-            port: TronPaths.defaultServerPort,
-            tailscaleIp: nil,
-            paired: false
-        )
-        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .malformed)
+    }
+
+    @Test("false pong or compatibility is malformed")
+    func falsePongOrCompatibilityIsMalformed() {
+        let falsePong = """
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"pong":false,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}}}
+        """
+        let incompatible = falsePong
+            .replacingOccurrences(of: "\"pong\":false", with: "\"pong\":true")
+            .replacingOccurrences(of: "\"compatible\":true", with: "\"compatible\":false")
+
+        #expect(ServerPing.decodeFrame(data: Data(falsePong.utf8)) == .malformed)
+        #expect(ServerPing.decodeFrame(data: Data(incompatible.utf8)) == .malformed)
+    }
+
+    @Test("numeric booleans and boolean protocol versions are malformed")
+    func bridgedJSONScalarTypesAreMalformed() {
+        let numericBooleans = """
+        {"type":"response","id":"mac-system-ping","ok":1,"result":{"child":{"value":{"pong":1,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":1}}}}
+        """
+        let booleanProtocols = """
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"pong":true,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":true,"minClientProtocolVersion":false,"compatible":true}}}}
+        """
+
+        #expect(ServerPing.decodeFrame(data: Data(numericBooleans.utf8)) == .malformed)
+        #expect(ServerPing.decodeFrame(data: Data(booleanProtocols.utf8)) == .malformed)
     }
 
     @Test("malformed JSON is classified")

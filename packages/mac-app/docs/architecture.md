@@ -233,8 +233,9 @@ step persistence.
 The Pairing step does not require a pre-existing user profile. It reads the
 agent-issued `auth.json` bearer token, confirms the server is answering
 `system::ping`, and resolves the host in this order: a fresh Tailscale probe,
-the wizard's latest Tailscale state, the ping response, then the settings
-cache. The selected host is cached best-effort in
+the wizard's latest Tailscale state, then the settings cache. The configured
+`EnvironmentSetup.serverPort` remains the pairing and local-process owner; ping
+does not duplicate connection metadata. The selected host is cached best-effort in
 `profiles/user/profile.toml`; a cache write failure does not invalidate the QR
 payload.
 The QR/manual payload builder accepts only a bare DNS name, IPv4 address, or
@@ -265,9 +266,12 @@ The menu bar renders an explicit server state rather than a generic dot:
 and `paused` is gray. `ServerStatusState` owns that tone and the running
 version/port; the menu icon and header consume the same tone and map it to
 their context-specific colors. Consumers pattern-match `ServerPingResult`
-directly, while snapshots store only orthogonal process and host metadata. `ServerPing.decodeFrame`
-owns both ping-frame classification and `ServerInfo` projection, parsing each
-WebSocket frame once. The status poller,
+directly, while snapshots store only orthogonal process and host metadata.
+`ServerPing.decodeFrame` parses each WebSocket frame once, requires the
+canonical pong, timestamp, server/protocol versions, minimum client protocol,
+and compatibility fields, and projects only the server version. The configured
+port and profile-backed Tailscale cache stay with `EnvironmentSetup`; `paired`
+belongs to `system::get_info`, not the ping response. The status poller,
 pairing window, log window, and feedback action each read the bearer token
 through `EnvironmentSetup.readBearerToken` at the point of use and never retain
 it in presentation state. Every Mac token read rejects `auth.json` when group

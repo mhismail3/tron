@@ -40,13 +40,14 @@ struct ServerStatusPoller: Sendable {
         let result = await setup.pingServer(token)
         switch result {
         case .success(let info):
+            let port = setup.serverPort
             async let launchAgentRuntime = setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
-            async let portProcess = setup.probeServerProcess(info.port)
+            async let portProcess = setup.probeServerProcess(port)
             let runtimeInfo = await launchAgentRuntime
             let serverProcess = await portProcess
             return ServerStatusSnapshot(
-                state: .running(version: info.version, port: info.port),
-                tailscaleIP: info.tailscaleIp ?? setup.readTailscaleIPFromSettings(),
+                state: .running(version: info.version, port: port),
+                tailscaleIP: setup.readTailscaleIPFromSettings(),
                 processID: serverProcess?.pid ?? runtimeInfo?.pid,
                 uptime: serverProcess?.uptime ?? runtimeInfo?.uptime,
                 isDevServerActive: serverProcess?.isDevServer == true

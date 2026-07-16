@@ -8,6 +8,7 @@ struct ServerStatusPollerTests {
         token: String? = nil,
         pingResult: ServerPingResult = .unreachable,
         tailscaleFromSettings: String? = nil,
+        serverPort: Int = 9847,
         launchAgentLoaded: Bool = false,
         serverProcess: ServerProcessInfo? = nil
     ) -> EnvironmentSetup {
@@ -23,7 +24,7 @@ struct ServerStatusPollerTests {
             settingsPath: tmp,
             launchAgentPlistPath: tmp,
             launchAgentLabel: "com.tron.server",
-            serverPort: 9847,
+            serverPort: serverPort,
             canManageLaunchAgent: true,
             wrapperLockPath: tmp.appendingPathComponent(".mac-wrapper.com.tron.mac.lock"),
             onboardedSentinelExists: { false },
@@ -40,7 +41,10 @@ struct ServerStatusPollerTests {
                 return pingResult
             },
             launchAgentManager: launchAgentManager,
-            probeServerProcess: { _ in serverProcess },
+            probeServerProcess: { port in
+                #expect(port == serverPort)
+                return serverProcess
+            },
             touchOnboardedSentinel: { }
         )
     }
@@ -61,11 +65,13 @@ struct ServerStatusPollerTests {
     func runningSnapshot() async throws {
         let setup = Self.makeSetup(
             token: "abc123",
-            pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true))
+            pingResult: .success(ServerPingInfo(version: "0.5.0")),
+            tailscaleFromSettings: "100.64.0.1",
+            serverPort: 19047
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state.tone == .running)
-        #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
+        #expect(snapshot.state == .running(version: "0.5.0", port: 19047))
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.processID == 16027)
         #expect(snapshot.uptime == "01:07:42")
@@ -76,7 +82,8 @@ struct ServerStatusPollerTests {
     func devTakeoverRuntimeSnapshot() async throws {
         let setup = Self.makeSetup(
             token: "abc123",
-            pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)),
+            pingResult: .success(ServerPingInfo(version: "0.5.0")),
+            tailscaleFromSettings: "100.64.0.1",
             serverProcess: ServerProcessInfo(
                 pid: 24680,
                 uptime: "00:00:09",
@@ -132,7 +139,7 @@ struct ServerStatusPollerTests {
     func cachedTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",
-            pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: nil, paired: false)),
+            pingResult: .success(ServerPingInfo(version: "0.5.0")),
             tailscaleFromSettings: "100.99.99.99"
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)

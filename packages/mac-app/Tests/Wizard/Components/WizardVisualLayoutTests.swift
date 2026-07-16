@@ -319,6 +319,7 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("state.tailscaleStatus?.displayIP"))
         #expect(source.contains("setup.cacheTailscaleIP(host)"))
         #expect(source.contains("setup.readTailscaleIPFromSettings()"))
+        #expect(source.contains("port: setup.serverPort"))
         #expect(source.contains("@State private var resolvedQRCode: NSImage?"))
         #expect(source.contains("private var shouldShowLoading"))
         #expect(source.contains("private var shouldShowResolvedPairing"))

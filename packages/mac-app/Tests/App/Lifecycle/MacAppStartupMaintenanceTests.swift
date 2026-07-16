@@ -40,7 +40,7 @@ struct MacAppStartupMaintenanceTests {
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
             pingServer: { _ in
-                pingResult ?? .success(ServerInfo(version: currentVersion.canonicalVersion, port: 9847, paired: true))
+                pingResult ?? .success(ServerPingInfo(version: currentVersion.canonicalVersion))
             },
             serverStartHealthCheckAttempts: 1,
             serverStartHealthCheckDelayNanoseconds: 0,
