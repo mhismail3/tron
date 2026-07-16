@@ -264,7 +264,9 @@ The menu bar renders an explicit server state rather than a generic dot:
 `running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
 and `paused` is gray. `ServerStatusState` owns that tone and the running
 version/port; consumers pattern-match `ServerPingResult` directly, while
-snapshots store only orthogonal process and host metadata. The status poller,
+snapshots store only orthogonal process and host metadata. `ServerPing.decodeFrame`
+owns both ping-frame classification and `ServerInfo` projection, parsing each
+WebSocket frame once. The status poller,
 pairing window, log window, and feedback action each read the bearer token
 through `EnvironmentSetup.readBearerToken` at the point of use and never retain
 it in presentation state. `MenuBarController` owns the setup used to compose

@@ -153,24 +153,17 @@ enum ServerPing {
         if json["error"] != nil || json["ok"] as? Bool == false {
             return .error
         }
-        guard let info = decode(data: data, defaultPort: defaultPort) else {
-            return .malformed
-        }
-        return .result(info)
-    }
-
-    static func decode(data: Data, defaultPort: Int = TronPaths.defaultServerPort) -> ServerInfo? {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              let result = json["result"] as? [String: Any],
+        guard let result = json["result"] as? [String: Any],
               let child = result["child"] as? [String: Any],
               let value = child["value"] as? [String: Any] else {
-            return nil
+            return .malformed
         }
-        let serverVersion = value["serverVersion"] as? String ?? ""
-        let port = value["port"] as? Int ?? defaultPort
-        let tailscaleIp = value["tailscaleIp"] as? String
-        let paired = value["paired"] as? Bool ?? false
-        return ServerInfo(version: serverVersion, port: port, tailscaleIp: tailscaleIp, paired: paired)
+        return .result(ServerInfo(
+            version: value["serverVersion"] as? String ?? "",
+            port: value["port"] as? Int ?? defaultPort,
+            tailscaleIp: value["tailscaleIp"] as? String,
+            paired: value["paired"] as? Bool ?? false
+        ))
     }
 
     private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {

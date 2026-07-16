@@ -2,66 +2,39 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// Tests for the engine protocol response decoder behind `ServerPing`. The
+/// Tests for the engine protocol frame decoder behind `ServerPing`. The
 /// network ping itself is not unit-tested (URLSession mocking is
 /// expensive); we cover the decode path which is where every
 /// JSON-shape edge lives.
-@Suite("ServerPing.decode")
+@Suite("ServerPing.decodeFrame")
 struct ServerPingDecodeTests {
-    @Test("happy path: full result object")
-    func happyDecode() throws {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
-        """
-        let info = try #require(ServerPing.decode(data: Data(body.utf8)))
-        #expect(info.version == "0.5.0")
-        #expect(info.port == 9847)
-        #expect(info.tailscaleIp == "100.64.0.1")
-        #expect(info.paired == true)
-    }
-
-    @Test("missing optional fields use defaults")
-    func missingOptionalFields() throws {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{}}}}
-        """
-        let info = try #require(ServerPing.decode(data: Data(body.utf8)))
-        #expect(info.version == "")
-        #expect(info.port == TronPaths.defaultServerPort)
-        #expect(info.tailscaleIp == nil)
-        #expect(info.paired == false)
-    }
-
-    @Test("error response (no result) returns nil")
-    func errorResponseReturnsNil() throws {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":false,"error":{"code":"CAPABILITY_NOT_FOUND","message":"capability not found"}}
-        """
-        #expect(ServerPing.decode(data: Data(body.utf8)) == nil)
-    }
-
-    @Test("malformed JSON returns nil")
-    func malformedJSONReturnsNil() throws {
-        #expect(ServerPing.decode(data: Data("garbage".utf8)) == nil)
-        #expect(ServerPing.decode(data: Data()) == nil)
-    }
-
-    @Test("paired defaults to false when field is missing")
-    func pairedDefaults() throws {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":1234}}}}
-        """
-        let info = try #require(ServerPing.decode(data: Data(body.utf8)))
-        #expect(info.paired == false)
-    }
-
-    @Test("response frame decodes string-id server response")
-    func responseFrameDecodesStringID() {
+    @Test("matching response projects the full server result")
+    func matchingResponseProjectsServerInfo() {
         let body = """
         {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
         """
         let expected = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
+    }
+
+    @Test("missing optional fields use defaults")
+    func missingOptionalFields() {
+        let body = """
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{}}}}
+        """
+        let expected = ServerInfo(
+            version: "",
+            port: TronPaths.defaultServerPort,
+            tailscaleIp: nil,
+            paired: false
+        )
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
+    }
+
+    @Test("malformed JSON is classified")
+    func malformedJSONIsClassified() {
+        #expect(ServerPing.decodeFrame(data: Data("garbage".utf8)) == .malformed)
+        #expect(ServerPing.decodeFrame(data: Data()) == .malformed)
     }
 
     @Test("connection.established event is ignored while waiting for ping response")
