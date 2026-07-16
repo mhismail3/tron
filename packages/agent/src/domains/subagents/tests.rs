@@ -3,11 +3,12 @@ use serde_json::{Value, json};
 use super::projection::PROJECTION_STRING_BYTES;
 use super::service::{inspect_subagent_task_value, list_subagent_tasks_value};
 use super::validation::{MAX_REF_ITEMS, MAX_SUMMARY_BYTES};
-use super::{Deps, READ_SCOPE, SCHEMA_VERSION};
+use super::{READ_SCOPE, SCHEMA_VERSION};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel, SUBAGENT_TASK_KIND,
-    SUBAGENT_TASK_SCHEMA_ID, TraceId, WorkerId, builtin_resource_type_definitions,
+    EngineHostHandle, EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel,
+    SUBAGENT_TASK_KIND, SUBAGENT_TASK_SCHEMA_ID, TraceId, WorkerId,
+    builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -46,7 +47,7 @@ async fn read_operations_are_scoped_and_require_explicit_selector() {
         &[READ_SCOPE, "resource.read"],
         Some(&first.session_id),
     );
-    let error = list_subagent_tasks_value(&first.deps, &no_selector, &no_selector.payload)
+    let error = list_subagent_tasks_value(&first.host, &no_selector, &no_selector.payload)
         .await
         .expect_err("selector is required")
         .to_string();
@@ -58,8 +59,7 @@ async fn inspect_revalidates_stored_kind_and_schema_not_id_prefix() {
     let fixture = Fixture::new("schema-mismatch").await;
     let resource_id = "subagent_task:not-actually-a-subagent";
     fixture
-        .deps
-        .engine_host
+        .host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.to_owned()),
             kind: "artifact".to_owned(),
@@ -101,8 +101,7 @@ async fn read_projections_omit_redact_and_bound_untrusted_stored_payloads() {
         .collect::<Vec<_>>();
 
     fixture
-        .deps
-        .engine_host
+        .host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.to_owned()),
             kind: SUBAGENT_TASK_KIND.to_owned(),
@@ -343,7 +342,7 @@ fn static_non_goal_guards_keep_subagent_tasks_inert() {
 }
 
 struct Fixture {
-    deps: Deps,
+    host: EngineHostHandle,
     session_id: String,
     read_grant_id: AuthorityGrantId,
 }
@@ -351,12 +350,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let read_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-read"),
             &[READ_SCOPE, "resource.read"],
             &[SUBAGENT_TASK_KIND],
@@ -365,7 +362,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            host,
             session_id,
             read_grant_id,
         }
@@ -382,7 +379,7 @@ impl Fixture {
             )
             .await;
         Self {
-            deps: self.deps.clone(),
+            host: self.host.clone(),
             session_id: session_id.to_owned(),
             read_grant_id,
         }
@@ -397,7 +394,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             scopes,
             resource_kinds,
@@ -409,8 +406,7 @@ impl Fixture {
 
     async fn seed_readable_task(&self, task_id: &str) -> String {
         let resource_id = format!("{SUBAGENT_TASK_KIND}:{task_id}");
-        self.deps
-            .engine_host
+        self.host
             .create_resource(CreateResource {
                 resource_id: Some(resource_id.clone()),
                 kind: SUBAGENT_TASK_KIND.to_owned(),
@@ -467,21 +463,21 @@ impl Fixture {
 
     async fn list(&self, key: &str) -> Value {
         let invocation = self.read_invocation(key, json!({"limit": 10}));
-        list_subagent_tasks_value(&self.deps, &invocation, &invocation.payload)
+        list_subagent_tasks_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("list tasks")
     }
 
     async fn inspect(&self, key: &str, resource_id: &str) -> Value {
         let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
-        inspect_subagent_task_value(&self.deps, &invocation, &invocation.payload)
+        inspect_subagent_task_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("inspect task")
     }
 
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
         let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
-        inspect_subagent_task_value(&self.deps, &invocation, &invocation.payload)
+        inspect_subagent_task_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
@@ -501,15 +497,14 @@ impl Fixture {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("subagents-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

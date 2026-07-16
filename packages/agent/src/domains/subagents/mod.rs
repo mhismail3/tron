@@ -7,6 +7,8 @@
 //! reviewable result-merge proposal contract. Follow-ups inspect or cancel the
 //! delegated module/job pair through the module runtime binding checks; they do
 //! not silently mutate the parent conversation.
+//! Services borrow the composition-owned engine host directly and own no
+//! parallel dependency container.
 //!
 //! ## Submodules
 //!
@@ -56,11 +58,6 @@ pub(crate) const SUBAGENT_TASK_TOPIC: &str = "subagents.lifecycle";
 pub(crate) const READ_SCOPE: &str = "subagents.read";
 pub(crate) const WRITE_SCOPE: &str = "subagents.write";
 pub(crate) const SCHEMA_VERSION: &str = "tron.subagent_task.v1";
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) fn worker_module(
     _deps: &DomainRegistrationContext,

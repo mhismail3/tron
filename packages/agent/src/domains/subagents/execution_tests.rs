@@ -7,10 +7,10 @@ use super::execution::{
     prepare_delegated_module_followup, result_subagent_from_module_value,
     status_subagent_from_module_value,
 };
-use super::{Deps, READ_SCOPE, WRITE_SCOPE};
+use super::{READ_SCOPE, WRITE_SCOPE};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, SUBAGENT_TASK_KIND, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, RiskLevel, SUBAGENT_TASK_KIND, TraceId,
 };
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::test_support::make_test_context;
@@ -202,7 +202,7 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         Some(&first.session_id),
     );
     let error = cancel_subagent_value(
-        &first.deps,
+        &first.host,
         &read_only_invocation,
         &read_only_invocation.payload,
     )
@@ -229,7 +229,7 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         Some(&first.session_id),
     );
     let error = launch_subagent_value(
-        &first.deps,
+        &first.host,
         &wildcard_invocation,
         &wildcard_invocation.payload,
         &delegated_start_value(),
@@ -321,23 +321,21 @@ fn static_non_goal_guards_keep_subagent_execution_foundation_narrow() {
 
 #[derive(Clone)]
 struct Fixture {
-    deps: Deps,
+    host: EngineHostHandle,
     session_id: String,
 }
 
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
-        Self { deps, session_id }
+        Self { host, session_id }
     }
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
         Self {
-            deps: self.deps.clone(),
+            host: self.host.clone(),
             session_id: session_id.to_owned(),
         }
     }
@@ -351,7 +349,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             scopes,
             resource_kinds,
@@ -367,7 +365,7 @@ impl Fixture {
             .write_invocation(key, payload, Some(&resource_id))
             .await;
         launch_subagent_value(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             &delegated_start_value(),
@@ -382,7 +380,7 @@ impl Fixture {
             .write_invocation(key, payload, Some(&resource_id))
             .await;
         launch_subagent_value(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             &delegated_start_value(),
@@ -423,7 +421,7 @@ impl Fixture {
                 Some(resource_id),
             )
             .await;
-        prepare_delegated_module_followup(&self.deps, &invocation, &invocation.payload, operation)
+        prepare_delegated_module_followup(&self.host, &invocation, &invocation.payload, operation)
             .await
     }
 
@@ -435,7 +433,7 @@ impl Fixture {
         let invocation = self
             .write_invocation(key, payload, resource_id.as_deref())
             .await;
-        cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
+        cancel_subagent_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("cancel")
     }
@@ -448,7 +446,7 @@ impl Fixture {
         let invocation = self
             .write_invocation(key, payload, resource_id.as_deref())
             .await;
-        cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
+        cancel_subagent_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect_err("cancel should fail")
             .to_string()
@@ -533,7 +531,7 @@ impl Fixture {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
@@ -542,7 +540,7 @@ async fn derive_grant(
 ) -> AuthorityGrantId {
     static GRANT_COUNTER: AtomicUsize = AtomicUsize::new(0);
     let counter = GRANT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    deps.engine_host
+    engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(
                 AuthorityGrantId::new(format!("subagent-exec-{suffix}-{counter}")).unwrap(),
