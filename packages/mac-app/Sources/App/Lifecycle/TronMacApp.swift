@@ -29,8 +29,7 @@ struct TronMacApp: App {
                 // directly so they stay emerald even if a sub-view
                 // overrides the tint locally.
                 .tint(Color.tronEmerald)
-                // Width is pinned at 480, and wizard height is fixed
-                // to the tallest onboarding step. `RootView`
+                // The wizard canvas is pinned at 480×440. `RootView`
                 // propagates the chosen size per mode
                 // (loading/wizard/menu-bar-only); `.contentSize`
                 // below tells SwiftUI to size the window to whatever

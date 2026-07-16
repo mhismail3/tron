@@ -193,7 +193,7 @@ struct WizardShell<Content: View>: View {
                 .animation(WizardLayout.transitionAnimation, value: displayStep)
 
             // Layer 2 (pinned): bottom bar has an explicit height and
-            // absolute bottom alignment inside the 480×H canvas. Only
+            // absolute bottom alignment inside the 480×440 canvas. Only
             // its labels/styles switch with `displayStep`; the bar's
             // frame never gets remeasured by the sliding content.
             bottomBar
@@ -211,10 +211,9 @@ struct WizardShell<Content: View>: View {
                 .padding(.horizontal, WizardLayout.horizontalPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        // Fixed wizard canvas: width stays 480 and height stays at the
-        // tallest step's requirement. Lower-density pages get breathing
-        // room, and every horizontal page slide runs inside identical
-        // clipping geometry.
+        // Fixed wizard canvas: every page gets the same 480×440 viewport,
+        // so horizontal transitions cannot resize the window or change
+        // their clipping geometry.
         .frame(width: WizardLayout.width, height: WizardLayout.height)
         .configureHostingWindow { window in
             window.isMovableByWindowBackground = true

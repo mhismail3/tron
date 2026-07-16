@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Wizard visual layout tokens")
 struct WizardVisualLayoutTests {
+    @Test("wizard canvas has one fixed layout owner")
+    func wizardCanvasIsFixed() throws {
+        #expect(WizardLayout.width == 480)
+        #expect(WizardLayout.height == 440)
+
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
+        let source = try String(contentsOf: wizardView, encoding: .utf8)
+
+        #expect(source.contains(".frame(width: WizardLayout.width, height: WizardLayout.height)"))
+        #expect(!source.contains("animateHostingWindow"))
+        #expect(!source.contains("preferredHeight"))
+    }
+
     @Test("welcome page shows only centered intro copy")
     func welcomePageShowsOnlyCenteredIntroCopy() throws {
         let packageRoot = macAppRoot()

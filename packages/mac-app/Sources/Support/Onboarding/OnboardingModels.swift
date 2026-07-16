@@ -45,26 +45,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Minimum height this step needs inside the fixed wizard canvas.
-    /// `WizardShell` keeps the actual window at `WizardLayout.height`
-    /// (the tallest step's height) so horizontal page transitions always
-    /// run inside one stable viewport.
-    ///
-    /// Heights are deliberately collapsed into bands rather than tuned
-    /// per-step: the lightweight opening steps share a single lower-height
-    /// band, while the fixed shell height is set to the tallest
-    /// permissions page.
-    var preferredHeight: CGFloat {
-        switch self {
-        case .welcome: return 360
-        case .tailscale: return 360
-        case .permissions: return 360
-        case .iosBeta: return 420
-        case .install: return 440
-        case .pairingInfo: return 420
-        case .done: return 320
-        }
-    }
 }
 
 /// Discriminated source for the icon rendered in `WizardShell`'s

@@ -153,8 +153,8 @@ executable path, and launch-constraint refresh state.
 
 ### Wizard visual system
 
-The wizard uses one fixed-size glass canvas with pinned header, progress, and
-action chrome so page transitions do not resize the window. `TronTypography`,
+`WizardLayout` owns the wizard's fixed 480×440 glass canvas, with pinned header,
+progress, and action chrome so page transitions do not resize the window. `TronTypography`,
 `WizardInfoCard`, `WizardIconTextRow`, and `WizardGlassCardBackground` own the
 shared type and card language. Welcome stays visually stable; install state is
 reported on the Install step. The Permissions step owns the single Full Disk
