@@ -23,6 +23,8 @@
 //! An approved decision can satisfy a freshness/evidence requirement selected
 //! by a future package, but execution permission still comes from existing
 //! authority grants resolved by the engine host before handlers run.
+//! Handler registrations retain the composition-owned engine host directly;
+//! approval services borrow it and own no parallel dependency container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{
@@ -47,20 +49,6 @@ pub(crate) const REQUEST_FUNCTION: &str = "approval::request";
 pub(crate) const DECIDE_FUNCTION: &str = "approval::decide";
 pub(crate) const CHECK_FUNCTION: &str = "approval::check";
 
-/// Approval dependencies narrowed from server setup.
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-        }
-    }
-}
-
 /// Build the domain worker registration.
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -68,7 +56,7 @@ pub(crate) fn worker_module(
     crate::domains::registration::worker::domain_worker_module(
         WORKER,
         &[APPROVAL_LIFECYCLE_TOPIC],
-        handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        handlers::function_registrations(contract::capabilities()?, deps.engine_host.clone())?,
     )
 }
 
