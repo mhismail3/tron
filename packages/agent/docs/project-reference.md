@@ -2904,9 +2904,9 @@ The agent is a single `tron` crate. The repository-owned schedule runs its libra
 For repository CI, Cargo's default auto-discovery of top-level
 `packages/agent/tests/*.rs` files owns the integration-target fact set. The
 source-owned guard is `packages/agent/tests/repository_workflow_invariants.rs`.
-`scripts/tron ci test` derives that set from the same source layout, runs each
-target once in deterministic order, and reserves `integration` for the final
-serial invocation because it shares process-global test-server plumbing. The
+`scripts/tron.d/quality.sh::run_tests` derives that set from the same source layout,
+runs each target once in deterministic order, and reserves `integration` for the
+final serial invocation because it shares process-global test-server plumbing. The
 repository workflow invariant compares the derived schedule with
 Cargo and verifies GitHub Actions delegates to `scripts/tron ci test` rather
 than carrying a second target list.

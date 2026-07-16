@@ -1,27 +1,6 @@
 #!/bin/bash
 # quality.sh - sourced by tron; do not execute directly.
 
-run_named_test_target() {
-    local target="$1"
-
-    case "$target" in
-        integration)
-            cargo test --test integration -- --test-threads=1 --quiet 2>&1
-            ;;
-        *)
-            cargo test --test "$target" -- --quiet 2>&1
-            ;;
-    esac
-}
-
-run_named_test_targets() {
-    local target
-
-    for target in "$@"; do
-        run_named_test_target "$target" || return 1
-    done
-}
-
 discover_cargo_integration_test_targets() {
     local target_path target
     local integration_found=false
@@ -62,9 +41,19 @@ run_tests() {
         [ -n "$target" ] && test_targets+=("$target")
     done <<< "$discovered_targets"
 
-    if (cd "$RUST_WORKSPACE" \
-        && cargo test --workspace --lib --bins -- --quiet --test-threads=1 2>&1 \
-        && run_named_test_targets "${test_targets[@]}"); then
+    if (
+        cd "$RUST_WORKSPACE" || exit 1
+        cargo test --workspace --lib --bins \
+            -- --quiet --test-threads=1 2>&1 || exit 1
+        for target in "${test_targets[@]}"; do
+            if [ "$target" = integration ]; then
+                cargo test --test integration \
+                    -- --test-threads=1 --quiet 2>&1 || exit 1
+            else
+                cargo test --test "$target" -- --quiet 2>&1 || exit 1
+            fi
+        done
+    ); then
         print_success "Tests passed"
         return 0
     else
