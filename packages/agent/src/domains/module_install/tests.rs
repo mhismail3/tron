@@ -69,9 +69,6 @@ impl Fixture {
     }
 
     async fn passed_validation_report(&self, key: &str) -> String {
-        let validation_deps = crate::domains::module_validation::Deps {
-            engine_host: self.engine_host.clone(),
-        };
         let validation_grant_id = derive_grant(
             &self.engine_host,
             &format!("{key}-validation"),
@@ -100,7 +97,7 @@ impl Fixture {
         );
         let recorded =
             crate::domains::module_validation::service::record_module_validation_report_value_at(
-                &validation_deps,
+                &self.engine_host,
                 &invocation,
                 &invocation.payload,
                 default_operation_at(),
