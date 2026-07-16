@@ -114,7 +114,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
         "engine host sqlite bootstrap sequence",
         &engine_host,
         &[
-            "pub fn open_sqlite",
+            "pub(in crate::engine) fn open_sqlite",
             "prepare_for_startup",
             "open_connection",
             "checkpoint",

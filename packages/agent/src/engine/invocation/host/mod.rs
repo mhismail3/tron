@@ -31,8 +31,10 @@ use crate::engine::catalog::registry::{
     InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
     PreparedSyncInvocationDecision,
 };
+#[cfg(test)]
+use crate::engine::durability::ledger::EngineLedgerStore;
 use crate::engine::durability::ledger::{
-    EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
+    IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
 use crate::engine::durability::queue::{
     EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation,

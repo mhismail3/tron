@@ -11,21 +11,19 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`authority`] | Grants, leases, compensation, and authorization policy |
-//! | [`catalog`] | Live catalog registry, discovery, and revision changes |
-//! | [`durability`] | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
-//! | [`invocation`] | Host handle, invocation records, handler dispatch, and model-facing context |
-//! | [`kernel`] | Engine ids, definitions, shared types, and error model |
-//! | [`primitives`] | Engine-native primitive workers such as resource/grant/ui support |
-//! | [`runtime`] | Trigger dispatch, external-worker runtime, and worker protocol DTOs |
+//! | `authority` | Grants, leases, compensation, and authorization policy |
+//! | `catalog` | Live catalog registry, discovery, and revision changes |
+//! | `durability` | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
+//! | `invocation` | Host handle, invocation records, handler dispatch, and model-facing context |
+//! | `kernel` | Engine ids, definitions, shared types, and error model |
+//! | `primitives` | Engine-native primitive workers such as resource/grant/ui support |
+//! | `runtime` | Trigger dispatch, external-worker runtime, and worker protocol DTOs |
 //!
 //! ## Entry Points
 //!
-//! - [`EngineHost`] owns the in-process catalog, policy checks, invocation
-//!   lifecycle, idempotency, ledgers, queues, streams, resources, grants, and
-//!   runtime handles.
 //! - [`EngineHostHandle`] is the intent-shaped boundary used by transports,
-//!   startup, and domain services.
+//!   startup, and domain services. The raw host and live catalog remain
+//!   engine-owned composition details behind this handle.
 //! - [`EngineTriggerRuntime`] dispatches trigger-originated work through the
 //!   same canonical invocation lifecycle as direct requests.
 //! - [`EngineExternalWorkerRuntime`] owns loopback external-worker connection,
@@ -47,9 +45,10 @@
 //!   the engine-owned grant store before any handler runs;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
-//! - `EngineHost` exposes privileged `engine::*` transport functions for live
-//!   worker/client discovery, inspection, cursor watch, delegated invocation,
-//!   and promotion;
+//! - the engine-owned raw host implements privileged `engine::*` transport
+//!   functions for live worker/client discovery, inspection, cursor watch,
+//!   delegated invocation, and promotion without exposing raw composition
+//!   through the crate facade;
 //! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
@@ -143,7 +142,6 @@ pub use authority::grants::{
 };
 pub use authority::leases::{AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus};
 pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
-pub use catalog::registry::LiveCatalog;
 pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
@@ -249,9 +247,7 @@ pub use durability::streams::{
     EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
     StreamActorScope, StreamCursor,
 };
-pub use invocation::host::{
-    CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle,
-};
+pub use invocation::host::{CatalogWatchRequest, CatalogWatchResponse, EngineHostHandle};
 pub use invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,

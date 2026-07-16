@@ -10,9 +10,8 @@
 //!
 //! ## Entry Points
 //!
-//! The engine root re-exports authority store types for host construction.
-//! Runtime callers enter through `EngineHost` and `EngineHostHandle`, which
-//! resolve grants and leases before handlers run.
+//! Production callers enter through `EngineHostHandle`; the engine-owned raw
+//! host resolves grants and leases before handlers run.
 //!
 //! ## Dependency Direction
 //!

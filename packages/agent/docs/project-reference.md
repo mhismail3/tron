@@ -190,7 +190,7 @@ main.rs           Thin binary entry point
 |--------|---------|-----------|
 | `app` | CLI, startup/bootstrap, health, metrics, onboarding, and shutdown | `Cli`, `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
-| `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
+| `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel; `EngineHostHandle` is the production composition boundary while the raw host and catalog remain engine-owned | `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and the post-baseline worker lifecycle owner | `DomainRegistrationContext`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor integrations | paired-device broker |
 | `shared` | Foundation vocabulary, protocol DTOs, server context/errors, observability, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
