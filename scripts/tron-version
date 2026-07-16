@@ -245,9 +245,9 @@ check_versions() {
     check_grep_count "Mac CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
     check_grep_count "Mac TRON_CANONICAL_VERSION" 1 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
 
-    check_grep_count "iOS MARKETING_VERSION" 2 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
-    check_grep_count "iOS CURRENT_PROJECT_VERSION" 2 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
-    check_grep_count "iOS TRON_CANONICAL_VERSION" 2 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS MARKETING_VERSION" 1 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS TRON_CANONICAL_VERSION" 1 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
 
     if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"; then
         note_failure "iOS Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
