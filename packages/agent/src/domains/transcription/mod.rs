@@ -13,7 +13,7 @@
 //! | `contract` | Canonical transcription function contracts and schemas |
 //! | `deps` | Narrow dependency bundle for handler setup |
 //! | `handlers` | Operation-key bindings to domain functions |
-//! | `implementation` | Local sidecar runtime, trait boundary, and worker assets |
+//! | `implementation` | Private local sidecar runtime, trait boundary, and worker assets |
 //!
 //! ## Invariants
 //!
@@ -22,14 +22,19 @@
 //! venv and model cache under `~/.tron/internal/transcription/`, but it must
 //! not persist user audio beyond temporary files used for one request. Voice
 //! notes and media storage remain Phase 2 work.
+//! Sidecar modules stay private; this root exports only the explicit engine,
+//! result, error, and runtime-state contract used by application composition.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
-pub mod implementation;
+mod implementation;
 
 pub(crate) use deps::Deps;
-pub use implementation::*;
+pub use implementation::{
+    MlxEngine, SharedTranscriptionEngine, TranscriptionEngine, TranscriptionError,
+    TranscriptionResult, TranscriptionRuntimeState, TranscriptionRuntimeStatus,
+};
 
 use base64::Engine;
 use serde_json::{Value, json};
