@@ -64,13 +64,19 @@ struct ToastCenterTests {
         #expect(sut.toasts[0].message == "b")
     }
 
-    @Test("dismissAll empties the queue")
+    @Test("dismissAll empties the queue and cancels pending timers")
     func dismissAllEmpties() async {
-        let (sut, _) = makeSUT()
-        sut.push("a")
-        sut.push("b")
-        sut.push("c")
+        let (sut, clock) = makeSUT()
+        sut.push("a", autoDismiss: .after(.seconds(5)))
+        sut.push("b", autoDismiss: .after(.seconds(5)))
+        sut.push("c", autoDismiss: .after(.seconds(5)))
+        await yieldForAsync()
+
         sut.dismissAll()
+        #expect(sut.toasts.isEmpty)
+
+        clock.advance(by: .seconds(10))
+        await yieldForAsync()
         #expect(sut.toasts.isEmpty)
     }
 
@@ -217,17 +223,6 @@ struct ToastCenterTests {
         clock.advance(by: .seconds(10))
         await yieldForAsync()
         #expect(sut.toasts.count == 1)
-    }
-
-    // MARK: - Tests helper
-
-    @Test("clearForTesting empties state")
-    func clearForTestingEmpties() async {
-        let (sut, _) = makeSUT()
-        sut.push("a")
-        sut.push("b")
-        sut.clearForTesting()
-        #expect(sut.toasts.isEmpty)
     }
 
     @Test("dismiss cancels the auto-dismiss timer")

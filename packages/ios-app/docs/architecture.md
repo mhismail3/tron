@@ -365,7 +365,9 @@ The chat timeline owns only truthful local/session presentation state:
   spinner or explanatory timeline row.
 - Connection status is app-global. Reconnecting, disconnected, and retry
   signals route through `ToastCenter`/connection retry policy, not through
-  separate in-chat connection pills.
+  separate in-chat connection pills. `ToastCenter`'s production dismissal APIs
+  own queue and timer cancellation; focused tests inject time instead of adding
+  production test hooks.
 - Local chat errors are temporary `LocalChatNotification` timeline messages.
   Tapping opens `LocalErrorDetailSheet` only when structured details exist;
   there is no tap-to-dismiss, explicit dismiss button, timer-only dismissal, or
