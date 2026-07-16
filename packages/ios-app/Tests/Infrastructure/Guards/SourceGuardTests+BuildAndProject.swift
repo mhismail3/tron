@@ -537,6 +537,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Configuration/ProdDebug.xcconfig"),
             encoding: .utf8
         )
+        let debugConfig = try String(
+            contentsOf: iosRoot.appendingPathComponent("Configuration/Debug.xcconfig"),
+            encoding: .utf8
+        )
         let developmentDoc = try String(
             contentsOf: iosRoot.appendingPathComponent("docs/development.md"),
             encoding: .utf8
@@ -560,9 +564,10 @@ extension SourceGuardTests {
         #expect(projectYML.contains("CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements"))
         #expect(projectYML.contains("CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements"))
 
-        #expect(prodDebugConfig.contains("SWIFT_OPTIMIZATION_LEVEL = -Onone"))
-        #expect(prodDebugConfig.contains("ENABLE_TESTABILITY = YES"))
-        #expect(prodDebugConfig.contains("ONLY_ACTIVE_ARCH = YES"))
+        #expect(prodDebugConfig.contains("#include \"Debug.xcconfig\""))
+        #expect(debugConfig.contains("SWIFT_OPTIMIZATION_LEVEL = -Onone"))
+        #expect(debugConfig.contains("ENABLE_TESTABILITY = YES"))
+        #expect(debugConfig.contains("ONLY_ACTIVE_ARCH = YES"))
         #expect(prodDebugConfig.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG"))
         #expect(!prodDebugConfig.contains("BETA"))
         #expect(prodDebugConfig.contains("PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile"))

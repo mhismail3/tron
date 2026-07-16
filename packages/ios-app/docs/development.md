@@ -123,6 +123,10 @@ them to `Tron Fast` and `ProdDebug`.
 | ProdDebug | Tron Fast | Local production-app iteration (debug, production bundle ID) |
 | Prod | Tron | App Store/TestFlight (release, production bundle ID) |
 
+`Debug.xcconfig` owns the compiler and test settings shared by Beta and
+ProdDebug; each leaf configuration owns only its compilation conditions and
+product identity. `Base.xcconfig` remains common to every configuration.
+
 Use `Tron Fast` when you want Xcode's debug-speed rebuilds to install over the
 production app (`com.tron.mobile`) instead of the side-by-side beta app. It uses
 the production app icon, production bundle IDs, and production entitlements, but
