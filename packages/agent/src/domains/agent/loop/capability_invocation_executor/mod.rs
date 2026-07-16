@@ -26,6 +26,10 @@
 //! grant exists solely so unsupported-operation handling can return structured
 //! recovery guidance and persist a redacted failed trace; its operation claim
 //! cannot authorize any supported domain behavior.
+//! When the runtime installs its optional per-invocation abort registry, the
+//! registered child token is carried through the regular engine handler
+//! boundary so targeted and parent aborts stop that handler without bypassing
+//! engine lease, durable outcome, compensation, or capability-trace cleanup.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -339,6 +343,8 @@ pub async fn execute_capability_invocation(
             ctx.trace_id,
             ctx.parent_invocation_id,
             effective_args,
+            ctx.invocation_abort_registry
+                .map(|_| &per_invocation_cancel),
         )
         .await
     } else {
@@ -434,6 +440,7 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
+    cancellation: Option<&CancellationToken>,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
     let is_supported_execute_operation = model_primitive_name == "execute"
         && effective_args
@@ -535,7 +542,12 @@ async fn execute_capability_primitive_via_engine(
         }
     };
     let mut causal_context = with_agent_working_directory_metadata(
-        CausalContext::new(actor_id, ActorKind::Agent, runtime_grant.grant_id, trace_id),
+        CausalContext::new(
+            actor_id,
+            ActorKind::Agent,
+            runtime_grant.grant_id,
+            trace_id.clone(),
+        ),
         &working_directory,
     )
     .with_scope("capability.execute")
@@ -572,7 +584,28 @@ async fn execute_capability_primitive_via_engine(
         }
     }
     let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
-    let result = engine_host.invoke(invocation).await;
+    let result = match cancellation {
+        Some(cancellation) => {
+            engine_host
+                .invoke_regular_cancellable(invocation, cancellation)
+                .await
+        }
+        None => Ok(engine_host.invoke(invocation).await),
+    };
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            return capability_failure_result(
+                engine_error_to_failure(&error),
+                model_primitive_name,
+                invocation_id,
+                session_id,
+                Some(&trace_id),
+                parent_invocation_id,
+                Some(json!({ "primitiveTargetId": function_id.to_string() })),
+            );
+        }
+    };
     let result_trace_id = Some(result.trace_id.clone());
     let result_invocation_id = Some(result.invocation_id.clone());
     let replayed_from = result.replayed_from.clone();

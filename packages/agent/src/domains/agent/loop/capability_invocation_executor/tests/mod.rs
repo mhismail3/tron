@@ -17,6 +17,8 @@ use crate::shared::server::failure::{
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::{Barrier, Notify};
 
 mod grant_catalog_tests;
 mod grant_file_git_tests;
@@ -275,6 +277,184 @@ impl crate::engine::InProcessFunctionHandler for FailingCapabilityHandler {
             "simulated failure".to_owned(),
         ))
     }
+}
+
+struct InterruptedInvocation {
+    interrupted: Arc<AtomicUsize>,
+    completed: bool,
+}
+
+impl Drop for InterruptedInvocation {
+    fn drop(&mut self) {
+        if !self.completed {
+            let _ = self.interrupted.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BlockingCapabilityHandler {
+    started: Arc<Barrier>,
+    release: Arc<Notify>,
+    interrupted: Arc<AtomicUsize>,
+    completed: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl crate::engine::InProcessFunctionHandler for BlockingCapabilityHandler {
+    async fn invoke(&self, _invocation: Invocation) -> crate::engine::Result<Value> {
+        let mut invocation = InterruptedInvocation {
+            interrupted: Arc::clone(&self.interrupted),
+            completed: false,
+        };
+        self.started.wait().await;
+        self.release.notified().await;
+        invocation.completed = true;
+        let _ = self.completed.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({"content": "completed"}))
+    }
+}
+
+async fn cancellation_test_host(
+    surface: &ResolvedPrimitiveSurface,
+    handler: Arc<dyn crate::engine::InProcessFunctionHandler>,
+) -> EngineHostHandle {
+    let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+    engine_host
+        .register_worker(
+            WorkerDefinition::new(
+                WorkerId::new("capability").expect("worker id"),
+                WorkerKind::InProcess,
+                ActorId::new("capability-owner").expect("actor id"),
+                AuthorityGrantId::new("capability-grant").expect("grant id"),
+            )
+            .with_namespace_claim("capability"),
+            false,
+        )
+        .await
+        .expect("register worker");
+    let function = surface.targets_by_name["execute"].function.clone();
+    engine_host
+        .register_function(function.clone(), Some(handler), false)
+        .await
+        .expect("register function");
+    engine_host
+}
+
+async fn run_cancellation_probe(
+    surface: ResolvedPrimitiveSurface,
+    emitter: Arc<EventEmitter>,
+    parent: CancellationToken,
+    registry: Arc<InvocationAbortRegistry>,
+    engine_host: EngineHostHandle,
+    invocation_id: &'static str,
+) -> CapabilityInvocationExecutionResult {
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &parent);
+    ctx.invocation_abort_registry = Some(&registry);
+    ctx.engine_host = Some(&engine_host);
+    let call = CapabilityInvocationDraft::new(
+        invocation_id,
+        "execute",
+        payload_object(&json!({"operation": "catalog_search", "text": invocation_id})),
+    );
+    execute_capability_invocation(&call, "cancellation-session", "/tmp", &ctx).await
+}
+
+#[tokio::test]
+async fn targeted_abort_terminates_only_the_registered_sibling_and_cleans_registry() {
+    let started = Arc::new(Barrier::new(3));
+    let release = Arc::new(Notify::new());
+    let interrupted = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let surface = surface_with_echo();
+    let engine_host = cancellation_test_host(
+        &surface,
+        Arc::new(BlockingCapabilityHandler {
+            started: Arc::clone(&started),
+            release: Arc::clone(&release),
+            interrupted: Arc::clone(&interrupted),
+            completed: Arc::clone(&completed),
+        }),
+    )
+    .await;
+    let emitter = Arc::new(EventEmitter::new());
+    let parent = CancellationToken::new();
+    let registry = Arc::new(InvocationAbortRegistry::new());
+    let first = tokio::spawn(run_cancellation_probe(
+        surface.clone(),
+        Arc::clone(&emitter),
+        parent.clone(),
+        Arc::clone(&registry),
+        engine_host.clone(),
+        "call-a",
+    ));
+    let second = tokio::spawn(run_cancellation_probe(
+        surface,
+        emitter,
+        parent.clone(),
+        Arc::clone(&registry),
+        engine_host,
+        "call-b",
+    ));
+
+    started.wait().await;
+    assert_eq!(registry.len(), 2);
+    assert!(registry.abort("cancellation-session", "call-a"));
+    let first_result = first.await.expect("join targeted cancellation");
+    assert_eq!(
+        first_result.result.details.as_ref().unwrap()["failure"]["code"],
+        RUNTIME_CANCELLED
+    );
+    assert!(!second.is_finished());
+    assert!(!parent.is_cancelled());
+    assert_eq!(registry.len(), 1);
+
+    release.notify_waiters();
+    let second_result = second.await.expect("join surviving sibling");
+    assert!(!second_result.result.is_error.unwrap_or(false));
+    assert_eq!(interrupted.load(Ordering::SeqCst), 1);
+    assert_eq!(completed.load(Ordering::SeqCst), 1);
+    assert!(registry.is_empty());
+}
+
+#[tokio::test]
+async fn parent_cancellation_terminates_handler_and_cleans_registry() {
+    let started = Arc::new(Barrier::new(2));
+    let interrupted = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let surface = surface_with_echo();
+    let engine_host = cancellation_test_host(
+        &surface,
+        Arc::new(BlockingCapabilityHandler {
+            started: Arc::clone(&started),
+            release: Arc::new(Notify::new()),
+            interrupted: Arc::clone(&interrupted),
+            completed: Arc::clone(&completed),
+        }),
+    )
+    .await;
+    let parent = CancellationToken::new();
+    let registry = Arc::new(InvocationAbortRegistry::new());
+    let running = tokio::spawn(run_cancellation_probe(
+        surface,
+        Arc::new(EventEmitter::new()),
+        parent.clone(),
+        Arc::clone(&registry),
+        engine_host,
+        "parent-cancelled-call",
+    ));
+
+    started.wait().await;
+    assert_eq!(registry.len(), 1);
+    parent.cancel();
+    let result = running.await.expect("join parent cancellation");
+    assert_eq!(
+        result.result.details.as_ref().unwrap()["failure"]["code"],
+        RUNTIME_CANCELLED
+    );
+    assert_eq!(interrupted.load(Ordering::SeqCst), 1);
+    assert_eq!(completed.load(Ordering::SeqCst), 0);
+    assert!(registry.is_empty());
 }
 
 #[tokio::test]

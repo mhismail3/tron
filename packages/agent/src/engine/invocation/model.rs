@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::errors::{EngineError, Result};
@@ -480,4 +481,24 @@ mod tests {
 pub trait InProcessFunctionHandler: Send + Sync {
     /// Handle an invocation.
     async fn invoke(&self, invocation: Invocation) -> Result<Value>;
+
+    /// Handle a regular in-process invocation with cooperative cancellation.
+    ///
+    /// The default implementation cancels by dropping the handler future. A
+    /// handler that owns durable work around its dispatch must override this
+    /// method and finish that bookkeeping before returning cancellation.
+    async fn invoke_cancellable(
+        &self,
+        invocation: Invocation,
+        cancellation: &CancellationToken,
+    ) -> Result<Value> {
+        if cancellation.is_cancelled() {
+            return Err(EngineError::InvocationCancelled);
+        }
+        tokio::select! {
+            biased;
+            result = self.invoke(invocation) => result,
+            () = cancellation.cancelled() => Err(EngineError::InvocationCancelled),
+        }
+    }
 }

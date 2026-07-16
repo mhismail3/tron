@@ -22,6 +22,7 @@ use std::sync::Arc;
 use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::engine::authority::compensation::{EngineCompensationRecord, compensation_record};
 use crate::engine::authority::grants::{ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant};

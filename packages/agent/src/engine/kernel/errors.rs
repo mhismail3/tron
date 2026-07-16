@@ -166,6 +166,10 @@ pub enum EngineError {
         message: String,
     },
 
+    /// A cooperative in-process invocation was cancelled while its handler ran.
+    #[error("invocation cancelled")]
+    InvocationCancelled,
+
     /// The handler returned an application failure.
     #[error("handler failed: {0}")]
     HandlerFailed(String),

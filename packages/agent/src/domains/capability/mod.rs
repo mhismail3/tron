@@ -259,6 +259,7 @@ pub(crate) mod pool;
 
 pub(crate) use contract::{EXECUTE_MODEL_PRIMITIVE, EXECUTE_MODEL_PRIMITIVE_EFFECT};
 pub(crate) use operations::execute_value;
+use operations::execute_value_cancellable;
 pub(crate) use operations::operation_replays_through_handler;
 pub(crate) use operations::provider_result_text;
 pub(crate) use operations::supported_operation_names;
@@ -282,6 +283,7 @@ use crate::domains::session::event_store::EventStore;
 use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
 use crate::shared::server::error_mapping::capability_error_to_engine;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
@@ -333,5 +335,13 @@ impl InProcessFunctionHandler for ExecuteHandler {
         execute_value(&invocation, &self.deps)
             .await
             .map_err(capability_error_to_engine)
+    }
+
+    async fn invoke_cancellable(
+        &self,
+        invocation: Invocation,
+        cancellation: &CancellationToken,
+    ) -> Result<Value, EngineError> {
+        execute_value_cancellable(&invocation, &self.deps, cancellation).await
     }
 }

@@ -19,15 +19,23 @@
 //! Context compact/clear caller-key replay deliberately re-enters this domain
 //! instead of returning the generic engine-ledger outcome: context control owns
 //! durable requested/finalized action repair and per-invocation stop semantics.
+//! Cooperative cancellation is selected around operation dispatch only; the
+//! execute owner terminalizes its already-started trace before returning the
+//! engine's typed cancellation result.
 
+use std::future::Future;
 use std::time::Instant;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use super::Deps;
-use crate::engine::Invocation;
+use crate::engine::{EngineError, Invocation};
+use crate::shared::protocol::model_capabilities::CapabilityResult;
+use crate::shared::server::error_mapping::capability_error_to_engine;
 use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::failure::RUNTIME_CANCELLED;
 use tracing::{info, warn};
 
 mod capability_binding;
@@ -74,6 +82,8 @@ mod worker_packages;
 
 #[cfg(test)]
 mod module_program_execution_tests;
+#[cfg(test)]
+mod tests;
 
 use common::{
     compact_json, error_capability_result, internal, invalid, ok_result, optional_str,
@@ -107,6 +117,26 @@ pub(crate) async fn execute_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    execute_value_with_cancellation(invocation, deps, None).await
+}
+
+pub(super) async fn execute_value_cancellable(
+    invocation: &Invocation,
+    deps: &Deps,
+    cancellation: &CancellationToken,
+) -> Result<Value, EngineError> {
+    match execute_value_with_cancellation(invocation, deps, Some(cancellation)).await {
+        Ok(value) => Ok(value),
+        Err(error) if error.code() == RUNTIME_CANCELLED => Err(EngineError::InvocationCancelled),
+        Err(error) => Err(capability_error_to_engine(error)),
+    }
+}
+
+async fn execute_value_with_cancellation(
+    invocation: &Invocation,
+    deps: &Deps,
+    cancellation: Option<&CancellationToken>,
+) -> Result<Value, CapabilityError> {
     let attempted_operation = invocation
         .payload
         .get("operation")
@@ -127,9 +157,11 @@ pub(crate) async fn execute_value(
             session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
             "primitive execute operation bypassed trace mutation"
         );
-        let result =
-            dispatch::execute_operation(OperationId::ReplayManifest, invocation, deps, Utc::now())
-                .await?;
+        let result = await_operation(
+            dispatch::execute_operation(OperationId::ReplayManifest, invocation, deps, Utc::now()),
+            cancellation,
+        )
+        .await?;
         return result_value(result);
     }
 
@@ -141,6 +173,31 @@ pub(crate) async fn execute_value(
     let operation = attempted_operation;
     validate_execute_authority(invocation, &operation, &deps.engine_host).await?;
     let operation_at = Utc::now();
+    execute_traced_operation(
+        invocation,
+        deps,
+        &operation,
+        operation_at,
+        async {
+            operation_contract::validate_payload(&invocation.payload)?;
+            dispatch::execute_operation(operation_id, invocation, deps, operation_at).await
+        },
+        cancellation,
+    )
+    .await
+}
+
+async fn execute_traced_operation<F>(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation: &str,
+    operation_at: DateTime<Utc>,
+    dispatch: F,
+    cancellation: Option<&CancellationToken>,
+) -> Result<Value, CapabilityError>
+where
+    F: Future<Output = Result<CapabilityResult, CapabilityError>>,
+{
     let started_at = operation_at.to_rfc3339();
     let start = Instant::now();
     let mut trace_record = started_trace_record(invocation, deps, &operation, &started_at)?;
@@ -178,10 +235,7 @@ pub(crate) async fn execute_value(
         "primitive execute trace record started"
     );
 
-    let result = match operation_contract::validate_payload(&invocation.payload) {
-        Ok(()) => dispatch::execute_operation(operation_id, invocation, deps, operation_at).await,
-        Err(error) => Err(error),
-    };
+    let result = await_operation(dispatch, cancellation).await;
     match result {
         Ok(result) => {
             complete_trace_record(
@@ -211,10 +265,15 @@ pub(crate) async fn execute_value(
         }
         Err(error) => {
             let provider_error = redact_provider_visible_error(error);
+            let status = if provider_error.code() == RUNTIME_CANCELLED {
+                "cancelled"
+            } else {
+                "failed"
+            };
             complete_trace_record(
                 &mut trace_record,
                 invocation,
-                &error_capability_result(provider_error.to_string(), json!({"status": "failed"})),
+                &error_capability_result(provider_error.to_string(), json!({"status": status})),
                 Some(&provider_error),
                 start.elapsed(),
             );
@@ -223,7 +282,11 @@ pub(crate) async fn execute_value(
                 .map_err(|store_error| internal(format!("record trace failure: {store_error}")))?;
             warn!(
                 component = "agent.execute",
-                agent_event = "execute_operation_failed",
+                agent_event = if status == "cancelled" {
+                    "execute_operation_cancelled"
+                } else {
+                    "execute_operation_failed"
+                },
                 operation = %operation,
                 trace_record_id = %trace_record.id,
                 trace_id = %trace_record.trace_id,
@@ -237,6 +300,36 @@ pub(crate) async fn execute_value(
             );
             Err(provider_error)
         }
+    }
+}
+
+async fn await_operation<F>(
+    operation: F,
+    cancellation: Option<&CancellationToken>,
+) -> Result<CapabilityResult, CapabilityError>
+where
+    F: Future<Output = Result<CapabilityResult, CapabilityError>>,
+{
+    match cancellation {
+        Some(cancellation) => {
+            if cancellation.is_cancelled() {
+                return Err(cancelled_capability_error());
+            }
+            tokio::select! {
+                biased;
+                result = operation => result,
+                () = cancellation.cancelled() => Err(cancelled_capability_error()),
+            }
+        }
+        None => operation.await,
+    }
+}
+
+fn cancelled_capability_error() -> CapabilityError {
+    CapabilityError::Custom {
+        code: RUNTIME_CANCELLED.to_owned(),
+        message: "Operation cancelled".to_owned(),
+        details: Some(json!({"status": "cancelled"})),
     }
 }
 
@@ -349,135 +442,4 @@ fn redact_token_after_marker(message: &str, marker: &str) -> String {
     }
     output.push_str(remaining);
     output
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domains::session::event_store::AgentTraceListOptions;
-    use crate::engine::{
-        ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant, FunctionId,
-        InvocationId, RiskLevel, TraceId,
-    };
-    use crate::shared::server::test_support::make_test_context;
-
-    #[test]
-    fn execute_error_redaction_removes_authority_grant_tokens() {
-        let error = CapabilityError::InvalidParams {
-            message: "authority grant authority_grant_019f3a requires explicit kind selector"
-                .to_owned(),
-        };
-        let redacted = redact_provider_visible_error(error).to_string();
-
-        assert!(redacted.contains("authority grant <redacted> requires"));
-        assert!(!redacted.contains("authority_grant_019f3a"));
-    }
-    #[tokio::test]
-    async fn unsupported_operation_is_persisted_as_a_failed_trace() {
-        let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-            event_store: ctx.event_store.clone(),
-            session_manager: ctx.session_manager.clone(),
-            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
-            jobs: crate::domains::jobs::RuntimeState::new(),
-            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
-        };
-        let session_id = "unsupported-operation-trace-session";
-        let actor_id = ActorId::new(format!("agent:{session_id}")).expect("actor id");
-        let grant_id = ctx
-            .engine_host
-            .derive_authority_grant(DeriveGrant {
-                grant_id: Some(AuthorityGrantId::new("unsupported-operation-grant").unwrap()),
-                parent_grant_id: AuthorityGrantId::new("agent-capability-runtime").unwrap(),
-                subject_actor_id: Some(actor_id.clone()),
-                subject_worker_id: None,
-                subject_invocation_id: None,
-                allowed_capabilities: vec!["capability::execute".to_owned()],
-                allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
-                allowed_authority_scopes: vec!["capability.execute".to_owned()],
-                allowed_resource_kinds: Vec::new(),
-                resource_selectors: Vec::new(),
-                file_roots: vec!["/tmp".to_owned()],
-                network_policy: "none".to_owned(),
-                max_risk: RiskLevel::Medium,
-                budget: json!({"remainingInvocations": 1}),
-                expires_at: None,
-                can_delegate: false,
-                provenance: json!({"operation": "guessed_operation"}),
-                trace_id: TraceId::new("unsupported-operation-grant-trace").unwrap(),
-            })
-            .await
-            .expect("derive rejection grant")
-            .grant_id;
-        let invocation = Invocation {
-            id: InvocationId::new("unsupported-operation-invocation").expect("invocation id"),
-            function_id: FunctionId::new("capability::execute").expect("function id"),
-            delivery_mode: DeliveryMode::Sync,
-            payload: json!({
-                "operation": "guessed_operation",
-                "unsafePayload": "sensitive-fixture-value"
-            }),
-            causal_context: CausalContext::new(
-                actor_id,
-                ActorKind::Agent,
-                grant_id,
-                TraceId::new("unsupported-operation-trace").expect("trace id"),
-            )
-            .with_session_id(session_id),
-        };
-
-        let error = execute_value(&invocation, &deps)
-            .await
-            .expect_err("unsupported operation must fail");
-        assert!(error.to_string().contains("catalog_search"));
-
-        let records = ctx
-            .event_store
-            .list_trace_records(&AgentTraceListOptions {
-                session_id: Some(session_id),
-                trace_id: None,
-                operation: None,
-                status: None,
-                limit: Some(10),
-            })
-            .expect("list failed validation trace");
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].operation, "guessed_operation");
-        assert_eq!(records[0].status, "failed");
-        assert!(records[0].completed_at.is_some());
-        assert_eq!(
-            records[0].record_json["metadata"]["dev.tron"]["rawRequestStored"],
-            false
-        );
-        assert!(
-            !records[0]
-                .record_json
-                .to_string()
-                .contains("sensitive-fixture-value")
-        );
-
-        let filtered = ctx
-            .event_store
-            .list_trace_records(&AgentTraceListOptions {
-                session_id: Some(session_id),
-                trace_id: None,
-                operation: Some("guessed_operation"),
-                status: Some("failed"),
-                limit: Some(10),
-            })
-            .expect("filter failed validation trace");
-        assert_eq!(filtered.len(), 1);
-        let excluded = ctx
-            .event_store
-            .list_trace_records(&AgentTraceListOptions {
-                session_id: Some(session_id),
-                trace_id: None,
-                operation: Some("guessed_operation"),
-                status: Some("ok"),
-                limit: Some(10),
-            })
-            .expect("filter nonmatching validation trace");
-        assert!(excluded.is_empty());
-    }
 }

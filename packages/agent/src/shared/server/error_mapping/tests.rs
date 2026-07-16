@@ -11,7 +11,7 @@ use crate::shared::server::failure::{
     ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED,
     ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
     ENGINE_STORED_INVOCATION_ERROR, ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory,
-    FailureOrigin,
+    FailureOrigin, RUNTIME_CANCELLED,
 };
 
 fn assert_embedded_failure(
@@ -170,6 +170,11 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             },
             "WORKER_DISCONNECTED",
             FailureCategory::Engine,
+        ),
+        (
+            EngineError::InvocationCancelled,
+            RUNTIME_CANCELLED,
+            FailureCategory::Cancelled,
         ),
         (
             EngineError::HandlerFailed("boom".to_owned()),

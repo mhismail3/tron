@@ -52,6 +52,9 @@
 //! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
+//!   its narrow regular-handler cancellation path observes cancellation only at
+//!   the in-process handler boundary, then still releases acquired resource
+//!   leases and finalizes ledger, idempotency, and compensation records;
 //!   read-only grant inspection through the handle is reserved for domain
 //!   workers that must enforce policy against the active stored grant without
 //!   importing grant-store internals;
