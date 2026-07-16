@@ -206,14 +206,15 @@ dev_start_foreground() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            restart_installed_service_after_dev 12
+            service_start
             return 1
         fi
     fi
 
     # Restart the installed helper on ANY exit (Ctrl+C, error, normal exit).
-    # IMPORTANT: no `exec` — must run as child so EXIT trap fires
-    trap 'echo ""; restart_installed_service_after_dev 12' EXIT INT TERM
+    # The shared start owner selects the installed wrapper or contributor pair.
+    # IMPORTANT: no `exec` — must run as child so EXIT trap fires.
+    trap 'echo ""; service_start' EXIT INT TERM
 
     echo ""
     echo -e "${CYAN}Starting Tron Dev Server (takeover)${NC}"
@@ -256,7 +257,7 @@ dev_start_background() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            restart_installed_service_after_dev 12
+            service_start
             return 1
         fi
     fi
@@ -267,7 +268,7 @@ dev_start_background() {
     if ! create_app_bundle "$DEV_BUNDLE" "$DEV_SERVER_BINARY" \
         || ! codesign_bundle "$DEV_BUNDLE"; then
         print_error "Failed to prepare signed dev takeover bundle"
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
 
@@ -275,7 +276,7 @@ dev_start_background() {
     local dev_pid_file="$DEV_BACKGROUND_PID_FILE"
     if ! mkdir -p "$RUN_DIR"; then
         print_error "Failed to create dev takeover runtime directory"
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
     if {
@@ -286,13 +287,13 @@ dev_start_background() {
         :
     else
         print_error "Failed to initialize dev takeover log"
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
 
     if ! create_dev_launchd_plist; then
         print_error "Failed to create dev takeover LaunchAgent"
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
     if launchctl bootstrap "gui/$(id -u)" "$DEV_PLIST_PATH" 2>>"$dev_log"; then
@@ -303,7 +304,7 @@ dev_start_background() {
             print_status "Last dev server log lines ($dev_log):"
             tail -n 80 "$dev_log" >&2 || true
         fi
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
 
@@ -367,7 +368,7 @@ dev_start_background() {
         else
             print_warning "Dev server log was empty: $dev_log"
         fi
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
 }
@@ -397,7 +398,7 @@ dev_stop() {
         # If it was kill -9, restart manually:
         sleep 1
         if ! service_is_running; then
-            restart_installed_service_after_dev 12
+            service_start
         fi
     else
         if launchd_is_loaded "$DEV_PLIST_NAME"; then
@@ -406,7 +407,7 @@ dev_stop() {
             rm -f "$DEV_BACKGROUND_PID_FILE"
             print_success "Dev takeover launchd job stopped"
             if ! service_is_running; then
-                restart_installed_service_after_dev 12
+                service_start
             fi
         else
             rm -f "$DEV_BACKGROUND_PID_FILE"

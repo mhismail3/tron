@@ -114,11 +114,19 @@ fn port_9847_and_process_ownership_are_source_guarded() {
         "wait_for_port_free \"$PROD_PORT\" 10",
         "create_app_bundle \"$DEV_BUNDLE\"",
         "create_dev_launchd_plist",
-        "restart_installed_service_after_dev 12",
         "listener_pid_for_port \"$PROD_PORT\"",
     ] {
         assert!(dev.contains(required), "dev.sh missing {required}");
     }
+    assert_eq!(
+        dev.matches("service_start").count(),
+        11,
+        "every dev exit, stop, and takeover failure must use the shared service start owner"
+    );
+    assert!(
+        !dev.contains("restart_installed_service_after_dev"),
+        "dev workflow must not recreate a separate installed-service restore owner"
+    );
     assert!(
         !dev.contains("cmd_manual_deploy") && !dev.contains("manual-deploy"),
         "dev workflow must not invoke manual deploy"
@@ -151,7 +159,7 @@ fn port_9847_and_process_ownership_are_source_guarded() {
     let failed_background_sign = Command::new("bash")
         .args([
             "-c",
-            "source \"$1\"; print_status() { :; }; print_error() { last_error=\"$1\"; }; launchd_stop() { :; }; launchctl() { return 1; }; service_is_running() { return 0; }; wait_for_port_free() { return 0; }; create_app_bundle() { return 0; }; restart_installed_service_after_dev() { restored=true; }; DEV_PLIST_NAME=test.dev; PLIST_NAME=test.prod; PROD_PORT=9847; TRON_HOME=/nonexistent; RUST_WORKSPACE=/nonexistent; DEV_SERVER_BINARY=/nonexistent/source-tron; DEV_BUNDLE=/nonexistent/Tron-Dev.app; DEV_BINARY=/nonexistent/tron; DEV_PLIST_PATH=/nonexistent/dev.plist; RUN_DIR=/nonexistent; DEV_BACKGROUND_PID_FILE=/nonexistent/pid; if create_dev_launchd_plist; then exit 11; fi; run_failure() { restored=false; last_error=; case \"$1\" in sign) codesign_bundle() { return 1; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to prepare signed dev takeover bundle' ;; mkdir) codesign_bundle() { return 0; }; mkdir() { return 1; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to create dev takeover runtime directory' ;; log) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/nonexistent/log; create_dev_launchd_plist() { return 0; }; expected='Failed to initialize dev takeover log' ;; plist) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 1; }; expected='Failed to create dev takeover LaunchAgent' ;; esac; if dev_start_background false 1; then return 10; fi; test \"$restored\" = true && test \"$last_error\" = \"$expected\"; }; run_failure sign && run_failure mkdir && run_failure log && run_failure plist",
+            "source \"$1\"; print_status() { :; }; print_error() { last_error=\"$1\"; }; launchd_stop() { :; }; launchctl() { return 1; }; service_is_running() { return 0; }; wait_for_port_free() { return 0; }; create_app_bundle() { return 0; }; service_start() { restored=true; }; DEV_PLIST_NAME=test.dev; PLIST_NAME=test.prod; PROD_PORT=9847; TRON_HOME=/nonexistent; RUST_WORKSPACE=/nonexistent; DEV_SERVER_BINARY=/nonexistent/source-tron; DEV_BUNDLE=/nonexistent/Tron-Dev.app; DEV_BINARY=/nonexistent/tron; DEV_PLIST_PATH=/nonexistent/dev.plist; RUN_DIR=/nonexistent; DEV_BACKGROUND_PID_FILE=/nonexistent/pid; if create_dev_launchd_plist; then exit 11; fi; run_failure() { restored=false; last_error=; case \"$1\" in sign) codesign_bundle() { return 1; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to prepare signed dev takeover bundle' ;; mkdir) codesign_bundle() { return 0; }; mkdir() { return 1; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to create dev takeover runtime directory' ;; log) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/nonexistent/log; create_dev_launchd_plist() { return 0; }; expected='Failed to initialize dev takeover log' ;; plist) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 1; }; expected='Failed to create dev takeover LaunchAgent' ;; esac; if dev_start_background false 1; then return 10; fi; test \"$restored\" = true && test \"$last_error\" = \"$expected\"; }; run_failure sign && run_failure mkdir && run_failure log && run_failure plist",
             "bash",
             repo_path("scripts/tron.d/dev.sh")
                 .to_str()
@@ -249,7 +257,7 @@ fn contributor_binary_recovery_has_one_service_owner() {
         .split_once("ensure_prod_binary() {")
         .expect("service recovery command missing")
         .1
-        .split_once("ensure_restartable_prod_server() {")
+        .split_once("service_start() {")
         .expect("service recovery owner has no boundary")
         .0;
     for required in [
@@ -274,9 +282,15 @@ fn contributor_binary_recovery_has_one_service_owner() {
         .0;
     assert_order(
         service_start,
+        "\"$RELEASE_APP_BINARY\" --tron-start-server-and-quit",
+        "wait_for_service_health 5",
+        "installed wrapper starts must stay wrapper-owned and health-gated",
+    );
+    assert_order(
+        service_start,
         "ensure_prod_binary",
-        "if [ ! -f \"$PLIST_PATH\" ]; then",
-        "pair recovery must be able to restore a missing launchd plist",
+        "launchd_restart \"$PLIST_NAME\"",
+        "contributor fallback must remain owned by the shared service start path",
     );
     assert_order(
         service_start,
@@ -284,6 +298,15 @@ fn contributor_binary_recovery_has_one_service_owner() {
         "finish_contributor_pair_recovery || return 1",
         "recovery must pass health before retiring its rollback plan",
     );
+    for retired in [
+        "ensure_restartable_prod_server() {",
+        "restart_installed_service_after_dev() {",
+    ] {
+        assert!(
+            !service.contains(retired),
+            "service module must not retain duplicate restore owner {retired}"
+        );
+    }
 }
 
 #[test]

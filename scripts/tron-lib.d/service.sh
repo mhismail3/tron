@@ -544,13 +544,6 @@ ensure_prod_binary() {
     return 1
 }
 
-ensure_restartable_prod_server() {
-    if release_wrapper_available; then
-        return 0
-    fi
-    ensure_prod_binary
-}
-
 service_start() {
     if release_wrapper_available; then
         print_status "Starting service..."
@@ -641,25 +634,6 @@ print_installed_service_restart_diagnostic() {
     else
         echo "  /Applications/Tron.app is missing or not executable; install it before relying on production restore."
     fi
-}
-
-restart_installed_service_after_dev() {
-    local wait_seconds="${1:-12}"
-    print_status "Restarting installed service..."
-    if ! ensure_restartable_prod_server; then
-        print_error "Cannot restart: install Tron.app at /Applications/Tron.app"
-        return 1
-    fi
-    launchd_start "$PLIST_NAME"
-    if wait_for_service_health "$wait_seconds"; then
-        finish_contributor_pair_recovery || return 1
-        local pid
-        pid="$(listener_pid_for_port "$PROD_PORT")"
-        print_success "Installed service restarted (PID: ${pid:-unknown})"
-        return 0
-    fi
-    print_installed_service_restart_diagnostic
-    return 1
 }
 
 listener_pid_for_port() {
