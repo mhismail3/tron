@@ -388,6 +388,7 @@ fn root_readme_stays_a_concise_progressive_disclosure_front_door() {
         "packages/agent/src/lib.rs",
         "packages/ios-app/docs/architecture.md",
         "packages/mac-app/docs/architecture.md",
+        "rust-toolchain.toml",
     ] {
         assert!(
             readme.contains(required),
@@ -471,6 +472,32 @@ fn local_and_github_ci_share_one_fail_fast_test_schedule() {
     let local_targets = quality_discovered_integration_targets();
     let discovered_targets = cargo_discovered_integration_targets();
     let workflow = read_repo_file(".github/workflows/ci.yml");
+    let toolchain: toml::Value = read_repo_file("rust-toolchain.toml")
+        .parse()
+        .expect("root Rust toolchain should parse");
+
+    assert!(
+        toolchain["toolchain"]["channel"]
+            .as_str()
+            .is_some_and(|channel| !channel.is_empty()),
+        "root toolchain must own a concrete Rust channel"
+    );
+    assert_eq!(
+        git_output(&["ls-files", "*rust-toolchain.toml"])
+            .lines()
+            .collect::<Vec<_>>(),
+        ["rust-toolchain.toml"],
+        "the repository must have one tracked Rust toolchain owner"
+    );
+    for path in [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release-mac.yml",
+    ] {
+        assert!(
+            !read_repo_file(path).contains("\n          toolchain:"),
+            "{path} must inherit the root rust-toolchain.toml"
+        );
+    }
 
     assert!(
         workflow.contains("run: scripts/tron ci test"),
@@ -844,6 +871,7 @@ fn github_ci_schedules_clients_and_aggregates_fail_closed() {
         .map(|(filter, _)| filter)
         .expect("CI must define the Mac path filter before validation jobs");
     for required in [
+        "rust-toolchain.toml",
         "packages/agent/**",
         "packages/mac-app/**",
         ".github/workflows/release-mac.yml",

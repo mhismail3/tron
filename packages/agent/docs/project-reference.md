@@ -140,7 +140,7 @@ tron/
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
 |   +-- benchmarks/         Performance benchmark runner and baselines
-|   +-- asc-jwt             Local App Store Connect JWT helper
+|   +-- asc-jwt             Release-workflow App Store Connect JWT helper
 |   +-- install-hooks.sh    Installs repo-managed commit hooks
 |   +-- personal-info-guard.sh
 +-- .github/

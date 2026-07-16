@@ -49,9 +49,8 @@
 # The build keychain is created with a unique random password, isolated
 # from the runner's `login.keychain`, and DESTROYED in an `if: always()`
 # cleanup step so it doesn't outlive the job even if a later step
-# fails. Keychain default is restored to `login.keychain-db` to leave
-# the runner in a known state for subsequent jobs (fork PRs share
-# runners; ephemerality is best-effort).
+# fails. Cleanup restores the original user keychain search list; the
+# default keychain is never changed.
 #
 # ─── Rollback ───────────────────────────────────────────────────────────
 #

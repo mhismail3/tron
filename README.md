@@ -72,7 +72,8 @@ the command line.
 Requirements:
 
 - macOS 15 or newer
-- Rust `1.94.1` through `rustup`
+- Rust through `rustup` (version and components are pinned in
+  [`rust-toolchain.toml`](rust-toolchain.toml))
 - Xcode 26 or newer
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 

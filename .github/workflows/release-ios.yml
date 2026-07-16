@@ -80,8 +80,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Resolve version
         id: ver
@@ -749,7 +747,6 @@ jobs:
           echo "::notice::resolved ASC build ${{ steps.ver.outputs.apple_build }} as $build_id"
 
       - name: Resolve export compliance
-        id: export_compliance
         if: steps.drymode.outputs.dry_run != 'true'
         shell: bash
         env:
@@ -798,10 +795,6 @@ jobs:
           fetch_detail
           echo "::notice::TestFlight states before export-compliance check: internal=$internal_state external=$external_state"
           if [[ "$internal_state" != "MISSING_EXPORT_COMPLIANCE" && "$external_state" != "MISSING_EXPORT_COMPLIANCE" ]]; then
-            {
-              echo "internal_state=$internal_state"
-              echo "external_state=$external_state"
-            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -838,10 +831,6 @@ jobs:
             fetch_detail
             echo "::notice::TestFlight states after export-compliance update: internal=$internal_state external=$external_state"
             if [[ "$internal_state" != "MISSING_EXPORT_COMPLIANCE" && "$external_state" != "MISSING_EXPORT_COMPLIANCE" ]]; then
-              {
-                echo "internal_state=$internal_state"
-                echo "external_state=$external_state"
-              } >> "$GITHUB_OUTPUT"
               exit 0
             fi
             sleep 15

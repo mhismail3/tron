@@ -525,9 +525,9 @@ rather than failing an otherwise successful TestFlight release checkpoint. The
 optional internal group id is diagnostic only. App Store Connect does not allow
 direct API assignment to an internal group, so CI warns when the configured
 internal group is stale or lacks all-build access. The group validation step
-supports both `asc testflight beta-groups list` and older
-`asc testflight groups list` CLI shapes. Reruns use `asc builds list` to reuse an
-existing Apple build number instead of uploading a duplicate binary.
+uses the current `asc testflight groups list` command. Reruns use
+`asc builds list` to reuse an existing Apple build number instead of uploading
+a duplicate binary.
 
 The app and share extension Info.plists set
 `ITSAppUsesNonExemptEncryption=false`, which is the current release assertion

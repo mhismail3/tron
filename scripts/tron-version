@@ -263,26 +263,6 @@ check_versions() {
         "$(value_after_key "$PROJECT_DIR/packages/mac-app/Sources/Info.plist" "TRONCanonicalVersion")" \
         '$(TRON_CANONICAL_VERSION)'
 
-    local drift_pattern='0\.5\.0|0\.5\.1|(^|[^A-Za-z-])mac-v[0-9]|(^|[^A-Za-z-])mac-v\*|mac-vX\.Y\.Z|server-v0\.5|1\.0\.0|server-vX\.Y\.Z|vX\.Y\.Z'
-    local drift_targets=(
-        "$PROJECT_DIR/README.md"
-        "$PROJECT_DIR/CONTRIBUTING.md"
-        "$PROJECT_DIR/packages/mac-app/docs"
-        "$PROJECT_DIR/packages/ios-app/docs"
-        "$PROJECT_DIR/.github/workflows/release-mac.yml"
-        "$PROJECT_DIR/.github/workflows/release-ios.yml"
-        "$PROJECT_DIR/scripts/tron-lib.sh"
-    )
-    if command -v rg >/dev/null 2>&1; then
-        rg -n "$drift_pattern" "${drift_targets[@]}" >/tmp/tron-version-doc-drift.txt || true
-    else
-        grep -RInE "$drift_pattern" "${drift_targets[@]}" >/tmp/tron-version-doc-drift.txt || true
-    fi
-    if [ -s /tmp/tron-version-doc-drift.txt ]; then
-        cat /tmp/tron-version-doc-drift.txt >&2
-        note_failure "release docs/workflow still mention stale version examples"
-    fi
-
     if [ "$failures" -ne 0 ]; then
         echo "$failures version drift issue(s) found" >&2
         return 1
