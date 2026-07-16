@@ -3,7 +3,8 @@
 //! This service is deliberately metadata-only: it derives a compact title from
 //! the initial user prompt, persists it on the session row, and broadcasts a
 //! normal `session_updated` event. It does not restore the old hook/subagent
-//! surface or add presentation-specific behavior to the runtime.
+//! surface or add presentation-specific behavior to the runtime. Provider
+//! creation uses the same admitted API-settings snapshot as the main run.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +30,7 @@ const TITLE_LABEL_PREFIXES: &[&str] = &["Title:", "Session title:", "Generated t
 pub(super) struct SessionTitleGenerationRequest {
     pub(super) session_id: String,
     pub(super) model: String,
+    pub(super) api_settings: crate::domains::settings::ApiSettings,
     pub(super) prompt: String,
     pub(super) working_dir: String,
     pub(super) server_origin: String,
@@ -113,6 +115,7 @@ async fn run_session_title_generation(job: SessionTitleGenerationJob) -> bool {
         responder_factory,
         &session_id,
         &request.model,
+        &request.api_settings,
         &request.prompt,
         &request.working_dir,
         &request.server_origin,
@@ -166,12 +169,15 @@ async fn generate_title(
     responder_factory: Arc<dyn ModelResponderFactory>,
     session_id: &str,
     model: &str,
+    api_settings: &crate::domains::settings::ApiSettings,
     prompt: &str,
     working_dir: &str,
     server_origin: &str,
     cancel: CancellationToken,
 ) -> Result<Option<String>, ModelResponseError> {
-    let responder = responder_factory.create_for_model(model).await?;
+    let responder = responder_factory
+        .create_for_model(model, api_settings)
+        .await?;
     let request = ModelResponseRequest {
         context: Context {
             system_prompt: Some(title_generation_system_prompt().to_owned()),
@@ -520,6 +526,7 @@ mod tests {
             request: SessionTitleGenerationRequest {
                 session_id: session_id.to_owned(),
                 model: "mock-title".to_owned(),
+                api_settings: crate::domains::settings::ApiSettings::default(),
                 prompt: prompt.to_owned(),
                 working_dir: "/tmp/project".to_owned(),
                 server_origin: "localhost:9847".to_owned(),
@@ -562,6 +569,7 @@ mod tests {
         async fn create_for_model(
             &self,
             model: &str,
+            _api_settings: &crate::domains::settings::ApiSettings,
         ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
             Ok(Arc::new(StaticTitleResponder {
                 model: model.to_owned(),

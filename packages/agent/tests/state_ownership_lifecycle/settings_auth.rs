@@ -96,8 +96,42 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
     );
     let prompt_execute =
         read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs");
-    assert!(prompt_execute.contains("&settings"));
+    assert!(prompt_execute.contains("api_settings: settings.api.clone()"));
     assert!(!prompt_execute.contains("get_settings()"));
+
+    let agent_build =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/agent_build.rs");
+    let title_generation =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/title_generation.rs");
+    let responder = read_repo_file("packages/agent/src/domains/model/responder/mod.rs");
+    for (source, required) in [
+        (&agent_build, ".create_for_model(model, &settings.api)"),
+        (
+            &title_generation,
+            "api_settings: crate::domains::settings::ApiSettings",
+        ),
+        (&title_generation, ".create_for_model(model, api_settings)"),
+        (
+            &responder,
+            "api_settings: &crate::domains::settings::ApiSettings",
+        ),
+        (&responder, "http_client: reqwest::Client"),
+        (&responder, "DefaultProviderFactory::with_client("),
+    ] {
+        assert!(
+            source.contains(required),
+            "prompt provider settings projection missing `{required}`"
+        );
+    }
+    for forbidden in [
+        "pub fn new(settings:",
+        "providers: crate::domains::model::providers::factory::DefaultProviderFactory",
+    ] {
+        assert!(
+            !responder.contains(forbidden),
+            "long-lived responder factory cached provider settings: {forbidden}"
+        );
+    }
 
     let settings_profile = read_repo_file("packages/agent/src/domains/settings/profile/mod.rs");
     for forbidden in [

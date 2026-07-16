@@ -19,7 +19,9 @@
 //! reconstructed event-store state and no parallel runtime service. Completion
 //! does not maintain a second final-answer state. Run-turn admission snapshots
 //! settings from the authoritative `ProfileRuntime`; the spawned run keeps that
-//! immutable value instead of consulting a second mutable settings owner.
+//! immutable value instead of consulting a second mutable settings owner. Main
+//! response and background title providers are both created from that same
+//! admitted API-settings snapshot.
 
 use std::sync::atomic::AtomicI64;
 

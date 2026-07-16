@@ -297,12 +297,12 @@ fn register_transcription_sidecar(
 async fn init_model_responder_factory(
     settings: &crate::domains::settings::TronSettings,
 ) -> (Arc<dyn ModelResponderFactory>, reqwest::Client) {
-    let default_factory = DefaultModelResponderFactory::new(settings);
+    let default_factory = DefaultModelResponderFactory::new();
     let shared_http_client = default_factory.http_client();
     let responder_factory: Arc<dyn ModelResponderFactory> = Arc::new(default_factory);
 
     let startup_auth_ok = responder_factory
-        .create_for_model(&settings.server.default_model)
+        .create_for_model(&settings.server.default_model, &settings.api)
         .await
         .is_ok();
     if startup_auth_ok {

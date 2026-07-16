@@ -525,11 +525,12 @@ mod tests {
     async fn context_responder_factory_creates_requested_model() {
         let mut ctx = make_test_context();
         ctx.responder_factory = Some(Arc::new(MockModelResponderFactory));
+        let api_settings = crate::domains::settings::ApiSettings::default();
         let responder = ctx
             .responder_factory
             .as_ref()
             .unwrap()
-            .create_for_model("claude-opus-4-6")
+            .create_for_model("claude-opus-4-6", &api_settings)
             .await
             .unwrap();
         assert_eq!(responder.model(), "claude-opus-4-6");
@@ -538,8 +539,15 @@ mod tests {
     #[tokio::test]
     async fn model_aware_factory_returns_correct_model() {
         let factory = ModelAwareMockFactory;
-        let r1 = factory.create_for_model("claude-opus-4-6").await.unwrap();
-        let r2 = factory.create_for_model("gpt-5.3-codex").await.unwrap();
+        let api_settings = crate::domains::settings::ApiSettings::default();
+        let r1 = factory
+            .create_for_model("claude-opus-4-6", &api_settings)
+            .await
+            .unwrap();
+        let r2 = factory
+            .create_for_model("gpt-5.3-codex", &api_settings)
+            .await
+            .unwrap();
         assert_eq!(r1.model(), "claude-opus-4-6");
         assert_eq!(r2.model(), "gpt-5.3-codex");
     }
@@ -547,7 +555,10 @@ mod tests {
     #[tokio::test]
     async fn strict_factory_rejects_unknown_model() {
         let factory = StrictMockFactory;
-        let result = factory.create_for_model("unknown-model").await;
+        let api_settings = crate::domains::settings::ApiSettings::default();
+        let result = factory
+            .create_for_model("unknown-model", &api_settings)
+            .await;
         match result {
             Err(e) => assert_eq!(e.category(), "auth"),
             Ok(_) => panic!("expected auth error"),

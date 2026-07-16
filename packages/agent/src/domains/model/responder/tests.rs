@@ -240,6 +240,51 @@ async fn provider_stream_error_event_becomes_canonical_model_response_error() {
     assert!(failure.message.contains("Bearer ****"));
 }
 
+#[tokio::test]
+async fn long_lived_factory_projects_api_settings_per_create_call() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let first_server = MockServer::start().await;
+    let second_server = MockServer::start().await;
+    for server in [&first_server, &second_server] {
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw("", "application/x-ndjson"))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    let factory = DefaultModelResponderFactory::new();
+    for (index, server) in [&first_server, &second_server].into_iter().enumerate() {
+        let mut api_settings = crate::domains::settings::ApiSettings::default();
+        api_settings.ollama = Some(crate::domains::settings::OllamaApiSettings {
+            base_url: server.uri(),
+        });
+        let responder = factory
+            .create_for_model("gemma4:e4b", &api_settings)
+            .await
+            .unwrap();
+        let response = responder
+            .respond(ModelResponseRequest {
+                context: Context::default(),
+                session_id: format!("settings-snapshot-{index}"),
+                reasoning_level: None,
+                trace_id: None,
+                parent_invocation_id: None,
+                cancel: CancellationToken::new(),
+                retry_config: None,
+            })
+            .await
+            .unwrap();
+        drop(response);
+    }
+
+    first_server.verify().await;
+    second_server.verify().await;
+}
+
 #[test]
 fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     let responder = ProviderBackedModelResponder {

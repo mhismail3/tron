@@ -21,6 +21,7 @@ impl ModelResponderFactory for CountingFactory {
     async fn create_for_model(
         &self,
         _model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         self.create_calls.fetch_add(1, Ordering::SeqCst);
         Err(ModelResponseError::other(

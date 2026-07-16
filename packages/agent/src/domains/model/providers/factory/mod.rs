@@ -1,6 +1,7 @@
 //! Default provider factory — creates providers on-demand per model.
 //!
-//! Auth is re-loaded from disk on each call so refreshed OAuth tokens
+//! One factory instance projects one admitted [`ApiSettings`] snapshot into a
+//! provider. Auth is re-loaded from disk on each call so refreshed OAuth tokens
 //! are picked up immediately after a token refresh or model switch.
 
 use std::path::PathBuf;
@@ -15,9 +16,11 @@ use crate::domains::model::routing::models::registry::{
 use async_trait::async_trait;
 use tracing::info;
 
+use crate::domains::settings::ApiSettings;
+
 // ─── Captured settings ───────────────────────────────────────────────
 
-/// Anthropic-specific settings captured at startup.
+/// Anthropic-specific settings projected for one provider construction.
 #[derive(Clone, Debug)]
 struct AnthropicSettings {
     client_id: String,
@@ -28,8 +31,8 @@ struct AnthropicSettings {
 
 /// Default factory that creates a fresh `Provider` for any supported model.
 ///
-/// The factory captures config at startup but re-reads auth on every call
-/// so that refreshed OAuth tokens take effect without restarting.
+/// The factory owns one immutable API-settings projection and re-reads auth on
+/// every call so refreshed OAuth tokens take effect without restarting.
 pub struct DefaultProviderFactory {
     auth_path: PathBuf,
     anthropic: AnthropicSettings,
@@ -44,26 +47,29 @@ pub struct DefaultProviderFactory {
 }
 
 impl DefaultProviderFactory {
-    /// Create a new factory from the current server settings.
-    pub fn new(settings: &crate::domains::settings::TronSettings) -> Self {
-        let http_client = reqwest::Client::builder()
+    /// Build the process-shared provider HTTP client.
+    pub(crate) fn build_http_client() -> reqwest::Client {
+        reqwest::Client::builder()
             .pool_idle_timeout(std::time::Duration::from_secs(90))
             .timeout(std::time::Duration::from_secs(300))
             .user_agent("tron-agent/1.0")
             .build()
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
+    /// Project one API-settings snapshot while reusing the process HTTP pool.
+    pub(crate) fn with_client(settings: &ApiSettings, http_client: reqwest::Client) -> Self {
         Self {
             auth_path: auth_path(),
             anthropic: AnthropicSettings {
-                client_id: settings.api.anthropic.client_id.clone(),
-                system_prompt_prefix: settings.api.anthropic.system_prompt_prefix.clone(),
-                token_expiry_buffer_seconds: settings.api.anthropic.token_expiry_buffer_seconds,
-                oauth_beta_headers: settings.api.anthropic.oauth_beta_headers.clone(),
+                client_id: settings.anthropic.client_id.clone(),
+                system_prompt_prefix: settings.anthropic.system_prompt_prefix.clone(),
+                token_expiry_buffer_seconds: settings.anthropic.token_expiry_buffer_seconds,
+                oauth_beta_headers: settings.anthropic.oauth_beta_headers.clone(),
             },
-            minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
-            kimi_base_url: settings.api.kimi.as_ref().map(|k| k.base_url.clone()),
-            ollama_base_url: settings.api.ollama.as_ref().map(|o| o.base_url.clone()),
+            minimax_base_url: settings.minimax.as_ref().map(|m| m.base_url.clone()),
+            kimi_base_url: settings.kimi.as_ref().map(|k| k.base_url.clone()),
+            ollama_base_url: settings.ollama.as_ref().map(|o| o.base_url.clone()),
             http_client,
         }
     }
@@ -74,11 +80,6 @@ impl DefaultProviderFactory {
     pub fn with_auth_path(mut self, path: PathBuf) -> Self {
         self.auth_path = path;
         self
-    }
-
-    /// Get a clone of the shared HTTP client.
-    pub fn http_client(&self) -> reqwest::Client {
-        self.http_client.clone()
     }
 
     // ── Per-provider construction ────────────────────────────────────

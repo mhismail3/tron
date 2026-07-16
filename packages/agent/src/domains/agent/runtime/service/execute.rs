@@ -236,6 +236,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         SessionTitleGenerationRequest {
             session_id: session_id.clone(),
             model: model.clone(),
+            api_settings: settings.api.clone(),
             prompt: prompt.clone(),
             working_dir: working_dir.clone(),
             server_origin: server_origin.clone(),

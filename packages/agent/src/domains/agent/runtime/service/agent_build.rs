@@ -29,7 +29,10 @@ pub(super) async fn build_prompt_agent(
     initial_turn_count: u32,
     resolved_workspace_id: Option<String>,
 ) -> Result<BuiltPromptAgent, ()> {
-    let responder = match responder_factory.create_for_model(model).await {
+    let responder = match responder_factory
+        .create_for_model(model, &settings.api)
+        .await
+    {
         Ok(responder) => responder,
         Err(error) => {
             warn!(

@@ -95,6 +95,7 @@ impl ModelResponderFactory for MockModelResponderFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         Ok(Arc::new(MockModelResponder::new(model)))
     }
@@ -107,6 +108,7 @@ impl ModelResponderFactory for ModelAwareMockFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         Ok(Arc::new(MockModelResponder::new(model)))
     }
@@ -119,6 +121,7 @@ impl ModelResponderFactory for StrictMockFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         if model.starts_with("mock") || model.starts_with("claude") {
             Ok(Arc::new(MockModelResponder::new(model)))
