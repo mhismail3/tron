@@ -263,7 +263,7 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
     for required in [
         "get_messages_at_head",
         "get_ancestors(&conn, head_id)",
-        "event_rows_to_session_events_with_conn",
+        "event_rows_to_session_events(&conn",
         "resolve_stored_json_value",
         "reconstruct_from_events(&events)",
         "build_session_state",

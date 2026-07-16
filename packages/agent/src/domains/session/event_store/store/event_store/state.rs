@@ -27,7 +27,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors);
         Ok(reconstruct_from_events(&events))
     }
 
@@ -41,7 +41,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors);
         Ok(reconstruct_from_events(&events))
     }
 
@@ -57,7 +57,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors);
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, head_id, reconstruction))
     }
@@ -71,37 +71,25 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = event_rows_to_session_events_with_conn(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors);
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, event_id, reconstruction))
     }
 }
 
-/// Convert `EventRow`s to `SessionEvent`s for reconstruction.
+/// Convert persisted `EventRow`s to `SessionEvent`s for reconstruction.
 ///
-/// Each `EventRow.payload` is a JSON string; this parses it into `serde_json::Value`.
-/// Invalid JSON on a known event type logs a warning and the payload is replaced
-/// with `Value::Null` (the reconstruction downstream skips missing payloads).
+/// Payloads are resolved through the owning SQLite connection so inline JSON
+/// and blob-backed payload-ref envelopes follow the same storage path. Invalid
+/// payloads on known event types log a warning and become `Value::Null` (the
+/// reconstruction downstream skips missing payloads).
 ///
 /// Rows whose `event_type` string does not parse into a known [`EventType`] are
 /// dropped and logged as corrupt — previously such rows were silently reclassified
 /// as [`EventType::SessionStart`], which would cause reconstruction to fake a new
 /// session boundary at an arbitrary point.
-pub fn event_rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
-    event_rows_to_session_events_inner(None, rows)
-}
-
-/// Convert event rows and resolve blob-backed payload-ref envelopes through
-/// the given SQLite connection.
-pub fn event_rows_to_session_events_with_conn(
+pub(super) fn event_rows_to_session_events(
     conn: &rusqlite::Connection,
-    rows: &[EventRow],
-) -> Vec<SessionEvent> {
-    event_rows_to_session_events_inner(Some(conn), rows)
-}
-
-fn event_rows_to_session_events_inner(
-    conn: Option<&rusqlite::Connection>,
     rows: &[EventRow],
 ) -> Vec<SessionEvent> {
     rows.iter()
@@ -118,25 +106,15 @@ fn event_rows_to_session_events_inner(
                     return None;
                 }
             };
-            let payload = match conn {
-                Some(conn) => crate::shared::storage::resolve_stored_json_value(conn, &row.payload)
-                    .unwrap_or_else(|error| {
-                        tracing::warn!(
-                            event_id = %row.id,
-                            error = %error,
-                            "stored event payload could not be resolved, defaulting to null"
-                        );
-                        Value::Null
-                    }),
-                None => serde_json::from_str(&row.payload).unwrap_or_else(|error| {
+            let payload = crate::shared::storage::resolve_stored_json_value(conn, &row.payload)
+                .unwrap_or_else(|error| {
                     tracing::warn!(
                         event_id = %row.id,
                         error = %error,
-                        "corrupt event payload, defaulting to null"
+                        "stored event payload could not be resolved, defaulting to null"
                     );
                     Value::Null
-                }),
-            };
+                });
             Some(SessionEvent {
                 id: row.id.clone(),
                 parent_id: row.parent_id.clone(),

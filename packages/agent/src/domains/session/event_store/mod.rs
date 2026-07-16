@@ -13,7 +13,6 @@
 //!   digest evidence persisted before model streams without duplicating bulk media
 //! - **Logs and traces**: bounded log queries plus Agent Trace-style records
 //!   keyed by session, workspace, trace, invocation, and provider identifiers
-//! - **Event chain builder**: Automates `parent_id` threading across sequential events
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing capability result text
 //! - **Migrations**: Version-tracked SQL schema evolution
@@ -54,6 +53,8 @@
 //! - Public event DTOs stay shared-protocol-owned; crate-private session-list
 //!   projections are not reexported through the persistence owner.
 //! - Reconstruction is deterministic over persisted event order.
+//! - Persisted event rows are decoded through the owning SQLite connection so
+//!   inline and blob-backed payloads share one resolution path.
 //! - `model.provider_request` is written before any provider stream opens.
 //! - Provider audit events project bulk strings to byte-count and digest
 //!   evidence; provider request bytes remain owned by the model boundary.
@@ -107,7 +108,6 @@ pub use sqlite::{
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
     ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,
-    event_rows_to_session_events,
 };
 pub use trace::{AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord};
 pub use types::{

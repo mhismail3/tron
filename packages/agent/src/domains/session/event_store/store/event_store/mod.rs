@@ -24,7 +24,6 @@ mod session_lifecycle;
 mod state;
 mod trace_log;
 
-pub use self::state::event_rows_to_session_events;
 pub use logs::{ClientLogEntry, ClientLogIngestResult, LogEntry, LogSessionFilter, RecentLogQuery};
 
 /// Result of creating a new session.

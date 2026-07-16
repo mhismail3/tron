@@ -623,7 +623,9 @@ fn event_rows_to_session_events_converts_correctly() {
         cost: None,
     };
 
-    let events = super::event_rows_to_session_events(&[row]);
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let events = super::super::state::event_rows_to_session_events(&conn, &[row]);
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].id, "evt_1");
     assert_eq!(events[0].event_type, EventType::SessionStart);
@@ -660,7 +662,9 @@ fn event_rows_to_session_events_handles_invalid_json() {
         cost: None,
     };
 
-    let events = super::event_rows_to_session_events(&[row]);
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let events = super::super::state::event_rows_to_session_events(&conn, &[row]);
     assert_eq!(events.len(), 1);
     assert!(events[0].payload.is_null());
 }
@@ -725,7 +729,9 @@ fn event_rows_to_session_events_skips_unknown_event_types() {
         cost: None,
     };
 
-    let events = super::event_rows_to_session_events(&[unknown, good]);
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let events = super::super::state::event_rows_to_session_events(&conn, &[unknown, good]);
     assert_eq!(events.len(), 1, "unknown event type row must be filtered");
     assert_eq!(events[0].id, "evt_good", "only the valid row survives");
     assert_eq!(events[0].event_type, EventType::MessageUser);
