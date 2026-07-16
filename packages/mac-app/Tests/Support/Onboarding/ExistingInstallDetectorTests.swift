@@ -206,7 +206,7 @@ struct ExistingInstallDetectorTests {
         Executable=/tmp/Tron Server.app/Contents/MacOS/tron
         Identifier=com.tron.server
         TeamIdentifier=MYGKXH6TY4
-        """, expectedBundleIdentifier: "com.tron.server", helperName: "Tron Server.app")
+        """)
 
         #expect(problem == nil)
     }

@@ -140,28 +140,6 @@ enum TronPaths {
     static var canManageLaunchAgent: Bool {
         MacRuntimeVariant.detect().canManageLaunchAgent(isIsolatedInstallMode: isIsolatedInstallMode())
     }
-    /// Bundle identifier for the active embedded server helper, not the
-    /// menu-bar wrapper. It intentionally matches the active LaunchAgent label
-    /// so launchd diagnostics and helper signature checks name the same
-    /// service in both production and isolated install-test modes.
-    static var bundleID: String {
-        bundleID(environment: ProcessInfo.processInfo.environment)
-    }
-
-    static func bundleID(environment: [String: String]) -> String {
-        launchAgentLabel(environment: environment)
-    }
-    /// User-facing display name for the agent in System Settings, Activity
-    /// Monitor, and the Dock (if it ever surfaced). Kept separate from the
-    /// wrapper's "Tron" name so System Settings never shows two entries
-    /// titled "Tron".
-    static var agentDisplayName: String {
-        agentDisplayName(environment: ProcessInfo.processInfo.environment)
-    }
-
-    static func agentDisplayName(environment: [String: String]) -> String {
-        agentBundleName(environment: environment)
-    }
     static var agentBundleName: String {
         agentBundleName(environment: ProcessInfo.processInfo.environment)
     }

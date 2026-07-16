@@ -166,6 +166,16 @@ struct MacSourceGuardTests {
             #expect(!isIgnored)
         }
 
+        for (relativePath, identifier, displayName) in [
+            ("Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist", "com.tron.server", "Tron Server"),
+            ("Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Info.plist", "com.tron.server.dev", "Tron Server Dev"),
+        ] {
+            let info = try Self.read(macRoot, relativePath)
+            #expect(info.contains("<key>CFBundleIdentifier</key>\n    <string>\(identifier)</string>"))
+            #expect(info.contains("<key>CFBundleName</key>\n    <string>\(displayName)</string>"))
+            #expect(info.contains("<key>CFBundleDisplayName</key>\n    <string>\(displayName)</string>"))
+        }
+
         let releaseLaunchAgent = try Self.read(
             macRoot,
             "Sources/Resources/Library/LaunchAgents/com.tron.server.plist"

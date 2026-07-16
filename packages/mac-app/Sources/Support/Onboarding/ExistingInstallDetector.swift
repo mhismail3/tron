@@ -174,7 +174,7 @@ enum ExistingInstallDetector {
 
     static func codeSignatureIdentityProblem(
         _ identityText: String,
-        expectedBundleIdentifier: String = TronPaths.bundleID,
+        expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
         helperName: String = "\(TronPaths.agentBundleName).app"
     ) -> String? {
         guard identityText.contains("Identifier=\(expectedBundleIdentifier)") else {
