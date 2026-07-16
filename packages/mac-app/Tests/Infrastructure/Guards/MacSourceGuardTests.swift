@@ -125,6 +125,21 @@ struct MacSourceGuardTests {
         }
     }
 
+    @Test("theme owns adaptive tokens without global gradient aliases")
+    func themeOwnsAdaptiveTokensWithoutGlobalGradientAliases() throws {
+        let macRoot = try Self.macAppRoot()
+        let source = try Self.read(macRoot, "Sources/Support/Theme/TronColors.swift")
+
+        #expect(source.contains("init(lightHex: String, darkHex: String)"))
+        #expect(source.contains("convenience init(hex: String)"))
+        #expect(source.components(separatedBy: "init(hex: String)").count - 1 == 1)
+        for token in ["tronEmerald", "tronEmeraldDeep", "tronMint", "tronSuccess"] {
+            #expect(source.contains("static let \(token) = Color(lightHex:"))
+        }
+        #expect(!source.contains("tronEmeraldGradient"))
+        #expect(!source.contains("extension ShapeStyle where Self == Color"))
+    }
+
     @Test("diagnostics redactor keeps iOS auth-field parity")
     func diagnosticsRedactorKeepsAuthFieldParity() throws {
         let macRoot = try Self.macAppRoot()

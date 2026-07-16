@@ -71,7 +71,7 @@ packages/mac-app/
 │   │   │   ├── PairingURLBuilder.swift # builds `tron://pair?…` URL
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Theme/
-│   │       ├── TronColors.swift        # emerald palette + shared gradients
+│   │       ├── TronColors.swift        # adaptive color tokens + NSColor conversion
 │   │       ├── TronFontLoader.swift    # CoreText registration for bundled fonts
 │   │       └── TronTypography.swift    # compact Mac wizard type tokens
 │   ├── Assets.xcassets/
