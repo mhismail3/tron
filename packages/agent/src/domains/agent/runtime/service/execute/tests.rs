@@ -86,6 +86,7 @@ impl PromptFailureHarness {
             responder_factory: Arc::new(CountingFactory {
                 create_calls: self.create_calls.clone(),
             }),
+            settings: crate::domains::settings::TronSettings::default(),
             event_store: self.event_store.clone(),
             shutdown_token: None,
             shutdown_coordinator: None,

@@ -91,6 +91,16 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         );
     }
 
+    let agent_deps = read_repo_file("packages/agent/src/domains/agent/deps.rs");
+    assert!(
+        agent_deps.contains("settings: self.profile_runtime.current().settings.clone()"),
+        "prompt settings must snapshot the authoritative profile runtime"
+    );
+    let prompt_execute =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs");
+    assert!(prompt_execute.contains("&settings"));
+    assert!(!prompt_execute.contains("get_settings()"));
+
     let auth_storage = read_repo_file("packages/agent/src/domains/auth/credentials/storage/mod.rs");
     for required in [
         "load_auth_storage",

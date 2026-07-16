@@ -17,7 +17,9 @@
 //! stream. Prompt-run composition derives broadcast access from its authoritative
 //! orchestrator and owns its event persister; the session cache retains only
 //! reconstructed event-store state and no parallel runtime service. Completion
-//! does not maintain a second final-answer state.
+//! does not maintain a second final-answer state. Run-turn admission snapshots
+//! settings from the authoritative `ProfileRuntime`; the spawned run keeps that
+//! immutable value instead of consulting a second mutable settings owner.
 
 use std::sync::atomic::AtomicI64;
 

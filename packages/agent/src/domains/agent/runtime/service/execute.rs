@@ -20,6 +20,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         orchestrator,
         session_manager,
         responder_factory,
+        settings,
         event_store,
         shutdown_token,
         shutdown_coordinator,
@@ -68,7 +69,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         PromptRunCleanup::new(started_run, session_manager.clone(), session_id.clone());
     let cancel_token = run_cleanup.cancel_token();
     let _shutdown_forwarder = ShutdownCancelForwarder::new(shutdown_token, cancel_token.clone());
-    let settings = crate::domains::settings::get_settings();
     let title_responder_factory = responder_factory.clone();
 
     let state = match resume_prompt_session(session_manager.clone(), session_id.clone()).await {
@@ -194,7 +194,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         engine_host.clone(),
         orchestrator.invocation_abort_registry().clone(),
         &broadcast,
-        settings.as_ref(),
+        &settings,
         &session_id,
         &model,
         &working_dir,
