@@ -190,7 +190,7 @@ final class MenuBarActionHandler {
 
     private func sendFeedback() async {
         let snapshot = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
-        await MenuBarFeedbackAction.present(snapshot: snapshot)
+        await MenuBarFeedbackAction.present(snapshot: snapshot, token: setup.readBearerToken())
     }
 
     private func confirmAndUninstall() async {

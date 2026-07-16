@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct MenuBarLogsView: View {
+    @Environment(\.environmentSetup) private var setup
     @State private var phase: Phase = .loading
 
     var body: some View {
@@ -70,7 +71,7 @@ struct MenuBarLogsView: View {
     @MainActor
     private func refresh() async {
         phase = .loading
-        let result = await MenuBarLogReader.fetchRecentLogs()
+        let result = await MenuBarLogReader.fetchRecentLogs(token: setup.readBearerToken())
         switch result {
         case .success(let logs):
             let trimmed = logs.trimmingCharacters(in: .whitespacesAndNewlines)
