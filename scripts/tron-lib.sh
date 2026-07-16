@@ -73,8 +73,6 @@ print_status()  { echo -e "${BLUE}▸${NC} $1" >&2; }
 print_success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 print_error()   { echo -e "${RED}✗${NC} $1" >&2; }
 print_warning() { echo -e "${YELLOW}!${NC} $1" >&2; }
-# Neutral informational tone for explanatory CLI output.
-print_info()    { echo -e "${DIM}ℹ${NC} $1" >&2; }
 print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2; }
 
 # Canonical help for commands routed by dispatch_runtime_command. Entrypoints
