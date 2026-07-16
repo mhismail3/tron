@@ -23,6 +23,87 @@ fn read_repo_file(path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
 }
 
+fn run_git(root: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap_or_else(|error| panic!("git {args:?} failed to start: {error}"));
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn run_staged_personal_info_guard(root: &Path) -> Output {
+    Command::new("bash")
+        .args(["scripts/personal-info-guard.sh", "--staged"])
+        .current_dir(root)
+        .output()
+        .expect("staged guard probe should start")
+}
+
+#[test]
+fn staged_personal_info_guard_preserves_multiple_paths() {
+    let repo = tempfile::tempdir().expect("guard probe repository should exist");
+    let scripts = repo.path().join("scripts");
+    std::fs::create_dir(&scripts).expect("guard probe scripts directory should exist");
+    std::fs::copy(
+        repo_path("scripts/personal-info-guard.sh"),
+        scripts.join("personal-info-guard.sh"),
+    )
+    .expect("guard script should copy into probe repository");
+    std::fs::write(repo.path().join("a clean.txt"), "generic content\n")
+        .expect("clean staged file should be writable");
+
+    run_git(repo.path(), &["init", "-q"]);
+    run_git(repo.path(), &["add", "-A"]);
+    let clean = run_staged_personal_info_guard(repo.path());
+    assert!(
+        clean.status.success(),
+        "clean staged files should pass: {}{}",
+        String::from_utf8_lossy(&clean.stdout),
+        String::from_utf8_lossy(&clean.stderr)
+    );
+
+    let developer = ["m", "oo", "se"].concat();
+    std::fs::write(
+        repo.path().join(":(exclude) z leak.txt"),
+        format!("/Users/{developer}/private\n"),
+    )
+    .expect("leaking staged file should be writable");
+    run_git(repo.path(), &["add", "-A"]);
+    let leaking = run_staged_personal_info_guard(repo.path());
+    assert!(
+        !leaking.status.success(),
+        "later staged paths must not disappear from the scan"
+    );
+    assert!(
+        String::from_utf8_lossy(&leaking.stdout).contains("raw home path"),
+        "guard should identify the staged personal-path violation"
+    );
+
+    let invalid_index = repo.path().join("invalid-index");
+    std::fs::write(&invalid_index, "not a Git index\n")
+        .expect("invalid index fixture should be writable");
+    let failed_git = Command::new("bash")
+        .args(["scripts/personal-info-guard.sh", "--staged"])
+        .env("GIT_INDEX_FILE", invalid_index)
+        .current_dir(repo.path())
+        .output()
+        .expect("broken-index guard probe should start");
+    assert_eq!(
+        failed_git.status.code(),
+        Some(2),
+        "staged index errors must fail closed"
+    );
+    assert!(
+        String::from_utf8_lossy(&failed_git.stderr).contains("failed to read the staged index"),
+        "setup failure should identify the staged-index owner"
+    );
+}
+
 #[test]
 fn logs_cli_owns_bounded_quoted_filters() {
     let logs_script = read_repo_file("scripts/tron-lib.d/logs.sh");
