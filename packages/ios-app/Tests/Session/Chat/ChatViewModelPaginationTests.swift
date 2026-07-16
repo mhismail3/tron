@@ -517,7 +517,6 @@ final class ChatViewModelPaginationTests: XCTestCase {
 @MainActor
 private final class TestConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState = .connected
-    var isConnected: Bool { true }
 
     func connect() async {}
 }

@@ -272,7 +272,7 @@ struct NewSessionFlow: View {
 
         // Ensure connection is established.
         await connectionRepository.connect()
-        if !connectionRepository.isConnected {
+        if !connectionRepository.connectionState.isConnected {
             try? await Task.sleep(for: .milliseconds(100))
         }
 

@@ -14,10 +14,6 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
         client.connectionState
     }
 
-    var isConnected: Bool {
-        client.isConnected
-    }
-
     func connect() async {
         await client.connect()
     }

@@ -407,10 +407,6 @@ final class EngineClient: EngineTransport {
 
     // MARK: - State Accessors
 
-    var isConnected: Bool {
-        connectionState.isConnected
-    }
-
     var hasActiveSession: Bool {
         currentSessionId != nil
     }

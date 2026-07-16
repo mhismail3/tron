@@ -6,7 +6,7 @@ import SwiftUI
 extension ChatViewModel: ConnectionContext {
 
     var isConnected: Bool {
-        services.connection.isConnected
+        services.connection.connectionState.isConnected
     }
 
     func connect() async {

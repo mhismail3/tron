@@ -6,7 +6,6 @@ import Foundation
 @MainActor
 protocol AppConnectionRepository: AnyObject {
     var connectionState: ConnectionState { get }
-    var isConnected: Bool { get }
 
     func connect() async
 }

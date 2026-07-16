@@ -88,7 +88,6 @@ final class WorkspaceSelectorVisualRenderTests: XCTestCase {
 @MainActor
 private final class WorkspaceSelectorVisualConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState { .connected }
-    var isConnected: Bool { true }
 
     func connect() async {}
 }

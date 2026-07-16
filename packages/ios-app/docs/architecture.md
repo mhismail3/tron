@@ -307,9 +307,10 @@ the root state object. Its session-lifetime observation tasks retain only their
 observed sources, capture the view model weakly for mutations, and use a
 cancellation-aware wait so releasing the view model terminates idle bindings;
 the connection-state binding owns only local cleanup after an observed
-disconnect. `ChatView` reads raw connectivity from the repository as an
-immediate `InputBarConfig` transport-safety gate, while `InteractionPolicy`
-remains the shared debounced read-only policy; neither state is mirrored.
+disconnect. `AppConnectionRepository.connectionState` is the sole raw
+connectivity fact. `ChatView` derives its immediate `InputBarConfig`
+transport-safety gate from that state, while `InteractionPolicy` remains the
+shared debounced read-only policy.
 Workspace existence is likewise not cached in the client; any future
 invalidation must arrive through authoritative engine or session state. Chat
 event-pipeline tests use `@testable` access to the internal

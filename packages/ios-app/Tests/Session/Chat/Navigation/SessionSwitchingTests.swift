@@ -63,7 +63,6 @@ final class SessionSwitchingTests: XCTestCase {
         let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
         XCTAssertEqual(viewModel.services.connection.connectionState, .disconnected)
-        XCTAssertFalse(viewModel.services.connection.isConnected)
     }
 
     func testNewChatViewModelHasEmptyInputState() {
