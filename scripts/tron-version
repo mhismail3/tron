@@ -180,14 +180,6 @@ sync_versions() {
     replace_regex "$PROJECT_DIR/packages/ios-app/project.yml" \
         '(TRON_CANONICAL_VERSION: ")[^"]+(")' \
         "\${1}${TRON_VERSION}\${2}"
-
-    # VERSION.env owns iOS versions now; leaving xcconfig mirrors around
-    # creates a second source of truth that XcodeGen may merge differently
-    # across configs.
-    perl -0pi -e 's{(?m)^// App info\nMARKETING_VERSION = [^\n]+\nCURRENT_PROJECT_VERSION = [^\n]+\n}{// App info lives in project.yml and is generated from VERSION.env.\n}' \
-        "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"
-    perl -0pi -e 's{(?m)^// App info\nMARKETING_VERSION = [^\n]+\nCURRENT_PROJECT_VERSION = [^\n]+\n}{// App info lives in project.yml and is generated from VERSION.env.\n}' \
-        "$PROJECT_DIR/packages/mac-app/Configuration/Base.xcconfig"
 }
 
 value_after_key() {
