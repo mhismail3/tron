@@ -6,10 +6,10 @@ use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRI
 use super::service::{
     inspect_module_proposal_value, list_module_proposal_value, record_module_proposal_value_at,
 };
-use super::{Deps, MODULE_PROPOSAL_KIND, MODULE_PROPOSAL_SCHEMA_ID};
+use super::{MODULE_PROPOSAL_KIND, MODULE_PROPOSAL_SCHEMA_ID};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, ListResources, RiskLevel, TraceId, builtin_resource_type_definitions,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, ListResources, RiskLevel, TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -20,7 +20,7 @@ const IDEMPOTENCY_LEAK_PREFIX: &str = "MODULE_PROPOSAL_IDEMPOTENCY_LEAK_PREFIX";
 const IDEMPOTENCY_LEAK_SUFFIX: &str = "MODULE_PROPOSAL_IDEMPOTENCY_LEAK_SUFFIX";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -29,12 +29,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -48,7 +46,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_PROPOSAL_KIND],
@@ -57,7 +55,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -67,7 +65,7 @@ impl Fixture {
     async fn record(&self, key: &str, payload: Value) -> Value {
         let invocation = self.write_invocation(key, payload);
         record_module_proposal_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -79,7 +77,7 @@ impl Fixture {
     async fn record_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.write_invocation(key, payload);
         record_module_proposal_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -91,14 +89,14 @@ impl Fixture {
 
     async fn list(&self, key: &str, payload: Value) -> Value {
         let invocation = self.read_invocation(key, payload);
-        list_module_proposal_value(&self.deps, &invocation, &invocation.payload)
+        list_module_proposal_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("list module proposals")
     }
 
     async fn list_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.read_invocation(key, payload);
-        list_module_proposal_value(&self.deps, &invocation, &invocation.payload)
+        list_module_proposal_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect_err("list should fail")
             .to_string()
@@ -116,7 +114,7 @@ impl Fixture {
             grant_id,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
         );
-        inspect_module_proposal_value(&self.deps, &invocation, &invocation.payload)
+        inspect_module_proposal_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .map_err(|error| error.to_string())
     }
@@ -129,7 +127,7 @@ impl Fixture {
     ) -> String {
         let invocation =
             self.invocation_with_grant(key, payload, grant_id, &[READ_SCOPE, RESOURCE_READ_SCOPE]);
-        inspect_module_proposal_value(&self.deps, &invocation, &invocation.payload)
+        inspect_module_proposal_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
@@ -138,7 +136,7 @@ impl Fixture {
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_PROPOSAL_KIND],
@@ -150,7 +148,6 @@ impl Fixture {
 
     async fn raw_current_payload(&self, resource_id: &str) -> Value {
         let inspection = self
-            .deps
             .engine_host
             .inspect_resource(resource_id)
             .await
@@ -239,7 +236,6 @@ async fn proposal_record_list_inspect_replay_and_projection_are_bounded() {
     let resource_id = recorded["moduleProposalResourceId"].as_str().unwrap();
 
     let stored = fixture
-        .deps
         .engine_host
         .inspect_resource(resource_id)
         .await
@@ -301,7 +297,6 @@ async fn proposal_record_list_inspect_replay_and_projection_are_bounded() {
     assert_eq!(replay["idempotentReplay"], json!(true));
     assert_eq!(replay["moduleProposalResourceId"], json!(resource_id));
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_PROPOSAL_KIND.to_owned()),
@@ -314,7 +309,6 @@ async fn proposal_record_list_inspect_replay_and_projection_are_bounded() {
     assert_eq!(resources.len(), 1);
 
     let streams = fixture
-        .deps
         .engine_host
         .replay_snapshot(&fixture.session_id)
         .await
@@ -517,7 +511,6 @@ async fn proposal_identity_rejects_provider_visible_token_like_material() {
     }
 
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_PROPOSAL_KIND.to_owned()),
@@ -596,7 +589,6 @@ async fn proposal_metadata_tokens_reject_provider_visible_token_like_material() 
     }
 
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_PROPOSAL_KIND.to_owned()),
@@ -684,15 +676,14 @@ fn id_token_like_idempotency_key(label: &str) -> String {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("module-proposal-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

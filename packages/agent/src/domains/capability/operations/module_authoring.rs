@@ -13,11 +13,8 @@ pub(super) async fn module_proposal_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_authoring_deps = crate::domains::module_authoring::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_authoring::service::record_module_proposal_value_at(
-        &module_authoring_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn module_proposal_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_authoring_deps = crate::domains::module_authoring::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_authoring::service::list_module_proposal_value(
-        &module_authoring_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn module_proposal_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_authoring_deps = crate::domains::module_authoring::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_authoring::service::inspect_module_proposal_value(
-        &module_authoring_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

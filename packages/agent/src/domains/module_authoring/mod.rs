@@ -21,6 +21,10 @@
 //! | `validation` | Text, ref, lifecycle, idempotency, and unsafe-field checks |
 //! | `tests` | Schema, authority, replay, redaction, and side-effect regressions |
 //!
+//! Service and authority functions borrow the composition-owned
+//! `EngineHostHandle` directly; this domain owns no dependency aggregate or
+//! engine-host lifecycle.
+//!
 //! # INVARIANT: proposals do not become installed modules
 //!
 //! This domain stores proposal metadata only. It must not create a physical
@@ -37,11 +41,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{MODULE_PROPOSAL_KIND, MODULE_PROPOSAL_SCHEMA_ID};
 
