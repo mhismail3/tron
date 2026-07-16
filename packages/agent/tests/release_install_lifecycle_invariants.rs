@@ -794,7 +794,7 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
 
     let release_mac = read_repo_file(".github/workflows/release-mac.yml");
     for required in [
-        "scripts/tron version check",
+        "scripts/tron version github-output",
         "./scripts/bundle-agent.sh --skip-build",
         "xcodegen generate",
         "git check-ignore -q packages/mac-app/TronMac.xcodeproj",
