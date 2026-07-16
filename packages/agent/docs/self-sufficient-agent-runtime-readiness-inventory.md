@@ -62,7 +62,7 @@ Implementation states:
 - Public `/engine` `promote` is user-owned engine visibility promotion with
   idempotency and authority requirements, not a public tool-synthesis or
   client-side catalog edit API.
-- Historical PET/OPSAA/IOSTC wording about self-adapting agents, generated
+- Historical PET/OPSAA wording about self-adapting agents, generated
   workers, learned memory/rules, and successor UI is retained as evidence or
   future-readiness context, not current completed architecture.
 

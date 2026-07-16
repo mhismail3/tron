@@ -679,9 +679,6 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
         "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
-        | "packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md"
-        | "packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md"
-        | "packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md"
         | "packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md"
         | "packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs" => {
             Some(ResidueClass::FutureReadinessWording)

@@ -45,7 +45,6 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
         || path == "packages/agent/src/domains/capability/mod.rs"
         || path.starts_with("packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-")
         || path.starts_with("packages/agent/docs/primitive-engine-teardown-")
-        || path.starts_with("packages/agent/docs/ios-thin-client-generic-runtime-shell-")
         || path.starts_with("packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-")
         || path.starts_with("packages/agent/docs/ios-affordance-restoration-map-")
         || path.starts_with("packages/agent/docs/phase-2-agent-execution-restoration-")
@@ -333,7 +332,6 @@ fn evidence_manifest_records_required_commands_without_placeholders() {
         "cargo check --manifest-path packages/agent/Cargo.toml",
         "cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test configuration_profile_environment_discipline_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture",

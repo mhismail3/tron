@@ -354,7 +354,8 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testEngineAndProvidersSheetsDoNotMountSummaryHeroes
 ```
 
-For the IOSTC thin-client closeout, the focused iOS 26.5 simulator set is:
+For settings, pairing, event decoding, error projection, and generic runtime
+rendering changes, use this focused iOS 26.5 simulator set:
 
 ```bash
 xcodebuild test -scheme Tron \
@@ -371,9 +372,6 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
   -only-testing:TronMobileTests/GeneratedUIRendererTests
 ```
-
-The source-backed scorecard and evidence live under
-`packages/agent/docs/ios-thin-client-generic-runtime-shell-*`.
 
 ### Simulator Deep-Link Smoke Test
 

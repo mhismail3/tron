@@ -19,7 +19,7 @@ Invariant target:
 | BPRC-3 | passed | Added absence guards for old product domains, repo-managed skills, fixed iOS product panel roots, successor runtime claims, and provider-visible tool widening; Slice 10A deliberately narrows the subagents guard to inert lifecycle records only. | BPRC invariant scans domain roots, iOS roots, skill path, README/docs wording, and capability contract shape. | New successor work must update guards deliberately. |
 | BPRC-4 | passed | Audited active stale/residue terms and retained only classified historical or future-restoration wording. | BPRC invariant rejects active unresolved markers and unscoped successor claims in BPRC artifacts and root docs. | No source deletion was required in this docs/static-gate closure. |
 | BPRC-5 | passed | Recorded the engine substrate readiness boundary and iii-aligned worker/function/trigger contract. | BPRC inventory rows for engine fabric, runtime, catalog, resources, capability contract, and iOS runtime surfaces. | Self-adapting runtime remains a future feature slice. |
-| BPRC-6 | passed | Recorded iOS current-baseline parity without adding fixed UI. | BPRC scorecard and inventory cite IOSTC-backed surfaces; no Swift source changes were made. | Simulator rerun remains required if Swift/protocol/UI changes later. |
+| BPRC-6 | passed | Recorded iOS current-baseline parity without adding fixed UI. | BPRC scorecard and inventory cite the source-owned iOS surfaces and focused tests; no Swift source changes were made. | Simulator rerun remains required if Swift/protocol/UI changes later. |
 | BPRC-7 | passed | Wired BPRC into local and GitHub static closeout gates. | BPRC invariant parses `scripts/tron.d/quality.sh` and `.github/workflows/ci.yml` and requires identical target order. | Closed. |
 | BPRC-8 | passed | Added BPRC inventory and TSV covering all BPRC artifacts, references, substrate rows, and backlog rows. | BPRC invariant parses TSV header, row count, classifications, tracked paths, and row coverage. | Closed. |
 | BPRC-9 | passed | Added the pre-restoration entry contract. | Inventory and README contain the required module owner, schemas, authority, iOS parity, tests, docs, migration, rollback, and no-hardcoded-harness proof requirements. | Every future restoration slice must satisfy it. |
@@ -33,7 +33,6 @@ Invariant target:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | passed | DESI predecessor invariant passed after BPRC artifact additions. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | passed | SSARR predecessor invariant passed after BPRC wording/classification. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_minimality_closure_invariants -- --nocapture` | passed | PMC predecessor invariant passed after BPRC closeout target wiring. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | passed | IOSTC predecessor invariant passed; no Swift source changes were made. |
 | `scripts/tron ci fmt check clippy test` | passed | Full Rust CI passed with BPRC in the closeout target set. |
 | `scripts/personal-info-guard.sh` | passed | Full personal-info guard passed. |
 | `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | passed | XcodeGen drift check passed. |
@@ -74,7 +73,7 @@ Invariant target:
 ## iOS No-Source-Change Rationale
 
 BPRC is a baseline closure and certification goal. The supported iOS current
-surface is already covered by IOSTC and the current retained UI roots:
+surface is covered by source-owned focused tests and the current retained UI roots:
 `Capabilities`, `Chat`, `Components`, `Onboarding`, `RuntimeSurfaces`,
 `Settings`, `System`, and `Theme`. No Swift source change is required until a
 future restoration slice introduces a new protocol or UI behavior.

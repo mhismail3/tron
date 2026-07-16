@@ -76,9 +76,8 @@ Mac source, or deploy commands.
 ## iOS No-Touch Rationale
 
 No Swift, XcodeGen schema, protocol DTO, settings UI, or iOS runtime-shell source
-changed in PMC. Validation is therefore XcodeGen drift checking plus inherited
-IOSTC static/source gates. iOS 26.5 simulator tests are reserved for Swift,
-protocol, or UI behavior changes.
+changed in PMC. Validation is therefore XcodeGen drift checking; source-owned
+iOS tests remain responsible for Swift, protocol, and UI behavior.
 
 ## Residual Risk
 
