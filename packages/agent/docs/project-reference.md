@@ -2878,7 +2878,8 @@ Xcode project, and archives `Tron.app`. Publication signs inside-out, notarizes
 the app, builds the DMG from a dedicated source directory, remounts it to
 require the production helper and `Applications` link, then signs/notarizes the
 DMG separately. `scripts/tron-release-notes` owns the dynamic release body and
-asset names; the workflow applies the validated title from
+asset names; compare-link identity comes from hosted workflow context or an
+explicit local `--repo-url`, never Git remotes. The validated title comes from
 `scripts/tron-version`. The workflow creates a draft when no release exists, or
 updates existing assets without changing an already-published release's state, title,
 or notes.

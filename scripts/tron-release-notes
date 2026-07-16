@@ -26,7 +26,7 @@ Usage: tron-release-notes --tag TAG --version VERSION \
 Options:
   --apple-build N       Include the Apple build number when available
   --previous-tag TAG    Override automatic previous release-tag detection
-  --repo-url URL        Override the GitHub repository URL used in compare links
+  --repo-url URL        Use this repository URL instead of hosted GitHub context
   --test                Run shell-level tests
 USAGE
 }
@@ -80,20 +80,7 @@ repository_url() {
         printf 'https://github.com/%s\n' "$GITHUB_REPOSITORY"
         return
     fi
-    local origin
-    origin="$(git config --get remote.origin.url || true)"
-    case "$origin" in
-        git@github.com:*)
-            origin="${origin#git@github.com:}"
-            printf 'https://github.com/%s\n' "${origin%.git}"
-            ;;
-        https://github.com/*)
-            printf '%s\n' "${origin%.git}"
-            ;;
-        *)
-            printf 'https://github.com/tron-owner/tron\n'
-            ;;
-    esac
+    die "repository identity is required; set GITHUB_REPOSITORY or pass --repo-url"
 }
 
 find_previous_tag() {
@@ -263,16 +250,25 @@ self_test() {
     sha="$tmp/tron-v0.1.0-beta2.dmg.sha256"
     echo "abcdef1234567890  tron-v0.1.0-beta2.dmg" > "$sha"
     notes="$tmp/notes.md"
+    if (
+        cd "$tmp"
+        env -u GITHUB_REPOSITORY "$script" --tag server-v0.1.0-beta.2 --version 0.1.0-beta.2 \
+            --display-version "v0.1 (Beta 2)" --asset "$tmp/tron-v0.1.0-beta2.dmg" \
+            --sha256-file "$sha" --output "$tmp/missing-owner.md"
+    ) >/dev/null 2>"$tmp/missing-owner.err"; then
+        die "release notes accepted missing repository ownership"
+    fi
+    grep -q "set GITHUB_REPOSITORY or pass --repo-url" "$tmp/missing-owner.err" || die "missing repository owner error lacked guidance"
+    [ ! -e "$tmp/missing-owner.md" ] || die "missing repository ownership generated release notes"
     (
         cd "$tmp"
-        "$script" \
+        GITHUB_REPOSITORY=acme/tron "$script" \
             --tag server-v0.1.0-beta.2 \
             --version 0.1.0-beta.2 \
             --display-version "v0.1 (Beta 2)" \
             --apple-build 2 \
             --asset "$tmp/tron-v0.1.0-beta2.dmg" \
             --sha256-file "$sha" \
-            --repo-url https://example.com/acme/tron \
             --output "$notes"
     )
 
@@ -283,7 +279,7 @@ self_test() {
     grep -qx -- "- SHA256: \`abcdef1234567890\`" "$notes" || die "notes omitted sha"
     grep -q "changes since \`mac-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
     grep -q "Add install repair flow" "$notes" || die "notes omitted release commit"
-    grep -qx "https://example.com/acme/tron/compare/mac-v0.1.0-beta.1...server-v0.1.0-beta.2" "$notes" || die "notes omitted compare URL"
+    grep -qx "https://github.com/acme/tron/compare/mac-v0.1.0-beta.1...server-v0.1.0-beta.2" "$notes" || die "notes omitted hosted compare URL"
 
     for i in $(seq 1 80); do
         printf 'line %s\n' "$i" >> "$tmp/file.txt"
@@ -335,4 +331,6 @@ self_test() {
 
 parse_args "$@"
 require_inputs
-emit_notes "$(find_previous_tag)" "$(repository_url)"
+previous_tag="$(find_previous_tag)"
+repo_url="$(repository_url)"
+emit_notes "$previous_tag" "$repo_url"
