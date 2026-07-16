@@ -274,25 +274,141 @@ fn production_swift_async_stream_initializers_are_bounded() {
     );
 }
 
+const KEYBOARD_OBSERVER_PATH: &str =
+    "packages/ios-app/Sources/Support/Foundation/SwiftUI/KeyboardObserver.swift";
+const KEYBOARD_OBSERVER_OWNER_PREAMBLE: &str = r#"/// Owns process-lifetime keyboard visibility and transition state.
+/// Native layout remains the authoritative owner of keyboard geometry.
+@Observable
+@MainActor
+final class KeyboardObserver {
+    static let shared = KeyboardObserver()
+
+    /// Whether the keyboard is currently visible
+    private(set) var isKeyboardVisible: Bool = false
+
+    /// Whether the keyboard is currently animating (showing or hiding)
+    private(set) var isAnimating: Bool = false
+
+    private var notificationTasks: [Task<Void, Never>] = []
+
+    private init() {"#;
+
+fn swift_has_task_storage(source: &str) -> bool {
+    mask_swift_comments_and_strings(source).lines().any(|line| {
+        let Some(task) = line.find("Task<") else {
+            return false;
+        };
+        let declaration = &line[..task];
+        declaration.contains(':')
+            && declaration
+                .split(|character: char| !character.is_alphanumeric() && character != '_')
+                .any(|token| matches!(token, "let" | "var"))
+    })
+}
+
+fn swift_has_cancellation_path(source: &str) -> bool {
+    let code = mask_swift_comments_and_strings(source);
+    text_has_any(
+        &code,
+        &[
+            "deinit",
+            "func stop",
+            "func reset",
+            "func disconnect",
+            "func cleanup",
+            ".cancel()",
+            "onDisappear",
+        ],
+    )
+}
+
+fn is_keyboard_process_lifetime_task_owner(path: &str, source: &str) -> bool {
+    if path != KEYBOARD_OBSERVER_PATH || !source.contains(KEYBOARD_OBSERVER_OWNER_PREAMBLE) {
+        return false;
+    }
+
+    let code = mask_swift_comments_and_strings(source);
+    let normalized = code.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized.matches("init(").count() == 1
+        && normalized.matches("Task<").count() == 1
+        && normalized
+            .matches("notificationTasks.append(Task { [weak self] in")
+            .count()
+            == 4
+        && normalized.matches("Task {").count() == 4
+        && normalized.matches(".notifications(named:").count() == 4
+}
+
+fn swift_task_owner_has_required_lifecycle(path: &str, source: &str) -> bool {
+    !swift_has_task_storage(source)
+        || swift_has_cancellation_path(source)
+        || is_keyboard_process_lifetime_task_owner(path, source)
+}
+
+#[test]
+fn swift_task_owner_guard_distinguishes_lifecycle_from_prose() {
+    let ordinary_owner = r#"
+final class Owner {
+    private var task: Task<Void, Never>?
+}
+"#;
+    assert!(!swift_task_owner_has_required_lifecycle(
+        "packages/ios-app/Sources/Owner.swift",
+        ordinary_owner
+    ));
+    assert!(swift_task_owner_has_required_lifecycle(
+        "packages/ios-app/Sources/Owner.swift",
+        &ordinary_owner.replace("}", "    func cancel() { task?.cancel() }\n}")
+    ));
+    assert!(!swift_task_owner_has_required_lifecycle(
+        "packages/ios-app/Sources/Owner.swift",
+        &format!("// cancelled by prose only\n{ordinary_owner}")
+    ));
+    assert!(swift_task_owner_has_required_lifecycle(
+        "packages/ios-app/Sources/Factory.swift",
+        "func makeTask() -> Task<Void, Never> { Task {} }"
+    ));
+    let process_owner = read_repo_file(KEYBOARD_OBSERVER_PATH);
+    assert!(is_keyboard_process_lifetime_task_owner(
+        KEYBOARD_OBSERVER_PATH,
+        &process_owner
+    ));
+    for invalid in [
+        process_owner.replace("static let shared", "static var shared"),
+        process_owner.replace("private init()", "init()"),
+        process_owner.replace("KeyboardObserver()", "OtherObserver()"),
+        process_owner.replace("[weak self]", "[self]"),
+        process_owner.replace(
+            "private init()",
+            "private var extraTask: Task<Void, Never>?\n    private init()",
+        ),
+        process_owner.replace(
+            KEYBOARD_OBSERVER_OWNER_PREAMBLE,
+            &KEYBOARD_OBSERVER_OWNER_PREAMBLE.replace("@Observable", "\n@Observable"),
+        ),
+    ] {
+        assert!(!is_keyboard_process_lifetime_task_owner(
+            KEYBOARD_OBSERVER_PATH,
+            &invalid
+        ));
+    }
+    assert!(!is_keyboard_process_lifetime_task_owner(
+        "packages/ios-app/Sources/Other.swift",
+        &process_owner
+    ));
+    assert!(!is_keyboard_process_lifetime_task_owner(
+        KEYBOARD_OBSERVER_PATH,
+        &format!("let prose = {process_owner:?}\n{ordinary_owner}")
+    ));
+}
+
 #[test]
 fn swift_owner_classes_with_task_fields_expose_cancellation_paths() {
     let offenders = production_ios_swift_paths()
         .into_iter()
         .filter(|path| {
             let source = read_repo_file(path);
-            source.contains("Task<")
-                && !text_has_any(
-                    &source,
-                    &[
-                        "deinit",
-                        "stop",
-                        "reset",
-                        "disconnect",
-                        "cleanup",
-                        "cancel",
-                        "onDisappear",
-                    ],
-                )
+            !swift_task_owner_has_required_lifecycle(path, &source)
         })
         .collect::<Vec<_>>();
     assert!(

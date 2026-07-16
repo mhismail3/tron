@@ -556,8 +556,10 @@ stored-event parity, but replay manifests stay outside the iOS event plugin and
 database event-case surface.
 
 Transport and UI scheduling is guarded directly by
-`concurrency_scheduling_discipline_invariants`. Long-lived `Task` handles are
-stored and cancelled by their owner, SwiftUI
+`concurrency_scheduling_discipline_invariants`. Releasable lifecycle owners
+store and cancel long-lived `Task` handles. The source-guarded
+`KeyboardObserver` exception owns its fixed weak-capturing notification task
+set until process exit. SwiftUI
 `.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
 callback bridges use bounded stream buffering or owner queues. An observation
 task must not retain its lifecycle owner through a suspended wait, and stored
