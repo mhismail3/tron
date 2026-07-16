@@ -161,9 +161,9 @@ fn procedural_record_resource_definition_is_registered_as_inert_metadata() {
 
 #[test]
 fn procedural_operations_are_read_only_execute_schema_values_without_activation_goals() {
-    let metadata = crate::domains::capability::contract::model_metadata(
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-    );
+    let metadata = crate::domains::capability::contract::execute_function_definition()
+        .expect("execute definition")
+        .metadata;
     let schema_text = crate::domains::capability::operation_host_request_schema().to_string();
     assert!(schema_text.contains("procedural_state_list"));
     assert!(schema_text.contains("procedural_state_inspect"));

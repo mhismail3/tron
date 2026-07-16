@@ -244,7 +244,6 @@ fn parameter_schema_from_value(value: Value) -> CapabilityParameterSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::registration::catalog::function_definition_for_capability;
     use crate::engine::{
         ActorId, AuthorityGrantId, EffectClass, FunctionDefinition, WorkerDefinition, WorkerId,
         WorkerKind,
@@ -260,32 +259,13 @@ mod tests {
         .with_namespace_claim(namespace)
     }
 
-    fn merge_metadata(target: &mut Value, extra: Value) {
-        match (target, extra) {
-            (Value::Object(target), Value::Object(extra)) => {
-                for (key, value) in extra {
-                    let _ = target.insert(key, value);
-                }
-            }
-            (target, extra) if !extra.is_null() => {
-                *target = extra;
-            }
-            _ => {}
-        }
-    }
-
     fn register_execute(host: &EngineHostHandle) {
         host.register_worker_for_setup(worker("capability", "capability"), false)
             .expect("capability worker");
-        for spec in crate::domains::capability::contract::capabilities().expect("capabilities") {
-            let mut definition = function_definition_for_capability(&spec);
-            merge_metadata(
-                &mut definition.metadata,
-                crate::domains::capability::contract::model_metadata(definition.id.as_str()),
-            );
-            host.register_function_for_setup(definition, None, false)
-                .expect("capability function");
-        }
+        let definition = crate::domains::capability::contract::execute_function_definition()
+            .expect("execute definition");
+        host.register_function_for_setup(definition, None, false)
+            .expect("capability function");
     }
 
     #[tokio::test]

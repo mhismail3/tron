@@ -204,7 +204,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `contract` | Single `capability::execute` host contract and compact provider bootstrap schema |
+//! | `contract` | Single fully composed `capability::execute` definition and compact provider bootstrap schema |
 //! | `operations` | Direct primitive operation implementations |
 //! | `operations::operation_contract` | Canonical typed operation registry plus input/output, ownership, effect, context, idempotency, and base-authority contracts for every execute operation |
 //! | `pool` | Operation/catalog-function classification for agent-facing discovery |
@@ -275,7 +275,6 @@ use std::sync::Arc;
 
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::jobs;
-use crate::domains::registration::catalog::{CapabilitySpec, function_definition_for_capability};
 use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
@@ -313,54 +312,15 @@ pub(crate) fn worker_module(
     jobs: jobs::RuntimeState,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let domain_deps = Deps::from_engine(deps, jobs);
-    let mut registrations = function_registrations(contract::capabilities()?, domain_deps)?;
-    for registration in &mut registrations {
-        merge_metadata(
-            &mut registration.definition.metadata,
-            contract::model_metadata(registration.definition.id.as_str()),
-        );
-    }
+    let registration = DomainFunctionRegistration {
+        definition: contract::execute_function_definition()?,
+        handler: Arc::new(ExecuteHandler { deps: domain_deps }),
+    };
     crate::domains::registration::worker::domain_worker_module(
         "capability",
         contract::STREAM_TOPICS,
-        registrations,
+        vec![registration],
     )
-}
-
-fn merge_metadata(target: &mut Value, extra: Value) {
-    if extra.is_null() {
-        return;
-    }
-    match (target, extra) {
-        (Value::Object(target), Value::Object(extra)) => {
-            for (key, value) in extra {
-                let _ = target.insert(key, value);
-            }
-        }
-        (target, extra) => {
-            *target = extra;
-        }
-    }
-}
-
-fn function_registrations(
-    specs: Vec<CapabilitySpec>,
-    deps: Deps,
-) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    let mut registrations = Vec::with_capacity(specs.len());
-    for spec in specs {
-        if spec.operation_key != "execute" {
-            return Err(EngineError::PolicyViolation(format!(
-                "unexpected capability operation '{}'",
-                spec.operation_key
-            )));
-        }
-        registrations.push(DomainFunctionRegistration {
-            definition: function_definition_for_capability(&spec),
-            handler: Arc::new(ExecuteHandler { deps: deps.clone() }),
-        });
-    }
-    Ok(registrations)
 }
 
 struct ExecuteHandler {
