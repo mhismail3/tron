@@ -497,7 +497,6 @@ jobs:
           notes_path="$RUNNER_TEMP/tron-release-notes.md"
           ./scripts/tron-release-notes \
             --tag "${{ steps.ver.outputs.tag }}" \
-            --title "${{ steps.ver.outputs.release_title }}" \
             --version "${{ steps.ver.outputs.version }}" \
             --display-version "${{ steps.ver.outputs.display_version }}" \
             --apple-build "${{ steps.ver.outputs.apple_build }}" \

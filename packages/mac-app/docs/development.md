@@ -211,7 +211,8 @@ the app, and then builds a fail-closed DMG from a dedicated source directory.
 The mounted DMG must contain the wrapper, production helper, and
 `Applications -> /Applications` link before the separately signed/notarized
 image can reach a draft release. `scripts/tron-release-notes` owns the dynamic
-tag, title, changelog, and asset names.
+tag, changelog, and asset names; the workflow applies the release title exported
+by `scripts/tron-version`.
 
 Manual workflow dispatch defaults to structural dry-run and never publishes a
 GitHub release; with `dry_run=false` and signing credentials, it can exercise

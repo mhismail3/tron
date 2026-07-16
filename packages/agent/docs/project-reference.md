@@ -2877,9 +2877,10 @@ helper metadata, stages the executable into both helper bundles, generates the
 Xcode project, and archives `Tron.app`. Publication signs inside-out, notarizes
 the app, builds the DMG from a dedicated source directory, remounts it to
 require the production helper and `Applications` link, then signs/notarizes the
-DMG separately. `scripts/tron-release-notes` owns dynamic release copy and
-asset names. The workflow creates a draft when no release exists, or updates
-existing assets without changing an already-published release's state, title,
+DMG separately. `scripts/tron-release-notes` owns the dynamic release body and
+asset names; the workflow applies the validated title from
+`scripts/tron-version`. The workflow creates a draft when no release exists, or
+updates existing assets without changing an already-published release's state, title,
 or notes.
 
 Manual dispatch defaults to structural dry-run and never publishes; with
