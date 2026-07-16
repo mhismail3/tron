@@ -8,19 +8,19 @@ use super::service::{
     record_module_install_decision_value_at, record_module_install_request_value_at,
 };
 use super::{
-    Deps, MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID,
-    MODULE_INSTALL_REQUEST_KIND, MODULE_INSTALL_REQUEST_SCHEMA_ID,
+    MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_INSTALL_REQUEST_KIND,
+    MODULE_INSTALL_REQUEST_SCHEMA_ID,
 };
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, ListResources, RiskLevel, TraceId, builtin_resource_type_definitions,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, ListResources, RiskLevel, TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-26T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -29,12 +29,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -51,7 +49,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_INSTALL_REQUEST_KIND, MODULE_INSTALL_DECISION_KIND],
@@ -63,7 +61,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -72,10 +70,10 @@ impl Fixture {
 
     async fn passed_validation_report(&self, key: &str) -> String {
         let validation_deps = crate::domains::module_validation::Deps {
-            engine_host: self.deps.engine_host.clone(),
+            engine_host: self.engine_host.clone(),
         };
         let validation_grant_id = derive_grant(
-            &self.deps,
+            &self.engine_host,
             &format!("{key}-validation"),
             &[
                 crate::domains::module_validation::contract::READ_SCOPE,
@@ -118,7 +116,7 @@ impl Fixture {
     async fn install_request(&self, key: &str, validation_report_id: &str) -> Value {
         let invocation = self.write_invocation(key, request_payload(validation_report_id));
         record_module_install_request_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -144,7 +142,7 @@ impl Fixture {
             &self.session_id,
         );
         let request = crate::domains::approval::service::request_approval_value(
-            &self.deps.engine_host,
+            &self.engine_host,
             &request_invocation,
             &request_invocation.payload,
         )
@@ -164,7 +162,7 @@ impl Fixture {
             &self.session_id,
         );
         crate::domains::approval::service::decide_approval_value(
-            &self.deps.engine_host,
+            &self.engine_host,
             &decision_invocation,
             &decision_invocation.payload,
         )
@@ -175,7 +173,7 @@ impl Fixture {
     async fn decision(&self, key: &str, payload: Value) -> Result<Value, String> {
         let invocation = self.write_invocation(key, payload);
         record_module_install_decision_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -187,7 +185,7 @@ impl Fixture {
     async fn request_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.write_invocation(key, payload);
         record_module_install_request_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -200,7 +198,7 @@ impl Fixture {
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_INSTALL_REQUEST_KIND, MODULE_INSTALL_DECISION_KIND],
@@ -318,7 +316,6 @@ async fn request_and_decision_record_list_inspect_replay_are_bounded() {
         .as_str()
         .unwrap();
     let stored = fixture
-        .deps
         .engine_host
         .inspect_resource(decision_id)
         .await
@@ -328,7 +325,7 @@ async fn request_and_decision_record_list_inspect_replay_are_bounded() {
     assert_eq!(stored.resource.schema_id, MODULE_INSTALL_DECISION_SCHEMA_ID);
 
     let request_list = list_module_install_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("list-requests", json!({})),
         &json!({}),
     )
@@ -336,7 +333,7 @@ async fn request_and_decision_record_list_inspect_replay_are_bounded() {
     .expect("list requests");
     assert_eq!(request_list["installRequests"].as_array().unwrap().len(), 1);
     let decision_list = list_module_install_decision_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("list-decisions", json!({})),
         &json!({}),
     )
@@ -356,7 +353,7 @@ async fn request_and_decision_record_list_inspect_replay_are_bounded() {
         &fixture.session_id,
     );
     let inspected_request = inspect_module_install_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &request_inspect_invocation,
         &request_inspect_invocation.payload,
     )
@@ -378,7 +375,7 @@ async fn request_and_decision_record_list_inspect_replay_are_bounded() {
         &fixture.session_id,
     );
     let inspected_decision = inspect_module_install_decision_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &decision_inspect_invocation,
         &decision_inspect_invocation.payload,
     )
@@ -442,7 +439,7 @@ async fn approval_denials_fail_closed() {
         &fixture.session_id,
     );
     let approval_request = crate::domains::approval::service::request_approval_value(
-        &fixture.deps.engine_host,
+        &fixture.engine_host,
         &approval_request_invocation,
         &approval_request_invocation.payload,
     )
@@ -505,7 +502,6 @@ async fn validation_prerequisite_and_unsafe_payloads_are_denied_before_storage()
     }
 
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_INSTALL_REQUEST_KIND.to_owned()),
@@ -535,11 +531,14 @@ async fn install_inspect_requires_exact_resource_selector() {
         "selector-denied",
         json!({"moduleInstallRequestResourceId": request_id}),
     );
-    let denied =
-        inspect_module_install_request_value(&fixture.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("kind-only read grant denied")
-            .to_string();
+    let denied = inspect_module_install_request_value(
+        &fixture.engine_host,
+        &invocation,
+        &invocation.payload,
+    )
+    .await
+    .expect_err("kind-only read grant denied")
+    .to_string();
     assert!(denied.contains("requires exact resource:"), "{denied}");
 }
 
@@ -642,15 +641,14 @@ fn approval_invocation(
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("module-install-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

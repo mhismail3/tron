@@ -13,11 +13,8 @@ pub(super) async fn module_install_request_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_install_deps = crate::domains::module_install::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_install::service::record_module_install_request_value_at(
-        &module_install_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn module_install_request_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_install_deps = crate::domains::module_install::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_install::service::list_module_install_request_value(
-        &module_install_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn module_install_request_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_install_deps = crate::domains::module_install::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_install::service::inspect_module_install_request_value(
-        &module_install_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -79,11 +70,8 @@ pub(super) async fn module_install_decision_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_install_deps = crate::domains::module_install::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_install::service::record_module_install_decision_value_at(
-        &module_install_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -100,11 +88,8 @@ pub(super) async fn module_install_decision_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_install_deps = crate::domains::module_install::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_install::service::list_module_install_decision_value(
-        &module_install_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -124,11 +109,8 @@ pub(super) async fn module_install_decision_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_install_deps = crate::domains::module_install::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_install::service::inspect_module_install_decision_value(
-        &module_install_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

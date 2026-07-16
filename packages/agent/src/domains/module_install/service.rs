@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResourceLocation, EngineResourceScope, Invocation, ListResources,
+    CreateResource, EngineHostHandle, EngineResourceLocation, EngineResourceScope, Invocation,
+    ListResources,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -32,18 +33,18 @@ use super::resource_store::{
 };
 use super::validation::*;
 use super::{
-    Deps, MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID,
-    MODULE_INSTALL_REQUEST_KIND, MODULE_INSTALL_REQUEST_SCHEMA_ID,
+    MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_INSTALL_REQUEST_KIND,
+    MODULE_INSTALL_REQUEST_SCHEMA_ID,
 };
 
 pub(crate) async fn record_module_install_request_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_write_authority(deps, invocation, "module_install_request_record").await?;
+    ensure_write_authority(engine_host, invocation, "module_install_request_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let request_id_input = optional_string(payload, "installRequestId")?
@@ -68,7 +69,8 @@ pub(crate) async fn record_module_install_request_value_at(
         required_string(payload, "moduleValidationReportResourceId")?;
     validate_module_validation_report_resource_id(&validation_report_resource_id)?;
     let validation_report =
-        inspect_validation_prerequisite(deps, &validation_report_resource_id, &scope).await?;
+        inspect_validation_prerequisite(engine_host, &validation_report_resource_id, &scope)
+            .await?;
     let dependency_policy_refs = validate_ref_array(
         "dependencyPolicyRefs",
         &optional_array(payload, "dependencyPolicyRefs")?.unwrap_or_default(),
@@ -89,8 +91,7 @@ pub(crate) async fn record_module_install_request_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = module_install_request_resource_id(&scope, &request_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -129,8 +130,7 @@ pub(crate) async fn record_module_install_request_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_INSTALL_REQUEST_KIND.to_owned(),
@@ -156,7 +156,7 @@ pub(crate) async fn record_module_install_request_value_at(
         invalid("module install request resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_install.request_recorded",
         &resource,
@@ -178,18 +178,18 @@ pub(crate) async fn record_module_install_request_value_at(
         "idempotentReplay": false,
         "moduleInstallRequestResourceId": resource.resource_id,
         "moduleInstallRequestVersionId": version_id,
-        "installRequest": module_install_request_summary_for_resource(deps, &resource).await?,
+        "installRequest": module_install_request_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_install_request")]
     }))
 }
 
 pub(crate) async fn list_module_install_request_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, "module_install_request_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "module_install_request_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -199,8 +199,7 @@ pub(crate) async fn list_module_install_request_value(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_INSTALL_REQUEST_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -218,8 +217,7 @@ pub(crate) async fn list_module_install_request_value(
     let truncated = resources.len() > limit;
     let mut requests = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -251,18 +249,19 @@ pub(crate) async fn list_module_install_request_value(
 }
 
 pub(crate) async fn inspect_module_install_request_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_install_request_inspect").await?;
+    let grant =
+        inspect_read_grant(engine_host, invocation, "module_install_request_inspect").await?;
     let resource_id = required_string(payload, "moduleInstallRequestResourceId")?;
     validate_module_install_request_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_install_request_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module install request").await?;
+        inspect_resource_required(engine_host, &resource_id, "module install request").await?;
     ensure_module_install_request(&inspection, "module_install_request_inspect")?;
     ensure_scope(&inspection, &scope, "module_install_request_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_install_request_inspect")?;
@@ -276,13 +275,13 @@ pub(crate) async fn inspect_module_install_request_value(
 }
 
 pub(crate) async fn record_module_install_decision_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_write_authority(deps, invocation, "module_install_decision_record").await?;
+    ensure_write_authority(engine_host, invocation, "module_install_decision_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let decision_id_input = optional_string(payload, "installDecisionId")?
@@ -295,7 +294,8 @@ pub(crate) async fn record_module_install_decision_value_at(
     let request_resource_id = required_string(payload, "moduleInstallRequestResourceId")?;
     validate_module_install_request_resource_id(&request_resource_id)?;
     let request_inspection =
-        inspect_resource_required(deps, &request_resource_id, "module install request").await?;
+        inspect_resource_required(engine_host, &request_resource_id, "module install request")
+            .await?;
     ensure_module_install_request(&request_inspection, "module_install_decision_record")?;
     ensure_scope(
         &request_inspection,
@@ -310,7 +310,8 @@ pub(crate) async fn record_module_install_decision_value_at(
         .ok_or_else(|| invalid("module install request is missing validation report ref"))?
         .to_owned();
     let validation_report =
-        inspect_validation_prerequisite(deps, &validation_report_resource_id, &scope).await?;
+        inspect_validation_prerequisite(engine_host, &validation_report_resource_id, &scope)
+            .await?;
     let state = decision_lifecycle_state(payload)?;
     let decision = required_string(payload, "decision")?;
     let reason = bounded_text(
@@ -331,7 +332,7 @@ pub(crate) async fn record_module_install_decision_value_at(
     let (approval_request_resource_id, approval_decision_resource_id) =
         validate_approval_refs(payload)?;
     let approval = check_install_approval(
-        deps,
+        engine_host,
         &scope,
         &request_resource_id,
         &validation_report_resource_id,
@@ -361,8 +362,7 @@ pub(crate) async fn record_module_install_decision_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = module_install_decision_resource_id(&scope, &decision_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -404,8 +404,7 @@ pub(crate) async fn record_module_install_decision_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_INSTALL_DECISION_KIND.to_owned(),
@@ -431,7 +430,7 @@ pub(crate) async fn record_module_install_decision_value_at(
         invalid("module install decision resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         if state == "install_candidate" {
             "module_install.install_candidate_recorded"
@@ -458,18 +457,19 @@ pub(crate) async fn record_module_install_decision_value_at(
         "idempotentReplay": false,
         "moduleInstallDecisionResourceId": resource.resource_id,
         "moduleInstallDecisionVersionId": version_id,
-        "installDecision": module_install_decision_summary_for_resource(deps, &resource).await?,
+        "installDecision": module_install_decision_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_install_decision")]
     }))
 }
 
 pub(crate) async fn list_module_install_decision_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, "module_install_decision_list").await?;
+    let _grant =
+        inspect_read_grant(engine_host, invocation, "module_install_decision_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -479,8 +479,7 @@ pub(crate) async fn list_module_install_decision_value(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_INSTALL_DECISION_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -498,8 +497,7 @@ pub(crate) async fn list_module_install_decision_value(
     let truncated = resources.len() > limit;
     let mut decisions = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -531,18 +529,19 @@ pub(crate) async fn list_module_install_decision_value(
 }
 
 pub(crate) async fn inspect_module_install_decision_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_install_decision_inspect").await?;
+    let grant =
+        inspect_read_grant(engine_host, invocation, "module_install_decision_inspect").await?;
     let resource_id = required_string(payload, "moduleInstallDecisionResourceId")?;
     validate_module_install_decision_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_install_decision_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module install decision").await?;
+        inspect_resource_required(engine_host, &resource_id, "module install decision").await?;
     ensure_module_install_decision(&inspection, "module_install_decision_inspect")?;
     ensure_scope(&inspection, &scope, "module_install_decision_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_install_decision_inspect")?;
@@ -556,11 +555,11 @@ pub(crate) async fn inspect_module_install_decision_value(
 }
 
 async fn inspect_validation_prerequisite(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource_id: &str,
     scope: &EngineResourceScope,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, resource_id, "module validation report").await?;
+        inspect_resource_required(engine_host, resource_id, "module validation report").await?;
     ensure_validation_report_prerequisite(&inspection, scope)
 }

@@ -2,15 +2,15 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::domains::approval::types::ApprovalCheckRequirement;
-use crate::engine::EngineResourceScope;
+use crate::engine::{EngineHostHandle, EngineResourceScope};
 use crate::shared::server::errors::CapabilityError;
 
+use super::MODULE_INSTALL_REQUEST_KIND;
 use super::records::scope_ref;
 use super::validation::invalid;
-use super::{Deps, MODULE_INSTALL_REQUEST_KIND};
 
 pub(super) async fn check_install_approval(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     scope: &EngineResourceScope,
     request_resource_id: &str,
     validation_report_resource_id: &str,
@@ -34,7 +34,7 @@ pub(super) async fn check_install_approval(
         ],
     };
     let check = crate::domains::approval::service::check_approval_at(
-        &deps.engine_host,
+        engine_host,
         requirement,
         operation_at,
     )
