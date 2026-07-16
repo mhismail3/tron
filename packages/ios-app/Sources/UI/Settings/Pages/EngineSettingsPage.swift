@@ -62,12 +62,14 @@ struct EngineSettingsPage: View {
     @ViewBuilder
     private var stackedContent: some View {
         serversSection
+        tailscaleSection
         enginePolicyContent
     }
 
     private var landscapeContent: some View {
         VStack(spacing: 16) {
             serversSection
+            tailscaleSection
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(spacing: 16) {
@@ -88,6 +90,26 @@ struct EngineSettingsPage: View {
 
     private var serversSection: some View {
         EngineServersSection(startServerOnboarding: startServerOnboarding)
+    }
+
+    @ViewBuilder
+    private var tailscaleSection: some View {
+        if let ip = settingsState.tailscaleIp, !ip.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSectionHeader(title: "Tailscale")
+
+                SettingsCard {
+                    SettingsRow(icon: "network", label: "Tailscale IP") {
+                        Text(ip)
+                            .font(TronTypography.code(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                SettingsCaption(text: "Reported by your Mac. This address is read-only on iPhone.")
+            }
+        }
     }
 
     private var enginePolicyContent: some View {

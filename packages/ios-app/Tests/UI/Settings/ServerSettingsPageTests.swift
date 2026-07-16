@@ -67,6 +67,27 @@ struct ServerSettingsPageTests {
         #expect(!serverSection.contains("Diagnostics"))
     }
 
+    @Test("engine settings exposes the cached Tailscale address as read-only")
+    func engineSettingsExposesCachedTailscaleAddressAsReadOnly() throws {
+        let page = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Settings",
+            "Pages",
+            "EngineSettingsPage.swift",
+        ])
+        let tailscaleSection = try section(
+            in: page,
+            from: "private var tailscaleSection: some View {",
+            to: "private var enginePolicyContent: some View {"
+        )
+
+        #expect(tailscaleSection.contains("settingsState.tailscaleIp"))
+        #expect(tailscaleSection.contains("label: \"Tailscale IP\""))
+        #expect(tailscaleSection.contains(".textSelection(.enabled)"))
+        #expect(!tailscaleSection.contains("updateServerSetting"))
+    }
+
     @Test("paired server menu uses server-specific actions")
     func pairedServerMenuUsesServerSpecificActions() {
         #expect(PairedServerMenuAction.allCases.map(\.title) == [

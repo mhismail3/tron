@@ -7,26 +7,27 @@ import XCTest
 /// `ServerSettings` must have a 1-to-1 control in the iOS settings UI.
 /// There is no Swift reflection path from the `ServerSettings` struct
 /// because it uses a custom strict decoder rather than Codable synthesis.
-/// Instead, this test walks `SettingsState`'s
-/// runtime fields via `Mirror` — every field on the observable
-/// projection is expected to either be part of the user-editable
+/// The first bridge test reflects the decoded DTO and repository snapshot so a
+/// newly decoded field cannot be silently dropped before it reaches state. The
+/// remaining tests walk `SettingsState`'s runtime fields via `Mirror` — every field on the observable
+/// projection is expected to either be represented in the settings
 /// surface (covered by `KNOWN_UI_FIELDS`) or on `WAIVER` with an
 /// explanation for why it doesn't need a UI control.
 ///
-/// A new server field added to the iOS decode path will eventually
-/// land on `SettingsState`, at which point this test fires until the
-/// maintainer updates either the UI list or the waiver.
+/// A new server field added to the iOS decode path must be projected into the
+/// snapshot and state before the UI list or a waiver can be updated.
 @MainActor
 final class SettingsParityTests: XCTestCase {
 
     /// Fields that are wired to a UI control somewhere under
     /// `Sources/UI/Settings/Pages/`. Adding a field here requires a real
-    /// UI control — the test only asserts the field is accounted for,
+    /// UI control or read-only row — the test only asserts the field is accounted for,
     /// not that it's actually displayed, but the intent is explicit.
     private let KNOWN_UI_FIELDS: Set<String> = [
         // General
         "defaultModel",
         "quickSessionWorkspace",
+        "tailscaleIp",
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
@@ -55,6 +56,33 @@ final class SettingsParityTests: XCTestCase {
         // plumbing (observation registrar) and not a user field.
         if stripped.hasPrefix("$") { return nil }
         return stripped
+    }
+
+    func testEveryDecodedSettingsFieldProjectsIntoSnapshot() throws {
+        let json = #"{"server":{"defaultWorkspace":"/parity-workspace","tailscaleIp":"100.64.0.7","transcription":{"enabled":true}},"context":{"compactor":{"preserveRecentCount":7,"triggerTokenThreshold":0.55}}}"#
+        let settings = try JSONDecoder().decode(
+            ServerSettings.self,
+            from: try ServerSettingsFixture.data(json)
+        )
+
+        XCTAssertEqual(
+            Set(Mirror(reflecting: settings).children.compactMap(\.label)),
+            Set(["defaultModel", "defaultWorkspace", "tailscaleIp", "compaction", "transcriptionEnabled"])
+        )
+        XCTAssertEqual(
+            Set(Mirror(reflecting: settings.compaction).children.compactMap(\.label)),
+            Set(["preserveRecentCount", "triggerTokenThreshold"])
+        )
+
+        let snapshot = ServerSettingsSnapshot(settings)
+        XCTAssertEqual(snapshot, ServerSettingsSnapshot(
+            defaultModel: "claude-sonnet-4-6",
+            defaultWorkspace: "/parity-workspace",
+            tailscaleIp: "100.64.0.7",
+            compactionPreserveRecentCount: 7,
+            compactionTriggerTokenThreshold: 0.55,
+            transcriptionEnabled: true
+        ))
     }
 
     func testEverySettingsStateFieldIsWiredOrWaived() {

@@ -503,8 +503,12 @@ that boundary adds no policy or state; policy-owning repositories such as
 `ModelClient` is transport-only; `DefaultModelRepository` owns the active
 server's five-minute model catalog, refresh, and invalidation policy, while
 Settings surfaces read that catalog directly. `SettingsState` owns only the
-server-settings snapshot and rollback state, while `ModelPickerState` owns only
-optimistic switch presentation.
+server-settings snapshot and rollback state, including the Mac-populated
+Tailscale address exposed as read-only connection metadata; the wire update DTO
+cannot write that cache. `ModelPickerState` owns only optimistic switch
+presentation. `SettingsParityTests` guards the DTO-to-snapshot bridge before
+checking state-to-UI ownership so decoded settings cannot disappear between
+layers.
 `WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
 resource, catalog-discovery report, module-activity overview,
 capability-binding cockpit overview, and worker lifecycle calls.

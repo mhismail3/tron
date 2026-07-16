@@ -13,6 +13,7 @@ final class SettingsState {
 
     var defaultModel: String = ""
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
+    var tailscaleIp: String?
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
 
@@ -77,6 +78,7 @@ final class SettingsState {
         isLoaded = false
         loadError = nil
         lastLoadedSettings = nil
+        tailscaleIp = nil
     }
 
     func rollbackToLastLoadedSettings(message: String) {
@@ -96,6 +98,7 @@ final class SettingsState {
     func applyServerSettings(_ settings: ServerSettingsSnapshot) {
         lastLoadedSettings = settings
         defaultModel = settings.defaultModel
+        tailscaleIp = settings.tailscaleIp
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace

@@ -30,6 +30,7 @@ protocol SessionEventRepository: AnyObject {
 struct ServerSettingsSnapshot: Equatable, Sendable {
     let defaultModel: String
     let defaultWorkspace: String?
+    let tailscaleIp: String?
     let compactionPreserveRecentCount: Int
     let compactionTriggerTokenThreshold: Double
     let transcriptionEnabled: Bool
@@ -37,12 +38,14 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     init(
         defaultModel: String,
         defaultWorkspace: String?,
+        tailscaleIp: String?,
         compactionPreserveRecentCount: Int,
         compactionTriggerTokenThreshold: Double,
         transcriptionEnabled: Bool
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
+        self.tailscaleIp = tailscaleIp
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
         self.transcriptionEnabled = transcriptionEnabled
@@ -52,6 +55,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         self.init(
             defaultModel: settings.defaultModel,
             defaultWorkspace: settings.defaultWorkspace,
+            tailscaleIp: settings.tailscaleIp,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
             compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
             transcriptionEnabled: settings.transcriptionEnabled

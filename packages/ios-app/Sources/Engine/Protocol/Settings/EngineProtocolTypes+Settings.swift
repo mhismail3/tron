@@ -74,7 +74,6 @@ struct ServerSettingsUpdate: Encodable {
     struct ServerUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
-        var tailscaleIp: String?
         var transcription: TranscriptionUpdate?
     }
 

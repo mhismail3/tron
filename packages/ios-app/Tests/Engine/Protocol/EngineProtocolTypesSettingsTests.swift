@@ -126,6 +126,7 @@ struct ServerSettingsTests {
 
         let server = json["server"] as? [String: Any]
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")
+        #expect(server?["tailscaleIp"] == nil)
         let transcription = server?["transcription"] as? [String: Any]
         #expect(transcription?["enabled"] as? Bool == true)
 

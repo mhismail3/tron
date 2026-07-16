@@ -10,6 +10,7 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         XCTAssertEqual(state.defaultModel, "")
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
+        XCTAssertNil(state.tailscaleIp)
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertFalse(state.isLoaded)
@@ -63,23 +64,26 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(
             ServerSettings.self,
-            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6"}}"#)
+            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6","tailscaleIp":"100.64.0.7"}}"#)
         )
 
         state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         XCTAssertEqual(state.defaultModel, "claude-opus-4-6")
+        XCTAssertEqual(state.tailscaleIp, "100.64.0.7")
     }
 
     func testClearServerSnapshotHidesServerSettingsDuringSwitch() {
         let state = SettingsState()
         state.isLoaded = true
         state.loadError = "old error"
+        state.tailscaleIp = "100.64.0.7"
 
         state.clearServerSnapshot()
 
         XCTAssertFalse(state.isLoaded)
         XCTAssertNil(state.loadError)
+        XCTAssertNil(state.tailscaleIp)
     }
 
     func testClearServerSnapshotClearsRollbackAnchor() throws {
