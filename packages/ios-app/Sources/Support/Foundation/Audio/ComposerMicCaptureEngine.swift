@@ -59,7 +59,20 @@ final class ComposerMicCaptureEngine {
     }
 
     func requestPermission() async -> Bool {
-        await MicAvailabilityMonitor.shared.requestPermissionIfNeeded()
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        @unknown default:
+            return false
+        }
     }
 
     func start() async throws {

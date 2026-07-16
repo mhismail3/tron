@@ -74,10 +74,17 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+MessageList.swift"),
             encoding: .utf8
         )
+        let retiredMonitor = iosRoot.appendingPathComponent(
+            "Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift"
+        )
 
         #expect(recorderSource.contains("private(set) var audioLevel: Double = 0"))
         #expect(recorderSource.contains("engine.currentLevel"))
         #expect(recorderSource.contains("stopMetering()"))
+        #expect(!recorderSource.contains("MicAvailabilityMonitor"))
+        #expect(!FileManager.default.fileExists(atPath: retiredMonitor.path))
+        #expect(captureSource.contains("AVAudioApplication.shared.recordPermission"))
+        #expect(captureSource.contains("AVAudioApplication.requestRecordPermission"))
         #expect(captureSource.contains("squaredAmplitude += clamped * clamped"))
         #expect(captureSource.contains("normalizedMeterLevel(forRMS:"))
         #expect(waveformSource.contains("samples.removeFirst()"))

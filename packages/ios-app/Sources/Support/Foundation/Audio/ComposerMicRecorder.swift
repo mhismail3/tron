@@ -41,23 +41,19 @@ final class ComposerMicRecorder {
         try Task.checkCancellation()
         guard hasPermission else { throw RecorderError.permissionDenied }
 
-        MicAvailabilityMonitor.shared.isRecordingInProgress = true
         do {
             try await engine.start()
             try Task.checkCancellation()
         } catch is CancellationError {
             isRecording = false
             engine.cancel()
-            MicAvailabilityMonitor.shared.isRecordingInProgress = false
             throw CancellationError()
         } catch {
             if Task.isCancelled {
                 isRecording = false
                 engine.cancel()
-                MicAvailabilityMonitor.shared.isRecordingInProgress = false
                 throw CancellationError()
             }
-            MicAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed(error.localizedDescription)
         }
         isRecording = true
@@ -87,7 +83,6 @@ final class ComposerMicRecorder {
         isRecording = false
         stopMetering()
         let url = engine.stop()
-        MicAvailabilityMonitor.shared.isRecordingInProgress = false
         return (url, url != nil)
     }
 
@@ -97,7 +92,6 @@ final class ComposerMicRecorder {
         isRecording = false
         stopMetering()
         engine.cancel()
-        MicAvailabilityMonitor.shared.isRecordingInProgress = false
     }
 
     private func startMetering() {

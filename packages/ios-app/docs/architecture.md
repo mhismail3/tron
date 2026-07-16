@@ -171,7 +171,7 @@ icon catalog, or fork-row state model.
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  model.list attachmentPolicy -> camera/photo/file data -> AttachmentImagePreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
-Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup + bounded RMS meter -> cancellable transcription::audio -> InputBar
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> ComposerMicCaptureEngine permission gate + bounded RMS meter -> cancellable transcription::audio -> InputBar
 Push:    AppDelegate token -> observable PushNotificationService -> system device::register (install + bundle + environment identity) -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
