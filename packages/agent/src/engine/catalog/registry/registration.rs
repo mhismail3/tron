@@ -34,7 +34,6 @@ impl LiveCatalog {
             .map(|change| change.after)
             .max()
             .unwrap_or(CatalogRevision(0));
-        self.changes = changes;
 
         for mut worker in self.ledger.list_durable_worker_definitions()? {
             if worker.kind == WorkerKind::External {
