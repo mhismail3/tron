@@ -2,12 +2,17 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::execution::{cancel_subagent_value, launch_subagent_value, status_subagent_value};
+use super::execution::{
+    PreparedSubagentFollowup, cancel_subagent_value, launch_subagent_value,
+    prepare_delegated_module_followup, result_subagent_from_module_value,
+    status_subagent_from_module_value,
+};
 use super::{Deps, READ_SCOPE, WRITE_SCOPE};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
     InvocationId, RiskLevel, SUBAGENT_TASK_KIND, TraceId,
 };
+use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::test_support::make_test_context;
 
 #[tokio::test]
@@ -137,6 +142,30 @@ async fn cancel_uses_freshness_and_is_idempotent_after_terminal_state() {
         json!("cancelled")
     );
     assert_eq!(status["execution"]["resultMerged"], json!(false));
+}
+
+#[tokio::test]
+async fn read_only_followup_projects_one_validated_task_snapshot() {
+    let fixture = Fixture::new("snapshot").await;
+    let launched = fixture.launch("snapshot-launch", launch_payload()).await;
+    let resource_id = launched["subagentTaskResourceId"].as_str().unwrap();
+    let version_id = launched["subagentTaskVersionId"].clone();
+    let followup = fixture
+        .prepare_followup("snapshot-read", resource_id, "subagent_result")
+        .await
+        .expect("prepare follow-up snapshot");
+    fixture
+        .cancel(
+            "snapshot-cancel",
+            json!({"subagentTaskResourceId": resource_id}),
+        )
+        .await;
+
+    let details = module_details("completed");
+    let status = status_subagent_from_module_value(&followup, &details);
+    assert_eq!(status["task"]["payload"]["state"], json!("running"));
+    let result = result_subagent_from_module_value(&followup, &details).unwrap();
+    assert_eq!(result["subagentTaskVersionId"], version_id);
 }
 
 #[tokio::test]
@@ -364,19 +393,29 @@ impl Fixture {
     }
 
     async fn status(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self
-            .read_invocation(
-                key,
-                json!({"subagentTaskResourceId": resource_id}),
-                Some(resource_id),
-            )
+        let followup = self
+            .prepare_followup(key, resource_id, "subagent_status")
             .await;
-        status_subagent_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("status")
+        let followup = followup.expect("prepare status follow-up");
+        status_subagent_from_module_value(&followup, &module_details("running"))
     }
 
     async fn status_error(&self, key: &str, resource_id: &str) -> String {
+        let result = self
+            .prepare_followup(key, resource_id, "subagent_status")
+            .await;
+        match result {
+            Ok(_) => panic!("status preparation should fail"),
+            Err(error) => error.to_string(),
+        }
+    }
+
+    async fn prepare_followup(
+        &self,
+        key: &str,
+        resource_id: &str,
+        operation: &str,
+    ) -> Result<PreparedSubagentFollowup, CapabilityError> {
         let invocation = self
             .read_invocation(
                 key,
@@ -384,10 +423,8 @@ impl Fixture {
                 Some(resource_id),
             )
             .await;
-        status_subagent_value(&self.deps, &invocation, &invocation.payload)
+        prepare_delegated_module_followup(&self.deps, &invocation, &invocation.payload, operation)
             .await
-            .expect_err("status should fail")
-            .to_string()
     }
 
     async fn cancel(&self, key: &str, payload: Value) -> Value {
@@ -607,7 +644,11 @@ fn delegated_start_value() -> Value {
         "status": "running",
         "moduleRuntime": {
             "moduleRuntimeResourceId": "module_runtime_state:delegated-runtime",
-            "moduleRuntimeVersionId": "runtime-version-1"
+            "moduleRuntimeVersionId": "runtime-version-1",
+            "moduleRuntime": {
+                "resourceId": "module_runtime_state:delegated-runtime",
+                "versionId": "runtime-version-2"
+            }
         },
         "programExecution": {
             "programExecutionResourceId": "program_execution_record:delegated-program",
@@ -621,4 +662,10 @@ fn delegated_start_value() -> Value {
             }
         }
     })
+}
+
+fn module_details(status: &str) -> Value {
+    let mut details = delegated_start_value();
+    details["status"] = json!(status);
+    details
 }

@@ -29,6 +29,11 @@
 //! review, not as hidden parent-state mutation. Result inspection must traverse
 //! the delegated module binding; no local or test-only result endpoint may
 //! return the persisted placeholder as if it were the production result.
+//! Each read-only module follow-up and its provider-visible projection must use
+//! one validated task snapshot so concurrent task updates cannot mix versions
+//! with delegated runtime or job references. Cancellation deliberately
+//! re-inspects after the module side effect to retain its compare-and-set
+//! freshness boundary.
 //! Delegated launch and follow-up grants must include exact module runtime, job,
 //! program-execution, lifecycle, and subagent-task selectors without implicit
 //! `agent_state` authority. Launch replay must recover the same delegated

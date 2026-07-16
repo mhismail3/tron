@@ -33,6 +33,18 @@ struct LaunchIdentity {
     scope: EngineResourceScope,
 }
 
+pub(crate) struct PreparedSubagentFollowup {
+    resource: EngineResource,
+    version: EngineResourceVersion,
+    module_payload: Value,
+}
+
+impl PreparedSubagentFollowup {
+    pub(crate) fn module_payload(&self) -> Value {
+        self.module_payload.clone()
+    }
+}
+
 pub(crate) async fn plan_subagent_launch_value(
     deps: &Deps,
     invocation: &Invocation,
@@ -194,24 +206,18 @@ pub(crate) async fn launch_subagent_value(
     }))
 }
 
-pub(crate) async fn status_subagent_value(
-    deps: &Deps,
-    invocation: &Invocation,
-    payload: &Value,
-) -> Result<Value, CapabilityError> {
-    let (inspection, version, current) =
-        inspect_current_task(deps, invocation, payload, "subagent_status").await?;
-    Ok(json!({
+fn status_subagent_snapshot_value(task: &PreparedSubagentFollowup) -> Value {
+    json!({
         "schemaVersion": SCHEMA_VERSION,
         "operation": "subagent_status",
-        "status": inspection.resource.lifecycle,
-        "subagentTaskResourceId": inspection.resource.resource_id,
-        "subagentTaskVersionId": version.version_id,
-        "task": inspected_task(&inspection.resource, &version, &current),
-        "resourceRefs": [version_ref(&inspection.resource, &version, "subagent_task")],
+        "status": task.resource.lifecycle,
+        "subagentTaskResourceId": task.resource.resource_id,
+        "subagentTaskVersionId": task.version.version_id,
+        "task": inspected_task(&task.resource, &task.version, &task.version.payload),
+        "resourceRefs": [version_ref(&task.resource, &task.version, "subagent_task")],
         "execution": execution_readback_proof(),
         "network": network_proof()
-    }))
+    })
 }
 
 pub(crate) async fn cancel_subagent_value(
@@ -309,14 +315,13 @@ pub(crate) async fn cancel_subagent_value(
     }))
 }
 
-pub(crate) async fn delegated_module_followup_payload(
+pub(crate) async fn prepare_delegated_module_followup(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
-) -> Result<Value, CapabilityError> {
-    let (_inspection, version, current) =
-        inspect_current_task(deps, invocation, payload, operation).await?;
+) -> Result<PreparedSubagentFollowup, CapabilityError> {
+    let (resource, version) = inspect_current_task(deps, invocation, payload, operation).await?;
     if operation == "subagent_cancel" {
         if let Some(expected) = optional_string(payload, "expectedSubagentTaskVersionId")? {
             if expected != version.version_id {
@@ -324,7 +329,8 @@ pub(crate) async fn delegated_module_followup_payload(
             }
         }
     }
-    let delegation = current
+    let delegation = version
+        .payload
         .get("delegation")
         .and_then(Value::as_object)
         .ok_or_else(|| {
@@ -356,25 +362,30 @@ pub(crate) async fn delegated_module_followup_payload(
     if let Some(key) = optional_string(payload, "idempotencyKey")? {
         followup["idempotencyKey"] = json!(key);
     }
-    Ok(followup)
+    Ok(PreparedSubagentFollowup {
+        resource,
+        version,
+        module_payload: followup,
+    })
 }
 
-pub(crate) async fn result_subagent_from_module_value(
-    deps: &Deps,
-    invocation: &Invocation,
-    payload: &Value,
+pub(crate) fn result_subagent_from_module_value(
+    followup: &PreparedSubagentFollowup,
     module_details: &Value,
 ) -> Result<Value, CapabilityError> {
-    let (inspection, version, current) =
-        inspect_current_task(deps, invocation, payload, "subagent_result").await?;
-    let task = inspected_task(&inspection.resource, &version, &current);
+    let current = followup;
+    let task = inspected_task(
+        &current.resource,
+        &current.version,
+        &current.version.payload,
+    );
     let proposal = merge_proposal_from_module(module_details)?;
     Ok(json!({
         "schemaVersion": SCHEMA_VERSION,
         "operation": "subagent_result",
-        "status": module_details.get("status").and_then(Value::as_str).unwrap_or(inspection.resource.lifecycle.as_str()),
-        "subagentTaskResourceId": inspection.resource.resource_id,
-        "subagentTaskVersionId": version.version_id,
+        "status": module_details.get("status").and_then(Value::as_str).unwrap_or(current.resource.lifecycle.as_str()),
+        "subagentTaskResourceId": current.resource.resource_id,
+        "subagentTaskVersionId": current.version.version_id,
         "result": {
             "kind": "merge_proposal",
             "status": proposal["status"].clone(),
@@ -383,9 +394,9 @@ pub(crate) async fn result_subagent_from_module_value(
         },
         "error": task["payload"]["error"].clone(),
         "refs": task["payload"]["refs"].clone(),
-        "delegation": projected_delegation(current.get("delegation")),
+        "delegation": projected_delegation(current.version.payload.get("delegation")),
         "resourceRefs": [
-            version_ref(&inspection.resource, &version, "subagent_task"),
+            version_ref(&current.resource, &current.version, "subagent_task"),
             proposal["moduleRuntimeRef"].clone(),
             proposal["jobRef"].clone()
         ],
@@ -400,9 +411,10 @@ pub(crate) async fn result_subagent_from_module_value(
 }
 
 pub(crate) fn status_subagent_from_module_value(
-    subagent_status: Value,
+    followup: &PreparedSubagentFollowup,
     module_details: &Value,
 ) -> Value {
+    let subagent_status = status_subagent_snapshot_value(followup);
     json!({
         "schemaVersion": SCHEMA_VERSION,
         "operation": "subagent_status",
@@ -471,12 +483,12 @@ async fn launch_replay(
     })))
 }
 
-async fn inspect_current_task<'a>(
+async fn inspect_current_task(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
-) -> Result<(EngineResourceInspection, EngineResourceVersion, Value), CapabilityError> {
+) -> Result<(EngineResource, EngineResourceVersion), CapabilityError> {
     let grant = inspect_grant(deps, invocation, operation).await?;
     let resource_id = required_subagent_resource_id(payload, operation)?;
     require_read_grant(&grant, operation, Some(&resource_id))?;
@@ -489,11 +501,8 @@ async fn inspect_current_task<'a>(
         .ok_or_else(|| invalid(format!("missing subagent task resource {resource_id}")))?;
     ensure_subagent_task(&inspection, operation)?;
     ensure_scope(&inspection, &scope, operation)?;
-    let (version, current) = {
-        let (version, current) = current_payload(&inspection, operation)?;
-        (version.clone(), current.clone())
-    };
-    Ok((inspection, version, current))
+    let version = current_payload(&inspection, operation)?.0.clone();
+    Ok((inspection.resource, version))
 }
 
 async fn ensure_concurrency_available(
