@@ -127,11 +127,13 @@ target once in deterministic order, and reserves `integration` for the final
 serial invocation. The
 [repository workflow invariant](packages/agent/tests/repository_workflow_invariants.rs)
 compares that schedule with Cargo and verifies GitHub delegates to this local
-owner. On pull requests, iOS and
-Mac jobs run for their package paths, their release workflows, or relevant
-labels. Both run on `main` and manual dispatch. `CI summary` requires successful
-change detection and all unconditional jobs; it accepts a skipped client job
-only on a successfully path-filtered pull request.
+owner. The same invariant owns generated-project hygiene by requiring iOS and
+Mac XcodeGen output to stay ignored and untracked; client workflows own project
+generation and the consuming builds, tests, and archives. On pull requests,
+iOS and Mac jobs run for their package paths, their release workflows, or
+relevant labels. Both run on `main` and manual dispatch. `CI summary` requires
+successful change detection and all unconditional jobs; it accepts a skipped
+client job only on a successfully path-filtered pull request.
 
 ## Commits
 

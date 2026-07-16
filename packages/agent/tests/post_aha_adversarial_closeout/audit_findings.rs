@@ -1,68 +1,6 @@
 use super::support::*;
 
 #[test]
-fn mac_generated_project_policy_is_truthful() {
-    let tracked = git_ls_files();
-    assert!(
-        !tracked
-            .iter()
-            .any(|path| path.starts_with("packages/mac-app/TronMac.xcodeproj/")),
-        "Mac XcodeGen output must remain untracked"
-    );
-
-    let mac_gitignore = read_repo_file("packages/mac-app/.gitignore");
-    assert!(
-        mac_gitignore.contains("TronMac.xcodeproj/"),
-        "packages/mac-app/.gitignore must ignore generated TronMac.xcodeproj"
-    );
-
-    let mut hits = Vec::new();
-    for (workflow, required_commands) in [
-        (
-            ".github/workflows/ci.yml",
-            [
-                "xcodegen generate",
-                "-project TronMac.xcodeproj",
-                "xcodebuild test",
-            ]
-            .as_slice(),
-        ),
-        (
-            ".github/workflows/release-mac.yml",
-            [
-                "xcodegen generate",
-                "-project TronMac.xcodeproj",
-                "xcodebuild archive",
-            ]
-            .as_slice(),
-        ),
-    ] {
-        let text = read_repo_file(workflow);
-        if text.contains("git diff --exit-code packages/mac-app/TronMac.xcodeproj") {
-            hits.push(format!(
-                "{workflow}: hollow Mac generated-project drift check"
-            ));
-        }
-        if !text.contains("git check-ignore -q packages/mac-app/TronMac.xcodeproj") {
-            hits.push(format!(
-                "{workflow}: missing ignored Mac project policy proof"
-            ));
-        }
-        for required in required_commands {
-            if !text.contains(required) {
-                hits.push(format!(
-                    "{workflow}: missing Mac generated-project build/test proof `{required}`"
-                ));
-            }
-        }
-    }
-    assert_no_hits(
-        "Mac generated-project policy must be generation + build/test, not tracked diff",
-        hits,
-    );
-}
-
-#[test]
 fn documented_source_truth_paths_exist_or_use_supported_globs() {
     let docs = [
         (

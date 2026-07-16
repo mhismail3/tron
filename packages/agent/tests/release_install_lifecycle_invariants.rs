@@ -772,9 +772,9 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     for required in [
         "working-directory: packages/ios-app",
         "run: xcodegen generate",
-        "git check-ignore -q packages/ios-app/TronMobile.xcodeproj",
+        "-project TronMobile.xcodeproj",
         "working-directory: packages/mac-app",
-        "git check-ignore -q packages/mac-app/TronMac.xcodeproj",
+        "-project TronMac.xcodeproj",
         "Dry-run DMG assembly",
         "ENABLE_DEBUG_DYLIB=NO",
     ] {
@@ -797,7 +797,8 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
         "scripts/tron version github-output",
         "./scripts/bundle-agent.sh --skip-build",
         "xcodegen generate",
-        "git check-ignore -q packages/mac-app/TronMac.xcodeproj",
+        "xcodebuild archive",
+        "-project TronMac.xcodeproj",
         "Sign embedded Tron Server helper",
         "Notarize DMG",
         "Staple DMG",
@@ -823,7 +824,8 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     let release_ios = read_repo_file(".github/workflows/release-ios.yml");
     for required in [
         "xcodegen generate",
-        "git check-ignore -q packages/ios-app/TronMobile.xcodeproj",
+        "xcodebuild archive",
+        "-project TronMobile.xcodeproj",
         "dry_run",
         "asc builds upload",
     ] {
@@ -832,11 +834,6 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
             "iOS release workflow missing {required}"
         );
     }
-
-    let mac_gitignore = read_repo_file("packages/mac-app/.gitignore");
-    assert!(mac_gitignore.contains("TronMac.xcodeproj/"));
-    let root_gitignore = read_repo_file(".gitignore");
-    assert!(root_gitignore.contains("packages/ios-app/TronMobile.xcodeproj/"));
 }
 
 #[test]

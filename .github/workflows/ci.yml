@@ -164,12 +164,6 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Verify generated Xcode project stays ignored
-        working-directory: ${{ github.workspace }}
-        run: |
-          test -d packages/ios-app/TronMobile.xcodeproj
-          git check-ignore -q packages/ios-app/TronMobile.xcodeproj
-
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60
 
@@ -234,12 +228,6 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate
-
-      - name: Verify generated Xcode project stays ignored
-        working-directory: ${{ github.workspace }}
-        run: |
-          test -d packages/mac-app/TronMac.xcodeproj
-          git check-ignore -q packages/mac-app/TronMac.xcodeproj
 
       # Build the TronMac scheme in Debug and compile its unit-test bundle;
       # ad-hoc signing (CODE_SIGN_IDENTITY="-") keeps this portable to any

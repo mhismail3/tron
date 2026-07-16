@@ -114,42 +114,6 @@ fn tron_ci_clippy_contract_matches_cargo_lint_policy() {
 }
 
 #[test]
-fn xcodegen_workflows_keep_generated_projects_untracked() {
-    let ci = read_repo_file(".github/workflows/ci.yml");
-    let release_ios = read_repo_file(".github/workflows/release-ios.yml");
-    let release_mac = read_repo_file(".github/workflows/release-mac.yml");
-
-    for (name, text, project) in [
-        (
-            "ci.yml",
-            ci.as_str(),
-            "packages/ios-app/TronMobile.xcodeproj",
-        ),
-        (
-            "release-ios.yml",
-            release_ios.as_str(),
-            "packages/ios-app/TronMobile.xcodeproj",
-        ),
-        ("ci.yml", ci.as_str(), "packages/mac-app/TronMac.xcodeproj"),
-        (
-            "release-mac.yml",
-            release_mac.as_str(),
-            "packages/mac-app/TronMac.xcodeproj",
-        ),
-    ] {
-        let ignore_guard = format!("git check-ignore -q {project}");
-        let tracked_guard = format!("git diff --exit-code {project}");
-        assert!(
-            text.contains("xcodegen generate")
-                && text.contains(project)
-                && text.contains(&ignore_guard)
-                && !text.contains(&tracked_guard),
-            "{name} must generate `{project}` and keep it ignored"
-        );
-    }
-}
-
-#[test]
 fn mac_ci_runs_focused_wrapper_tests() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     for required in [

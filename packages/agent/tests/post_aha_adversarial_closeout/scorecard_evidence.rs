@@ -21,7 +21,6 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         "PAC-8 | Local/GitHub CI parity | 8 | passed_after_fix",
         "PAC-9 | Provenance, privacy, and residue policy | 7 | passed_after_fix",
         "PAC-10 | Final closeout verification | 6 | passed_after_fix",
-        "mac_generated_project_policy_is_truthful",
         "documented_source_truth_paths_exist_or_use_supported_globs",
         "startup_domains_and_database_inventory_match_runtime_truth",
         "mac_launch_agent_and_subprocess_have_physical_owners",
