@@ -13,7 +13,7 @@ struct MacRuntimeVariantTests {
 
         #expect(variant.locationProblem == nil)
         #expect(variant.expectedParentBundleIdentifier == "com.tron.mac.dev")
-        #expect(variant.precedence == 2)
+        #expect(variant == .xcodeDebug)
         #expect(!variant.canManageLaunchAgent(isIsolatedInstallMode: false))
         #expect(variant.canManageLaunchAgent(isIsolatedInstallMode: true))
     }
@@ -26,7 +26,6 @@ struct MacRuntimeVariantTests {
         )
         #expect(installed == .installedRelease)
         #expect(installed.locationProblem == nil)
-        #expect(installed.precedence > MacRuntimeVariant.xcodeDebug(bundlePath: "/tmp/TronMac.app").precedence)
 
         let misplaced = MacRuntimeVariant.detect(
             bundleURL: URL(fileURLWithPath: "/Users/dev/Downloads/Tron.app", isDirectory: true),
@@ -43,14 +42,17 @@ struct MacRuntimeVariantTests {
         )
 
         #expect(variant.locationProblem?.contains("Unsupported") == true)
-        #expect(variant.precedence == 0)
+        #expect(!variant.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
     }
 
-    @Test("parent bundle precedence makes installed release authoritative")
-    func parentPrecedence() {
-        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac") > MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac.dev"))
-        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac") > MacRuntimeVariant.precedence(forParentBundleIdentifier: "other"))
-        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: nil) == 0)
+    @Test("registration takeover keeps installed release authoritative")
+    func registrationTakeoverPolicy() {
+        #expect(MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
+        #expect(MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: "other"))
+        #expect(!MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: MacRuntimeVariant.releaseBundleIdentifier))
+        #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: MacRuntimeVariant.releaseBundleIdentifier))
+        #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
+        #expect(MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: "other"))
     }
 }
 

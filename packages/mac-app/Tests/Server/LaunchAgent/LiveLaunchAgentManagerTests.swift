@@ -30,7 +30,7 @@ struct LiveLaunchAgentManagerTests {
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(
                 for: .enabled,
-                currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+                currentVariant: .xcodeDebug,
                 runningParentBundleIdentifier: nil
             ) == nil
         )
@@ -38,7 +38,7 @@ struct LiveLaunchAgentManagerTests {
 
     @Test("debug companion treats an installed release service as already loaded")
     func debugCompanionWrapsReleaseService() {
-        let variant = MacRuntimeVariant.xcodeDebug(bundlePath: "/tmp/Debug/Tron.app")
+        let variant = MacRuntimeVariant.xcodeDebug
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(
                 for: .notRegistered,
@@ -80,7 +80,7 @@ struct LiveLaunchAgentManagerTests {
         #expect(
             !LiveLaunchAgentManager.shouldBootoutForTakeover(
                 status: .enabled,
-                currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+                currentVariant: .xcodeDebug,
                 runningParentBundleIdentifier: "com.tron.mac",
                 canManageLaunchAgent: false
             )
@@ -234,7 +234,7 @@ struct LiveLaunchAgentManagerTests {
         )
         let outcome = LiveLaunchAgentManager.preRegistrationOutcome(
             for: .enabled,
-            currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+            currentVariant: .xcodeDebug,
             runtimeInfo: runtime,
             canManageLaunchAgent: false,
             expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"

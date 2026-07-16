@@ -148,7 +148,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 }
                 return .alreadyLoaded
             }
-            if currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: resolvedParent) {
+            if currentVariant.canTakeOverRegistration(ownedBy: resolvedParent) {
                 return nil
             }
             return .launchdRefused(
@@ -169,7 +169,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
               runningParentBundleIdentifier != currentVariant.expectedParentBundleIdentifier else {
             return false
         }
-        return currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: runningParentBundleIdentifier)
+        return currentVariant.canTakeOverRegistration(ownedBy: runningParentBundleIdentifier)
     }
 
     static func shouldRefuseExternalServer(

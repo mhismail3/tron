@@ -109,7 +109,8 @@ SwiftUI plumbing: injected via `.environment(\.environmentSetup, …)` on the ro
 
 ### Validation and side-effect boundaries
 
-`MacRuntimeVariant` owns wrapper identity and application-placement policy.
+`MacRuntimeVariant` owns wrapper identity, application-placement policy, and
+whether to take over an existing LaunchAgent registration based on its parent bundle.
 `ExistingInstallDetector` owns bundled-helper validation: helper app,
 executable, LaunchAgent plist, signature, and registration classification.
 `InstallStep` orchestrates that validation and passes the active
