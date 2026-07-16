@@ -30,13 +30,23 @@ Prefer fast, focused checks while iterating. Escalate to full suites when the ch
 
 ## Settings Parity
 
-Every server setting lives in profile TOML: managed defaults under `[settings]` in `~/.tron/profiles/default/profile.toml`, with sparse user overrides under `[settings]` in `~/.tron/profiles/user/profile.toml`. Each setting must have a 1-to-1 corresponding control in the iOS settings UI. When adding a new setting to the Rust agent (`packages/agent/src/domains/settings/profile/types/`), also add:
-1. Decode in `packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift` (`ServerSettings`)
-2. Update struct in `packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift` (`ServerSettingsUpdate`)
-3. Property in `packages/ios-app/Sources/Session/Chat/State/SettingsState.swift` (load, reset, build reset update)
-4. UI control in the appropriate settings page (`packages/ios-app/Sources/UI/Settings/Pages/`)
+`settings::get` returns the complete validated `TronSettings` profile, including
+server-only provider, retry, runtime, tmux, and TUI configuration. iOS admits an
+explicit product-settings projection from that response. Every field admitted
+into the iOS `ServerSettings` DTO must have 1-to-1 ownership through:
 
-No setting should exist only on the server or only in the iOS UI.
+1. Decode in `packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift`
+2. Projection in `ServerSettingsSnapshot` and state ownership in `SettingsState`
+3. Load/reset/server-switch handling
+4. A read-only row or editable control in `packages/ios-app/Sources/UI/Settings/Pages/`
+
+Editable fields must also have a `SettingsMutation` and matching
+`ServerSettingsUpdate` encoding. Read-only fields must not gain a write path.
+When adding a Rust profile field under
+`packages/agent/src/domains/settings/profile/types/`, first identify its owner:
+server-only provider/runtime/TUI fields remain outside the iOS DTO, while an
+iOS-visible product setting requires every layer above in the same commit. No
+field admitted into the mobile projection may exist in only one layer.
 
 ## Managed Skills
 

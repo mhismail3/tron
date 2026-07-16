@@ -5,19 +5,31 @@ import Foundation
 @Suite("ServerSettings Tests")
 struct ServerSettingsTests {
 
-    @Test("decode full primitive JSON")
-    func fullPrimitiveDecode() throws {
+    @Test("full profile response projects mobile settings and ignores server-only fields")
+    func fullProfileResponseProjectsMobileSettings() throws {
         let json = """
         {
+            "version": "0.1.0",
+            "name": "tron",
+            "api": { "anthropic": { "authUrl": "https://example.invalid" } },
+            "retry": { "maxRetries": 3 },
+            "agent": { "maxTurns": 250 },
             "server": {
+                "heartbeatIntervalMs": 30000,
                 "defaultModel": "claude-opus-4-6",
                 "defaultWorkspace": "/projects",
                 "tailscaleIp": "100.64.0.7",
                 "transcription": { "enabled": true }
             },
             "context": {
-                "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
-            }
+                "compactor": {
+                    "maxTokens": 25000,
+                    "preserveRecentCount": 3,
+                    "triggerTokenThreshold": 0.80
+                }
+            },
+            "tmux": { "commandTimeoutMs": 30000 },
+            "ui": { "theme": "forest_green" }
         }
         """
 

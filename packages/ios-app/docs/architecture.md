@@ -708,9 +708,12 @@ generation-owned transition is active, preventing concurrent page mutations.
 and large detents so the sheet starts compactly while still allowing expansion
 for workspace and model selection.
 
-Server settings shown in the iOS settings UI are snapshots from
-`settings::get`/`settings::reset`; local state exists only to render the active
-server and roll back a failed in-flight edit to the last loaded snapshot.
+`settings::get` returns the server's complete validated profile. iOS
+intentionally admits only its mobile product-settings projection, ignores
+unrelated provider/runtime/tmux/TUI keys, and strictly maps every admitted field
+through `ServerSettingsSnapshot` and `SettingsState` to a read-only row or
+editable control. Local state exists only to render the active server and roll
+back a failed in-flight edit to the last loaded snapshot.
 Onboarding completion is one device-local `@AppStorage` flag owned by
 `ProductionAppRoot`, alongside the sheet and startup effects it gates.
 `PairedServerStore` owns paired-server metadata and active selection as

@@ -4,8 +4,9 @@ import Foundation
 
 /// Server-authoritative settings decoded from `settings::get`.
 ///
-/// This mirrors the primitive server settings surface. Product policy planes
-/// and fixed workflow settings are intentionally absent.
+/// The server returns its complete validated profile. This DTO intentionally
+/// admits only the mobile product-settings projection, ignores unrelated
+/// provider/runtime/TUI keys, and decodes every admitted field strictly.
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?

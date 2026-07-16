@@ -10,9 +10,13 @@
 //!    `ANTHROPIC_CLIENT_ID`
 //!
 //! Settings are server-authoritative: `~/.tron/profiles/user/profile.toml` stores
-//! sparse user overrides. iOS reads/writes the effective server settings via
-//! `settings.get`, `settings.update`, and `settings.resetToDefaults`.
-//! Device-only iOS preferences stay in the app's local storage, not here.
+//! sparse user overrides. `settings.get` returns the complete validated
+//! [`TronSettings`] snapshot, while iOS intentionally admits only its explicit
+//! product-settings projection and ignores unrelated provider, retry, runtime,
+//! tmux, and TUI fields. iOS writes editable admitted fields through
+//! `settings.update`; `settings.resetToDefaults` clears the complete sparse
+//! server overlay before iOS projects the returned full profile. Device-only
+//! preferences stay in the app's local storage, not here.
 //! [`SettingsStore`] owns strict, atomic, serialized sparse-file writes.
 //! Unknown nested settings keys are rejected so stale managed defaults and user
 //! overlays fail closed instead of being silently ignored.
@@ -29,7 +33,7 @@
 //! |--------|---------|
 //! | [`storage`] | Profile file paths, sparse overlay loading, and deep merge |
 //! | [`store`] | Atomic sparse settings persistence |
-//! | [`types`] | Strict profile schema mirrored by iOS, including Engine-owned local transcription policy |
+//! | [`types`] | Complete strict profile schema; iOS projects only its explicitly admitted product fields |
 //! | `operations` | Canonical settings capability operations |
 //! | [`db_path_policy`] | Database path guardrails |
 //! | [`errors`] | Settings error hierarchy |
@@ -55,6 +59,8 @@
 //!
 //! - Server settings are authoritative and sparse user overrides stay in
 //!   `profiles/user/profile.toml`.
+//! - `settings.get` preserves the complete profile contract; mobile parity is
+//!   enforced only for fields explicitly admitted by the iOS settings DTO.
 //! - Local transcription remains a server-owned Engine policy at
 //!   `server.transcription.enabled` and is mirrored by the iOS Engine page.
 //! - Diagnostics verbosity, diagnostic retention, and database budgets are
