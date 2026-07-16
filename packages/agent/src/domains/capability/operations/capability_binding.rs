@@ -13,9 +13,7 @@ pub(super) async fn capability_binding_request_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::record_capability_binding_request_value_at(
             &binding_deps,
@@ -35,9 +33,7 @@ pub(super) async fn capability_binding_request_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::list_capability_binding_request_value(
             &binding_deps,
@@ -60,9 +56,7 @@ pub(super) async fn capability_binding_request_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::inspect_capability_binding_request_value(
             &binding_deps,
@@ -82,9 +76,7 @@ pub(super) async fn capability_binding_decision_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::record_capability_binding_decision_value_at(
             &binding_deps,
@@ -104,9 +96,7 @@ pub(super) async fn capability_binding_decision_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::list_capability_binding_decision_value(
             &binding_deps,
@@ -129,9 +119,7 @@ pub(super) async fn capability_binding_decision_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::inspect_capability_binding_decision_value(
             &binding_deps,
@@ -151,9 +139,7 @@ pub(super) async fn capability_binding_policy_activate(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::activate_capability_binding_policy_value_at(
             &binding_deps,
@@ -173,9 +159,7 @@ pub(super) async fn capability_binding_policy_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::list_capability_binding_policy_value(
             &binding_deps,
@@ -198,9 +182,7 @@ pub(super) async fn capability_binding_policy_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::service::inspect_capability_binding_policy_value(
             &binding_deps,
@@ -219,9 +201,7 @@ pub(super) async fn capability_binding_cockpit_overview(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::service::cockpit_overview_value(
         &binding_deps,
         invocation,
@@ -241,9 +221,7 @@ pub(super) async fn capability_shadow_trial_request_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::shadow_trial::record_capability_shadow_trial_request_value_at(
             &binding_deps,
@@ -264,9 +242,7 @@ pub(super) async fn capability_shadow_trial_decision_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::shadow_trial::record_capability_shadow_trial_decision_value_at(
             &binding_deps,
@@ -287,9 +263,7 @@ pub(super) async fn capability_shadow_trial_run_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::shadow_trial::record_capability_shadow_trial_run_value_at(
             &binding_deps,
@@ -309,9 +283,7 @@ pub(super) async fn capability_shadow_trial_evidence_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details =
         crate::domains::capability_binding::shadow_trial::inspect_capability_shadow_trial_evidence_value(
             &binding_deps,
@@ -331,9 +303,7 @@ pub(super) async fn capability_replacement_candidate_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::record_replacement_candidate_value_at(
         &binding_deps,
         invocation,
@@ -352,9 +322,7 @@ pub(super) async fn capability_replacement_candidate_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::list_replacement_candidate_value(
         &binding_deps,
         invocation,
@@ -376,9 +344,7 @@ pub(super) async fn capability_replacement_candidate_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::inspect_replacement_candidate_value(
         &binding_deps,
         invocation,
@@ -397,9 +363,7 @@ pub(super) async fn capability_route_binding_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::record_route_binding_value_at(
         &binding_deps,
         invocation,
@@ -418,9 +382,7 @@ pub(super) async fn capability_route_binding_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::list_route_binding_value(
         &binding_deps,
         invocation,
@@ -442,9 +404,7 @@ pub(super) async fn capability_route_binding_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::inspect_route_binding_value(
         &binding_deps,
         invocation,
@@ -463,9 +423,7 @@ pub(super) async fn capability_route_activate(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::activate_route_value_at(
         &binding_deps,
         invocation,
@@ -485,9 +443,7 @@ pub(super) async fn capability_route_disable(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::disable_route_value_at(
         &binding_deps,
         invocation,
@@ -507,9 +463,7 @@ pub(super) async fn capability_route_rollback(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::rollback_route_value_at(
         &binding_deps,
         invocation,
@@ -528,9 +482,7 @@ pub(super) async fn capability_route_event_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::list_route_event_value(
         &binding_deps,
         invocation,
@@ -552,9 +504,7 @@ pub(super) async fn capability_route_event_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
+    let binding_deps = crate::domains::capability_binding::Deps::from_host(&deps.engine_host);
     let details = crate::domains::capability_binding::route::inspect_route_event_value(
         &binding_deps,
         invocation,

@@ -61,6 +61,9 @@
 //! | `validation` | Text, ref, registry-derived target metadata, binding-mode, authority, and stale-guard checks |
 //! | `tests` | Schema, authority, replay, stale guard, locked-class, shadow-trial, and no-routing regressions |
 //!
+//! Registration and execute adapters obtain the shared engine host through the
+//! domain-owned `Deps` constructor instead of reconstructing that dependency.
+//!
 //! # INVARIANT: routing is governed, scoped, and reversible
 //!
 //! This domain stores review, policy, shadow, and route metadata, and it owns
@@ -97,14 +100,18 @@ mod validation;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
+    engine_host: crate::engine::EngineHostHandle,
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+    pub(crate) fn from_host(engine_host: &crate::engine::EngineHostHandle) -> Self {
         Self {
-            engine_host: deps.engine_host.clone(),
+            engine_host: engine_host.clone(),
         }
+    }
+
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+        Self::from_host(&deps.engine_host)
     }
 }
 
