@@ -106,22 +106,4 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
     }
 
-    @Test("enforcePermissions: false bypasses the guard for tests")
-    func bypassFlagWorks() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
-        #expect(BearerTokenReader.read(at: path, enforcePermissions: false) == "abcdef1234567890")
-    }
-
-    @Test("missing file is treated as 'no permission failure'")
-    func missingFilePermissionGuardNeutral() {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        #expect(BearerTokenReader.permissionsAreSafe(at: path) == true)
-    }
-
 }

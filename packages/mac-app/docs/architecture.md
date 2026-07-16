@@ -270,7 +270,9 @@ owns both ping-frame classification and `ServerInfo` projection, parsing each
 WebSocket frame once. The status poller,
 pairing window, log window, and feedback action each read the bearer token
 through `EnvironmentSetup.readBearerToken` at the point of use and never retain
-it in presentation state. `MenuBarController` owns the setup used to compose
+it in presentation state. Every Mac token read rejects `auth.json` when group
+or other permission bits are present; no caller can bypass that owner-only
+policy. `MenuBarController` owns the setup used to compose
 the pairing and log windows; `MenuBarActionHandler` dispatches those typed
 window actions without resupplying composition. `MenuBarLogReader` accepts the
 token as request input and does not own credential storage or path resolution.

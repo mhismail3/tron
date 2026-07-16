@@ -14,12 +14,12 @@ import Foundation
 /// }
 /// ```
 ///
-/// Security INVARIANT: `auth.json` MUST be mode `0o600` (owner-only
-/// read+write). Any wider permission bit indicates either a tampered
-/// file or a buggy writer; in either case the token is treated as
-/// untrusted and `read` returns nil with an `NSLog` audit line. The
-/// Rust writer enforces `0o600` at write time (see
-/// `packages/agent/src/llm/auth/storage.rs::save_auth_storage`).
+/// Security INVARIANT: `auth.json` MUST have owner-only permissions. Any group
+/// or other permission bit indicates either a tampered file or a buggy writer;
+/// in either case the token is treated as untrusted and `read` returns nil with
+/// an `NSLog` audit line. No caller may bypass this check. The Rust writer uses
+/// mode `0o600` at write time (see
+/// `packages/agent/src/domains/auth/credentials/storage/mod.rs::save_auth_storage`).
 ///
 /// Tests in `Tests/Server/PairingToken/BearerTokenReaderTests.swift` cover happy
 /// path, missing file, malformed JSON, missing `bearerToken`, and the
@@ -30,10 +30,9 @@ enum BearerTokenReader {
     }
 
     /// Reads the token file. Returns nil if missing, empty, malformed,
-    /// or has unsafe permissions. Use `enforcePermissions: false` from
-    /// tests that need to read a tempfile written without `chmod 0o600`.
-    static func read(at path: URL, enforcePermissions: Bool = true) -> String? {
-        if enforcePermissions, !permissionsAreSafe(at: path) {
+    /// or has unsafe permissions.
+    static func read(at path: URL) -> String? {
+        if !permissionsAreSafe(at: path) {
             return nil
         }
         guard let data = try? Data(contentsOf: path), !data.isEmpty else {
@@ -46,10 +45,10 @@ enum BearerTokenReader {
         return nonEmpty(decoded.bearerToken ?? "")
     }
 
-    /// Returns true when the file is owned by the current user AND has
-    /// mode `0o600`. A missing file returns true (caller surfaces the
+    /// Returns true when the file has no group or other permission bits.
+    /// A missing file returns true (caller surfaces the
     /// "missing" case via `read` returning nil for empty data).
-    static func permissionsAreSafe(at path: URL) -> Bool {
+    private static func permissionsAreSafe(at path: URL) -> Bool {
         let fm = FileManager.default
         guard fm.fileExists(atPath: path.path) else {
             return true
@@ -65,7 +64,7 @@ enum BearerTokenReader {
         let unsafeMask = 0o077
         if mode & unsafeMask != 0 {
             NSLog(
-                "[BearerTokenReader] refusing to read %@: mode 0o%o (expected 0o600). Re-run `tron auth rotate`.",
+                "[BearerTokenReader] refusing to read %@: mode 0o%o exposes group/other permissions. Re-run `tron auth rotate`.",
                 path.path,
                 mode & 0o777
             )
