@@ -960,9 +960,6 @@ impl RouteFixture {
             "none",
         )
         .await;
-        let runtime_deps = crate::domains::module_runtime::Deps {
-            engine_host: self.deps.engine_host.clone(),
-        };
         let runtime_payload = json!({
             "moduleLifecycleResourceId": lifecycle_id,
             "runtimeRequestId": runtime_request_id,
@@ -976,7 +973,7 @@ impl RouteFixture {
             "timeoutMs": 30000
         });
         let runtime = crate::domains::module_runtime::service::request_module_runtime_value_at(
-            &runtime_deps,
+            &self.deps.engine_host,
             &invocation(
                 &format!("{key}-runtime-request"),
                 runtime_payload.clone(),

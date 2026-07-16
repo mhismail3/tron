@@ -1,7 +1,9 @@
 //! Supervised module runtime envelopes.
 //!
 //! Module runtime owns durable `module_runtime_state` resources for Slice 23F's
-//! first generic execution supervisor gate. Requests are accepted only after
+//! first generic execution supervisor gate. Its services borrow the engine host
+//! from the calling composition owner instead of retaining a second dependency
+//! owner. Requests are accepted only after
 //! `module_lifecycle::service::ensure_runtime_allowed` proves the referenced
 //! lifecycle state is enabled in the current scope. The runtime record stores a
 //! bounded metadata envelope with sandbox, network, secrets, timeout,
@@ -43,11 +45,6 @@ mod records;
 mod resource_store;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
 

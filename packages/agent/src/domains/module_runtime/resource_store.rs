@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, PublishStreamEvent, WorkerId,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -10,14 +10,14 @@ use super::contract::{MODULE_RUNTIME_TOPIC, WORKER};
 use super::projection::module_runtime_summary;
 use super::records::resource_ref;
 use super::validation::invalid;
-use super::{Deps, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
+use super::{MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
 
 pub(super) async fn inspect_resource_required(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource_id: &str,
     label: &str,
 ) -> Result<EngineResourceInspection, CapabilityError> {
-    deps.engine_host
+    engine_host
         .inspect_resource(resource_id)
         .await
         .map_err(engine_error)?
@@ -25,11 +25,12 @@ pub(super) async fn inspect_resource_required(
 }
 
 pub(super) async fn module_runtime_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "module runtime state").await?;
+        inspect_resource_required(engine_host, &resource.resource_id, "module runtime state")
+            .await?;
     let (version, payload) = current_payload(&inspection, "module_runtime projection")?;
     Ok(module_runtime_summary(
         &inspection.resource,
@@ -91,13 +92,13 @@ pub(super) fn current_payload<'a>(
 }
 
 pub(super) async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: MODULE_RUNTIME_TOPIC.to_owned(),
             payload: json!({

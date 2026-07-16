@@ -885,12 +885,9 @@ pub(crate) async fn execute_routed_git_status(
     invocation: &Invocation,
     route: &ActiveRoute,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let projected =
         match crate::domains::module_runtime::service::validate_accepted_shadow_projection(
-            &runtime_deps,
+            &deps.engine_host,
             invocation,
             TARGET_OPERATION,
             &route.module_runtime_ref,
@@ -1831,11 +1828,8 @@ async fn validate_candidate_runtime_contract(
         &runtime_ref.resource_id,
         "capability_replacement_candidate_record",
     )?;
-    let runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let projection = crate::domains::module_runtime::service::validate_accepted_shadow_projection(
-        &runtime_deps,
+        &deps.engine_host,
         invocation,
         TARGET_OPERATION,
         &runtime_ref.value,

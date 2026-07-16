@@ -2,8 +2,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceLocation, Invocation, ListResources,
-    UpdateResource,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceLocation, Invocation,
+    ListResources, UpdateResource,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -23,7 +23,7 @@ use super::resource_store::{
     worker_id,
 };
 use super::validation::*;
-use super::{Deps, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
+use super::{MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
 
 pub(crate) struct DelegatedJobRuntimeUpdate {
     pub(crate) module_runtime_resource_id: String,
@@ -38,7 +38,7 @@ pub(crate) struct DelegatedJobRuntimeUpdate {
 }
 
 pub(crate) async fn validate_accepted_shadow_projection(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
     module_runtime_ref: &Value,
@@ -60,7 +60,7 @@ pub(crate) async fn validate_accepted_shadow_projection(
     validate_module_lifecycle_resource_id(&lifecycle_resource_id)?;
     let lifecycle_authorization =
         crate::domains::module_lifecycle::service::ensure_runtime_allowed(
-            &deps.engine_host,
+            engine_host,
             &scope,
             &lifecycle_resource_id,
         )
@@ -82,7 +82,8 @@ pub(crate) async fn validate_accepted_shadow_projection(
     )?;
     validate_module_runtime_resource_id(&runtime_resource_id)?;
     let runtime =
-        inspect_resource_required(deps, &runtime_resource_id, "module runtime state").await?;
+        inspect_resource_required(engine_host, &runtime_resource_id, "module runtime state")
+            .await?;
     ensure_module_runtime_state(&runtime, "accepted_shadow_projection_validation")?;
     ensure_scope(&runtime, &scope, "accepted_shadow_projection_validation")?;
     if !matches!(runtime.resource.lifecycle.as_str(), "running" | "completed") {
@@ -202,13 +203,13 @@ fn route_runtime_summary(
 }
 
 pub(crate) async fn request_module_runtime_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_write_authority(deps, invocation, "module_runtime_request").await?;
+    let grant = ensure_write_authority(engine_host, invocation, "module_runtime_request").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let lifecycle_resource_id = required_string(payload, "moduleLifecycleResourceId")?;
@@ -216,7 +217,7 @@ pub(crate) async fn request_module_runtime_value_at(
     require_exact_resource_selector(&grant, &lifecycle_resource_id, "module_runtime_request")?;
     let lifecycle_authorization =
         crate::domains::module_lifecycle::service::ensure_runtime_allowed(
-            &deps.engine_host,
+            engine_host,
             &scope,
             &lifecycle_resource_id,
         )
@@ -265,8 +266,7 @@ pub(crate) async fn request_module_runtime_value_at(
         .to_rfc3339();
     let now = operation_at.to_rfc3339();
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -316,8 +316,7 @@ pub(crate) async fn request_module_runtime_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_RUNTIME_STATE_KIND.to_owned(),
@@ -344,7 +343,7 @@ pub(crate) async fn request_module_runtime_value_at(
         .clone()
         .ok_or_else(|| invalid("module runtime resource was created without a current version"))?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_runtime.requested",
         &resource,
@@ -364,7 +363,7 @@ pub(crate) async fn request_module_runtime_value_at(
         "idempotentReplay": false,
         "moduleRuntimeResourceId": resource.resource_id,
         "moduleRuntimeVersionId": version_id,
-        "moduleRuntime": module_runtime_summary_for_resource(deps, &resource).await?,
+        "moduleRuntime": module_runtime_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_runtime_state")]
     }))
 }
@@ -494,12 +493,12 @@ fn git_status_provider_safe_projection(value: &Value) -> Result<Value, Capabilit
 }
 
 pub(crate) async fn list_module_runtime_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, "module_runtime_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "module_runtime_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -509,8 +508,7 @@ pub(crate) async fn list_module_runtime_value(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_RUNTIME_STATE_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -528,8 +526,7 @@ pub(crate) async fn list_module_runtime_value(
     let truncated = resources.len() > limit;
     let mut runtimes = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -561,17 +558,18 @@ pub(crate) async fn list_module_runtime_value(
 }
 
 pub(crate) async fn inspect_module_runtime_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_runtime_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "module_runtime_inspect").await?;
     let resource_id = required_string(payload, "moduleRuntimeResourceId")?;
     validate_module_runtime_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_runtime_inspect")?;
     let scope = resource_scope(invocation)?;
-    let inspection = inspect_resource_required(deps, &resource_id, "module runtime state").await?;
+    let inspection =
+        inspect_resource_required(engine_host, &resource_id, "module runtime state").await?;
     ensure_module_runtime_state(&inspection, "module_runtime_inspect")?;
     ensure_scope(&inspection, &scope, "module_runtime_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_runtime_inspect")?;
@@ -585,13 +583,13 @@ pub(crate) async fn inspect_module_runtime_value(
 }
 
 pub(crate) async fn cancel_module_runtime_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_write_authority(deps, invocation, "module_runtime_cancel").await?;
+    let grant = ensure_write_authority(engine_host, invocation, "module_runtime_cancel").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let resource_id = required_string(payload, "moduleRuntimeResourceId")?;
@@ -603,7 +601,8 @@ pub(crate) async fn cancel_module_runtime_value_at(
         &required_string(payload, "reason")?,
         SUMMARY_MAX_BYTES,
     )?;
-    let inspection = inspect_resource_required(deps, &resource_id, "module runtime state").await?;
+    let inspection =
+        inspect_resource_required(engine_host, &resource_id, "module runtime state").await?;
     ensure_module_runtime_state(&inspection, "module_runtime_cancel")?;
     ensure_scope(&inspection, &scope, "module_runtime_cancel")?;
     let (current_version, current) = current_payload(&inspection, "module_runtime_cancel")?;
@@ -699,8 +698,7 @@ pub(crate) async fn cancel_module_runtime_value_at(
             .unwrap_or(1)
             .saturating_add(1),
     });
-    let version = deps
-        .engine_host
+    let version = engine_host
         .update_resource(UpdateResource {
             resource_id: resource_id.clone(),
             expected_current_version_id: Some(current_version.version_id.clone()),
@@ -718,9 +716,10 @@ pub(crate) async fn cancel_module_runtime_value_at(
         })
         .await
         .map_err(engine_error)?;
-    let updated = inspect_resource_required(deps, &resource_id, "module runtime state").await?;
+    let updated =
+        inspect_resource_required(engine_host, &resource_id, "module runtime state").await?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_runtime.cancelled",
         &updated.resource,
@@ -739,13 +738,13 @@ pub(crate) async fn cancel_module_runtime_value_at(
         "idempotentReplay": false,
         "moduleRuntimeResourceId": resource_id,
         "moduleRuntimeVersionId": version.version_id,
-        "moduleRuntime": module_runtime_summary_for_resource(deps, &updated.resource).await?,
+        "moduleRuntime": module_runtime_summary_for_resource(engine_host, &updated.resource).await?,
         "resourceRefs": [version_ref(&updated.resource, &version, "module_runtime_state")]
     }))
 }
 
 pub(crate) async fn record_delegated_job_runtime_update_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     update: DelegatedJobRuntimeUpdate,
     operation_at: DateTime<Utc>,
@@ -753,7 +752,7 @@ pub(crate) async fn record_delegated_job_runtime_update_at(
     validate_module_runtime_resource_id(&update.module_runtime_resource_id)?;
     let scope = resource_scope(invocation)?;
     let inspection = inspect_resource_required(
-        deps,
+        engine_host,
         &update.module_runtime_resource_id,
         "module runtime state",
     )
@@ -833,8 +832,7 @@ pub(crate) async fn record_delegated_job_runtime_update_at(
         _ => {}
     }
 
-    let version = deps
-        .engine_host
+    let version = engine_host
         .update_resource(UpdateResource {
             resource_id: update.module_runtime_resource_id.clone(),
             expected_current_version_id: Some(current_version.version_id.clone()),
@@ -853,13 +851,13 @@ pub(crate) async fn record_delegated_job_runtime_update_at(
         .await
         .map_err(engine_error)?;
     let updated = inspect_resource_required(
-        deps,
+        engine_host,
         &update.module_runtime_resource_id,
         "module runtime state",
     )
     .await?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_runtime.delegated_job_updated",
         &updated.resource,
@@ -879,7 +877,7 @@ pub(crate) async fn record_delegated_job_runtime_update_at(
         "status": updated.resource.lifecycle,
         "moduleRuntimeResourceId": update.module_runtime_resource_id,
         "moduleRuntimeVersionId": version.version_id,
-        "moduleRuntime": module_runtime_summary_for_resource(deps, &updated.resource).await?,
+        "moduleRuntime": module_runtime_summary_for_resource(engine_host, &updated.resource).await?,
         "resourceRefs": [version_ref(&updated.resource, &version, "module_runtime_state")]
     }))
 }

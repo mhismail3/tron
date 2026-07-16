@@ -26,13 +26,10 @@ pub(super) async fn module_program_execution_start(
         ));
     }
 
-    let module_runtime_deps = module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let runtime_payload = runtime_request_payload(&invocation.payload, operation_at)?;
     let runtime_invocation = invocation_with_payload_idempotency(invocation, &runtime_payload);
     let runtime = module_runtime::service::request_module_runtime_value_at(
-        &module_runtime_deps,
+        &deps.engine_host,
         &runtime_invocation,
         &runtime_payload,
         operation_at,
@@ -69,7 +66,7 @@ pub(super) async fn module_program_execution_start(
         Ok(job) => job,
         Err(error) => {
             let _ = module_runtime::service::record_delegated_job_runtime_update_at(
-                &module_runtime_deps,
+                &deps.engine_host,
                 invocation,
                 module_runtime::service::DelegatedJobRuntimeUpdate {
                     module_runtime_resource_id: runtime_resource_id(&runtime)?,
@@ -102,7 +99,7 @@ pub(super) async fn module_program_execution_start(
 
     let job_ref = job_ref(&job, "delegated_job_process")?;
     let runtime_update = module_runtime::service::record_delegated_job_runtime_update_at(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         module_runtime::service::DelegatedJobRuntimeUpdate {
             module_runtime_resource_id: runtime_resource_id(&runtime)?,
@@ -229,11 +226,8 @@ pub(super) async fn module_program_execution_cancel(
     )
     .await?;
     let job = redacted_job_status(invocation, deps, job_resource_id).await?;
-    let module_runtime_deps = module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let runtime_update = module_runtime::service::record_delegated_job_runtime_update_at(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         module_runtime::service::DelegatedJobRuntimeUpdate {
             module_runtime_resource_id: required_str(
@@ -293,11 +287,8 @@ pub(super) async fn module_program_execution_cleanup(
     )
     .await?;
     let job = redacted_job_status(invocation, deps, job_resource_id).await?;
-    let module_runtime_deps = module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let runtime_update = module_runtime::service::record_delegated_job_runtime_update_at(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         module_runtime::service::DelegatedJobRuntimeUpdate {
             module_runtime_resource_id: required_str(
@@ -434,11 +425,8 @@ async fn inspect_bound_runtime(
     deps: &Deps,
     job_resource_id: &str,
 ) -> Result<Value, CapabilityError> {
-    let module_runtime_deps = module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let runtime = module_runtime::service::inspect_module_runtime_value(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

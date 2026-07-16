@@ -13,11 +13,8 @@ pub(super) async fn module_runtime_request(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_runtime::service::request_module_runtime_value_at(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn module_runtime_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_runtime::service::list_module_runtime_value(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn module_runtime_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_runtime::service::inspect_module_runtime_value(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -79,11 +70,8 @@ pub(super) async fn module_runtime_cancel(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_runtime::service::cancel_module_runtime_value_at(
-        &module_runtime_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
