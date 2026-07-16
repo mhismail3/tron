@@ -61,8 +61,8 @@
 //! | `validation` | Text, ref, registry-derived target metadata, binding-mode, authority, and stale-guard checks |
 //! | `tests` | Schema, authority, replay, stale guard, locked-class, shadow-trial, and no-routing regressions |
 //!
-//! Registration and execute adapters obtain the shared engine host through the
-//! domain-owned `Deps` constructor instead of reconstructing that dependency.
+//! Registration and execute adapters pass the composition-owned engine host
+//! directly; the domain owns no parallel dependency container.
 //!
 //! # INVARIANT: routing is governed, scoped, and reversible
 //!
@@ -98,23 +98,6 @@ pub(crate) mod service;
 pub(crate) mod shadow_trial;
 mod validation;
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_host(engine_host: &crate::engine::EngineHostHandle) -> Self {
-        Self {
-            engine_host: engine_host.clone(),
-        }
-    }
-
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self::from_host(&deps.engine_host)
-    }
-}
-
 pub(crate) use crate::engine::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
@@ -136,7 +119,7 @@ pub(crate) fn worker_module(
     crate::domains::registration::worker::domain_worker_module(
         contract::WORKER,
         &[contract::CAPABILITY_BINDING_LIFECYCLE_TOPIC],
-        service::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        service::function_registrations(contract::capabilities()?, deps.engine_host.clone())?,
     )
 }
 

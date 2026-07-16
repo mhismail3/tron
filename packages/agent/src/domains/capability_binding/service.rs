@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::domains::registration::bindings::operation_bindings;
-use crate::engine::{CreateResource, EngineResourceLocation, Invocation, ListResources};
+use crate::engine::{
+    CreateResource, EngineHostHandle, EngineResourceLocation, Invocation, ListResources,
+};
 use crate::shared::server::errors::CapabilityError;
 
 use super::authority::{
@@ -38,34 +40,34 @@ use super::validation::*;
 use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
-    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID, Deps,
+    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
 };
 
 operation_bindings! {
-    deps = Deps;
+    deps = EngineHostHandle;
     hidden = [];
     bindings = [
-        "cockpit_overview" => |invocation, deps| {
-            cockpit_overview_value(deps, invocation).await
+        "cockpit_overview" => |invocation, host| {
+            cockpit_overview_value(host, invocation).await
         },
     ];
 }
 
 pub(crate) async fn cockpit_overview_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
 ) -> Result<Value, CapabilityError> {
-    cockpit_visibility::cockpit_overview_value(deps, invocation).await
+    cockpit_visibility::cockpit_overview_value(host, invocation).await
 }
 
 pub(crate) async fn record_capability_binding_request_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_write_authority(deps, invocation, "capability_binding_request_record").await?;
+    ensure_write_authority(host, invocation, "capability_binding_request_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let request_id_input = optional_string(payload, "capabilityBindingRequestId")?
@@ -109,8 +111,7 @@ pub(crate) async fn record_capability_binding_request_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = capability_binding_request_resource_id(&scope, &request_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -160,8 +161,7 @@ pub(crate) async fn record_capability_binding_request_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: CAPABILITY_BINDING_REQUEST_KIND.to_owned(),
@@ -187,7 +187,7 @@ pub(crate) async fn record_capability_binding_request_value_at(
         invalid("capability binding request resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         "capability_binding.request_recorded",
         &resource,
@@ -210,18 +210,18 @@ pub(crate) async fn record_capability_binding_request_value_at(
         "idempotentReplay": false,
         "capabilityBindingRequestResourceId": resource.resource_id,
         "capabilityBindingRequestVersionId": version_id,
-        "bindingRequest": capability_binding_request_summary_for_resource(deps, &resource).await?,
+        "bindingRequest": capability_binding_request_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_binding_request")]
     }))
 }
 
 pub(crate) async fn list_capability_binding_request_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        host,
         invocation,
         payload,
         "capability_binding_request_list",
@@ -234,18 +234,18 @@ pub(crate) async fn list_capability_binding_request_value(
 }
 
 pub(crate) async fn inspect_capability_binding_request_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "capability_binding_request_inspect").await?;
+    let grant = inspect_read_grant(host, invocation, "capability_binding_request_inspect").await?;
     let resource_id = required_string(payload, "capabilityBindingRequestResourceId")?;
     validate_capability_binding_request_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "capability_binding_request_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "capability binding request").await?;
+        inspect_resource_required(host, &resource_id, "capability binding request").await?;
     ensure_capability_binding_request(&inspection, "capability_binding_request_inspect")?;
     ensure_scope(&inspection, &scope, "capability_binding_request_inspect")?;
     let (version, payload) = current_payload(&inspection, "capability_binding_request_inspect")?;
@@ -260,14 +260,14 @@ pub(crate) async fn inspect_capability_binding_request_value(
 }
 
 pub(crate) async fn record_capability_binding_decision_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_write_authority(deps, invocation, "capability_binding_decision_record").await?;
+        ensure_write_authority(host, invocation, "capability_binding_decision_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let decision_id_input = optional_string(payload, "capabilityBindingDecisionId")?
@@ -285,7 +285,7 @@ pub(crate) async fn record_capability_binding_decision_value_at(
         "capability_binding_decision_record",
     )?;
     let request_inspection =
-        inspect_resource_required(deps, &request_resource_id, "capability binding request").await?;
+        inspect_resource_required(host, &request_resource_id, "capability binding request").await?;
     ensure_capability_binding_request(&request_inspection, "capability_binding_decision_record")?;
     ensure_scope(
         &request_inspection,
@@ -321,8 +321,7 @@ pub(crate) async fn record_capability_binding_decision_value_at(
     let resource_id =
         capability_binding_decision_resource_id(&scope, &decision_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -362,8 +361,7 @@ pub(crate) async fn record_capability_binding_decision_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: CAPABILITY_BINDING_DECISION_KIND.to_owned(),
@@ -389,7 +387,7 @@ pub(crate) async fn record_capability_binding_decision_value_at(
         invalid("capability binding decision resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         if state == "approved_policy" {
             "capability_binding.policy_candidate_recorded"
@@ -412,18 +410,18 @@ pub(crate) async fn record_capability_binding_decision_value_at(
         "idempotentReplay": false,
         "capabilityBindingDecisionResourceId": resource.resource_id,
         "capabilityBindingDecisionVersionId": version_id,
-        "bindingDecision": capability_binding_decision_summary_for_resource(deps, &resource).await?,
+        "bindingDecision": capability_binding_decision_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_binding_decision")]
     }))
 }
 
 pub(crate) async fn list_capability_binding_decision_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        host,
         invocation,
         payload,
         "capability_binding_decision_list",
@@ -436,18 +434,18 @@ pub(crate) async fn list_capability_binding_decision_value(
 }
 
 pub(crate) async fn inspect_capability_binding_decision_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "capability_binding_decision_inspect").await?;
+    let grant = inspect_read_grant(host, invocation, "capability_binding_decision_inspect").await?;
     let resource_id = required_string(payload, "capabilityBindingDecisionResourceId")?;
     validate_capability_binding_decision_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "capability_binding_decision_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "capability binding decision").await?;
+        inspect_resource_required(host, &resource_id, "capability binding decision").await?;
     ensure_capability_binding_decision(&inspection, "capability_binding_decision_inspect")?;
     ensure_scope(&inspection, &scope, "capability_binding_decision_inspect")?;
     let (version, payload) = current_payload(&inspection, "capability_binding_decision_inspect")?;
@@ -462,14 +460,14 @@ pub(crate) async fn inspect_capability_binding_decision_value(
 }
 
 pub(crate) async fn activate_capability_binding_policy_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_write_authority(deps, invocation, "capability_binding_policy_activate").await?;
+        ensure_write_authority(host, invocation, "capability_binding_policy_activate").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let policy_id_input = optional_string(payload, "capabilityBindingPolicyId")?
@@ -487,7 +485,7 @@ pub(crate) async fn activate_capability_binding_policy_value_at(
         "capability_binding_policy_activate",
     )?;
     let decision_inspection =
-        inspect_resource_required(deps, &decision_resource_id, "capability binding decision")
+        inspect_resource_required(host, &decision_resource_id, "capability binding decision")
             .await?;
     ensure_capability_binding_decision(&decision_inspection, "capability_binding_policy_activate")?;
     ensure_scope(
@@ -521,8 +519,7 @@ pub(crate) async fn activate_capability_binding_policy_value_at(
         &idempotency_key,
     );
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -561,8 +558,7 @@ pub(crate) async fn activate_capability_binding_policy_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: CAPABILITY_BINDING_POLICY_KIND.to_owned(),
@@ -588,7 +584,7 @@ pub(crate) async fn activate_capability_binding_policy_value_at(
         invalid("capability binding policy resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         "capability_binding.policy_activated",
         &resource,
@@ -608,18 +604,18 @@ pub(crate) async fn activate_capability_binding_policy_value_at(
         "idempotentReplay": false,
         "capabilityBindingPolicyResourceId": resource.resource_id,
         "capabilityBindingPolicyVersionId": version_id,
-        "bindingPolicy": capability_binding_policy_summary_for_resource(deps, &resource).await?,
+        "bindingPolicy": capability_binding_policy_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_binding_policy")]
     }))
 }
 
 pub(crate) async fn list_capability_binding_policy_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        host,
         invocation,
         payload,
         "capability_binding_policy_list",
@@ -632,18 +628,18 @@ pub(crate) async fn list_capability_binding_policy_value(
 }
 
 pub(crate) async fn inspect_capability_binding_policy_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "capability_binding_policy_inspect").await?;
+    let grant = inspect_read_grant(host, invocation, "capability_binding_policy_inspect").await?;
     let resource_id = required_string(payload, "capabilityBindingPolicyResourceId")?;
     validate_capability_binding_policy_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "capability_binding_policy_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "capability binding policy").await?;
+        inspect_resource_required(host, &resource_id, "capability binding policy").await?;
     ensure_capability_binding_policy(&inspection, "capability_binding_policy_inspect")?;
     ensure_scope(&inspection, &scope, "capability_binding_policy_inspect")?;
     let (version, payload) = current_payload(&inspection, "capability_binding_policy_inspect")?;
@@ -658,7 +654,7 @@ pub(crate) async fn inspect_capability_binding_policy_value(
 }
 
 async fn list_values(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
@@ -672,7 +668,7 @@ async fn list_values(
     output_key: &str,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, operation).await?;
+    let _grant = inspect_read_grant(host, invocation, operation).await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -682,8 +678,7 @@ async fn list_values(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = host
         .list_resources(ListResources {
             kind: Some(kind.to_owned()),
             scope: Some(scope.clone()),
@@ -701,8 +696,7 @@ async fn list_values(
     let truncated = resources.len() > limit;
     let mut items = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?

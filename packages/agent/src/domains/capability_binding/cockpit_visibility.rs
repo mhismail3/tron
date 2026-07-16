@@ -9,8 +9,8 @@ use crate::domains::capability::{
     supported_operation_names,
 };
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, ListResources,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, ListResources,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -23,7 +23,7 @@ use super::{
     CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_EVENT_KIND,
     CAPABILITY_ROUTE_ROLLBACK_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
     CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
-    CAPABILITY_SHADOW_TRIAL_RUN_KIND, Deps,
+    CAPABILITY_SHADOW_TRIAL_RUN_KIND,
 };
 
 const MAX_RESOURCES_PER_KIND_SCOPE: usize = 100;
@@ -551,7 +551,7 @@ impl Default for ResourceScanFacts {
 }
 
 pub(crate) async fn cockpit_overview_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
 ) -> Result<Value, CapabilityError> {
     let scopes = readable_scopes(invocation);
@@ -581,7 +581,7 @@ pub(crate) async fn cockpit_overview_value(
             "unknown targetOperation {target_operation}"
         )));
     }
-    let facts = collect_facts(deps, &scopes).await?;
+    let facts = collect_facts(host, &scopes).await?;
     let mut all_operations = Vec::new();
     for operation in supported_operation_names() {
         let metadata =
@@ -690,32 +690,31 @@ pub(crate) async fn cockpit_overview_value(
 }
 
 async fn collect_facts(
-    deps: &Deps,
+    host: &EngineHostHandle,
     scopes: &[EngineResourceScope],
 ) -> Result<FactCollection, CapabilityError> {
     let mut collection = FactCollection::default();
     for kind in BINDING_KINDS {
-        collect_kind_facts(deps, scopes, kind, &mut collection, apply_binding_resource).await?;
+        collect_kind_facts(host, scopes, kind, &mut collection, apply_binding_resource).await?;
     }
     for kind in SHADOW_TRIAL_KINDS {
-        collect_kind_facts(deps, scopes, kind, &mut collection, apply_shadow_resource).await?;
+        collect_kind_facts(host, scopes, kind, &mut collection, apply_shadow_resource).await?;
     }
     for kind in ROUTE_KINDS {
-        collect_kind_facts(deps, scopes, kind, &mut collection, apply_route_resource).await?;
+        collect_kind_facts(host, scopes, kind, &mut collection, apply_route_resource).await?;
     }
     Ok(collection)
 }
 
 async fn collect_kind_facts(
-    deps: &Deps,
+    host: &EngineHostHandle,
     scopes: &[EngineResourceScope],
     kind: &str,
     collection: &mut FactCollection,
     apply: fn(&EngineResource, &EngineResourceVersion, &Value, &mut OperationFacts),
 ) -> Result<(), CapabilityError> {
     for scope in scopes {
-        let resources = deps
-            .engine_host
+        let resources = host
             .list_resources(ListResources {
                 kind: Some(kind.to_owned()),
                 scope: Some(scope.clone()),
@@ -731,7 +730,7 @@ async fn collect_kind_facts(
         for resource in resources.into_iter().take(MAX_RESOURCES_PER_KIND_SCOPE) {
             collection.scan.scanned_resources += 1;
             if let Some((inspection, version, payload)) =
-                inspect_current_payload(deps, &resource).await?
+                inspect_current_payload(host, &resource).await?
                 && let Some(operation) = operation_name(&payload)
             {
                 collection.scan.applied_resources += 1;
@@ -744,11 +743,10 @@ async fn collect_kind_facts(
 }
 
 async fn inspect_current_payload(
-    deps: &Deps,
+    host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Option<(EngineResourceInspection, EngineResourceVersion, Value)>, CapabilityError> {
-    let Some(inspection) = deps
-        .engine_host
+    let Some(inspection) = host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?

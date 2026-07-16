@@ -3,8 +3,8 @@ use serde_json::{Map, Value, json};
 
 use crate::domains::capability::OperationBindingMetadata;
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -38,7 +38,7 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
     CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
     CAPABILITY_SHADOW_TRIAL_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
+    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
 };
 
 const TARGET_OPERATION: &str = "git_status";
@@ -63,13 +63,13 @@ const EVIDENCE_IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] =
     b"tron.capability_shadow_trial_evidence.idempotency.v1\0";
 
 pub(crate) async fn record_capability_shadow_trial_request_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_shadow_trial_write_authority(deps, invocation, "capability_shadow_trial_request_record")
+    ensure_shadow_trial_write_authority(host, invocation, "capability_shadow_trial_request_record")
         .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
@@ -102,8 +102,7 @@ pub(crate) async fn record_capability_shadow_trial_request_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = shadow_trial_request_resource_id(&scope, &trial_request_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -159,8 +158,7 @@ pub(crate) async fn record_capability_shadow_trial_request_value_at(
         "updatedAt": now,
         "revision": 1
     });
-    let resource = deps
-        .engine_host
+    let resource = host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: CAPABILITY_SHADOW_TRIAL_REQUEST_KIND.to_owned(),
@@ -186,7 +184,7 @@ pub(crate) async fn record_capability_shadow_trial_request_value_at(
         invalid("capability shadow trial request resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         "capability_shadow_trial.request_recorded",
         &resource,
@@ -209,20 +207,20 @@ pub(crate) async fn record_capability_shadow_trial_request_value_at(
         "idempotentReplay": false,
         "capabilityShadowTrialRequestResourceId": resource.resource_id,
         "capabilityShadowTrialRequestVersionId": version_id,
-        "shadowTrialRequest": shadow_trial_request_summary_for_resource(deps, &resource).await?,
+        "shadowTrialRequest": shadow_trial_request_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_shadow_trial_request")]
     }))
 }
 
 pub(crate) async fn record_capability_shadow_trial_decision_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant = ensure_shadow_trial_write_authority(
-        deps,
+        host,
         invocation,
         "capability_shadow_trial_decision_record",
     )
@@ -244,7 +242,7 @@ pub(crate) async fn record_capability_shadow_trial_decision_value_at(
         "capability_shadow_trial_decision_record",
     )?;
     let request_inspection = inspect_resource_required(
-        deps,
+        host,
         &request_resource_id,
         "capability shadow trial request",
     )
@@ -294,8 +292,7 @@ pub(crate) async fn record_capability_shadow_trial_decision_value_at(
     let resource_id =
         shadow_trial_decision_resource_id(&scope, &trial_decision_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -364,8 +361,7 @@ pub(crate) async fn record_capability_shadow_trial_decision_value_at(
         "updatedAt": now,
         "revision": 1
     });
-    let resource = deps
-        .engine_host
+    let resource = host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: CAPABILITY_SHADOW_TRIAL_DECISION_KIND.to_owned(),
@@ -391,7 +387,7 @@ pub(crate) async fn record_capability_shadow_trial_decision_value_at(
         invalid("capability shadow trial decision resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         if run_allowed {
             "capability_shadow_trial.approved"
@@ -416,20 +412,20 @@ pub(crate) async fn record_capability_shadow_trial_decision_value_at(
         "idempotentReplay": false,
         "capabilityShadowTrialDecisionResourceId": resource.resource_id,
         "capabilityShadowTrialDecisionVersionId": version_id,
-        "shadowTrialDecision": shadow_trial_decision_summary_for_resource(deps, &resource).await?,
+        "shadowTrialDecision": shadow_trial_decision_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_shadow_trial_decision")]
     }))
 }
 
 pub(crate) async fn record_capability_shadow_trial_run_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_shadow_trial_write_authority(deps, invocation, "capability_shadow_trial_run_record")
+        ensure_shadow_trial_write_authority(host, invocation, "capability_shadow_trial_run_record")
             .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
@@ -455,7 +451,7 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
         "capability_shadow_trial_run_record",
     )?;
     let decision_inspection = inspect_resource_required(
-        deps,
+        host,
         &decision_resource_id,
         "capability shadow trial decision",
     )
@@ -533,8 +529,7 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
     let evidence_resource_id =
         shadow_trial_evidence_resource_id(&scope, &trial_evidence_id, &run_resource_id);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&run_resource_id)
         .await
         .map_err(engine_error)?
@@ -594,8 +589,7 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
         "updatedAt": now,
         "revision": 1
     });
-    let evidence_resource = deps
-        .engine_host
+    let evidence_resource = host
         .create_resource(CreateResource {
             resource_id: Some(evidence_resource_id.clone()),
             kind: CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND.to_owned(),
@@ -660,8 +654,7 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
         "updatedAt": now,
         "revision": 1
     });
-    let run_resource = deps
-        .engine_host
+    let run_resource = host
         .create_resource(CreateResource {
             resource_id: Some(run_resource_id.clone()),
             kind: CAPABILITY_SHADOW_TRIAL_RUN_KIND.to_owned(),
@@ -687,7 +680,7 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
         invalid("capability shadow trial run resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         "capability_shadow_trial.run_recorded",
         &run_resource,
@@ -713,8 +706,8 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
         "capabilityShadowTrialRunVersionId": run_version_id,
         "capabilityShadowTrialEvidenceResourceId": evidence_resource.resource_id,
         "capabilityShadowTrialEvidenceVersionId": evidence_version_id,
-        "shadowTrialRun": shadow_trial_run_summary_for_resource(deps, &run_resource).await?,
-        "shadowTrialEvidence": shadow_trial_evidence_summary_for_resource(deps, &evidence_resource).await?,
+        "shadowTrialRun": shadow_trial_run_summary_for_resource(host, &run_resource).await?,
+        "shadowTrialEvidence": shadow_trial_evidence_summary_for_resource(host, &evidence_resource).await?,
         "resourceRefs": [
             resource_ref(&run_resource, "capability_shadow_trial_run"),
             resource_ref(&evidence_resource, "capability_shadow_trial_evidence")
@@ -723,13 +716,13 @@ pub(crate) async fn record_capability_shadow_trial_run_value_at(
 }
 
 pub(crate) async fn inspect_capability_shadow_trial_evidence_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant = inspect_shadow_trial_read_grant(
-        deps,
+        host,
         invocation,
         "capability_shadow_trial_evidence_inspect",
     )
@@ -743,7 +736,7 @@ pub(crate) async fn inspect_capability_shadow_trial_evidence_value(
     )?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "capability shadow trial evidence").await?;
+        inspect_resource_required(host, &resource_id, "capability shadow trial evidence").await?;
     ensure_shadow_trial_evidence(&inspection, "capability_shadow_trial_evidence_inspect")?;
     ensure_scope(
         &inspection,
@@ -1171,12 +1164,12 @@ fn shadow_authority_record() -> Value {
 }
 
 fn shadow_trial_request_summary_for_resource<'a>(
-    deps: &'a Deps,
+    host: &'a EngineHostHandle,
     resource: &'a EngineResource,
 ) -> impl std::future::Future<Output = Result<Value, CapabilityError>> + 'a {
     async move {
         let inspection = inspect_resource_required(
-            deps,
+            host,
             &resource.resource_id,
             "capability shadow trial request",
         )
@@ -1194,12 +1187,12 @@ fn shadow_trial_request_summary_for_resource<'a>(
 }
 
 fn shadow_trial_decision_summary_for_resource<'a>(
-    deps: &'a Deps,
+    host: &'a EngineHostHandle,
     resource: &'a EngineResource,
 ) -> impl std::future::Future<Output = Result<Value, CapabilityError>> + 'a {
     async move {
         let inspection = inspect_resource_required(
-            deps,
+            host,
             &resource.resource_id,
             "capability shadow trial decision",
         )
@@ -1217,12 +1210,12 @@ fn shadow_trial_decision_summary_for_resource<'a>(
 }
 
 fn shadow_trial_run_summary_for_resource<'a>(
-    deps: &'a Deps,
+    host: &'a EngineHostHandle,
     resource: &'a EngineResource,
 ) -> impl std::future::Future<Output = Result<Value, CapabilityError>> + 'a {
     async move {
         let inspection =
-            inspect_resource_required(deps, &resource.resource_id, "capability shadow trial run")
+            inspect_resource_required(host, &resource.resource_id, "capability shadow trial run")
                 .await?;
         let (version, payload) =
             current_payload(&inspection, "capability_shadow_trial_run_record projection")?;
@@ -1235,12 +1228,12 @@ fn shadow_trial_run_summary_for_resource<'a>(
 }
 
 fn shadow_trial_evidence_summary_for_resource<'a>(
-    deps: &'a Deps,
+    host: &'a EngineHostHandle,
     resource: &'a EngineResource,
 ) -> impl std::future::Future<Output = Result<Value, CapabilityError>> + 'a {
     async move {
         let inspection = inspect_resource_required(
-            deps,
+            host,
             &resource.resource_id,
             "capability shadow trial evidence",
         )
