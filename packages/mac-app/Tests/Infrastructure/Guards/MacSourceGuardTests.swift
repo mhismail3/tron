@@ -98,6 +98,19 @@ struct MacSourceGuardTests {
         let subprocess = try Self.read(macRoot, "Sources/Support/Foundation/Subprocess.swift")
         #expect(subprocess.contains("enum Subprocess"))
         #expect(subprocess.contains("ProcessResult"))
+
+        let project = try Self.read(macRoot, "project.yml")
+        for owner in [
+            "Debug:\n          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.dev",
+            "Release:\n          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac",
+            "PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.tests",
+        ] {
+            #expect(project.contains(owner), "project.yml must own \(owner)")
+        }
+        for configuration in ["Debug", "Release"] {
+            let xcconfig = try Self.read(macRoot, "Configuration/\(configuration).xcconfig")
+            #expect(!xcconfig.contains("PRODUCT_BUNDLE_IDENTIFIER"))
+        }
     }
 
     @Test("diagnostics redactor keeps iOS auth-field parity")

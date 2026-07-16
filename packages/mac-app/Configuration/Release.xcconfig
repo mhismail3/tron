@@ -8,9 +8,6 @@ COPY_PHASE_STRIP = NO
 ENABLE_NS_ASSERTIONS = NO
 MTL_ENABLE_DEBUG_INFO = NO
 
-// Production variant - DMG installs to /Applications/Tron.app
-PRODUCT_BUNDLE_IDENTIFIER = com.tron.mac
-
 // Override the default `PRODUCT_NAME = $(TARGET_NAME)` (= "TronMac") so the
 // archived bundle is `Tron.app` with executable `Tron` — matching the
 // `APP_BUNDLE: Tron.app` expectation in `.github/workflows/release-mac.yml`
