@@ -273,6 +273,14 @@ fn contributor_binary_recovery_has_one_service_owner() {
             "service recovery missing {required}"
         );
     }
+    for single_owner in [
+        "launchctl kickstart -k \"$target\"",
+        "launchctl bootstrap \"gui/$(id -u)\" \"$plist\"",
+        "RELEASE_LAUNCH_AGENT_PLIST",
+        "--tron-start-server-and-quit",
+    ] {
+        assert_eq!(service.matches(single_owner).count(), 1, "{single_owner}");
+    }
     let service_start = service
         .split_once("service_start() {")
         .expect("service start command missing")
@@ -300,11 +308,12 @@ fn contributor_binary_recovery_has_one_service_owner() {
     );
     for retired in [
         "ensure_restartable_prod_server() {",
+        "release_wrapper_available() {",
         "restart_installed_service_after_dev() {",
     ] {
         assert!(
             !service.contains(retired),
-            "service module must not retain duplicate restore owner {retired}"
+            "service module must not retain duplicate start indirection {retired}"
         );
     }
 }

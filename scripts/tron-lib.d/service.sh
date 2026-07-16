@@ -457,13 +457,6 @@ launchd_start() {
         return 0
     fi
 
-    if [ "$1" = "$PLIST_NAME" ] && [ -x "$RELEASE_APP_BINARY" ] && [ -f "$RELEASE_LAUNCH_AGENT_PLIST" ]; then
-        "$RELEASE_APP_BINARY" --tron-start-server-and-quit >/dev/null 2>&1 || true
-        sleep 1
-        launchctl kickstart -k "$target" 2>/dev/null || true
-        return 0
-    fi
-
     launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
 }
 
@@ -487,10 +480,6 @@ get_service_pid() {
 validate_prod_binary() {
     [ -f "$INSTALLED_BINARY" ] \
         && file "$INSTALLED_BINARY" 2>/dev/null | grep -q "Mach-O"
-}
-
-release_wrapper_available() {
-    [ -x "$RELEASE_APP_BINARY" ] && [ -f "$RELEASE_LAUNCH_AGENT_PLIST" ]
 }
 
 finish_contributor_pair_recovery() {
@@ -545,7 +534,8 @@ ensure_prod_binary() {
 }
 
 service_start() {
-    if release_wrapper_available; then
+    if [ -x "$RELEASE_APP_BINARY" ] \
+        && [ -f "$RELEASE_LAUNCH_AGENT_PLIST" ]; then
         print_status "Starting service..."
         if "$RELEASE_APP_BINARY" --tron-start-server-and-quit >/dev/null 2>&1 \
             && wait_for_service_health 5; then
