@@ -1,17 +1,13 @@
 import Foundation
 
-/// Shared capability state consumed by invocation and turn lifecycle coordinators.
-@MainActor
-protocol CapabilityInvocationStateTracking: AnyObject {
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] { get set }
-}
-
 /// Protocol defining the context required by CapabilityInvocationCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of capability invocation event handling.
 @MainActor
-protocol CapabilityInvocationContext: ChatCoordinatorContext, CapabilityInvocationStateTracking, MessageMutating {
+protocol CapabilityInvocationContext: ChatCoordinatorContext, MessageMutating {
 
     // MARK: - Messages State
+
+    var currentTurnCapabilityMessageIds: Set<UUID> { get set }
 
     /// Running capability counter for O(1) hasRunningCapabilityInvocations check
     var runningCapabilityInvocationCount: Int { get set }

@@ -438,14 +438,14 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     func test_turnStart_resetsCapabilityTracking() {
         // Given - have some capability invocations from previous turn
-        viewModel.currentCapabilityInvocationMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
+        viewModel.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then - capability tracking should be cleared
-        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     func test_turnStart_clearsThinkingMessageId() {
@@ -513,13 +513,13 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     func test_complete_clearsCapabilityTracking() {
         // Given: agent must be processing for handleComplete to transition
         viewModel.agentPhase = .processing
-        viewModel.currentCapabilityInvocationMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
+        viewModel.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         viewModel.handleComplete()
 
         // Then
-        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     // MARK: - Full Turn Flow Integration Test
@@ -575,7 +575,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         // Then - verify final state
         XCTAssertFalse(viewModel.isProcessing)
-        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
 
         // Should have: thinking message + capability message = at least 2 new messages
         XCTAssertGreaterThanOrEqual(viewModel.messages.count, initialMessageCount + 2)

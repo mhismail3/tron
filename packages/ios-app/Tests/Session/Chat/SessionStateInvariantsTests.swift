@@ -83,16 +83,12 @@ final class SessionStateInvariantsTests: XCTestCase {
         let vm = makeViewModel("sess-clear-\(UUID().uuidString)")
         vm.thinkingMessageId = UUID()
         let capabilityMessageId = UUID()
-        vm.currentCapabilityInvocationMessages[capabilityMessageId] = ChatMessage(
-            id: capabilityMessageId,
-            role: .assistant,
-            content: .text("")
-        )
+        vm.currentTurnCapabilityMessageIds.insert(capabilityMessageId)
 
         vm.cleanUpStreamingState()
 
         XCTAssertNil(vm.thinkingMessageId)
-        XCTAssertTrue(vm.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(vm.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     /// A completed `session::reconstruct` response is server-authoritative.
@@ -106,13 +102,13 @@ final class SessionStateInvariantsTests: XCTestCase {
         vm.appendToMessages(thinking)
         vm.thinkingMessageId = thinking.id
         let capabilityMessageId = UUID()
-        vm.currentCapabilityInvocationMessages[capabilityMessageId] = ChatMessage(id: capabilityMessageId, role: .assistant, content: .text(""))
+        vm.currentTurnCapabilityMessageIds.insert(capabilityMessageId)
 
         vm.reconcileCompletedReconstructionState()
 
         XCTAssertEqual(vm.agentPhase, .idle)
         XCTAssertEqual(vm.runningCapabilityInvocationCount, 0)
-        XCTAssertTrue(vm.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(vm.currentTurnCapabilityMessageIds.isEmpty)
         guard case .thinking(_, _, let isStreaming, _) = vm.messages[0].content else {
             return XCTFail("expected thinking message")
         }

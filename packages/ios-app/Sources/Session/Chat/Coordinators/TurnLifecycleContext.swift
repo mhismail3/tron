@@ -3,7 +3,7 @@ import Foundation
 /// Protocol defining the context required by TurnLifecycleCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of turn lifecycle handling.
 @MainActor
-protocol TurnLifecycleContext: ChatCoordinatorContext, CapabilityInvocationStateTracking, MessageMutating {
+protocol TurnLifecycleContext: ChatCoordinatorContext, MessageMutating {
 
     // MARK: - Turn Tracking State
 
@@ -12,6 +12,9 @@ protocol TurnLifecycleContext: ChatCoordinatorContext, CapabilityInvocationState
 
     /// Index in messages array where the current turn started
     var turnStartMessageIndex: Int? { get set }
+
+    /// Message identities belonging to the current turn's capability invocations.
+    var currentTurnCapabilityMessageIds: Set<UUID> { get set }
 
     /// ID of the first text message created in this turn
     var firstTextMessageIdForTurn: UUID? { get set }

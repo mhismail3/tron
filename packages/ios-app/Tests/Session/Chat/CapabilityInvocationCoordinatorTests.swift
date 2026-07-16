@@ -127,8 +127,8 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         } else {
             XCTFail("Expected capability invocation content")
         }
-        // Then: currentCapabilityInvocationMessages is updated
-        XCTAssertEqual(mockContext.currentCapabilityInvocationMessages.count, 1)
+        // Then: current-turn membership tracks only the authoritative message identity.
+        XCTAssertEqual(mockContext.currentTurnCapabilityMessageIds, [mockContext.messages[0].id])
     }
 
     func testCapabilityInvocationEndUpdatesGeneratingChip() async throws {
@@ -395,7 +395,7 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
     var runningCapabilityInvocationCount: Int = 0
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
+    var currentTurnCapabilityMessageIds: Set<UUID> = []
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false

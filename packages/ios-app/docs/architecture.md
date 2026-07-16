@@ -350,8 +350,10 @@ lookups cannot drift while streaming text, thinking, and tool chips update.
 Chat coordinator contracts live with `Session/Chat/Coordinators`; Engine
 transport and persistence do not own UI session state. Capability chips in the
 message timeline are the single live invocation projection—there is no shadow
-turn-level capability record. Each coordinator context declares only the state
-and lifecycle operations that coordinator consumes.
+turn-level capability record. Live-turn cleanup retains only the capability
+message UUIDs it must remove before reconstruction, never duplicate message
+values. Each coordinator context declares only the state and lifecycle
+operations that coordinator consumes.
 The compaction coordinator context exposes only message mutation, info logging,
 and the two stream-finalization actions it consumes.
 

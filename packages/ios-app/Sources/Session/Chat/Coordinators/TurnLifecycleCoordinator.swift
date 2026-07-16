@@ -46,9 +46,9 @@ final class TurnLifecycleCoordinator {
         context.startThinkingTurn(pluginResult.turnNumber, model: context.currentModel)
 
         // Clear capability tracking for the new turn
-        if !context.currentCapabilityInvocationMessages.isEmpty {
-            context.logDebug("Clearing \(context.currentCapabilityInvocationMessages.count) capability message references from previous turn")
-            context.currentCapabilityInvocationMessages.removeAll()
+        if !context.currentTurnCapabilityMessageIds.isEmpty {
+            context.logDebug("Clearing \(context.currentTurnCapabilityMessageIds.count) capability message references from previous turn")
+            context.currentTurnCapabilityMessageIds.removeAll()
         }
 
         // Notify UIUpdateQueue of turn boundary (resets capability ordering)
@@ -278,7 +278,7 @@ final class TurnLifecycleCoordinator {
         streamingText: String,
         context: TurnLifecycleContext
     ) {
-        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, capabilityInvocations: \(context.currentCapabilityInvocationMessages.count))")
+        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, capabilityInvocations: \(context.currentTurnCapabilityMessageIds.count))")
 
         // Flush any pending UI updates to ensure all capability results are displayed
         context.flushUIUpdateQueue()
@@ -293,7 +293,7 @@ final class TurnLifecycleCoordinator {
             lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200))
         )
 
-        context.currentCapabilityInvocationMessages.removeAll()
+        context.currentTurnCapabilityMessageIds.removeAll()
 
         // Reset all manager states
         context.resetUIUpdateQueue()

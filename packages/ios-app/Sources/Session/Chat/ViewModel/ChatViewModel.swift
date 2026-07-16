@@ -182,7 +182,8 @@ final class ChatViewModel {
     let micRecorder = ComposerMicRecorder()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
+    /// Message identities for capability invocations in the live current turn.
+    var currentTurnCapabilityMessageIds: Set<UUID> = []
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end

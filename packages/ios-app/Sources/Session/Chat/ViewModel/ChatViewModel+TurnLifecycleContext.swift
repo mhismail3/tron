@@ -9,7 +9,7 @@ extension ChatViewModel: TurnLifecycleContext {
     // MARK: - Turn Tracking State (Protocol Properties)
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
-    // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
+    // - currentTurnCapabilityMessageIds: Set<UUID>
     // - thinkingMessageId: UUID?
     // - turnStartMessageIndex: Int?
     // - firstTextMessageIdForTurn: UUID?

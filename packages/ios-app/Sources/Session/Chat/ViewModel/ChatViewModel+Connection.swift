@@ -90,12 +90,12 @@ extension ChatViewModel: ConnectionContext {
         if let thinkingId = thinkingMessageId {
             removeFromMessages { $0.id == thinkingId }
         }
-        // Remove running capability messages (will be re-created from reconstruction)
-        let runningCapabilityIds = currentCapabilityInvocationMessages.keys
-        removeFromMessages { runningCapabilityIds.contains($0.id) }
+        // Remove current-turn capability messages (will be re-created from reconstruction)
+        let currentTurnCapabilityIds = currentTurnCapabilityMessageIds
+        removeFromMessages { currentTurnCapabilityIds.contains($0.id) }
         // Clear turn tracking state
         thinkingMessageId = nil
-        currentCapabilityInvocationMessages.removeAll()
+        currentTurnCapabilityMessageIds.removeAll()
         // Reset thinking accumulators so stale content doesn't bleed through
         thinkingState.seedCatchUpThinking("", isStreaming: false)
     }

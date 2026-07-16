@@ -31,7 +31,7 @@ final class CapabilityInvocationCoordinator {
         let message = ChatMessage(role: .assistant, content: .capabilityInvocation(invocation))
 
         context.appendToMessages(message)
-        context.currentCapabilityInvocationMessages[message.id] = message
+        context.currentTurnCapabilityMessageIds.insert(message.id)
         context.runningCapabilityInvocationCount += 1
         context.makeCapabilityInvocationVisible(pluginResult.invocationId)
 
@@ -76,7 +76,7 @@ final class CapabilityInvocationCoordinator {
                 context.updateMessage(at: existingIndex) { message in
                     message.content = .capabilityInvocation(existing)
                 }
-                context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
+                context.currentTurnCapabilityMessageIds.insert(context.messages[existingIndex].id)
             }
 
             return
@@ -87,7 +87,7 @@ final class CapabilityInvocationCoordinator {
 
         let message = ChatMessage(role: .assistant, content: .capabilityInvocation(invocation))
         context.appendToMessages(message)
-        context.currentCapabilityInvocationMessages[message.id] = message
+        context.currentTurnCapabilityMessageIds.insert(message.id)
         context.runningCapabilityInvocationCount += 1
         context.makeCapabilityInvocationVisible(pluginResult.invocationId)
 

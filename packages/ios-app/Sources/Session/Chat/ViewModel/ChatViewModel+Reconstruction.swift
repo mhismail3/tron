@@ -236,7 +236,7 @@ extension ChatViewModel {
     func reconcileCompletedReconstructionState() {
         agentPhase = .idle
         runningCapabilityInvocationCount = 0
-        currentCapabilityInvocationMessages.removeAll()
+        currentTurnCapabilityMessageIds.removeAll()
         streamingManager.reset()
         thinkingState.markStreamingComplete()
         markThinkingMessageCompleteIfNeeded()
@@ -453,7 +453,7 @@ extension ChatViewModel {
             updateMessage(at: existingIdx) { message in
                 message.content = .capabilityInvocation(invocationData)
             }
-            currentCapabilityInvocationMessages[messages[existingIdx].id] = messages[existingIdx]
+            currentTurnCapabilityMessageIds.insert(messages[existingIdx].id)
             animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
             logger.info("[RECONSTRUCT] Deduplicated capability message for \(modelPrimitiveName) id=\(capabilityInvocation.invocationId)", category: .session)
             return
@@ -466,8 +466,7 @@ extension ChatViewModel {
             timestamp: Date()
         )
 
-        // Track in currentCapabilityInvocationMessages AFTER content is finalized
-        currentCapabilityInvocationMessages[messageId] = capabilityMessage
+        currentTurnCapabilityMessageIds.insert(messageId)
         appendToMessages(capabilityMessage)
         animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
     }

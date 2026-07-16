@@ -61,14 +61,14 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartClearsPreviousTurnCapabilityTracking() {
         // Given
-        mockContext.currentCapabilityInvocationMessages = [UUID(): makeTextMessage("test")]
+        mockContext.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         let pluginResult = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     func testTurnStartEnqueuesTurnBoundary() {
@@ -428,13 +428,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testCompleteClearsCapabilityTracking() {
         // Given
-        mockContext.currentCapabilityInvocationMessages = [UUID(): makeTextMessage("test")]
+        mockContext.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         coordinator.handleComplete(streamingText: "", context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     // MARK: - Helpers
@@ -517,7 +517,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     // MARK: - State
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
+    var currentTurnCapabilityMessageIds: Set<UUID> = []
     var thinkingMessageId: UUID?
     var turnStartMessageIndex: Int?
     var firstTextMessageIdForTurn: UUID?
