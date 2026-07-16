@@ -53,10 +53,6 @@ pub fn test_runtime() -> TestRuntime {
         .join(tron::shared::foundation::paths::dirs::PROFILES)
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
     let profile_runtime = Arc::new(ProfileRuntime::load(&home).unwrap());
-    let settings =
-        tron::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
-            .expect("settings load");
-    tron::domains::settings::init_settings(settings);
 
     let ctx = ServerRuntimeContext {
         orchestrator,

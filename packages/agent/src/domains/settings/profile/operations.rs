@@ -81,16 +81,6 @@ async fn restore_sparse_settings_file(
     Ok(())
 }
 
-async fn rollback_sparse_settings(
-    deps: &Deps,
-    previous_sparse: Value,
-    reason: &str,
-) -> std::result::Result<(), CapabilityError> {
-    restore_sparse_settings_file(deps, previous_sparse, reason).await?;
-    crate::domains::settings::init_settings(deps.profile_runtime.current().settings.clone());
-    Ok(())
-}
-
 async fn reload_profile_runtime_or_rollback(
     deps: &Deps,
     previous_sparse: Value,
@@ -99,12 +89,50 @@ async fn reload_profile_runtime_or_rollback(
     match deps.profile_runtime.reload_now(reason) {
         Ok(_) => Ok(()),
         Err(error) => {
-            rollback_sparse_settings(deps, previous_sparse, reason).await?;
+            restore_sparse_settings_file(deps, previous_sparse, reason).await?;
             Err(CapabilityError::Internal {
                 message: format!(
                     "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
                 ),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn update_and_reset_swap_only_the_profile_runtime_snapshot() {
+        let context = crate::shared::server::test_support::make_test_context();
+        let deps = Deps {
+            profile_runtime: context.profile_runtime.clone(),
+            settings_path: context.settings_path.clone(),
+        };
+        let default_max_turns = crate::domains::settings::TronSettings::default()
+            .agent
+            .max_turns;
+        let initial = deps.profile_runtime.current();
+        let params = json!({"settings": {"agent": {"maxTurns": 123}}});
+
+        settings_update_value(Some(&params), &deps).await.unwrap();
+
+        let updated = deps.profile_runtime.current();
+        assert_eq!(updated.settings.agent.max_turns, 123);
+        assert_eq!(initial.settings.agent.max_turns, default_max_turns);
+        assert!(!std::sync::Arc::ptr_eq(&initial, &updated));
+
+        let reset = settings_reset_to_defaults_value(&deps).await.unwrap();
+
+        let current = deps.profile_runtime.current();
+        assert_eq!(reset["agent"]["maxTurns"], default_max_turns);
+        assert_eq!(current.settings.agent.max_turns, default_max_turns);
+        assert_eq!(
+            crate::domains::settings::SettingsStore::new(&deps.settings_path)
+                .read_sparse_value()
+                .unwrap(),
+            json!({})
+        );
     }
 }

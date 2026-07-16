@@ -42,8 +42,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
     for required in [
         "settings_reset_to_defaults_value",
         "restore_sparse_value_for_rollback",
-        "rollback_sparse_settings",
-        "init_settings(deps.profile_runtime.current().settings.clone())",
+        "restore_sparse_settings_file(deps, previous_sparse, reason).await?",
         "deps.profile_runtime.reload_now(reason)",
         "sparse settings were rolled back",
     ] {
@@ -74,7 +73,6 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         "current: ArcSwap<ResolvedHarnessSpec>",
         "pub fn reload_now",
         "self.current.store(next.clone())",
-        "crate::domains::settings::init_settings(next.settings.clone())",
         "profile runtime reload rejected; keeping previous valid spec",
         "pub fn spawn_watcher",
         "CancellationToken",
@@ -83,7 +81,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         "AUTH_JSON",
         "continue;",
         "invalid_reload_keeps_previous_spec",
-        "reload_updates_global_settings_snapshot",
+        "reload_swaps_current_snapshot_and_preserves_held_value",
     ] {
         assert!(
             profile_runtime.contains(required),
@@ -100,6 +98,20 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs");
     assert!(prompt_execute.contains("&settings"));
     assert!(!prompt_execute.contains("get_settings()"));
+
+    let settings_profile = read_repo_file("packages/agent/src/domains/settings/profile/mod.rs");
+    for forbidden in [
+        "static SETTINGS",
+        "pub fn get_settings",
+        "pub fn init_settings",
+        "reload_settings_from_path",
+        "test_settings_lock",
+    ] {
+        assert!(
+            !settings_profile.contains(forbidden),
+            "duplicate settings owner reappeared: {forbidden}"
+        );
+    }
 
     let auth_storage = read_repo_file("packages/agent/src/domains/auth/credentials/storage/mod.rs");
     for required in [

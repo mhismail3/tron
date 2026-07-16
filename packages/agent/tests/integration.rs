@@ -59,11 +59,6 @@ async fn boot_server() -> TestServer {
     let auth_path = home
         .join(tron::shared::foundation::paths::dirs::PROFILES)
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
-    let settings =
-        tron::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
-            .expect("settings load");
-    tron::domains::settings::init_settings(settings);
-
     let runtime_context = ServerRuntimeContext {
         orchestrator: Arc::clone(&orchestrator),
         session_manager,

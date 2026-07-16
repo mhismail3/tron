@@ -85,7 +85,6 @@ impl ProfileRuntime {
             Ok(next) => {
                 let next = Arc::new(next);
                 self.current.store(next.clone());
-                crate::domains::settings::init_settings(next.settings.clone());
                 tracing::info!(
                     reason,
                     profile = next.profile_name(),
@@ -277,13 +276,9 @@ mod tests {
     }
 
     #[test]
-    fn reload_updates_global_settings_snapshot() {
-        let _settings_guard = crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        crate::domains::settings::reset_settings();
+    fn reload_swaps_current_snapshot_and_preserves_held_value() {
         let (_dir, runtime) = seeded_runtime();
-        crate::domains::settings::init_settings(runtime.current().settings.clone());
+        let before = runtime.current();
         let profile_path = runtime
             .home()
             .join(crate::shared::foundation::paths::dirs::PROFILES)
@@ -293,28 +288,23 @@ mod tests {
         profile.push_str("\n[settings.server]\ndefaultModel = \"reload-test-model\"\n");
         std::fs::write(&profile_path, profile).unwrap();
 
-        runtime.reload_now("test").unwrap();
+        let reloaded = runtime.reload_now("test").unwrap();
 
+        assert_eq!(reloaded.settings.server.default_model, "reload-test-model");
         assert_eq!(
-            crate::domains::settings::get_settings()
-                .server
-                .default_model,
+            runtime.current().settings.server.default_model,
             "reload-test-model"
         );
-        crate::domains::settings::reset_settings();
+        assert_eq!(before.settings.server.default_model, "claude-sonnet-4-6");
+        assert!(!Arc::ptr_eq(&before, &reloaded));
     }
 
     #[tokio::test]
     async fn watcher_reloads_valid_profile_edits() {
-        let _settings_guard = crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
         crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
         let runtime = Arc::new(ProfileRuntime::load(&home).unwrap());
-        crate::domains::settings::init_settings(runtime.current().settings.clone());
         let cancel = CancellationToken::new();
         let handle = runtime
             .clone()
@@ -341,7 +331,6 @@ mod tests {
 
         cancel.cancel();
         handle.await.unwrap();
-        crate::domains::settings::reset_settings();
     }
 
     #[test]

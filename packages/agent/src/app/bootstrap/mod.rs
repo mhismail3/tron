@@ -402,7 +402,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     );
     let settings_path = crate::domains::settings::profile::settings_path();
     let settings = profile_runtime.current().settings.clone();
-    crate::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);
     let (log_handle, flush_task) = init_logging(&db_path, !args.quiet)?;
     match crate::shared::storage::StorageRuntime::new(db_path.clone()).retention_run(false) {

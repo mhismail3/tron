@@ -147,19 +147,6 @@ pub fn make_test_context() -> ServerRuntimeContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
-    let settings = crate::domains::settings::profile::load_settings_from_path(&settings_path)
-        .expect("test profile settings should load from isolated Tron home");
-    #[cfg(test)]
-    {
-        // `init_settings` writes the process-global snapshot. Serialize test
-        // fixture seeding with settings tests that assert stable global reads.
-        let _settings_guard = crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        crate::domains::settings::init_settings(settings);
-    }
-    #[cfg(not(test))]
-    crate::domains::settings::init_settings(settings);
     let ctx = ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,
@@ -187,21 +174,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn make_test_context_seeds_global_settings_from_isolated_profile() {
+    fn make_test_context_owns_isolated_profile_runtime() {
         let ctx = make_test_context();
         assert!(
             ctx.settings_path.starts_with(std::env::temp_dir()),
             "test settings path must be isolated from the live user profile"
         );
-
-        let settings = crate::domains::settings::get_settings();
+        assert!(ctx.profile_runtime.home().starts_with(std::env::temp_dir()));
         assert_eq!(
-            settings.name,
+            ctx.profile_runtime.current().settings.name,
             crate::domains::settings::TronSettings::default().name
         );
-        let _guard = crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        crate::domains::settings::reset_settings();
     }
 }

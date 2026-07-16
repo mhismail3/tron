@@ -494,7 +494,7 @@ fn sparse_overlay_rules_stay_atomic_sparse_and_rollback_safe() {
         "SettingsStore::operation_lock",
         "read_sparse_settings_snapshot",
         "reload_profile_runtime_or_rollback",
-        "rollback_sparse_settings",
+        "restore_sparse_settings_file(deps, previous_sparse, reason).await?",
     ] {
         assert!(
             operations.contains(required),

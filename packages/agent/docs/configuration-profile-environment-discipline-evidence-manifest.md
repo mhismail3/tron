@@ -10,7 +10,7 @@ Stale branch policy: `codex/configuration-profile-environment-discipline` and `c
 | --- | --- | --- |
 | Binding slice list | CPE-0 | `$CODEX_HOME/attachments/fdc4e780-354b-4da4-8fb5-57839c35bfee/pasted-text.txt` names Configuration / Profile / Environment Discipline as an original remaining meta-slice. |
 | Lineage proof | CPE-0 | `git merge-base --is-ancestor` passed for DSEMD -> PPACD -> post-PPACD reconciliation -> PMBD -> PERF and for `c1d266e22` -> current branch. |
-| Settings/profile audit | CPE-1,CPE-2,CPE-3,CPE-4,CPE-7 | Rust settings/profile docs, loader, store, seeder, and profile runtime were read before edits; existing tests already proved sparse writes, rollback, profile recovery, and cache reload. |
+| Settings/profile audit | CPE-1,CPE-2,CPE-3,CPE-4,CPE-7 | Rust settings/profile docs, loader, store, seeder, and profile runtime were read before edits; existing tests already proved sparse writes, rollback, profile recovery, and authoritative runtime snapshot swaps. |
 | Default drift finding | CPE-2,CPE-7 | `packages/agent/defaults/profiles/default/profile.toml` contained inert `settings.session.queueDrainMode`; it was removed and guarded by strict nested schema tests. |
 | iOS fallback finding | CPE-6,CPE-7 | Swift `ServerSettings` used `try?` plus local defaults for server-owned fields; decoder now requires the fields iOS exposes and negative tests cover missing/mistyped payloads. |
 | Mac sparse seed finding | CPE-4,CPE-5 | `ServerSettingsWriter` created missing overlays with v2 metadata and `inherits = ["normal"]`; it now creates the current v3 sparse overlay with no inherited defaults. |

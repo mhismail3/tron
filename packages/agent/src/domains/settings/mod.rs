@@ -2,8 +2,8 @@
 //!
 //! This module owns canonical function execution for the settings namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them. Settings
-//! updates persist the sparse profile overlay, then reload the profile runtime so
-//! subsequent turns use the new provider and loop settings.
+//! updates persist the sparse profile overlay, then compile and atomically swap
+//! `ProfileRuntime`'s authoritative snapshot.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

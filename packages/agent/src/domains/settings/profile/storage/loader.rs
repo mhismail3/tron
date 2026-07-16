@@ -29,11 +29,6 @@ pub fn auth_path() -> PathBuf {
     crate::shared::foundation::paths::auth_path()
 }
 
-/// Load settings from the default path with env var overrides.
-pub fn load_settings() -> Result<TronSettings> {
-    load_settings_from_path(&settings_path())
-}
-
 /// Load settings from a sparse user profile path with env var overrides.
 pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     let defaults = load_settings_defaults_for(path)?;

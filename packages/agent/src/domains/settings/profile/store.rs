@@ -67,16 +67,14 @@ impl SettingsStore {
         self.read_sparse_profile_settings_locked()
     }
 
-    /// Reset sparse settings to `{}` and reload the global cache.
+    /// Reset sparse settings to `{}` and return the resulting effective value.
     pub fn reset(&self) -> Result<Value> {
         let _guard = write_lock().lock();
         self.write_profile_toml_locked(&Value::Object(Map::new()))?;
-        crate::domains::settings::reload_settings_from_path(&self.path)?;
         self.load_value()
     }
 
-    /// Merge a sparse update into the existing sparse file, validate, write,
-    /// and reload the global settings cache.
+    /// Merge a sparse update into the existing sparse file, validate, and write.
     pub fn update(&self, updates: Value) -> Result<()> {
         let _guard = write_lock().lock();
         let current = self.read_sparse_profile_settings_locked()?;
@@ -84,7 +82,6 @@ impl SettingsStore {
         validate_sparse_settings(&merged, &self.path)?;
 
         self.write_profile_toml_locked(&merged)?;
-        crate::domains::settings::reload_settings_from_path(&self.path)?;
         Ok(())
     }
 
@@ -93,7 +90,6 @@ impl SettingsStore {
         let _guard = write_lock().lock();
         validate_sparse_settings(&value, &self.path)?;
         self.write_profile_toml_locked(&value)?;
-        crate::domains::settings::reload_settings_from_path(&self.path)?;
         Ok(())
     }
 
@@ -101,8 +97,9 @@ impl SettingsStore {
     /// runtime reload failed.
     ///
     /// This intentionally bypasses validation because the active profile files
-    /// may be the thing that failed validation. The caller must reset the
-    /// in-memory settings snapshot from the last-known-good profile runtime.
+    /// may be the thing that failed validation. `ProfileRuntime` rejects the
+    /// invalid compile without swapping, so its last-known-good snapshot stays
+    /// active while the caller restores this file.
     pub fn restore_sparse_value_for_rollback(&self, value: Value) -> Result<()> {
         let _guard = write_lock().lock();
         ensure_object(&value)?;
@@ -254,12 +251,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn lock_settings() -> std::sync::MutexGuard<'static, ()> {
-        crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
         let home = dir.path().join(".tron");
         crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
@@ -284,19 +275,14 @@ authProfile = "default"
 
     #[test]
     fn missing_file_loads_defaults() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let store = SettingsStore::new(temp_settings_path(&dir));
         let value = store.load_value().unwrap();
         assert_eq!(value["server"]["heartbeatIntervalMs"], 30_000);
-        crate::domains::settings::reset_settings();
     }
 
     #[test]
     fn update_rejects_malformed_existing_toml_and_preserves_file() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         std::fs::write(&path, "{broken").unwrap();
@@ -308,13 +294,10 @@ authProfile = "default"
 
         assert!(err.to_string().contains("parse settings TOML"));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{broken");
-        crate::domains::settings::reset_settings();
     }
 
     #[test]
     fn update_rejects_non_object_roots() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         std::fs::write(&path, "settings = []\n").unwrap();
@@ -323,13 +306,10 @@ authProfile = "default"
         let err = store.update(json!({"server": {}})).unwrap_err();
 
         assert!(err.to_string().contains("root must be an object"));
-        crate::domains::settings::reset_settings();
     }
 
     #[test]
     fn update_rejects_zero_heartbeat_interval_and_preserves_file() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         let original = sparse_profile(
@@ -346,13 +326,10 @@ defaultModel = "claude-sonnet-4-6"
 
         assert!(err.to_string().contains("heartbeatIntervalMs"));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
-        crate::domains::settings::reset_settings();
     }
 
     #[test]
-    fn update_writes_atomically_and_reloads_cache() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
+    fn update_writes_atomically_and_loads_effective_value() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
@@ -362,20 +339,13 @@ defaultModel = "claude-sonnet-4-6"
             .unwrap();
 
         let saved = store.read_sparse_value().unwrap();
+        let effective = store.load_value().unwrap();
         assert_eq!(saved["server"]["heartbeatIntervalMs"], 12_345);
-        assert_eq!(
-            crate::domains::settings::get_settings()
-                .server
-                .heartbeat_interval_ms,
-            12_345
-        );
-        crate::domains::settings::reset_settings();
+        assert_eq!(effective["server"]["heartbeatIntervalMs"], 12_345);
     }
 
     #[test]
     fn concurrent_updates_serialize_without_lost_writes() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
@@ -402,13 +372,10 @@ defaultModel = "claude-sonnet-4-6"
         let saved = store.read_sparse_value().unwrap();
         assert_eq!(saved["server"]["heartbeatIntervalMs"], 41_000);
         assert_eq!(saved["context"]["compactor"]["preserveRecentCount"], 8);
-        crate::domains::settings::reset_settings();
     }
 
     #[test]
     fn reset_writes_empty_object() {
-        let _lock = lock_settings();
-        crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
@@ -421,6 +388,5 @@ defaultModel = "claude-sonnet-4-6"
 
         assert_eq!(saved, json!({}));
         assert_eq!(value["server"]["heartbeatIntervalMs"], 30_000);
-        crate::domains::settings::reset_settings();
     }
 }
