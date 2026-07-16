@@ -958,6 +958,7 @@ fn tracked_ignored_files_stay_absent() {
     }
 
     for ignored_output in [
+        "packages/agent/target/debug/tron",
         "packages/ios-app/TronMobile.xcodeproj/project.pbxproj",
         "packages/mac-app/TronMac.xcodeproj/project.pbxproj",
         "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",

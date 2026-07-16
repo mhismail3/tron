@@ -36,7 +36,7 @@ Thumbs.db
 # Tron user data
 .tron/auth.json
 
-# Node (relay worker)
+# Node/Bun asset tooling
 node_modules/
 package-lock.json
 

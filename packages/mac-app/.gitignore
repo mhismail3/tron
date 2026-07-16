@@ -3,7 +3,6 @@ TronMac.xcodeproj/
 
 # Build artifacts
 build/
-DerivedData/
 *.xcarchive
 *.dmg
 
@@ -12,12 +11,3 @@ Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron
 Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron
 Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns
 Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns
-
-# macOS / Xcode
-.DS_Store
-*.swp
-*.xcuserstate
-xcuserdata/
-
-# Sentry artifacts
-.sentryclirc
