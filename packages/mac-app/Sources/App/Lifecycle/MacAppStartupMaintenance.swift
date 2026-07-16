@@ -64,15 +64,15 @@ enum MacAppStartupMaintenance {
         context: MacAppStartupContext
     ) async -> MacAppStartupMaintenanceResult {
         let currentVersion = setup.currentAppVersion()
-        let recordedVersion = setup.readRecordedAppVersion()
-        let onboarded = setup.onboardedSentinelExists()
-
-        let devServerActive = await setup.probeServerProcess(setup.serverPort)?.isDevServer == true
         if context == .wizardCompletion,
            setup.canManageLaunchAgent {
             recordCurrentVersion(currentVersion, setup: setup)
             return .recordedCurrentVersion
         }
+
+        let recordedVersion = setup.readRecordedAppVersion()
+        let onboarded = setup.onboardedSentinelExists()
+        let devServerActive = await setup.probeServerProcess(setup.serverPort)?.isDevServer == true
         if let reason = restartSkipReason(
             currentVersion: currentVersion,
             recordedVersion: recordedVersion,
