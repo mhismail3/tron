@@ -23,9 +23,6 @@ Usage:
   scripts/tron-ios-beta stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-beta status [--device-id ID] [--device-name NAME]
 
-Aliases:
-  start    Same as install
-
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
@@ -334,7 +331,7 @@ main() {
     local cmd="${1:-help}"
     shift || true
     case "$cmd" in
-        install|start)
+        install)
             parse_common_args "$@"
             build_install_launch
             ;;

@@ -650,6 +650,7 @@ extension SourceGuardTests {
         #expect(!installScript.contains(".xcworkspace"))
         #expect(installScript.contains("TRON_IOS_SCHEME"))
         #expect(installScript.contains("TRON_IOS_CONFIGURATION"))
+        #expect(!installScript.contains("install|start)"))
         #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))
         #expect(!installScript.contains(#"find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1"#))
 

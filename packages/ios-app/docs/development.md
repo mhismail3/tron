@@ -87,8 +87,8 @@ installs the fresh product, and then launches it through the same helper.
 After each build, the helper installs the requested configuration's `iphoneos`
 product so stale Beta or Prod app bundles left in DerivedData cannot be launched
 by a different action.
-Production rebuild actions call `install`, not `launch`, so local source changes
-are compiled before the app is reinstalled.
+Production rebuild actions use the helper's sole rebuild command, `install`, so
+local source changes are compiled before the app is reinstalled.
 The matching `Just Launch Installed ...` actions run `scripts/tron-ios-beta
 launch` for the already-installed app without rebuilding. The iPhone launch
 actions are deduplicated by bundle ID: Beta has its own launch action, and the
