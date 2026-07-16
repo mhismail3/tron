@@ -96,32 +96,38 @@ final class AsyncEventStreamTests: XCTestCase {
         task.cancel()
     }
 
-    func test_filteredStream_onlyDeliversMatchingEvents() async {
-        let stream = AsyncEventStream<Int>()
+    func test_filteredStream_deliversMatchesWithoutOwningSource() async {
+        var stream: AsyncEventStream<Int>? = AsyncEventStream()
+        weak let retainedStream = stream
         let expectation = expectation(description: "Received filtered events")
         let collector = Collector<Int>()
+        let filteredEvents = stream!.filtered(where: { $0 % 2 == 0 })
 
         let task = Task {
-            for await value in stream.filtered(where: { $0 % 2 == 0 }) {
+            for await value in filteredEvents {
                 collector.append(value)
-                if collector.count >= 2 {
+                if collector.count == 2 {
                     expectation.fulfill()
-                    break
                 }
             }
         }
+        defer { task.cancel() }
 
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        stream.send(1) // odd - filtered out
-        stream.send(2) // even - delivered
-        stream.send(3) // odd - filtered out
-        stream.send(4) // even - delivered
+        stream?.send(1) // odd - filtered out
+        stream?.send(2) // even - delivered
+        stream?.send(3) // odd - filtered out
+        stream?.send(4) // even - delivered
 
         await fulfillment(of: [expectation], timeout: 2.0)
-        task.cancel()
+        stream = nil
+        for _ in 0..<10 {
+            await Task.yield()
+        }
 
         XCTAssertEqual(collector.values, [2, 4])
+        XCTAssertNil(retainedStream)
     }
 
     func test_concurrentSends_noDataRace() async {

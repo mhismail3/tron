@@ -67,14 +67,13 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
     /// - Returns: Filtered async stream
     func filtered(where predicate: @escaping @Sendable (T) -> Bool) -> AsyncStream<T> {
         AsyncStream(bufferingPolicy: bufferingPolicy) { [weak self] continuation in
-            guard let self else {
+            guard let upstreamEvents = self?.events else {
                 continuation.finish()
                 return
             }
 
-            let task = Task { [weak self] in
-                guard let self else { return }
-                for await event in self.events {
+            let task = Task {
+                for await event in upstreamEvents {
                     if predicate(event) {
                         continuation.yield(event)
                     }
