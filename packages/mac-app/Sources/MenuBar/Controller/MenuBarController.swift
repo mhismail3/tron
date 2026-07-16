@@ -146,7 +146,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let menu = statusItem?.menu else { return }
         let items = MenuBarItemBuilder.build(
             snapshot: snapshot,
-            paths: setup
+            tronHome: setup.tronHome,
+            defaultServerPort: setup.serverPort,
+            canManageLaunchAgent: setup.canManageLaunchAgent
         )
         menu.removeAllItems()
         for descriptor in items {

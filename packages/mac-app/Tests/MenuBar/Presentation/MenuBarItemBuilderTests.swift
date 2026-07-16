@@ -4,48 +4,25 @@ import Testing
 
 @Suite("MenuBarItemBuilder")
 struct MenuBarItemBuilderTests {
-    /// Returns a synthetic EnvironmentSetup pointing at a throwaway tmp
-    /// directory. We only consume `serverPort` and `tronHome` from the
-    /// builder, so all the closures can be stub `{ _ in nil }`.
-    static func makeSetup(
-        in tmp: URL,
-        port: Int = 9847,
+    /// Supplies only the immutable inputs consumed by the pure builder.
+    static func build(
+        snapshot: ServerStatusSnapshot,
+        tronHome: URL = URL(fileURLWithPath: "/tmp/tron", isDirectory: true),
+        defaultServerPort: Int = 9847,
         canManageLaunchAgent: Bool = true
-    ) -> EnvironmentSetup {
-        EnvironmentSetup(
-            tronHome: tmp,
-            applicationBundle: tmp.appendingPathComponent("Tron.app"),
-            bearerTokenPath: tmp.appendingPathComponent("auth.json"),
-            onboardedMarkerPath: tmp.appendingPathComponent("run/.onboarded"),
-            settingsPath: tmp.appendingPathComponent("profile.toml"),
-            launchAgentPlistPath: tmp.appendingPathComponent("com.tron.server.plist"),
-            launchAgentLabel: "com.tron.server",
-            serverPort: port,
-            canManageLaunchAgent: canManageLaunchAgent,
-            wrapperLockPath: tmp.appendingPathComponent("run/.mac-wrapper.com.tron.mac.lock"),
-            onboardedSentinelExists: { false },
-            readBearerToken: { nil },
-            readTailscaleIPFromSettings: { nil },
-            cacheTailscaleIP: { _ in },
-            probeTailscale: { .notInstalled },
-            probePermissions: { [:] },
-            detectExistingInstall: { .none },
-            validateApplicationLocation: { nil },
-            validateBundledHelper: { nil },
-            pingServer: { _ in .unreachable },
-            launchAgentManager: MockLaunchAgentManager(),
-            touchOnboardedSentinel: { }
+    ) -> [MenuItemDescriptor] {
+        MenuBarItemBuilder.build(
+            snapshot: snapshot,
+            tronHome: tronHome,
+            defaultServerPort: defaultServerPort,
+            canManageLaunchAgent: canManageLaunchAgent
         )
     }
 
     @Test("paused snapshot: header reads paused and falls back when Tailscale is missing")
     func pausedSnapshot() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
-
         let snap = ServerStatusSnapshot(state: .paused)
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
 
         if case .header(let content) = items[0] {
             #expect(content.status == "Paused")
@@ -59,16 +36,13 @@ struct MenuBarItemBuilderTests {
 
     @Test("running snapshot: header reads running with endpoint")
     func runningSnapshot() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp, port: 9848)
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",
             processID: 16027,
             uptime: "01:07:42"
         )
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap, defaultServerPort: 9848)
 
         if case .header(let content) = items[0] {
             #expect(content.status == "Running")
@@ -85,9 +59,6 @@ struct MenuBarItemBuilderTests {
 
     @Test("dev snapshot: header calls out active dev server")
     func devSnapshotHeader() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",
@@ -95,7 +66,7 @@ struct MenuBarItemBuilderTests {
             uptime: "00:00:09",
             isDevServerActive: true
         )
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
 
         if case .header(let content) = items[0] {
             #expect(content.status == "Running")
@@ -109,14 +80,11 @@ struct MenuBarItemBuilderTests {
 
     @Test("dev snapshot: stop dev action appears and service controls are disabled")
     func devSnapshotControls() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             isDevServerActive: true
         )
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
         let titles = items.map(\.title)
 
         #expect(titles == [
@@ -148,14 +116,11 @@ struct MenuBarItemBuilderTests {
 
     @Test("dev snapshot: stop dev appears with server controls")
     func stopDevAppearsWithServerControlsDuringTakeover() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             isDevServerActive: true
         )
-        let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
+        let titles = Self.build(snapshot: snap).map(\.title)
 
         #expect(Array(titles.suffix(5)) == [
             "Pause server",
@@ -168,11 +133,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("running snapshot includes Pause server (not Resume)")
     func pauseShownWhileRunning() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
         #expect(titles.contains("Pause server"))
@@ -181,11 +143,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("paused snapshot includes Resume server (not Pause)")
     func resumeShownWhilePaused() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .paused)
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
         #expect(titles.contains("Resume server"))
@@ -194,11 +153,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("menu always has pairing, folder, logs, feedback, server controls, uninstall, quit")
     func canonicalActionPresence() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot.checking
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
 
         let titles = Set(items.map(\.title))
         for required in [
@@ -218,11 +174,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("menu sections use the canonical order")
     func canonicalSectionOrder() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
+        let titles = Self.build(snapshot: snap).map(\.title)
 
         #expect(titles == [
             "Tron",
@@ -241,11 +194,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("menu titles map directly to typed actions")
     func canonicalActionRouting() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let actions = Dictionary(uniqueKeysWithValues: MenuBarItemBuilder.build(snapshot: snap, paths: setup).compactMap { item in
+        let actions = Dictionary(uniqueKeysWithValues: Self.build(snapshot: snap).compactMap { item in
             if case .action(let title, _, let action) = item {
                 return (title, action)
             }
@@ -261,24 +211,21 @@ struct MenuBarItemBuilderTests {
             "Uninstall Tron": .uninstall,
         ])
 
-        let pausedItems = MenuBarItemBuilder.build(snapshot: ServerStatusSnapshot(state: .paused), paths: setup)
+        let pausedItems = Self.build(snapshot: ServerStatusSnapshot(state: .paused))
         #expect(pausedItems.contains(.action(title: "Resume server", isEnabled: true, action: .resumeServer)))
 
         let devSnapshot = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             isDevServerActive: true
         )
-        let devItems = MenuBarItemBuilder.build(snapshot: devSnapshot, paths: setup)
+        let devItems = Self.build(snapshot: devSnapshot)
         #expect(devItems.contains(.action(title: "Stop dev server", isEnabled: true, action: .stopDevServer)))
     }
 
     @Test("debug companion disables production LaunchAgent controls")
     func companionDisablesProductionControls() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp, canManageLaunchAgent: false)
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap, canManageLaunchAgent: false)
 
         for item in items {
             if case .action(let title, let isEnabled, _) = item,
@@ -290,11 +237,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("menu omits developer start commands")
     func menuOmitsDeveloperStartCommands() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
         let titles = items.map(\.title)
 
         #expect(!titles.contains("Show Developer Options"))
@@ -308,11 +252,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("busy snapshot disables server controls and shows transient action title")
     func busyDisablesServerControls() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .busy(.restarting))
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
         #expect(titles.contains("Restarting…"))
@@ -327,11 +268,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("failed status title carries reason")
     func failedTitle() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .failed(reason: "timeout"))
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Stopped")
             #expect(content.health == .stopped)
@@ -342,11 +280,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("status title flips for unauthorized state")
     func unauthorizedTitle() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .unauthorized)
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Needs token")
             #expect(content.health == .attention)
@@ -357,11 +292,8 @@ struct MenuBarItemBuilderTests {
 
     @Test("status title 'checking' for checking state")
     func checkingTitle() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot.checking
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Checking")
             #expect(content.health == .attention)
@@ -372,11 +304,9 @@ struct MenuBarItemBuilderTests {
 
     @Test("Open Tron folder uses the configured tronHome path")
     func openFolderUsesPath() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
+        let tronHome = URL(fileURLWithPath: "/tmp/custom-tron", isDirectory: true)
         let snap = ServerStatusSnapshot.checking
-        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let items = Self.build(snapshot: snap, tronHome: tronHome)
         let openLink = items.first { item in
             if case .openLink(_, _) = item { return true } else { return false }
         }
@@ -384,7 +314,7 @@ struct MenuBarItemBuilderTests {
             Issue.record("expected an openLink for Open Tron folder")
             return
         }
-        #expect(url == tmp)
+        #expect(url == tronHome)
     }
 
     @Test("uptime formatter accepts ps elapsed-time formats and rejects malformed values")

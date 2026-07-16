@@ -237,7 +237,7 @@ Missing build products, helpers, links, or failed packaging are hard failures.
 ### Add a new menu-bar item
 
 1. Add a `MenuBarAction` case and route it in `MenuBarActionHandler.perform(_:)` when the item has side effects; pairing/log detail belongs in dedicated windows.
-2. Add the typed `.action` (or passive `.openLink`) descriptor in `MenuBarItemBuilder.build(snapshot:paths:)`.
+2. Add the typed `.action` (or passive `.openLink`) descriptor in `MenuBarItemBuilder.build(snapshot:tronHome:defaultServerPort:canManageLaunchAgent:)`.
 3. Pin the action mapping and ordering in `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift`.
 
 ### Debug the `.onboarded` sentinel logic

@@ -29,19 +29,24 @@ enum MenuBarItemBuilder {
     /// `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift` pin the ordering.
     static func build(
         snapshot: ServerStatusSnapshot,
-        paths: EnvironmentSetup
+        tronHome: URL,
+        defaultServerPort: Int,
+        canManageLaunchAgent: Bool
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
         let controlsEnabled = !snapshot.state.isBusy
-        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive && paths.canManageLaunchAgent
+        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive && canManageLaunchAgent
 
-        items.append(.header(headerContent(snapshot: snapshot, paths: paths)))
+        items.append(.header(headerContent(
+            snapshot: snapshot,
+            defaultServerPort: defaultServerPort
+        )))
         items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
 
-        items.append(.openLink(title: "Open Tron folder", url: paths.tronHome))
+        items.append(.openLink(title: "Open Tron folder", url: tronHome))
 
         items.append(.action(title: "Show logs", isEnabled: true, action: .viewLogs))
 
@@ -80,8 +85,11 @@ enum MenuBarItemBuilder {
         }
     }
 
-    static func headerContent(snapshot: ServerStatusSnapshot, paths: EnvironmentSetup) -> MenuHeaderContent {
-        let port = snapshot.state.runningPort ?? paths.serverPort
+    static func headerContent(
+        snapshot: ServerStatusSnapshot,
+        defaultServerPort: Int
+    ) -> MenuHeaderContent {
+        let port = snapshot.state.runningPort ?? defaultServerPort
         let address = snapshot.tailscaleIP.map { "\($0):\(port)" } ?? "Tailscale unavailable"
         let health: MenuHeaderContent.Health
         switch snapshot.state {

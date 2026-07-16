@@ -106,6 +106,9 @@ struct EnvironmentSetup: Sendable {
 ```
 
 SwiftUI plumbing: injected via `.environment(\.environmentSetup, …)` on the root scene. Test views override the single key.
+Pure presentation owners receive only the immutable values they consume:
+`MenuBarController` projects the Tron-home URL, default port, and launch-control
+authority into `MenuBarItemBuilder` instead of passing the effectful setup seam.
 
 ### Validation and side-effect boundaries
 
