@@ -169,9 +169,4 @@ extension ChatViewModel {
     func connectAndReconstruct() async {
         await connectionCoordinator.connectAndReconstruct(context: self)
     }
-
-    /// Reconnect to server and reconstruct session state
-    func reconnectAndReconstruct() async {
-        await connectionCoordinator.reconnectAndReconstruct(context: self)
-    }
 }

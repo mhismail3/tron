@@ -171,21 +171,6 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.processReconstructionResultCalled)
     }
 
-    // MARK: - Reconnect Tests
-
-    func testReconnectAndReconstructCallsReconstruct() async {
-        mockContext.isConnected = true
-        await coordinator.reconnectAndReconstruct(context: mockContext)
-        XCTAssertTrue(mockContext.reconstructSessionCalled)
-    }
-
-    func testReconnectAndReconstructConnectsIfNeeded() async {
-        mockContext.isConnected = false
-        mockContext.connectWillSucceed = true
-        await coordinator.reconnectAndReconstruct(context: mockContext)
-        XCTAssertTrue(mockContext.connectCalled)
-    }
-
 }
 
 // MARK: - Test Error

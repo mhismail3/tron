@@ -204,13 +204,8 @@ struct ChatView: View {
             if newState.isConnected && !oldState.isConnected {
                 taskCoordinator.replaceTask(.connectionRefresh) { ticket in
                     guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                    if initialLoadComplete {
-                        // Reconnection after initial setup — reconstruct state
-                        await viewModel.reconnectAndReconstruct()
-                    } else {
-                        // First connection — use initial connect flow
-                        await viewModel.connectAndReconstruct()
-                    }
+                    // Initial and later connected edges share one reconstruction flow.
+                    await viewModel.connectAndReconstruct()
                     guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                 }
             }

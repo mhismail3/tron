@@ -141,22 +141,9 @@ final class ConnectionCoordinator {
         context.drainEventBuffer()
     }
 
-    /// Reconnect to server and reconstruct session state.
-    /// Same flow as initial connect — no separate reconnect path.
-    func reconnectAndReconstruct(context: ConnectionContext) async {
-        context.logInfo("reconnectAndReconstruct() - checking connection state")
-
-        if !context.isConnected {
-            context.logInfo("Not connected, reconnecting...")
-        }
-
-        // Reuse the same flow — session::reconstruct handles everything
-        await connectAndReconstruct(context: context)
-    }
-
     // MARK: - Session Resume Error Handling
 
-    /// Shared error handler for session resume failures in both connect and reconnect paths.
+    /// Handles session resume failures for the shared connection/reconstruction path.
     /// Detects session-not-found errors and sets shouldDismiss to navigate away.
     private func handleSessionResumeFailure(_ error: Error, context: ConnectionContext) {
         let isNotFound: Bool

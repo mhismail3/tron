@@ -327,7 +327,9 @@ display/task owner, shared by the production view and its focused tests.
 View-local async work is owned by `ChatViewTaskCoordinator`: every
 delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets
 a session-generation ticket and is cancelled on disappearance so stale work
-cannot mutate a replaced chat view. Transcript mutations go through the
+cannot mutate a replaced chat view. Initial and later connected edges both use
+the single `connectAndReconstruct` session-reconstruction entry point.
+Transcript mutations go through the
 `MessageMutating` helpers in `Session/Chat/Navigation/MessageIndex.swift`; in
 place updates must use `updateMessage(at:)` so message-id and capability-id
 lookups cannot drift while streaming text, thinking, and tool chips update.
