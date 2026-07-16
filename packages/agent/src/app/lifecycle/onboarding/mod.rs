@@ -1,4 +1,4 @@
-//! # server/onboarding — bearer-token lifecycle + first-run sentinel
+//! # app/lifecycle/onboarding — bearer-token lifecycle + first-run sentinel
 //!
 //! Per-server bootstrap state: bearer-token lifecycle and first-run sentinel.
 //!

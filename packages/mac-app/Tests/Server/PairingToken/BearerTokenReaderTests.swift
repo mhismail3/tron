@@ -6,7 +6,7 @@ import Testing
 struct BearerTokenReaderTests {
     /// Writes `data` to `path` and chmods to 0o600 so the reader's
     /// `permissionsAreSafe` guard accepts the file. Mirrors the writer
-    /// invariant in `packages/agent/src/server/onboarding/mod.rs`.
+    /// invariant in `packages/agent/src/app/lifecycle/onboarding/mod.rs`.
     private func writeSecureToken(_ data: Data, to path: URL) throws {
         try data.write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)

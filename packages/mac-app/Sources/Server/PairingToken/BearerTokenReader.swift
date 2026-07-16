@@ -1,10 +1,11 @@
 import Foundation
 
 /// Reads the bearer token from `bearerToken` in `~/.tron/profiles/auth.json`.
-/// This is the same file written by the Rust agent's `server::onboarding`
-/// module through the shared auth-storage atomic writer.
+/// This is the same file written by the Rust agent's
+/// `app::lifecycle::onboarding` module through the shared auth-storage atomic
+/// writer.
 ///
-/// File format (matches `packages/agent/src/server/onboarding/mod.rs`):
+/// File format (matches `packages/agent/src/app/lifecycle/onboarding/mod.rs`):
 /// ```json
 /// {
 ///   "version": 1,
