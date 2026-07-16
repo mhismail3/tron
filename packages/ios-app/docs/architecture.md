@@ -306,12 +306,13 @@ drain, capability completion ordering, and live event processing lives in
 the root state object. Its session-lifetime observation tasks retain only their
 observed sources, capture the view model weakly for mutations, and use a
 cancellation-aware wait so releasing the view model terminates idle bindings;
-the connection binding owns disconnect cleanup only. `ChatView` reads raw
-connectivity from the repository as an immediate `InputBarConfig` transport-safety
-gate, while `InteractionPolicy` remains the shared debounced read-only policy;
-neither state is mirrored. Workspace existence is likewise not cached in the
-client; any future invalidation must arrive through authoritative engine or
-session state. Chat event-pipeline tests use `@testable` access to the internal
+the connection-state binding owns only local cleanup after an observed
+disconnect. `ChatView` reads raw connectivity from the repository as an
+immediate `InputBarConfig` transport-safety gate, while `InteractionPolicy`
+remains the shared debounced read-only policy; neither state is mirrored.
+Workspace existence is likewise not cached in the client; any future
+invalidation must arrive through authoritative engine or session state. Chat
+event-pipeline tests use `@testable` access to the internal
 dispatcher and buffer instead of production-only test shims;
 PhotosPicker transfers use a narrow I/O adapter and one cancel-and-replace task
 that never retains the view model across data loading or image preparation.
@@ -467,7 +468,7 @@ SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
 `EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
 They consume protocol-typed repositories and view models: `ChatSessionServices`
 for mounted chat sessions, `AppConnectionRepository` for observable connection
-state plus explicit connect/disconnect,
+state plus explicit connect,
 `SessionEventRepository` for live events, `SettingsRepository` for settings
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
@@ -506,8 +507,10 @@ protocols to engine-owned clients. `DependencyContainerStorage` owns typed
 production/test resolution of defaults, Documents, and the event database;
 `DependencyContainer+RuntimeServices` owns the consumer-facing chat repository
 bundle plus paired-server-guarded background, retry, and verification policy.
-Consumer connect/disconnect belongs to `AppConnectionRepository`, while
-`DependencyContainer` keeps application assembly and active-server selection.
+Consumer connection initiation belongs to `AppConnectionRepository`, while
+client teardown belongs to the composition-owned `EngineClient` in
+`DependencyContainer`, alongside application assembly and active-server
+selection.
 Post-switch connection and settings startup is one cancel-and-replace task
 bound to the installed `EngineClient` identity; superseded work cannot connect
 or update a newer generation. Replaced-client teardown is synchronous at the

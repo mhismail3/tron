@@ -455,7 +455,6 @@ private final class DeepLinkTestConnectionRepository: AppConnectionRepository {
     var isConnected: Bool { true }
 
     func connect() async {}
-    func disconnect() async {}
 }
 
 @MainActor

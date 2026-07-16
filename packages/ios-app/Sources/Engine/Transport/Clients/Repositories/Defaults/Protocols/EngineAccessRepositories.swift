@@ -9,7 +9,6 @@ protocol AppConnectionRepository: AnyObject {
     var isConnected: Bool { get }
 
     func connect() async
-    func disconnect() async
 }
 
 // MARK: - Session Event Repository

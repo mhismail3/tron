@@ -130,9 +130,9 @@ final class DependencyContainerTests: XCTestCase {
         let recorder = testState.attemptRecorders.last!
 
         await container.manualRetry()
-        await container.connectionRepository.disconnect()
+        container.engineClient.disconnect()
         await container.connectionRepository.connect()
-        await container.connectionRepository.disconnect()
+        container.engineClient.disconnect()
 
         XCTAssertGreaterThanOrEqual(recorder.requests.count, 2)
         XCTAssertNil(container.engineClient.engineConnection?.urlSession)
@@ -155,7 +155,7 @@ final class DependencyContainerTests: XCTestCase {
 
         XCTAssertEqual(recorder.requests.last?.url?.port, 65526)
         XCTAssertNil(container.engineClient.engineConnection?.urlSession)
-        await container.connectionRepository.disconnect()
+        container.engineClient.disconnect()
     }
 
     func test_defaultServerSwitchAndForgetNextServerRemainHandled() async throws {
@@ -180,7 +180,7 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertGreaterThan(recorder.requests.count, beforeForget)
         XCTAssertEqual(container.pairedServerStore.activeServerId, first.id)
         XCTAssertNil(container.engineClient.engineConnection?.urlSession)
-        await container.connectionRepository.disconnect()
+        container.engineClient.disconnect()
     }
 
     func test_supersededAutoConnectCannotConnectNoConnectGeneration() async throws {

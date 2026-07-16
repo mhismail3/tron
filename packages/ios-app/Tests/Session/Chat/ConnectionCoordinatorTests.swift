@@ -186,12 +186,6 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.connectCalled)
     }
 
-    // MARK: - Disconnect Tests
-
-    func testDisconnectCallsRpcDisconnect() async {
-        await coordinator.disconnect(context: mockContext)
-        XCTAssertTrue(mockContext.disconnectCalled)
-    }
 }
 
 // MARK: - Test Error
@@ -223,7 +217,6 @@ final class MockConnectionContext: ConnectionContext {
 
     // MARK: - Tracking
     var connectCalled = false
-    var disconnectCalled = false
     var resumeSessionCalled = false
     var lastResumeSessionId: String?
     var reconstructSessionCalled = false
@@ -259,11 +252,6 @@ final class MockConnectionContext: ConnectionContext {
         if connectWillSucceed {
             isConnected = true
         }
-    }
-
-    func disconnect() async {
-        disconnectCalled = true
-        isConnected = false
     }
 
     func resumeSession(sessionId: String) async throws {

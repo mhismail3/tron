@@ -29,9 +29,6 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     /// Connect to the server
     func connect() async
 
-    /// Disconnect from the server
-    func disconnect() async
-
     /// Resume a session on the server
     func resumeSession(sessionId: String) async throws
 
@@ -174,12 +171,5 @@ final class ConnectionCoordinator {
             context.shouldDismiss = true
             context.showError("Session not found on server")
         }
-    }
-
-    // MARK: - Disconnect
-
-    /// Disconnect from the server.
-    func disconnect(context: ConnectionContext) async {
-        await context.disconnect()
     }
 }

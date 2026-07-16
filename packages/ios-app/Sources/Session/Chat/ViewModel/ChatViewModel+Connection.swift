@@ -13,10 +13,6 @@ extension ChatViewModel: ConnectionContext {
         await services.connection.connect()
     }
 
-    func disconnect() async {
-        await services.connection.disconnect()
-    }
-
     func resumeSession(sessionId: String) async throws {
         try await services.sessions.resume(
             sessionId: sessionId,

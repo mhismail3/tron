@@ -91,7 +91,6 @@ private final class WorkspaceSelectorVisualConnectionRepository: AppConnectionRe
     var isConnected: Bool { true }
 
     func connect() async {}
-    func disconnect() async {}
 }
 
 @MainActor

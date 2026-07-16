@@ -520,7 +520,6 @@ private final class TestConnectionRepository: AppConnectionRepository {
     var isConnected: Bool { true }
 
     func connect() async {}
-    func disconnect() async {}
 }
 
 @MainActor

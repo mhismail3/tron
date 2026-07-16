@@ -21,10 +21,6 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
     func connect() async {
         await client.connect()
     }
-
-    func disconnect() async {
-        client.disconnect()
-    }
 }
 
 // MARK: - Default Session Event Repository
