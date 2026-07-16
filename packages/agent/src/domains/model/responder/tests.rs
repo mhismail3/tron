@@ -241,6 +241,38 @@ async fn provider_stream_error_event_becomes_canonical_model_response_error() {
 }
 
 #[tokio::test]
+async fn provider_eof_without_done_becomes_recoverable_parse_error() {
+    let stream: StreamEventStream = Box::pin(stream::iter([Ok(StreamEvent::Start)]));
+    let health = Arc::new(ModelResponderHealth::new());
+    let mut wrapped = wrap_provider_stream(
+        stream,
+        "openai",
+        "gpt-5.5".to_owned(),
+        health,
+        Instant::now(),
+    );
+
+    assert!(matches!(wrapped.next().await, Some(Ok(StreamEvent::Start))));
+    let error = wrapped
+        .next()
+        .await
+        .expect("EOF should produce a terminal model error")
+        .expect_err("EOF without Done must fail");
+    let failure = error.failure();
+
+    assert_eq!(
+        failure.code,
+        crate::shared::server::failure::PROVIDER_SSE_PARSE_ERROR
+    );
+    assert_eq!(failure.category, FailureCategory::Parse);
+    assert!(!failure.retryable);
+    assert!(failure.recoverable);
+    assert_eq!(failure.provider.as_deref(), Some("openai"));
+    assert_eq!(failure.model.as_deref(), Some("gpt-5.5"));
+    assert!(wrapped.next().await.is_none());
+}
+
+#[tokio::test]
 async fn long_lived_factory_projects_api_settings_per_create_call() {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};

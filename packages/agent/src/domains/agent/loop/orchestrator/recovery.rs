@@ -4,10 +4,12 @@
 //! scans for orphaned journal files left by turns that were interrupted by a crash.
 //! For each orphaned journal:
 //!
-//! 1. If the session still exists in the DB → persist recovered content as a partial
+//! 1. If that turn already has a durable `turn.failed` → treat the failure as
+//!    authoritative and delete the stale journal without replaying it.
+//! 2. If the session still exists in the DB → persist recovered content as a partial
 //!    assistant message and a turn-end event, then delete the journal.
-//! 2. If the session was deleted → log cleanup details and delete the journal.
-//! 3. If the journal is empty or corrupted → log and delete.
+//! 3. If the session was deleted → log cleanup details and delete the journal.
+//! 4. If the journal is empty or corrupted → log and delete.
 //!
 //! Recovery events use `sequence: None`; the event store assigns the next
 //! sequence because the runtime counter is not initialized during startup recovery.
@@ -92,7 +94,15 @@ fn recover_single_turn(
     turn: u32,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let journal_path = StreamingJournal::journal_path(session_id, turn);
+    recover_single_turn_from_path(event_store, session_id, turn, &journal_path)
+}
 
+fn recover_single_turn_from_path(
+    event_store: &Arc<EventStore>,
+    session_id: &str,
+    turn: u32,
+    journal_path: &std::path::Path,
+) -> Result<bool, Box<dyn std::error::Error>> {
     // Check if session still exists
     let session_exists = event_store.get_session(session_id)?.is_some();
     if !session_exists {
@@ -105,8 +115,28 @@ fn recover_single_turn(
         return Ok(false);
     }
 
+    let has_durable_failure = event_store
+        .get_events_by_type(session_id, &[EventType::TurnFailed.as_str()], None)?
+        .into_iter()
+        .any(|row| {
+            serde_json::from_str::<serde_json::Value>(&row.payload)
+                .ok()
+                .and_then(|payload| payload.get("turn").and_then(serde_json::Value::as_u64))
+                == Some(u64::from(turn))
+        });
+    if has_durable_failure {
+        info!(
+            session_id,
+            turn, "removed stale streaming journal for durably failed turn"
+        );
+        fs::remove_file(journal_path)?;
+        cleanup_empty_session_dir(journal_path);
+        return Ok(false);
+    }
+
     // Load recovery data
-    let recovered = match StreamingJournal::load_recovery(session_id, turn)? {
+    let recovered = match StreamingJournal::load_recovery_from_path(journal_path, session_id, turn)?
+    {
         Some(r) => r,
         None => {
             debug!(session_id, turn, "journal empty or corrupted, deleting");
@@ -205,6 +235,9 @@ fn cleanup_empty_session_dir(journal_path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::session::event_store::ListEventsOptions;
+    use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
     use tempfile::TempDir;
 
     // Note: Full integration tests require a real EventStore with DB setup.
@@ -269,5 +302,53 @@ mod tests {
         assert!(content[2].get("capability_invocation").is_none());
         assert_eq!(content[2]["id"], "tc_1");
         assert_eq!(content[2]["arguments"]["command"], "ls");
+    }
+
+    #[test]
+    fn durable_turn_failure_stays_terminal_across_restart_recovery() {
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::TurnFailed,
+                payload: json!({
+                    "turn": 3,
+                    "error": "provider failed",
+                    "recoverable": true,
+                }),
+                sequence: None,
+                parent_id: None,
+            })
+            .unwrap();
+
+        let tmp = TempDir::new().unwrap();
+        let journal_path = tmp.path().join("turn_3.wal");
+        fs::write(&journal_path, "{\"t\":\"text\",\"c\":\"partial answer\"}\n").unwrap();
+
+        let recovered =
+            recover_single_turn_from_path(&store, &session.session.id, 3, &journal_path).unwrap();
+
+        assert!(!recovered);
+        assert!(!journal_path.exists());
+        let events = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|row| row.event_type == EventType::TurnFailed.as_str())
+                .count(),
+            1
+        );
+        assert!(events.iter().all(|row| {
+            row.event_type != EventType::MessageAssistant.as_str()
+                && row.event_type != EventType::StreamTurnEnd.as_str()
+        }));
     }
 }

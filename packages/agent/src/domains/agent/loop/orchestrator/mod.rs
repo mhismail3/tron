@@ -53,9 +53,12 @@
 //!
 //! Each active LLM turn writes streaming deltas to a journal file at
 //! `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`. On normal
-//! completion the journal is deleted. If the server crashes mid-turn, orphaned
-//! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
-//! which persists partial content as assistant messages before accepting connections.
+//! completion or durable turn failure the journal is deleted. If cleanup is
+//! interrupted after a durable failure, startup recovery treats `turn.failed`
+//! as authoritative and removes the stale journal without replaying it. Other
+//! orphaned journals are recovered on next startup by
+//! `recovery::recover_incomplete_turns`, which persists partial content as
+//! assistant messages before accepting connections.
 //! The journal records block-final snapshots and capability draft start/end
 //! markers so recovered `message.assistant.content` uses the same ordered,
 //! canonical content shape as normal turn completion.

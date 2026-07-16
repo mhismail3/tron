@@ -2103,7 +2103,9 @@ capability identity. Server-authored capability identity only promotes
 execute operation registry; caller-supplied aliases or stale names remain
 requested arguments instead of becoming authoritative UI labels.
 Live `agent.turn_failed` and `error` runtime events are emitted through
-canonical server builders. New runtime emissions carry stable code/category,
+canonical server builders. A turn failure is persisted as `turn.failed` before
+its live broadcast, and both use the durable row sequence so reconnect and live
+rendering observe the same terminal truth. New runtime emissions carry stable code/category,
 retryability, recoverability, origin, and `details.failure`; provider-backed
 failures also preserve provider/model/status/error-type semantics when known.
 iOS decodes the same server-authored envelope through `CanonicalFailurePayload`

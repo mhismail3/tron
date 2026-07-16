@@ -35,7 +35,7 @@ use crate::shared::protocol::model_audit::ProviderAuditPayload;
 use super::message_converter::{
     convert_to_responses_input, convert_tools_v2, generate_capability_instruction_text,
 };
-use super::stream_handler::{create_stream_state, process_stream_event};
+use super::stream_handler::{create_stream_state, process_provider_stream_event};
 use super::types::{
     ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, OpenAIModelProfile, ReasoningConfig,
     ResponseTextConfig, ResponsesInputItem, ResponsesRequest, ResponsesSseEvent,
@@ -57,11 +57,11 @@ const TOKEN_EXPIRY_BUFFER_MS: i64 = 300 * 1000;
 
 /// SSE parser options for the Responses API.
 ///
-/// `OpenAI` uses an explicit `[DONE]` marker, so we don't need to process
-/// remaining buffer content when the stream ends.
+/// Process a final unterminated JSON frame before the optional `[DONE]` marker.
+/// The shared parser filters `[DONE]` itself.
 static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
     crate::domains::model::providers::shared::SseParserOptions {
-        process_remaining_buffer: false,
+        process_remaining_buffer: true,
     };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -565,6 +565,7 @@ impl OpenAIProvider {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
                     message: err_info.message,
+                    code: err_info.code,
                 });
             }
             return Err(ProviderError::Api {
@@ -584,7 +585,7 @@ impl OpenAIProvider {
                 response,
                 &SSE_OPTIONS,
                 create_stream_state(),
-                process_stream_event,
+                process_provider_stream_event,
             ),
         )
     }

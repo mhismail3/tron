@@ -22,6 +22,9 @@
 //! Every `TronAgent` owns a required engine host for its full lifetime. Each
 //! turn borrows that host to resolve the live provider primitive surface and to
 //! execute provider-requested capability invocations through the same engine.
+//! Turn failures are persisted before their matching live broadcast, and both
+//! surfaces share the durable row sequence so reconnect reconstruction cannot
+//! lose or reorder the terminal failure.
 
 #![deny(unsafe_code)]
 

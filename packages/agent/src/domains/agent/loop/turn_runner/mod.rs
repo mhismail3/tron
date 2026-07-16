@@ -175,6 +175,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -241,6 +242,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -284,6 +286,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         );
         emit_turn_failure(
             emitter,
+            persister,
             session_id,
             turn,
             run_context,
@@ -334,6 +337,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -394,6 +398,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -438,8 +443,9 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             let error_msg = e.to_string();
             error!(session_id, turn, error = %error_msg, "stream failed");
             let failure = e.to_failure();
-            emit_turn_failure(
+            let failure_persisted = emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -447,6 +453,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 &failure,
                 None,
             );
+            if failure_persisted {
+                if let Some(j) = journal.take() {
+                    if let Err(cleanup_error) = j.finalize_and_delete() {
+                        warn!(
+                            session_id,
+                            turn,
+                            error = %cleanup_error,
+                            "failed to finalize streaming journal after durable turn failure"
+                        );
+                    }
+                }
+            }
             return TurnResult {
                 success: false,
                 error: Some(error_msg),
@@ -584,6 +602,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         );
         emit_turn_failure(
             emitter,
+            persister,
             session_id,
             turn,
             run_context,

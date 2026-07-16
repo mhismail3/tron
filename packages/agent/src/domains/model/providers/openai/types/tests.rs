@@ -718,6 +718,67 @@ fn sse_completed() {
 }
 
 #[test]
+fn sse_failed_preserves_response_error() {
+    let event: ResponsesSseEvent = serde_json::from_value(json!({
+        "type": "response.failed",
+        "response": {
+            "id": "resp_failed",
+            "error": {
+                "code": "server_error",
+                "message": "The model failed to generate a response."
+            },
+            "output": []
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(event.event_type, SseEventType::Failed);
+    let error = event.response.unwrap().error.unwrap();
+    assert_eq!(error.code.as_deref(), Some("server_error"));
+    assert_eq!(error.message, "The model failed to generate a response.");
+}
+
+#[test]
+fn sse_incomplete_preserves_reason() {
+    let event: ResponsesSseEvent = serde_json::from_value(json!({
+        "type": "response.incomplete",
+        "response": {
+            "id": "resp_incomplete",
+            "incomplete_details": { "reason": "max_output_tokens" },
+            "output": []
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(event.event_type, SseEventType::Incomplete);
+    assert_eq!(
+        event
+            .response
+            .unwrap()
+            .incomplete_details
+            .unwrap()
+            .reason
+            .as_deref(),
+        Some("max_output_tokens")
+    );
+}
+
+#[test]
+fn sse_top_level_error_preserves_code_and_message() {
+    let event: ResponsesSseEvent = serde_json::from_value(json!({
+        "type": "error",
+        "code": "invalid_prompt",
+        "message": "Prompt rejected",
+        "param": null
+    }))
+    .unwrap();
+
+    assert_eq!(event.event_type, SseEventType::Error);
+    assert_eq!(event.code.as_deref(), Some("invalid_prompt"));
+    assert_eq!(event.message.as_deref(), Some("Prompt rejected"));
+}
+
+#[test]
 fn sse_unknown_event_type_deserializes() {
     let json = json!({
         "type": "response.new_feature.delta",

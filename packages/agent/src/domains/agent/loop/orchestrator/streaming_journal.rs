@@ -249,9 +249,15 @@ impl StreamingJournal {
         Ok(())
     }
 
-    /// Read a journal for crash recovery. Returns None if no journal exists or file is empty.
-    pub fn load_recovery(session_id: &str, turn: u32) -> io::Result<Option<RecoveredTurn>> {
-        let path = Self::journal_path(session_id, turn);
+    /// Read a journal for crash recovery from its explicitly owned path.
+    ///
+    /// Startup recovery uses the canonical path; the explicit seam keeps the
+    /// recovery contract testable without touching a developer's data root.
+    pub(crate) fn load_recovery_from_path(
+        path: &std::path::Path,
+        session_id: &str,
+        turn: u32,
+    ) -> io::Result<Option<RecoveredTurn>> {
         let file = match File::open(&path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -655,15 +661,11 @@ mod tests {
 
     #[test]
     fn test_load_recovery_nonexistent_returns_none() {
-        // Use a path that definitely doesn't exist
-        let result = StreamingJournal::load_recovery("nonexistent-session-xyz-123", 999);
-        // This may return None (path doesn't exist) or error (dir doesn't exist)
-        // In either case it should not panic
-        match result {
-            Ok(None) => {} // expected
-            Ok(Some(_)) => panic!("should not find a recovery for nonexistent session"),
-            Err(_) => {} // acceptable if journal dir doesn't exist
-        }
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("missing.wal");
+        let result =
+            StreamingJournal::load_recovery_from_path(&path, "missing-session", 999).unwrap();
+        assert!(result.is_none());
     }
 
     // ── Test 7: load_recovery_empty_journal_returns_none ──────────────────

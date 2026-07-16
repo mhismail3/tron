@@ -200,6 +200,7 @@ impl KimiProvider {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
                     message: err_info.message,
+                    code: err_info.code,
                 });
             }
             return Err(ProviderError::Api {
@@ -219,7 +220,7 @@ impl KimiProvider {
                 response,
                 &SSE_OPTIONS,
                 KimiStreamState::new(),
-                process_chunk,
+                |event, state| Ok(process_chunk(event, state)),
             ),
         )
     }

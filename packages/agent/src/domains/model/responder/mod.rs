@@ -626,6 +626,18 @@ fn wrap_provider_stream(
             health.record_failure(provider_name);
             histogram!("provider_request_duration_seconds", "provider" => provider_name)
                 .record(request_start.elapsed().as_secs_f64());
+            let info = ModelResponderInfo {
+                provider_type: crate::shared::protocol::messages::Provider::Unknown,
+                provider_name,
+                model: model.clone(),
+                context_window: 0,
+            };
+            yield Err(ModelResponseError::from_provider_error(
+                ProviderError::StreamEnded {
+                    message: "provider stream ended before a terminal event".to_owned(),
+                },
+                &info,
+            ));
         }
     })
 }

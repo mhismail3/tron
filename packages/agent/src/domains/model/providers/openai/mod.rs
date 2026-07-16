@@ -36,6 +36,11 @@
 //!   [`stream_handler`] accumulates them until the closing `finish_reason`
 //!   before emitting a single `StreamEvent::CapabilityInvocationDraft` — the orchestrator
 //!   never sees a partial capability invocation.
+//! - Responses terminal events are exhaustive at the provider boundary:
+//!   `response.completed` and `response.incomplete` finalize canonical output,
+//!   while `response.failed` and top-level `error` preserve provider code and
+//!   message as typed provider failures. A trailing terminal frame is processed
+//!   even when the connection closes without a final newline.
 //! - The converter normalises capability results into Responses input items so the
 //!   provider can resume multi-turn tool loops without leaking provider-specific
 //!   payload details into the runtime.
