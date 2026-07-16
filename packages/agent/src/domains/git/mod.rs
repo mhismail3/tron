@@ -59,6 +59,7 @@
 //! plus HEAD/index parity: a replacement must preserve provider-safe refs,
 //! replay/idempotency evidence, guarded mutation evidence, and
 //! rollback/disable metadata before binding policy may later consider routing.
+//! Handler registrations retain the engine host directly; Git services borrow it.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -82,26 +83,13 @@ pub(crate) const DIFF_FUNCTION: &str = "git::diff";
 pub(crate) const STAGE_FUNCTION: &str = "git::stage";
 pub(crate) const UNSTAGE_FUNCTION: &str = "git::unstage";
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-        }
-    }
-}
-
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     crate::domains::registration::worker::domain_worker_module(
         WORKER,
         STREAM_TOPICS,
-        handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        handlers::function_registrations(contract::capabilities()?, deps.engine_host.clone())?,
     )
 }
 
