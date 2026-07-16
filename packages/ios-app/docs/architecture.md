@@ -189,6 +189,11 @@ the rest of the chat. While recording, the capture owner publishes only a
 normalized microphone-energy value; the composer keeps a bounded rolling
 waveform locally so no audio samples become view state.
 
+`KeyboardObserver` is a process-lifetime owner of keyboard visibility and
+transition state only; native layout owns keyboard geometry. Its four stored
+notification tasks drive composer menu gating and hidden-to-visible message
+scrolling without a separate teardown path.
+
 Prompt submission is transactional at the composer boundary. Text,
 attachments, selected-photo state, the optimistic user row, and the persisted
 draft are committed only after `/engine` accepts `agent::prompt`; a pre-accept
