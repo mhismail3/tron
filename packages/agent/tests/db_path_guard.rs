@@ -546,6 +546,15 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
         });
     let body = &workflow[validate..distribute];
 
+    assert_eq!(
+        body.matches("asc testflight groups list").count(),
+        1,
+        "current Homebrew asc must be the single TestFlight group-list owner"
+    );
+    assert!(
+        !body.contains("asc testflight beta-groups list"),
+        "release workflow must not retain a legacy asc command-shape fallback"
+    );
     assert!(
         body.contains("attempting public-link auto-discovery"),
         "stale public TestFlight group config should use ASC public-link discovery"
