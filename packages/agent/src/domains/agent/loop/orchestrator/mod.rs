@@ -14,7 +14,7 @@
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of ordered partial LLM output |
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
 //! | `capability_invocation_tracker` | Tracks in-flight capability invocations for cancellation |
-//! | `invocation_abort_registry` | Per-invocation `CancellationToken` registry for `agent.abortCapabilityInvocation` |
+//! | `invocation_abort_registry` | Authoritative per-invocation `CancellationToken` registry for `agent.abortCapabilityInvocation` |
 //!
 //! ## Entry Points
 //!

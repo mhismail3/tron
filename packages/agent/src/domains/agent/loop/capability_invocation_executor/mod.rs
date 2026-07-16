@@ -26,10 +26,11 @@
 //! grant exists solely so unsupported-operation handling can return structured
 //! recovery guidance and persist a redacted failed trace; its operation claim
 //! cannot authorize any supported domain behavior.
-//! When the runtime installs its optional per-invocation abort registry, the
-//! registered child token is carried through the regular engine handler
-//! boundary so targeted and parent aborts stop that handler without bypassing
-//! engine lease, durable outcome, compensation, or capability-trace cleanup.
+//! The runtime-owned per-invocation abort registry is required for every model
+//! capability execution. Its registered child token is carried through the
+//! regular engine handler boundary so targeted and parent aborts stop that
+//! handler without bypassing engine lease, durable outcome, compensation, or
+//! capability-trace cleanup.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -228,7 +229,7 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     /// rows using persisted row sequences.
     pub emit_lifecycle_events: bool,
     pub turn: i64,
-    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
+    pub invocation_abort_registry: &'a InvocationAbortRegistry,
     pub engine_host: Option<&'a EngineHostHandle>,
     pub run_id: Option<&'a str>,
     pub provider_type: &'a str,
@@ -301,14 +302,11 @@ pub async fn execute_capability_invocation(
         );
     }
 
-    let (per_invocation_cancel, _abort_guard) = match ctx.invocation_abort_registry {
-        Some(registry) => {
-            let child = registry.register(session_id, &invocation_id, ctx.cancel);
-            let guard = InvocationAbortGuard::new(Arc::clone(registry), session_id, &invocation_id);
-            (child, Some(guard))
-        }
-        None => (ctx.cancel.clone(), None),
-    };
+    let per_invocation_cancel =
+        ctx.invocation_abort_registry
+            .register(session_id, &invocation_id, ctx.cancel);
+    let _abort_guard =
+        InvocationAbortGuard::new(ctx.invocation_abort_registry, session_id, &invocation_id);
 
     let capability_result = if per_invocation_cancel.is_cancelled() {
         let failure = FailureEnvelope::new(
@@ -343,8 +341,7 @@ pub async fn execute_capability_invocation(
             ctx.trace_id,
             ctx.parent_invocation_id,
             effective_args,
-            ctx.invocation_abort_registry
-                .map(|_| &per_invocation_cancel),
+            &per_invocation_cancel,
         )
         .await
     } else {
@@ -440,7 +437,7 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
-    cancellation: Option<&CancellationToken>,
+    cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
     let is_supported_execute_operation = model_primitive_name == "execute"
         && effective_args
@@ -584,14 +581,9 @@ async fn execute_capability_primitive_via_engine(
         }
     }
     let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
-    let result = match cancellation {
-        Some(cancellation) => {
-            engine_host
-                .invoke_regular_cancellable(invocation, cancellation)
-                .await
-        }
-        None => Ok(engine_host.invoke(invocation).await),
-    };
+    let result = engine_host
+        .invoke_regular_cancellable(invocation, cancellation)
+        .await;
     let result = match result {
         Ok(result) => result,
         Err(error) => {

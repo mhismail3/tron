@@ -45,7 +45,7 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub workspace_id: Option<&'a str>,
     pub persister: Option<&'a EventPersister>,
     pub sequence_counter: Option<&'a AtomicI64>,
-    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
+    pub invocation_abort_registry: &'a InvocationAbortRegistry,
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
     pub run_id: Option<&'a str>,
     pub provider_type: &'a str,

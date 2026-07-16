@@ -220,6 +220,7 @@ fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
         context_manager: test_context_manager("mock-model"),
         compaction_trigger_config:
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
+        invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
         engine_host: None,
     }
 }

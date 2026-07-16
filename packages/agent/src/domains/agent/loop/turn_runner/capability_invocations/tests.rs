@@ -142,6 +142,7 @@ struct PhasePersistenceHarness {
     session_id: String,
     counter: AtomicI64,
     rx: tokio::sync::broadcast::Receiver<TronEvent>,
+    invocation_abort_registry: Arc<InvocationAbortRegistry>,
 }
 
 async fn phase_persistence_harness() -> PhasePersistenceHarness {
@@ -162,6 +163,7 @@ async fn phase_persistence_harness() -> PhasePersistenceHarness {
         session_id: session.session.id,
         counter: AtomicI64::new(0),
         rx,
+        invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
     }
 }
 
@@ -362,7 +364,7 @@ async fn assert_provider_result_identity_survives_reconstruction(
         workspace_id: None,
         persister: Some(&h.persister),
         sequence_counter: Some(&h.counter),
-        invocation_abort_registry: None,
+        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
         engine_host: Some(&engine_host),
         run_id: Some("run-operation-identity"),
         provider_type: "openai",
@@ -484,7 +486,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         workspace_id: None,
         persister: Some(&h.persister),
         sequence_counter: Some(&h.counter),
-        invocation_abort_registry: None,
+        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
         engine_host: Some(&engine_host),
         run_id: Some("run-phase"),
         provider_type: "openai",
@@ -628,7 +630,7 @@ async fn context_boundary_terminalizes_later_started_invocations_without_executi
         workspace_id: None,
         persister: Some(&h.persister),
         sequence_counter: Some(&h.counter),
-        invocation_abort_registry: None,
+        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
         engine_host: Some(&engine_host),
         run_id: Some("run-boundary"),
         provider_type: "openai",
@@ -694,7 +696,7 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
         workspace_id: None,
         persister: Some(&h.persister),
         sequence_counter: Some(&h.counter),
-        invocation_abort_registry: None,
+        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
         engine_host: None,
         run_id: Some("run-phase"),
         provider_type: "openai",

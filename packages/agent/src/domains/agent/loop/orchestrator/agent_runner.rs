@@ -105,6 +105,7 @@ mod tests {
     use crate::domains::agent::context::context_manager::ContextManager;
     use crate::domains::agent::context::types::ContextManagerConfig;
     use crate::domains::agent::r#loop::errors::StopReason;
+    use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
     use crate::domains::model::responder::{
         ModelResponder, ModelResponderInfo, ModelResponse, ModelResponseError,
         ModelResponseRequest, ModelResponseStream,
@@ -240,6 +241,7 @@ mod tests {
                 }),
                 compaction_trigger_config:
                     crate::domains::agent::context::types::CompactionTriggerConfig::default(),
+                invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
                 engine_host: None,
             },
             session_id,

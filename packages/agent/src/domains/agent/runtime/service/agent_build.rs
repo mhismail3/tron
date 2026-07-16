@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::domains::agent::context::soul::AGENT_SOUL;
+use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::shared::protocol::events::{BaseEvent, error_event};
 
 use super::{AgentConfig, AgentFactory, CreateAgentOpts};
@@ -17,6 +18,7 @@ pub(super) struct BuiltPromptAgent {
 pub(super) async fn build_prompt_agent(
     responder_factory: Arc<dyn crate::domains::model::responder::ModelResponderFactory>,
     engine_host: crate::engine::EngineHostHandle,
+    invocation_abort_registry: Arc<InvocationAbortRegistry>,
     broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     settings: &crate::domains::settings::TronSettings,
     session_id: &str,
@@ -78,6 +80,7 @@ pub(super) async fn build_prompt_agent(
             messages,
             initial_turn_count,
             compactor_settings.into(),
+            invocation_abort_registry,
             Some(engine_host),
         ),
     );

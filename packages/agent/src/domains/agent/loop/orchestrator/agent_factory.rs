@@ -1,9 +1,10 @@
-//! Agent factory for primitive-loop `TronAgent` construction.
+//! Agent factory for primitive-loop `TronAgent` construction with required runtime owners.
 
 use std::sync::Arc;
 
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::context::types::ContextManagerConfig;
+use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::tron_agent::{AgentDeps, TronAgent};
 use crate::domains::agent::r#loop::types::AgentConfig;
 use crate::domains::model::responder::ModelResponder;
@@ -14,6 +15,7 @@ pub struct CreateAgentOpts {
     pub initial_messages: Vec<Message>,
     pub initial_turn_count: u32,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
+    pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
     pub engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -23,6 +25,7 @@ impl CreateAgentOpts {
         initial_messages: Vec<Message>,
         initial_turn_count: u32,
         compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
+        invocation_abort_registry: Arc<InvocationAbortRegistry>,
         engine_host: Option<crate::engine::EngineHostHandle>,
     ) -> Self {
         Self {
@@ -30,6 +33,7 @@ impl CreateAgentOpts {
             initial_messages,
             initial_turn_count,
             compaction_trigger_config,
+            invocation_abort_registry,
             engine_host,
         }
     }
@@ -63,6 +67,7 @@ impl AgentFactory {
                 responder: opts.responder,
                 context_manager,
                 compaction_trigger_config: opts.compaction_trigger_config,
+                invocation_abort_registry: opts.invocation_abort_registry,
                 engine_host: opts.engine_host,
             },
             session_id,
@@ -107,6 +112,7 @@ mod tests {
             vec![],
             0,
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
+            Arc::new(InvocationAbortRegistry::new()),
             None,
         )
     }

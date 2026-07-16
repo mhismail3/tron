@@ -350,7 +350,8 @@ async fn web_fetch_runtime_grant_rejects_partial_robots_proof_before_execution()
     let (engine_host, surface, captured) = capturing_execute_surface().await;
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
+    let registry = Arc::new(InvocationAbortRegistry::new());
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
     ctx.engine_host = Some(&engine_host);
     let tempdir = tempfile::tempdir().expect("working directory");
     let call = CapabilityInvocationDraft::new(

@@ -40,6 +40,7 @@ pub struct AgentDeps {
     pub responder: Arc<dyn ModelResponder>,
     pub context_manager: ContextManager,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
+    pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
     pub engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -57,7 +58,7 @@ pub struct TronAgent {
     external_abort_token: bool,
     persister: Option<Arc<EventPersister>>,
     sequence_counter: Option<Arc<AtomicI64>>,
-    invocation_abort_registry: Option<Arc<InvocationAbortRegistry>>,
+    invocation_abort_registry: Arc<InvocationAbortRegistry>,
     engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -77,7 +78,7 @@ impl TronAgent {
             external_abort_token: false,
             persister: None,
             sequence_counter: None,
-            invocation_abort_registry: None,
+            invocation_abort_registry: deps.invocation_abort_registry,
             engine_host: deps.engine_host,
         }
     }
@@ -322,10 +323,6 @@ impl TronAgent {
 
     pub fn set_completed_turn_offset(&mut self, offset: u32) {
         self.completed_turn_offset.store(offset, Ordering::Relaxed);
-    }
-
-    pub fn set_invocation_abort_registry(&mut self, registry: Arc<InvocationAbortRegistry>) {
-        self.invocation_abort_registry = Some(registry);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {

@@ -242,7 +242,8 @@ async fn catalog_conformance_replays_end_to_end_without_duplicate_evidence() {
         .expect("provider capability surface");
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
+    let registry = Arc::new(InvocationAbortRegistry::new());
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry);
     ctx.engine_host = Some(&server.engine_host);
     let tempdir = tempfile::tempdir().expect("catalog replay workspace");
     let payload = json!({

@@ -192,6 +192,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     } = match build_prompt_agent(
         responder_factory,
         engine_host.clone(),
+        orchestrator.invocation_abort_registry().clone(),
         &broadcast,
         settings.as_ref(),
         &session_id,
@@ -226,7 +227,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         event_store: event_store.clone(),
         session_manager: session_manager.clone(),
     });
-    agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
     spawn_session_title_generation(
         title_responder_factory,
