@@ -149,9 +149,9 @@ pub use durability::ledger::{
     IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
 };
 pub use durability::queue::{
-    EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
-    EnqueueInvocation, MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_LIST_PAGE_SIZE,
-    MAX_QUEUE_PAYLOAD_BYTES, QueueAttemptOutcome, QueueItemStatus,
+    EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EnqueueInvocation,
+    MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_LIST_PAGE_SIZE, MAX_QUEUE_PAYLOAD_BYTES,
+    QueueAttemptOutcome, QueueItemStatus,
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub(crate) use durability::resources::CAPABILITY_BINDING_DECISION_PAYLOAD_SCHEMA_VERSION;

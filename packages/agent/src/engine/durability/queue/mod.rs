@@ -17,6 +17,8 @@
 //! Worker transport loss before a non-mutating queued target returns is treated
 //! as delivery failure: the queue publishes retry state, but the target
 //! invocation ledger does not record an application-level handler failure.
+//! [`EngineQueueDrainer`] is the single claim-and-execute owner for background
+//! queue services and synchronous receipt drains.
 //! Enqueue is also the resource-governance boundary: payload size and
 //! per-queue active ready/leased depth are rejected before either queue store
 //! persists the item, and list calls clamp to the owner-defined page cap.
@@ -39,7 +41,7 @@ mod sqlite_codec;
 mod sqlite_store;
 
 pub use memory::InMemoryEngineQueueStore;
-pub use runtime::{EngineQueueDrainer, EngineQueueRuntime, publish_queue_lifecycle_event};
+pub use runtime::{EngineQueueDrainer, publish_queue_lifecycle_event};
 pub(in crate::engine) use runtime::{queue_failure_event_type, queue_lifecycle_stream_event};
 pub use sqlite_store::SqliteEngineQueueStore;
 
