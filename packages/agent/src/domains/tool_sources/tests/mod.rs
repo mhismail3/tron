@@ -1,146 +1,46 @@
 use serde_json::{Value, json};
 
-use super::service::{
-    create_conformance_report_value, create_proposal_value, inspect_tool_source_value,
-    list_tool_sources_value,
-};
-use super::{Deps, PROPOSE_FUNCTION, READ_SCOPE, REPORT_FUNCTION};
+use super::service::{inspect_tool_source_value, list_tool_sources_value};
+use super::{Deps, READ_SCOPE, SCHEMA_VERSION};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
-    TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID, TOOL_SOURCE_PROPOSAL_KIND,
-    TOOL_SOURCE_PROPOSAL_SCHEMA_ID, TraceId, builtin_resource_type_definitions,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
+    EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel,
+    TOOL_SOURCE_CONFORMANCE_REPORT_KIND, TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID,
+    TOOL_SOURCE_PROPOSAL_KIND, TOOL_SOURCE_PROPOSAL_SCHEMA_ID, TraceId, WorkerId,
+    builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
 mod inspect;
-mod validation_tests;
 
 #[tokio::test]
-async fn internal_proposal_creation_records_bounded_inert_resource() {
-    let fixture = Fixture::new("proposal-create").await;
-    let result = fixture
-        .create_proposal("proposal-create", proposal_payload())
-        .await;
-    let resource_id = result["toolSourceProposalResourceId"]
-        .as_str()
-        .expect("proposal id");
-
-    assert_eq!(result["activation"]["performed"], json!(false));
-    let inspection = fixture
-        .deps
-        .engine_host
-        .inspect_resource(resource_id)
-        .await
-        .expect("inspect")
-        .expect("proposal");
-    assert_eq!(inspection.resource.kind, TOOL_SOURCE_PROPOSAL_KIND);
-    assert_eq!(
-        inspection.resource.schema_id,
-        TOOL_SOURCE_PROPOSAL_SCHEMA_ID
-    );
-    assert_eq!(inspection.resource.scope.kind(), "session");
-    let payload = current_payload(&inspection);
-    assert_eq!(payload["sourceKind"], json!("mcp_server"));
-    assert_eq!(payload["sandboxPolicy"]["networkPolicy"], json!("none"));
-    assert_eq!(payload["declaredTools"][0]["name"], json!("lookup"));
-    assert_eq!(payload["activation"], Value::Null);
-}
-
-#[tokio::test]
-async fn proposal_creation_requires_internal_non_wildcard_authority() {
-    let fixture = Fixture::new("proposal-authority").await;
-    let agent_error = fixture
-        .create_proposal_error_with_actor(
-            "proposal-agent-denied",
-            ActorKind::Agent,
-            proposal_payload(),
-        )
-        .await;
-    assert!(agent_error.contains("trusted internal"), "{agent_error}");
-
-    let bootstrap_invocation = invocation(
-        PROPOSE_FUNCTION,
-        "bootstrap-denied",
-        proposal_payload(),
-        AuthorityGrantId::new("engine-system").unwrap(),
-        ActorKind::System,
-        &["tool_sources.propose", "resource.write"],
-        Some("proposal-authority-session"),
-    );
-    let bootstrap = create_proposal_value(
-        &fixture.deps,
-        &bootstrap_invocation,
-        &bootstrap_invocation.payload,
-    )
-    .await
-    .expect_err("bootstrap grant denied")
-    .to_string();
-    assert!(bootstrap.contains("non-bootstrap"), "{bootstrap}");
-
-    let wildcard_grant = fixture
-        .derive_grant(
-            "wildcard",
-            &["tool_sources.propose", "resource.write"],
-            &["*"],
-            &["kind:tool_source_proposal"],
-            "none",
-        )
-        .await;
-    let wildcard_invocation = invocation(
-        PROPOSE_FUNCTION,
-        "wildcard-denied",
-        proposal_payload(),
-        wildcard_grant,
-        ActorKind::System,
-        &["tool_sources.propose", "resource.write"],
-        Some(&fixture.session_id),
-    );
-    let wildcard = create_proposal_value(
-        &fixture.deps,
-        &wildcard_invocation,
-        &wildcard_invocation.payload,
-    )
-    .await
-    .expect_err("wildcard grant denied")
-    .to_string();
-    assert!(wildcard.contains("wildcard"), "{wildcard}");
-}
-
-#[tokio::test]
-async fn proposal_creation_is_idempotent_per_scope_and_key() {
-    let fixture = Fixture::new("proposal-idempotent").await;
-    let first = fixture
-        .create_proposal("same-key", proposal_payload())
-        .await;
-    let second = fixture
-        .create_proposal("same-key", proposal_payload())
-        .await;
-    assert_eq!(
-        first["toolSourceProposalResourceId"],
-        second["toolSourceProposalResourceId"]
-    );
-    assert_eq!(second["idempotentReplay"], json!(true));
-
-    let listed = fixture.list("proposal-list").await;
-    assert_eq!(listed["proposals"].as_array().unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn read_operations_are_session_scoped_and_sandbox_visible() {
+async fn read_operations_are_session_scoped_and_bounded() {
     let first = Fixture::new("scope-one").await;
     let second = first.clone_for_session("scope-two-session").await;
-    let created = first.create_proposal("scope-key", proposal_payload()).await;
-    let resource_id = created["toolSourceProposalResourceId"].as_str().unwrap();
+    let resource_id = first.seed_proposal("scope-proposal").await;
 
-    let inspected = first.inspect("scope-inspect", resource_id).await;
+    let listed = first.list("scope-list").await;
+    assert_eq!(listed["proposals"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["proposals"][0]["sourceKind"], json!("mcp_server"));
+    assert_eq!(listed["proposals"][0]["declaredToolCount"], json!(1));
+    assert_eq!(listed["proposals"][0]["declaredSchemaCount"], json!(1));
+
+    let inspected = first.inspect("scope-inspect", &resource_id).await;
     assert_eq!(
         inspected["resource"]["payload"]["sandboxPolicy"]["networkPolicy"],
         "none"
     );
+    assert_eq!(
+        inspected["resource"]["payload"]["declaredSchemas"]["maxBytes"],
+        json!(100)
+    );
+    assert_eq!(
+        inspected["resource"]["payload"]["declaredSchemas"]["truncated"],
+        json!(true)
+    );
     assert_eq!(inspected["activation"]["catalogRegistration"], json!(false));
 
-    let cross_scope = second.inspect_error("scope-denied", resource_id).await;
+    let cross_scope = second.inspect_error("scope-denied", &resource_id).await;
     assert!(
         cross_scope.contains("outside the current scope"),
         "{cross_scope}"
@@ -148,197 +48,97 @@ async fn read_operations_are_session_scoped_and_sandbox_visible() {
 }
 
 #[tokio::test]
-async fn proposal_validation_rejects_secrets_unsafe_paths_unbounded_schema_and_execution_fields() {
-    let fixture = Fixture::new("proposal-validation").await;
-    let mut secret = proposal_payload();
-    secret["sourceIdentity"]["token"] = json!("Bearer not-allowed");
-    assert!(
-        fixture
-            .create_proposal_error("secret", secret)
-            .await
-            .contains("secret")
-    );
+async fn conformance_report_inspection_preserves_proposal_reference_without_activation() {
+    let fixture = Fixture::new("report-inspect").await;
+    let proposal_id = fixture.seed_proposal("report-proposal").await;
+    let report_id = fixture.seed_report("report", &proposal_id, "passed").await;
 
-    let mut unsafe_path = proposal_payload();
-    unsafe_path["expectedLinkage"] = json!({"manifestPath": "../escape"});
-    assert!(
-        fixture
-            .create_proposal_error("unsafe-path", unsafe_path)
-            .await
-            .contains("unsafe path")
-    );
-
-    let mut command = proposal_payload();
-    command["declaredTools"][0]["command"] = json!("node server.js");
-    assert!(
-        fixture
-            .create_proposal_error("command", command)
-            .await
-            .contains("execution field")
-    );
-
-    let mut schema = proposal_payload();
-    schema["declaredSchemas"] = json!([{"schema": "x".repeat(33_000)}]);
-    assert!(
-        fixture
-            .create_proposal_error("large-schema", schema)
-            .await
-            .contains("exceeds")
-    );
-
-    let mut wildcard = proposal_payload();
-    wildcard["sandboxPolicy"]["authorityScopes"] = json!(["*"]);
-    assert!(
-        fixture
-            .create_proposal_error("sandbox-wildcard", wildcard)
-            .await
-            .contains("wildcard authority")
-    );
-}
-
-#[tokio::test]
-async fn proposal_validation_rejects_string_valued_activation_intent() {
-    let fixture = Fixture::new("proposal-string-intent").await;
-    let mut cases = Vec::new();
-    let mut payload = proposal_payload();
-    payload["sourceIdentity"]["note"] = json!("register this MCP server");
-    cases.push(("string-register", payload));
-    let mut payload = proposal_payload();
-    payload["sandboxPolicy"]["reviewNote"] = json!("install package after review");
-    cases.push(("string-install", payload));
-    let mut payload = proposal_payload();
-    payload["declaredTools"][0]["description"] = json!("execute this tool");
-    cases.push(("string-execute", payload));
-    let mut payload = proposal_payload();
-    payload["expectedLinkage"]["plan"] = json!("launch worker package");
-    cases.push(("string-launch", payload));
-    for (key, payload) in cases {
-        let error = fixture.create_proposal_error(key, payload).await;
-        assert!(error.contains("activation intent string"), "{error}");
-    }
-}
-
-#[tokio::test]
-async fn conformance_report_links_to_proposal_without_activation() {
-    let fixture = Fixture::new("proposal-report").await;
-    let proposal = fixture
-        .create_proposal("report-proposal", proposal_payload())
-        .await;
-    let proposal_id = proposal["toolSourceProposalResourceId"].as_str().unwrap();
-    let report = fixture
-        .create_report(
-            "report-key",
-            json!({
-                "toolSourceProposalResourceId": proposal_id,
-                "status": "passed",
-                "checks": [{"name": "schema_bounded", "status": "passed"}],
-                "summary": {"preflight": "metadata_only"}
-            }),
-        )
-        .await;
-    let report_id = report["toolSourceConformanceReportResourceId"]
-        .as_str()
-        .expect("report id");
-    assert_eq!(report["activation"]["execution"], json!(false));
-
-    let inspection = fixture
-        .deps
-        .engine_host
-        .inspect_resource(report_id)
-        .await
-        .expect("inspect")
-        .expect("report");
-    assert_eq!(
-        inspection.resource.kind,
-        TOOL_SOURCE_CONFORMANCE_REPORT_KIND
-    );
-    assert_eq!(
-        inspection.resource.schema_id,
-        TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID
-    );
-    let payload = current_payload(&inspection);
-    assert_eq!(payload["toolSourceProposalResourceId"], json!(proposal_id));
-    assert_eq!(payload["status"], json!("passed"));
-
-    let inspected = fixture.inspect("report-inspect", report_id).await;
+    let inspected = fixture.inspect("report-inspect", &report_id).await;
     assert_eq!(
         inspected["resource"]["kind"],
         json!(TOOL_SOURCE_CONFORMANCE_REPORT_KIND)
     );
+    assert_eq!(
+        inspected["resource"]["payload"]["toolSourceProposalResourceId"],
+        json!(proposal_id)
+    );
+    assert_eq!(inspected["resource"]["payload"]["status"], json!("passed"));
+    assert_eq!(inspected["activation"]["performed"], json!(false));
+    assert_eq!(inspected["activation"]["execution"], json!(false));
 }
 
 #[tokio::test]
-async fn conformance_report_creation_requires_report_resource_kind_authority() {
-    let fixture = Fixture::new("report-kind-authority").await;
-    let proposal = fixture
-        .create_proposal("report-kind-proposal", proposal_payload())
-        .await;
-    let proposal_id = proposal["toolSourceProposalResourceId"].as_str().unwrap();
-    let proposal_only_grant = fixture
+async fn read_operations_require_explicit_scope_kind_and_selector() {
+    let fixture = Fixture::new("read-authority").await;
+
+    let missing_scope_grant = fixture
         .derive_grant(
-            "proposal-only-write",
-            &["tool_sources.propose", "resource.write"],
-            &["tool_source_proposal"],
+            "missing-scope",
+            &["resource.read"],
+            &[TOOL_SOURCE_PROPOSAL_KIND],
             &["kind:tool_source_proposal"],
             "none",
         )
         .await;
-    let invocation = invocation(
-        REPORT_FUNCTION,
-        "proposal-only-report-denied",
-        json!({
-            "toolSourceProposalResourceId": proposal_id,
-            "status": "passed"
-        }),
-        proposal_only_grant,
-        ActorKind::System,
-        &["tool_sources.propose", "resource.write"],
-        Some(&fixture.session_id),
+    let missing_scope = invocation(
+        "missing-scope",
+        json!({"limit": 10}),
+        missing_scope_grant,
+        &["resource.read"],
+        &fixture.session_id,
     );
-
-    let error = create_conformance_report_value(&fixture.deps, &invocation, &invocation.payload)
+    let error = list_tool_sources_value(&fixture.deps, &missing_scope, &missing_scope.payload)
         .await
-        .expect_err("proposal-only grant cannot create report")
+        .expect_err("tool_sources.read scope is required")
         .to_string();
-    assert!(error.contains("tool_source_conformance_report"), "{error}");
+    assert!(error.contains(READ_SCOPE), "{error}");
+
+    let missing_selector_grant = fixture
+        .derive_grant(
+            "missing-selector",
+            &[READ_SCOPE, "resource.read"],
+            &[TOOL_SOURCE_PROPOSAL_KIND],
+            &["resource:tool_source_proposal:other"],
+            "none",
+        )
+        .await;
+    let missing_selector = invocation(
+        "missing-selector",
+        json!({"limit": 10}),
+        missing_selector_grant,
+        &[READ_SCOPE, "resource.read"],
+        &fixture.session_id,
+    );
+    let error =
+        list_tool_sources_value(&fixture.deps, &missing_selector, &missing_selector.payload)
+            .await
+            .expect_err("kind selector is required")
+            .to_string();
+    assert!(error.contains("kind:tool_source_proposal"), "{error}");
 }
 
 #[tokio::test]
 async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
     let fixture = Fixture::new("report-read-kind-authority").await;
-    let proposal = fixture
-        .create_proposal("read-kind-proposal", proposal_payload())
+    let proposal_id = fixture.seed_proposal("read-kind-proposal").await;
+    let report_id = fixture
+        .seed_report("read-kind-report", &proposal_id, "passed")
         .await;
-    let proposal_id = proposal["toolSourceProposalResourceId"].as_str().unwrap();
-    let report = fixture
-        .create_report(
-            "read-kind-report",
-            json!({
-                "toolSourceProposalResourceId": proposal_id,
-                "status": "passed"
-            }),
-        )
-        .await;
-    let report_id = report["toolSourceConformanceReportResourceId"]
-        .as_str()
-        .unwrap();
     let proposal_only_read_grant = fixture
         .derive_grant(
             "proposal-only-read",
-            &["tool_sources.read", "resource.read"],
-            &["tool_source_proposal"],
+            &[READ_SCOPE, "resource.read"],
+            &[TOOL_SOURCE_PROPOSAL_KIND],
             &["kind:tool_source_proposal"],
             "none",
         )
         .await;
     let list_invocation = invocation(
-        "capability::execute",
         "proposal-only-list",
         json!({"limit": 10}),
         proposal_only_read_grant.clone(),
-        ActorKind::Agent,
         &[READ_SCOPE, "resource.read"],
-        Some(&fixture.session_id),
+        &fixture.session_id,
     );
     let listed = list_tool_sources_value(&fixture.deps, &list_invocation, &list_invocation.payload)
         .await
@@ -346,13 +146,11 @@ async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
     assert_eq!(listed["proposals"].as_array().unwrap().len(), 1);
 
     let proposal_inspect_invocation = invocation(
-        "capability::execute",
         "proposal-only-inspect-proposal",
         json!({"toolSourceResourceId": proposal_id}),
         proposal_only_read_grant.clone(),
-        ActorKind::Agent,
         &[READ_SCOPE, "resource.read"],
-        Some(&fixture.session_id),
+        &fixture.session_id,
     );
     inspect_tool_source_value(
         &fixture.deps,
@@ -363,13 +161,11 @@ async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
     .expect("proposal-only grant can inspect proposals");
 
     let report_inspect_invocation = invocation(
-        "capability::execute",
         "proposal-only-inspect-report",
         json!({"toolSourceResourceId": report_id}),
         proposal_only_read_grant,
-        ActorKind::Agent,
         &[READ_SCOPE, "resource.read"],
-        Some(&fixture.session_id),
+        &fixture.session_id,
     );
     let error = inspect_tool_source_value(
         &fixture.deps,
@@ -379,20 +175,9 @@ async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
     .await
     .expect_err("proposal-only grant cannot inspect reports")
     .to_string();
-    assert!(error.contains("tool_source_conformance_report"), "{error}");
-}
-
-#[tokio::test]
-async fn proposals_do_not_register_or_execute_declared_tools() {
-    let fixture = Fixture::new("proposal-non-goal").await;
-    let before = fixture.deps.engine_host.catalog_revision().await.0;
-    let _ = fixture
-        .create_proposal("non-goal", proposal_payload())
-        .await;
-    let after = fixture.deps.engine_host.catalog_revision().await.0;
-    assert_eq!(
-        before, after,
-        "proposal creation must not register catalog tools"
+    assert!(
+        error.contains(TOOL_SOURCE_CONFORMANCE_REPORT_KIND),
+        "{error}"
     );
 }
 
@@ -471,7 +256,6 @@ fn static_non_goal_guards_keep_tool_sources_inert() {
 struct Fixture {
     deps: Deps,
     session_id: String,
-    grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
 }
 
@@ -482,28 +266,14 @@ impl Fixture {
             engine_host: ctx.engine_host.clone(),
         };
         let session_id = format!("{label}-session");
-        let grant_id = derive_grant(
-            &deps,
-            &format!("{label}-write"),
-            &[
-                "tool_sources.propose",
-                "tool_sources.read",
-                "resource.write",
-                "resource.read",
-            ],
-            &["tool_source_proposal", "tool_source_conformance_report"],
-            &[
-                "kind:tool_source_proposal",
-                "kind:tool_source_conformance_report",
-            ],
-            "none",
-        )
-        .await;
         let read_grant_id = derive_grant(
             &deps,
             &format!("{label}-read"),
-            &["tool_sources.read", "resource.read"],
-            &["tool_source_proposal", "tool_source_conformance_report"],
+            &[READ_SCOPE, "resource.read"],
+            &[
+                TOOL_SOURCE_PROPOSAL_KIND,
+                TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
+            ],
             &[
                 "kind:tool_source_proposal",
                 "kind:tool_source_conformance_report",
@@ -514,34 +284,19 @@ impl Fixture {
         Self {
             deps,
             session_id,
-            grant_id,
             read_grant_id,
         }
     }
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
-        let grant_id = self
-            .derive_grant(
-                &format!("{session_id}-write"),
-                &[
-                    "tool_sources.propose",
-                    "tool_sources.read",
-                    "resource.write",
-                    "resource.read",
-                ],
-                &["tool_source_proposal", "tool_source_conformance_report"],
-                &[
-                    "kind:tool_source_proposal",
-                    "kind:tool_source_conformance_report",
-                ],
-                "none",
-            )
-            .await;
         let read_grant_id = self
             .derive_grant(
                 &format!("{session_id}-read"),
-                &["tool_sources.read", "resource.read"],
-                &["tool_source_proposal", "tool_source_conformance_report"],
+                &[READ_SCOPE, "resource.read"],
+                &[
+                    TOOL_SOURCE_PROPOSAL_KIND,
+                    TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
+                ],
                 &[
                     "kind:tool_source_proposal",
                     "kind:tool_source_conformance_report",
@@ -552,7 +307,6 @@ impl Fixture {
         Self {
             deps: self.deps.clone(),
             session_id: session_id.to_owned(),
-            grant_id,
             read_grant_id,
         }
     }
@@ -576,36 +330,57 @@ impl Fixture {
         .await
     }
 
-    async fn create_proposal(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.write_invocation(PROPOSE_FUNCTION, key, payload, ActorKind::System);
-        create_proposal_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("create proposal")
-    }
-
-    async fn create_proposal_error(&self, key: &str, payload: Value) -> String {
-        self.create_proposal_error_with_actor(key, ActorKind::System, payload)
-            .await
-    }
-
-    async fn create_proposal_error_with_actor(
+    async fn seed_resource(
         &self,
-        key: &str,
-        actor_kind: ActorKind,
+        resource_id: &str,
+        kind: &str,
+        schema_id: &str,
+        lifecycle: &str,
         payload: Value,
     ) -> String {
-        let invocation = self.write_invocation(PROPOSE_FUNCTION, key, payload, actor_kind);
-        create_proposal_value(&self.deps, &invocation, &invocation.payload)
+        self.deps
+            .engine_host
+            .create_resource(CreateResource {
+                resource_id: Some(resource_id.to_owned()),
+                kind: kind.to_owned(),
+                schema_id: Some(schema_id.to_owned()),
+                scope: EngineResourceScope::Session(self.session_id.clone()),
+                owner_worker_id: WorkerId::new("resource").expect("worker id"),
+                owner_actor_id: ActorId::new("system:tool-sources-test").expect("actor id"),
+                lifecycle: Some(lifecycle.to_owned()),
+                policy: json!({"test": "stored-resource-fixture"}),
+                initial_payload: Some(payload),
+                locations: Vec::new(),
+                trace_id: TraceId::generate(),
+                invocation_id: None,
+            })
             .await
-            .expect_err("proposal should fail")
-            .to_string()
+            .expect("seed stored tool source resource")
+            .resource_id
     }
 
-    async fn create_report(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.write_invocation(REPORT_FUNCTION, key, payload, ActorKind::System);
-        create_conformance_report_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("create report")
+    async fn seed_proposal(&self, label: &str) -> String {
+        let resource_id = format!("{TOOL_SOURCE_PROPOSAL_KIND}:{label}");
+        self.seed_resource(
+            &resource_id,
+            TOOL_SOURCE_PROPOSAL_KIND,
+            TOOL_SOURCE_PROPOSAL_SCHEMA_ID,
+            "proposed",
+            stored_proposal_payload(label),
+        )
+        .await
+    }
+
+    async fn seed_report(&self, label: &str, proposal_id: &str, status: &str) -> String {
+        let resource_id = format!("{TOOL_SOURCE_CONFORMANCE_REPORT_KIND}:{label}");
+        self.seed_resource(
+            &resource_id,
+            TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
+            TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID,
+            status,
+            stored_report_payload(label, proposal_id, status),
+        )
+        .await
     }
 
     async fn list(&self, key: &str) -> Value {
@@ -622,7 +397,7 @@ impl Fixture {
         );
         inspect_tool_source_value(&self.deps, &invocation, &invocation.payload)
             .await
-            .expect("inspect proposal")
+            .expect("inspect tool source")
     }
 
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
@@ -633,33 +408,13 @@ impl Fixture {
             .to_string()
     }
 
-    fn write_invocation(
-        &self,
-        function_id: &str,
-        key: &str,
-        payload: Value,
-        actor_kind: ActorKind,
-    ) -> Invocation {
-        invocation(
-            function_id,
-            key,
-            payload,
-            self.grant_id.clone(),
-            actor_kind,
-            &["tool_sources.propose", "resource.write"],
-            Some(&self.session_id),
-        )
-    }
-
     fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
         invocation(
-            "capability::execute",
             key,
             payload,
             self.read_grant_id.clone(),
-            ActorKind::Agent,
             &[READ_SCOPE, "resource.read"],
-            Some(&self.session_id),
+            &self.session_id,
         )
     }
 }
@@ -706,90 +461,76 @@ async fn derive_grant(
 }
 
 fn invocation(
-    function_id: &str,
     key: &str,
     payload: Value,
     grant_id: AuthorityGrantId,
-    actor_kind: ActorKind,
     scopes: &[&str],
-    session_id: Option<&str>,
+    session_id: &str,
 ) -> Invocation {
-    let actor_id = match actor_kind {
-        ActorKind::Agent => ActorId::new(format!("agent:{}", session_id.unwrap())).unwrap(),
-        ActorKind::System => ActorId::new("system:tool-sources-test").unwrap(),
-        ActorKind::Admin => ActorId::new("admin:tool-sources-test").unwrap(),
-        _ => ActorId::new("client:tool-sources-test").unwrap(),
-    };
     let mut context = CausalContext::new(
-        actor_id,
-        actor_kind,
+        ActorId::new(format!("agent:{session_id}")).unwrap(),
+        ActorKind::Agent,
         grant_id,
         TraceId::new(format!("trace-{key}")).unwrap(),
     )
     .with_workspace_id("workspace-tool-sources")
-    .with_idempotency_key(key.to_owned());
-    if let Some(session_id) = session_id {
-        context = context.with_session_id(session_id.to_owned());
-    }
+    .with_idempotency_key(key.to_owned())
+    .with_session_id(session_id.to_owned());
     for scope in scopes {
         context = context.with_scope(*scope);
     }
     Invocation {
         id: InvocationId::new(format!("invocation-{key}")).unwrap(),
-        function_id: FunctionId::new(function_id).unwrap(),
+        function_id: FunctionId::new("capability::execute").unwrap(),
         delivery_mode: crate::engine::DeliveryMode::Sync,
         payload,
         causal_context: context,
     }
 }
 
-fn proposal_payload() -> Value {
+fn stored_proposal_payload(label: &str) -> Value {
     json!({
+        "schemaVersion": SCHEMA_VERSION,
+        "state": "proposed",
         "sourceKind": "mcp_server",
-        "sourceIdentity": {
-            "id": "demo.lookup",
-            "label": "Demo Lookup",
-            "uri": "mcp://demo.lookup"
-        },
-        "provenance": {
-            "submittedBy": "system-test",
-            "source": "fixture",
-            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        },
-        "sandboxPolicy": {
-            "networkPolicy": "none",
-            "authorityScopes": ["tool_sources.read"],
-            "resourceKinds": ["tool_source_proposal"],
-            "resourceSelectors": ["kind:tool_source_proposal"]
-        },
-        "declaredTools": [{
-            "name": "lookup",
-            "description": "Lookup metadata only.",
-            "inputSchemaRef": "schema:lookup.input"
-        }],
+        "sourceIdentity": {"id": format!("fixture.{label}"), "label": "Stored fixture"},
+        "provenance": {"source": "test_resource_store"},
+        "sandboxPolicy": {"networkPolicy": "none"},
+        "declaredTools": [{"name": "lookup", "description": "Metadata lookup"}],
         "declaredSchemas": [{
             "id": "schema:lookup.input",
-            "schema": {"type": "object", "additionalProperties": false, "properties": {"query": {"type": "string"}}}
+            "schema": {
+                "type": "object",
+                "description": "x".repeat(256),
+                "properties": {"query": {"type": "string"}}
+            }
         }],
-        "expectedLinkage": {
-            "workerPackageResourceId": "worker_package:demo.lookup:1.0.0"
-        },
-        "evidenceRefs": [{"kind": "fixture", "id": "evidence-1"}],
-        "summary": "Demo lookup proposal"
+        "expectedLinkage": {"workerPackageResourceId": "worker_package:fixture"},
+        "summary": "Stored proposal fixture",
+        "authority": {"activation": "forbidden"},
+        "traceRefs": [],
+        "replayRefs": [],
+        "evidenceRefs": [],
+        "idempotency": {"key": label},
+        "revision": 1
     })
 }
 
-fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Value {
-    let current = inspection
-        .resource
-        .current_version_id
-        .as_ref()
-        .expect("current version");
-    inspection
-        .versions
-        .iter()
-        .find(|version| &version.version_id == current)
-        .expect("current payload")
-        .payload
-        .clone()
+fn stored_report_payload(label: &str, proposal_id: &str, status: &str) -> Value {
+    json!({
+        "schemaVersion": SCHEMA_VERSION,
+        "state": status,
+        "toolSourceProposalResourceId": proposal_id,
+        "proposalVersionId": format!("version:{label}"),
+        "status": status,
+        "checks": [{"name": "schema_bounded", "status": status}],
+        "summary": {"source": "test_resource_store"},
+        "authority": {"activation": "forbidden"},
+        "traceRefs": [],
+        "replayRefs": [],
+        "evidenceRefs": [],
+        "idempotency": {"key": label},
+        "revision": 1,
+        "activation": {"performed": false, "catalogRegistration": false, "execution": false}
+    })
 }

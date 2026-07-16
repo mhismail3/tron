@@ -11,11 +11,6 @@ use crate::shared::server::errors::CapabilityError;
 use super::validation::*;
 use super::{Deps, READ_SCOPE, SCHEMA_VERSION};
 
-#[cfg(test)]
-mod write_fixtures;
-#[cfg(test)]
-pub(crate) use write_fixtures::{create_conformance_report_value, create_proposal_value};
-
 const RESOURCE_READ_SCOPE: &str = "resource.read";
 
 pub(crate) async fn list_tool_sources_value(

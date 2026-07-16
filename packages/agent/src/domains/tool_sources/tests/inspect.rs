@@ -3,10 +3,9 @@ use serde_json::{Value, json};
 use super::*;
 use crate::engine::durability::resources::EngineResourceVersionState;
 use crate::engine::{
-    ActorId, CreateResource, EngineResource, EngineResourceInspection, EngineResourceScope,
-    EngineResourceVersion, TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
-    TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID, TOOL_SOURCE_PROPOSAL_KIND,
-    TOOL_SOURCE_PROPOSAL_SCHEMA_ID, TraceId, WorkerId,
+    ActorId, EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
+    TOOL_SOURCE_CONFORMANCE_REPORT_KIND, TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID,
+    TOOL_SOURCE_PROPOSAL_KIND, TOOL_SOURCE_PROPOSAL_SCHEMA_ID, TraceId, WorkerId,
 };
 
 #[tokio::test]
@@ -19,7 +18,7 @@ async fn inspect_rejects_tool_source_prefix_when_actual_kind_mismatches() {
             TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
             TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID,
             "failed",
-            stored_report_payload("tool_source_proposal:wrong-kind"),
+            stored_report_payload("wrong-kind", "tool_source_proposal:wrong-kind", "failed"),
             "expected tool_source_proposal",
         ),
         (
@@ -28,31 +27,15 @@ async fn inspect_rejects_tool_source_prefix_when_actual_kind_mismatches() {
             TOOL_SOURCE_PROPOSAL_KIND,
             TOOL_SOURCE_PROPOSAL_SCHEMA_ID,
             "proposed",
-            stored_proposal_payload(),
+            stored_proposal_payload("wrong-kind"),
             "expected tool_source_conformance_report",
         ),
     ];
 
     for (key, resource_id, kind, schema_id, lifecycle, payload, expected_error) in cases {
         fixture
-            .deps
-            .engine_host
-            .create_resource(CreateResource {
-                resource_id: Some(resource_id.to_owned()),
-                kind: kind.to_owned(),
-                schema_id: Some(schema_id.to_owned()),
-                scope: EngineResourceScope::Session(fixture.session_id.clone()),
-                owner_worker_id: WorkerId::new("tool-source-test").expect("worker id"),
-                owner_actor_id: ActorId::new("system:tool-sources-test").expect("actor id"),
-                lifecycle: Some(lifecycle.to_owned()),
-                policy: json!({"test": "kind-schema-mismatch"}),
-                initial_payload: Some(payload),
-                locations: Vec::new(),
-                trace_id: TraceId::generate(),
-                invocation_id: None,
-            })
-            .await
-            .expect("create mismatched resource");
+            .seed_resource(resource_id, kind, schema_id, lifecycle, payload)
+            .await;
 
         let error = fixture.inspect_error(key, resource_id).await;
         assert!(error.contains(expected_error), "{error}");
@@ -65,7 +48,7 @@ fn inspect_resource_type_guard_rejects_tool_source_schema_mismatches() {
         TOOL_SOURCE_PROPOSAL_KIND,
         "tron.test.wrong_schema.v1",
         "proposed",
-        stored_proposal_payload(),
+        stored_proposal_payload("schema-guard"),
     );
     let error = super::super::service::ensure_tool_source_resource(
         &proposal,
@@ -80,7 +63,11 @@ fn inspect_resource_type_guard_rejects_tool_source_schema_mismatches() {
         TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
         "tron.test.wrong_schema.v1",
         "failed",
-        stored_report_payload("tool_source_proposal:schema-guard"),
+        stored_report_payload(
+            "schema-guard",
+            "tool_source_proposal:schema-guard",
+            "failed",
+        ),
     );
     let error = super::super::service::ensure_tool_source_resource(
         &report,
@@ -93,45 +80,6 @@ fn inspect_resource_type_guard_rejects_tool_source_schema_mismatches() {
         error.contains(TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID),
         "{error}"
     );
-}
-
-fn stored_proposal_payload() -> Value {
-    json!({
-        "schemaVersion": "tron.tool_source.v1",
-        "state": "proposed",
-        "sourceKind": "mcp_server",
-        "sourceIdentity": {"id": "mismatch.fixture"},
-        "provenance": {"source": "fixture"},
-        "sandboxPolicy": {"networkPolicy": "none"},
-        "declaredTools": [],
-        "declaredSchemas": [],
-        "expectedLinkage": {},
-        "authority": {"activation": "forbidden"},
-        "traceRefs": [],
-        "replayRefs": [],
-        "evidenceRefs": [],
-        "idempotency": {"key": "mismatch"},
-        "revision": 1
-    })
-}
-
-fn stored_report_payload(proposal_id: &str) -> Value {
-    json!({
-        "schemaVersion": "tron.tool_source.v1",
-        "state": "failed",
-        "toolSourceProposalResourceId": proposal_id,
-        "proposalVersionId": "version:mismatch",
-        "status": "failed",
-        "checks": [],
-        "summary": {"source": "fixture"},
-        "authority": {"activation": "forbidden"},
-        "traceRefs": [],
-        "replayRefs": [],
-        "evidenceRefs": [],
-        "idempotency": {"key": "mismatch"},
-        "revision": 1,
-        "activation": {"performed": false, "catalogRegistration": false, "execution": false}
-    })
 }
 
 fn stored_inspection(

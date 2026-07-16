@@ -974,7 +974,7 @@ Current primitive operations:
 | `web_research_source_record` | Accepted Slice 24F operation that records one bounded source/citation artifact metadata record linked by exact request or review selectors, with source/citation/robots/dependency/current-scope/evidence refs, idempotency fingerprint, and no raw page dumps, browser logs, cookies, credentials, commands, raw file contents, or network behavior. |
 | `web_research_source_list` | List scoped `web_research_source` artifact records as bounded provider-safe source/citation summaries after kind/schema/scope/current-version revalidation. |
 | `web_research_source_inspect` | Inspect one scoped `web_research_source` through exact `kind:web_research_source` plus `resource:<id>` selector authorization, returning bounded citation/source artifact metadata and refs only. |
-| `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
+| `tool_source_list` | List a bounded number of current-session inert `tool_source_proposal` records with source identity, state/summary, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
 | `subagent_launch` | Accepted Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
 | `subagent_status` | Inspect one scoped `subagent_task`, then inspect the delegated module runtime/job binding through `module_program_execution_status`, returning bounded/redacted task and delegated job refs without raw output payloads. |
@@ -1435,25 +1435,17 @@ artifacts. Actual fetch and robots network use remains in `web_fetch` and
 `web_robots_check`; search providers, browser drivers, crawling, sitemap
 traversal, logged-in cookie custody, and native research cockpit UI remain
 future module/runtime decisions.
-The accepted Slice 9A foundation adds the `tool_sources` domain as an inert
-external source-proposal and provenance boundary. Trusted internal system/admin
-callers can create
-resource-backed `tool_source_proposal` records and bounded
-`tool_source_conformance_report` evidence only with derived non-bootstrap
-`tool_sources.propose` and `resource.write` authority, explicit non-wildcard
-resource grants for the resource kind being written, `networkPolicy: none`,
-idempotency, source identity, provenance, sandbox policy, declared tool/schema
-metadata, expected worker/package linkage, trace/replay refs, and evidence
-refs. Proposal validation rejects inline secrets, credential-looking values,
-unsafe paths, unbounded schemas, wildcard sandbox authority, execution fields
-such as command or env, and active/passive/noun activation or registration
-intent while preserving explicit inert prohibition prose. Agent-visible access
-is read-only through `tool_source_list` and `tool_source_inspect` under
-`capability::execute`; those operations require current-session context,
-`tool_sources.read`, `resource.read`, explicit resource-kind grants plus
-matching `kind:tool_source_*` selectors, stored kind/schema revalidation, and
-`networkPolicy: none`, and they return bounded/redacted resource evidence
-without network I/O. Slice 9A does
+The `tool_sources` domain is the read-only projection boundary over existing
+`tool_source_proposal` and `tool_source_conformance_report` resources. It does
+not register a production proposal or report writer; a future accepted writer
+must own creation authority and payload validation rather than hiding that
+lifecycle in the read domain. Agent-visible access is limited to
+`tool_source_list` and `tool_source_inspect` under `capability::execute`; those
+operations require current-session context, `tool_sources.read`,
+`resource.read`, explicit resource-kind grants plus matching
+`kind:tool_source_*` selectors, stored kind/schema revalidation, and
+`networkPolicy: none`; list cardinality and inspected schema previews are
+bounded, and neither operation performs network I/O. This boundary does
 not start or restart MCP servers, install packages, register catalog tools,
 execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
@@ -1994,8 +1986,8 @@ metadata-only catalog targets as non-callable, derives only catalog-scoped
 runtime authority for search/inspect calls, and writes only append-oriented
 `catalog_discovery_report` evidence. Tool-source inspection reads scoped
 `tool_source_proposal` and
-`tool_source_conformance_report` resources only; internal proposal/report
-writes are provenance evidence and explicitly do not activate external tools.
+`tool_source_conformance_report` resources only; it neither writes those
+records nor activates external tools.
 Failures rejected before an effectful trace record is inserted still rely on
 the direct capability failure result projection for bounded error code/path
 evidence; durable pre-trace failure records remain a deferred tracing slice.

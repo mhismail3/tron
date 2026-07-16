@@ -53,7 +53,7 @@
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
 //! | `web` | Direct web fetch source provenance resources |
-//! | `tool_sources` | Inert external tool-source proposal and preflight evidence |
+//! | `tool_sources` | Read-only tool-source proposal/conformance evidence projection |
 //! | `subagents` | Inert subagent task lifecycle evidence |
 //! | `procedural` | Inert skill/rule/hook/procedure provenance inspection evidence |
 //! | `scheduler` | Durable schedules, missed-run policy, cancellation, and run records |
