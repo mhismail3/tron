@@ -306,7 +306,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "inspect_authority_grant(&invocation.causal_context.authority_grant_id)",
         "capability::execute grant requires an exact operation claim",
         "capability::execute grant operation claim does not match the requested operation",
-        "operation_risk_level(operation)?",
+        "operation_contract::risk_level(operation)",
         "operation_contract::authority_policy(operation)",
         "policy.base_scope_additions()",
         "policy.resource_kind_policy().base_kinds()",
