@@ -261,11 +261,15 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedOrbitIndicator).path))
     }
 
-    @Test("Chat scoped errors do not use generic alert surface")
-    func testChatScopedErrorsAvoidGenericAlertSurface() throws {
+    @Test("Chat scoped errors use only the local timeline surface")
+    func testChatScopedErrorsUseOnlyLocalTimelineSurface() throws {
         let iosRoot = iosAppRoot()
         let chatView = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView.swift"),
+            encoding: .utf8
+        )
+        let viewModel = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Session/Chat/ViewModel/ChatViewModel.swift"),
             encoding: .utf8
         )
         let errorPath = "Sources/Session/Chat/ViewModel/ChatViewModel+Errors.swift"
@@ -277,5 +281,10 @@ extension SourceGuardTests {
         #expect(!chatView.contains(#".alert("Error""#))
         #expect(errorRouting.contains("appendLocalError"))
         #expect(errorRouting.contains("LocalChatNotification.error"))
+        #expect(!errorRouting.contains("clearError"))
+        #expect(!viewModel.contains("var errorMessage: String?"))
+        #expect(!viewModel.contains("var showError: Bool"))
+        #expect(viewModel.contains("func showError(_ message: String)"))
+        #expect(viewModel.contains("handleError(message, severity: .fatal)"))
     }
 }

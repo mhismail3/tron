@@ -324,10 +324,11 @@ that never retains the view model across data loading or image preparation.
 Chat-scoped error routing lives in
 `ChatViewModel+Errors.swift`: local failures append ephemeral
 `LocalChatNotification` timeline items with deduped replacement and are cleared
-when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
-shell composition; message-list scrolling, pagination, composer, and sheet
-rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
-extensions. `TypewriterAnimationState` is the toolbar title's single mutable
+when a new prompt starts or the chat view disappears; `ChatViewModel` carries no
+parallel optional or Boolean error state. `ChatView.swift` keeps shell
+composition; message-list scrolling, pagination, composer, and sheet rendering
+live in `ChatView+MessageList.swift` and the existing toolbar/helper extensions.
+`TypewriterAnimationState` is the toolbar title's single mutable
 display/task owner, shared by the production view and its focused tests.
 View-local async work is owned by `ChatViewTaskCoordinator`: every
 delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets

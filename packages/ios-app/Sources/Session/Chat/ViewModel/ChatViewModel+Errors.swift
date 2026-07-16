@@ -19,10 +19,6 @@ extension ChatViewModel {
         }
     }
 
-    func clearError() {
-        errorMessage = nil
-    }
-
     func appendLocalError(
         dedupKey: String,
         title: String,

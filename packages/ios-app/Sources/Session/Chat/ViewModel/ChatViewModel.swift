@@ -20,8 +20,6 @@ final class ChatViewModel {
     /// because context maintenance can trigger it asynchronously. A turn_start resets it.
     var isCompacting = false
     var showSettings = false
-    var errorMessage: String?
-    var showError: Bool { errorMessage != nil }
     /// Set to true when the session doesn't exist on server and view should navigate back
     var shouldDismiss = false
     var isThinkingExpanded = false
