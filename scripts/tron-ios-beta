@@ -11,7 +11,6 @@ SCHEME="${TRON_IOS_SCHEME:-Tron Beta}"
 CONFIG="${TRON_IOS_CONFIGURATION:-Beta}"
 DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
-DESTINATION="${TRON_IOS_DESTINATION:-}"
 LAUNCH_AFTER_INSTALL=1
 LAUNCH_TIMEOUT_SECONDS="${TRON_IOS_LAUNCH_TIMEOUT_SECONDS:-20}"
 
@@ -26,7 +25,6 @@ Usage:
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
-  TRON_IOS_DESTINATION     Full xcodebuild destination, e.g. platform=iOS,id=<id>
   TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron Beta
   TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Beta
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
@@ -184,13 +182,6 @@ build_install_launch() {
     local bundle_id
     bundle_id="$(bundle_id_for_project)"
 
-    local destination
-    if [ -n "$DESTINATION" ]; then
-        destination="$DESTINATION"
-    else
-        destination="platform=iOS,id=${device_id}"
-    fi
-
     local ts log xcresult
     ts="$(date +%s)-$$"
     log="/tmp/xcode-${ts}.log"
@@ -202,7 +193,7 @@ build_install_launch() {
         -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration "$CONFIG" \
-        -destination "$destination" \
+        -destination "platform=iOS,id=${device_id}" \
         -destination-timeout 30 \
         -derivedDataPath "$DERIVED_DATA" \
         -resultBundlePath "$xcresult" \

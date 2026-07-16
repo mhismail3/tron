@@ -108,9 +108,6 @@ export TRON_IOS_DEVICE_ID=<device-identifier>
 export TRON_IOS_DEVICE_NAME=<device-name>
 ```
 
-If Xcode needs a custom destination string, set `TRON_IOS_DESTINATION`
-directly, for example `platform=iOS,id=<device-identifier>`.
-
 The helper also accepts `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` for local
 variants. Defaults remain `Tron Beta` and `Beta`; the fast production action sets
 them to `Tron Fast` and `ProdDebug`.

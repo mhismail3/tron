@@ -44,7 +44,7 @@ env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta launch
 
 The script auto-selects the only selectable physical iOS device, where
 selectable means CoreDevice reports it as `available` or `connected`. If
-multiple devices are selectable, set `TRON_IOS_DEVICE_ID`,
-`TRON_IOS_DEVICE_NAME`, or `TRON_IOS_DESTINATION` locally before running it.
+multiple devices are selectable, set either `TRON_IOS_DEVICE_ID` or
+`TRON_IOS_DEVICE_NAME` locally before running it.
 Use `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` only for intentional
 non-default variants; defaults remain the side-by-side beta app.
