@@ -11,15 +11,17 @@ import UIKit
 @MainActor
 struct ChatViewModelLifecycleTests {
 
-    @Test("Observation bindings release their owning view model")
-    func testObservationBindingsReleaseOwner() async {
+    @Test("Session tasks release their owning view model")
+    func testSessionTasksReleaseOwner() async {
         let mockURL = URL(string: "ws://localhost:8080/engine")!
         let engineClient = EngineClient(serverURL: mockURL)
         var viewModel: ChatViewModel? = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
         weak let retainedViewModel = viewModel
+        viewModel?.startLiveEventStream()
 
-        // Let all four observation tasks install their idle continuations. This
-        // distinguishes genuine owner release from a task that never started.
+        // Let the observation and live-event tasks install their idle
+        // continuations. This distinguishes genuine owner release from a task
+        // that never started.
         for _ in 0..<10 {
             await Task.yield()
         }
