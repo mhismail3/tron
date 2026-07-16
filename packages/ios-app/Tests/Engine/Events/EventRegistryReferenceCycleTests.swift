@@ -3,7 +3,7 @@ import Foundation
 @testable import TronMobile
 
 /// L13: guard test for the "no strong-reference-cycle" invariant on
-/// `EventRegistry`. The registry is a process-lifetime singleton whose
+/// `EventRegistry`. The shared production registry is process-lifetime, and its
 /// plugin map must NEVER hold a reference-typed value that could
 /// transitively own a ViewModel. If it did, the ViewModel would outlive
 /// its SwiftUI scope and its state would never be reclaimed on session
@@ -48,7 +48,7 @@ struct EventRegistryReferenceCycleTests {
         // so the author can reason about the consequences.
         let mirror = Mirror(reflecting: EventPluginBoxImpl<TextDeltaPlugin>())
         #expect(mirror.children.count == 0,
-                "EventPluginBoxImpl must carry no stored properties — otherwise the registry's process-lifetime singleton could retain a reference")
+                "EventPluginBoxImpl must carry no stored properties — otherwise the shared production registry could retain a reference")
     }
 
     @Test("DispatchablePluginBoxImpl has no stored properties either")
@@ -60,7 +60,7 @@ struct EventRegistryReferenceCycleTests {
     @Test("EventRegistry does not retain its per-call dispatch context")
     @MainActor
     func registryDoesNotRetainDispatchContext() {
-        let registry = EventRegistry.shared
+        let registry = EventRegistry()
         registry.register(TextDeltaPlugin.self)
         let result = TextDeltaPlugin.Result(delta: "lifetime probe", messageIndex: nil)
 

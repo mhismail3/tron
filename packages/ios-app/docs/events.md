@@ -144,9 +144,12 @@ must flow from the canonical envelope rather than a client taxonomy.
 
 ## Registration
 
-`EventRegistry.shared.registerAll()` runs at app startup. Registration is the
-only place a live event plugin enters the shell, so deleted roots should be
-removed from both disk and registration instead of left dormant.
+`EventRegistry.shared.registerAll()` runs at app startup. The shared production
+instance owns the live plugin map; focused tests create isolated registry
+instances and register through the same APIs instead of mutating production
+state through a reset hook. Registration is the only place a live event plugin
+enters the shell, so deleted roots should be removed from both disk and
+registration instead of left dormant.
 Events that are intentionally diagnostics-only should still register a parser
 that returns no `EventResult`; unknown event types are reserved for genuine
 drift, not for known server markers.
@@ -163,8 +166,8 @@ func dispatch(type: String, transform: () -> (any EventResult)?, context: EventD
 }
 ```
 
-`ChatViewModel` passes itself as the per-call dispatch target and the
-process-lifetime registry never retains it. `ChatViewModel+Events.swift` owns
+`ChatViewModel` passes itself as the per-call dispatch target and the shared
+production registry never retains it. `ChatViewModel+Events.swift` owns
 the composed target conformance, while small handler extensions implement its
 requirements. The root state object owns
 orchestration; streaming, UI queue,

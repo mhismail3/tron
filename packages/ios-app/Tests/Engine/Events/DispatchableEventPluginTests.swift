@@ -39,7 +39,7 @@ final class DispatchableEventPluginTests: XCTestCase {
     }
 
     func testRegistryDispatchesRegisteredPlugin() {
-        let registry = EventRegistry.shared
+        let registry = EventRegistry()
         registry.register(TestDispatchablePlugin.self)
 
         let mockContext = MockEventDispatchContext()
@@ -51,10 +51,6 @@ final class DispatchableEventPluginTests: XCTestCase {
         )
 
         XCTAssertEqual(mockContext.logDebugMessage, "TestDispatchable: registry-test")
-
-        // Cleanup
-        registry.clearForTesting()
-        registry.registerAll()
     }
 
     // MARK: - Domain Protocol Conformance

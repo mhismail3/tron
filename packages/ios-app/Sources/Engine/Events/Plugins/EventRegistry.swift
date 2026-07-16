@@ -19,7 +19,7 @@ import Foundation
 /// }
 /// ```
 final class EventRegistry: @unchecked Sendable {
-    /// Shared singleton instance.
+    /// Shared production instance.
     static let shared = EventRegistry()
 
     /// Registered plugins keyed by event type.
@@ -33,7 +33,7 @@ final class EventRegistry: @unchecked Sendable {
     /// types with only static methods), and the dispatch context
     /// (ChatViewModel) is passed as a method parameter per call,
     /// never stored. This shape is deliberate: the registry is a
-    /// process-lifetime singleton, so any stored reference would
+    /// production process-lifetime instance, so any stored reference would
     /// outlive the ViewModel and create a cycle (ChatViewModel →
     /// EventRegistry → … → ChatViewModel).
     ///
@@ -48,7 +48,7 @@ final class EventRegistry: @unchecked Sendable {
     /// Lock for thread-safe access to plugins dictionary.
     private let lock = NSLock()
 
-    private init() {}
+    init() {}
 
     // MARK: - Registration
 
@@ -197,12 +197,4 @@ final class EventRegistry: @unchecked Sendable {
         return Array(plugins.keys).sorted()
     }
 
-    // MARK: - Testing Support
-
-    /// Clear all registered plugins. Only for testing.
-    func clearForTesting() {
-        lock.lock()
-        defer { lock.unlock() }
-        plugins.removeAll()
-    }
 }

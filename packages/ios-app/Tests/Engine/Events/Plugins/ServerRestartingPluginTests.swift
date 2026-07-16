@@ -2,11 +2,7 @@ import XCTest
 @testable import TronMobile
 
 final class ServerRestartingPluginTests: XCTestCase {
-
-    override func setUp() {
-        super.setUp()
-        EventRegistry.shared.clearForTesting()
-    }
+    private let registry = EventRegistry()
 
     // MARK: - Event Type
 
@@ -17,7 +13,7 @@ final class ServerRestartingPluginTests: XCTestCase {
     // MARK: - Parsing
 
     func testParseFullEvent() {
-        EventRegistry.shared.register(ServerRestartingPlugin.self)
+        registry.register(ServerRestartingPlugin.self)
 
         let json = """
         {
@@ -31,7 +27,7 @@ final class ServerRestartingPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "server.restarting", data: json)
+        let result = registry.parse(type: "server.restarting", data: json)
         XCTAssertNotNil(result)
 
         if case .plugin(let type, _, let sessionId, _, let transform) = result {
@@ -49,7 +45,7 @@ final class ServerRestartingPluginTests: XCTestCase {
     }
 
     func testParseMinimalEvent_defaultValues() {
-        EventRegistry.shared.register(ServerRestartingPlugin.self)
+        registry.register(ServerRestartingPlugin.self)
 
         let json = """
         {
@@ -57,7 +53,7 @@ final class ServerRestartingPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "server.restarting", data: json)
+        let result = registry.parse(type: "server.restarting", data: json)
         XCTAssertNotNil(result)
 
         if case .plugin(_, _, _, _, let transform) = result {
@@ -72,7 +68,7 @@ final class ServerRestartingPluginTests: XCTestCase {
     }
 
     func testParsePartialData() {
-        EventRegistry.shared.register(ServerRestartingPlugin.self)
+        registry.register(ServerRestartingPlugin.self)
 
         let json = """
         {
@@ -84,7 +80,7 @@ final class ServerRestartingPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "server.restarting", data: json)
+        let result = registry.parse(type: "server.restarting", data: json)
 
         if case .plugin(_, _, _, _, let transform) = result {
             let eventResult = transform() as? ServerRestartingPlugin.Result
@@ -99,7 +95,7 @@ final class ServerRestartingPluginTests: XCTestCase {
     // MARK: - Global Event (no session scoping)
 
     func testIsGlobalEvent_matchesAnySession() {
-        EventRegistry.shared.register(ServerRestartingPlugin.self)
+        registry.register(ServerRestartingPlugin.self)
 
         let json = """
         {
@@ -108,7 +104,7 @@ final class ServerRestartingPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "server.restarting", data: json)!
+        let result = registry.parse(type: "server.restarting", data: json)!
 
         // Global events match any session
         XCTAssertTrue(result.matchesSession("session-1"))

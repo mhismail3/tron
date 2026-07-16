@@ -15,9 +15,9 @@ extension SourceGuardTests {
         let serverTypes = try rustSessionStreamEventTypes(in: streamRoot)
             .filter { $0 != "events.session" }
 
-        EventRegistry.shared.clearForTesting()
-        EventRegistry.shared.registerAll()
-        let registeredTypes = Set(EventRegistry.shared.registeredTypes)
+        let registry = EventRegistry()
+        registry.registerAll()
+        let registeredTypes = Set(registry.registeredTypes)
         let missing = serverTypes.subtracting(registeredTypes).sorted()
 
         #expect(

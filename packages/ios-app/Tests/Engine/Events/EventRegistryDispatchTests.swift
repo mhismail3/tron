@@ -9,11 +9,9 @@ final class EventRegistryDispatchTests: XCTestCase {
     var mockContext: MockEventDispatchContext!
 
     override func setUp() async throws {
-        registry = EventRegistry.shared
+        registry = EventRegistry()
         mockContext = MockEventDispatchContext()
-        // Ensure all plugins are registered for dispatch lookup
-        EventRegistry.shared.clearForTesting()
-        EventRegistry.shared.registerAll()
+        registry.registerAll()
     }
 
     override func tearDown() async throws {
