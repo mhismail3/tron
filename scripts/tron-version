@@ -29,8 +29,8 @@ Usage: tron version <command>
 
 Commands:
   print              Print derived version fields as KEY=value lines
-  check              Validate all mirrored version fields
-  sync [--check]     Update mirrors from VERSION.env, or validate with --check
+  check              Read-only validation of all mirrored version fields
+  sync               Update mirrors from VERSION.env
   github-output      Validate a hosted release ref and write GitHub step outputs
   bump beta|patch|minor
                      Update VERSION.env, sync mirrors, and print the result
@@ -350,7 +350,7 @@ self_test() {
     [ "$(asset_version 0.1.1)" = "0.1.1" ] || die "asset version changed stable patch"
     [[ "$TRON_DMG_NAME" =~ ^tron-v[0-9]+\.[0-9]+\.[0-9]+(-beta[1-9][0-9]*)?\.dmg$ ]] || die "DMG name has unexpected format: $TRON_DMG_NAME"
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
-    "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null
+    ! "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null 2>&1 || die "sync --check alias remains accepted"
 
     local github_output output_keys
     github_output="$(mktemp)"
@@ -399,12 +399,9 @@ case "$cmd" in
         write_github_release_outputs
         ;;
     sync)
-        if [ "${2:-}" = "--check" ]; then
-            check_versions
-        else
-            sync_versions
-            check_versions
-        fi
+        [ "$#" -eq 1 ] || die "sync accepts no arguments; use 'tron version check' for read-only validation"
+        sync_versions
+        check_versions
         ;;
     bump)
         shift
