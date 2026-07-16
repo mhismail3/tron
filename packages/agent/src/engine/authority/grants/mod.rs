@@ -70,7 +70,7 @@ use derivation::{ensure_child_narrows_parent, ensure_parent_can_derive, validate
 #[cfg(test)]
 use model::TEST_BOOTSTRAP_GRANT_IDS;
 use model::{bootstrap_grant, grant_event, grant_from_request};
-use sqlite_codec::{json_string, risk_as_str, row_to_grant, sqlite_err};
+use sqlite_codec::{json_string, row_to_grant, sqlite_err};
 
 pub(crate) fn is_bootstrap_grant_id(grant_id: &AuthorityGrantId) -> bool {
     model::is_bootstrap_grant_id(grant_id.as_str())
@@ -616,7 +616,7 @@ impl SqliteEngineGrantStore {
                     resource_selectors,
                     file_roots,
                     grant.network_policy,
-                    risk_as_str(grant.max_risk),
+                    grant.max_risk.as_str(),
                     budget,
                     expires_at,
                     grant.can_delegate as i64,

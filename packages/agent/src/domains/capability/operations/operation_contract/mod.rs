@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 #[cfg(test)]
 use crate::engine::validate_engine_schema_definition;
-use crate::engine::{FunctionId, validate_engine_schema_payload};
+use crate::engine::{FunctionId, RiskLevel, validate_engine_schema_payload};
 use crate::shared::server::errors::CapabilityError;
 
 mod authority;
@@ -310,8 +310,12 @@ pub(crate) fn effect(operation: &str) -> Option<OperationEffect> {
     OperationId::parse(operation).map(policy::effect)
 }
 
+pub(super) fn risk_level(operation: &str) -> Option<RiskLevel> {
+    OperationId::parse(operation).map(policy::risk)
+}
+
 pub(crate) fn risk(operation: &str) -> Option<&'static str> {
-    OperationId::parse(operation).map(|operation| policy::risk(operation).as_str())
+    risk_level(operation).map(RiskLevel::as_str)
 }
 
 pub(crate) fn authority_policy(operation: &str) -> Option<AuthorityPolicy> {

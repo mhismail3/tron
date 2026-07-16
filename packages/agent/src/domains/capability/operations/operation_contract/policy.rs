@@ -1,6 +1,7 @@
 //! Canonical invocation-context and effect policy for provider-visible operations.
 
 use super::OperationId;
+use crate::engine::RiskLevel;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OperationEffect {
@@ -17,23 +18,6 @@ impl OperationEffect {
             Self::MetadataWrite => "metadata_write",
             Self::StateChange => "state_change",
             Self::StartsWork => "starts_work",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OperationRisk {
-    Low,
-    Medium,
-    High,
-}
-
-impl OperationRisk {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
         }
     }
 }
@@ -436,7 +420,7 @@ pub(super) const fn effect(operation: OperationId) -> OperationEffect {
     }
 }
 
-pub(super) const fn risk(operation: OperationId) -> OperationRisk {
+pub(super) const fn risk(operation: OperationId) -> RiskLevel {
     match operation {
         OperationId::CapabilityBindingPolicyActivate
         | OperationId::CapabilityRouteActivate
@@ -444,11 +428,11 @@ pub(super) const fn risk(operation: OperationId) -> OperationRisk {
         | OperationId::CapabilityRouteRollback
         | OperationId::ContextControlClear
         | OperationId::ModuleDependencyPolicyActivate
-        | OperationId::ModuleLifecycleDecision => OperationRisk::High,
+        | OperationId::ModuleLifecycleDecision => RiskLevel::High,
         operation => match effect(operation) {
-            OperationEffect::ReadOnly => OperationRisk::Low,
-            OperationEffect::MetadataWrite => OperationRisk::Medium,
-            OperationEffect::StateChange | OperationEffect::StartsWork => OperationRisk::High,
+            OperationEffect::ReadOnly => RiskLevel::Low,
+            OperationEffect::MetadataWrite => RiskLevel::Medium,
+            OperationEffect::StateChange | OperationEffect::StartsWork => RiskLevel::High,
         },
     }
 }
@@ -468,17 +452,11 @@ mod tests {
 
     #[test]
     fn risk_is_derived_from_effect_with_explicit_governance_overrides() {
-        assert_eq!(risk(OperationId::GitStatus), OperationRisk::Low);
-        assert_eq!(
-            risk(OperationId::ContextControlSnapshot),
-            OperationRisk::Medium
-        );
-        assert_eq!(risk(OperationId::FilesystemWrite), OperationRisk::High);
-        assert_eq!(risk(OperationId::ContextControlClear), OperationRisk::High);
-        assert_eq!(
-            risk(OperationId::CapabilityRouteActivate),
-            OperationRisk::High
-        );
+        assert_eq!(risk(OperationId::GitStatus), RiskLevel::Low);
+        assert_eq!(risk(OperationId::ContextControlSnapshot), RiskLevel::Medium);
+        assert_eq!(risk(OperationId::FilesystemWrite), RiskLevel::High);
+        assert_eq!(risk(OperationId::ContextControlClear), RiskLevel::High);
+        assert_eq!(risk(OperationId::CapabilityRouteActivate), RiskLevel::High);
     }
 
     #[test]

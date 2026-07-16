@@ -6,7 +6,6 @@ use sha2::{Digest, Sha256};
 use super::model::{EngineGrant, EngineGrantLifecycle, bootstrap_grant, is_bootstrap_grant_id};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::AuthorityGrantId;
-use crate::engine::kernel::types::RiskLevel;
 
 /// Hash the authority-relevant fields of an active grant.
 ///
@@ -29,7 +28,7 @@ pub(crate) fn grant_policy_hash(grant: &EngineGrant) -> String {
         "resourceSelectors": sorted_strings(&grant.resource_selectors),
         "fileRoots": sorted_strings(&grant.file_roots),
         "networkPolicy": grant.network_policy,
-        "maxRisk": risk_as_str(grant.max_risk),
+        "maxRisk": grant.max_risk.as_str(),
         "budget": grant.budget,
         "expiresAt": grant.expires_at.map(|value| value.to_rfc3339()),
         "canDelegate": grant.can_delegate,
@@ -61,15 +60,6 @@ fn lifecycle_as_str(lifecycle: &EngineGrantLifecycle) -> &'static str {
     match lifecycle {
         EngineGrantLifecycle::Active => "active",
         EngineGrantLifecycle::Revoked => "revoked",
-    }
-}
-
-fn risk_as_str(risk: RiskLevel) -> &'static str {
-    match risk {
-        RiskLevel::Low => "low",
-        RiskLevel::Medium => "medium",
-        RiskLevel::High => "high",
-        RiskLevel::Critical => "critical",
     }
 }
 

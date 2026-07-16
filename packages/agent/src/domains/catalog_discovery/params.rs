@@ -170,15 +170,6 @@ pub(super) fn effect_key(value: EffectClass) -> &'static str {
     }
 }
 
-pub(super) fn risk_key(value: RiskLevel) -> &'static str {
-    match value {
-        RiskLevel::Low => "low",
-        RiskLevel::Medium => "medium",
-        RiskLevel::High => "high",
-        RiskLevel::Critical => "critical",
-    }
-}
-
 pub(super) fn health_key(value: &FunctionHealth) -> &'static str {
     match value {
         FunctionHealth::Healthy => "healthy",

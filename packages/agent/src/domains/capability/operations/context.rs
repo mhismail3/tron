@@ -1,8 +1,7 @@
 use serde_json::Value;
 
 use crate::engine::{
-    ActorKind, EngineGrant, EngineHostHandle, Invocation, RiskLevel,
-    is_bootstrap_authority_grant_id,
+    ActorKind, EngineGrant, EngineHostHandle, Invocation, is_bootstrap_authority_grant_id,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -15,7 +14,8 @@ pub(super) async fn validate_execute_authority(
     engine_host: &EngineHostHandle,
 ) -> Result<(), CapabilityError> {
     let grant = validate_execute_identity(invocation, operation, engine_host).await?;
-    let required_risk = operation_risk_level(operation)?;
+    let required_risk = operation_contract::risk_level(operation)
+        .ok_or_else(|| invalid(format!("{operation} has no canonical risk policy")))?;
     if grant.max_risk < required_risk {
         return Err(invalid(format!(
             "capability::execute grant risk is below the canonical {operation} risk"
@@ -131,18 +131,6 @@ fn validate_execute_context(
     }
 }
 
-fn operation_risk_level(operation: &str) -> Result<RiskLevel, CapabilityError> {
-    match operation_contract::risk(operation) {
-        Some("low") => Ok(RiskLevel::Low),
-        Some("medium") => Ok(RiskLevel::Medium),
-        Some("high") => Ok(RiskLevel::High),
-        Some(other) => Err(invalid(format!(
-            "{operation} has unsupported canonical risk {other}"
-        ))),
-        None => Err(invalid(format!("{operation} has no canonical risk policy"))),
-    }
-}
-
 fn require_session_or_workspace(
     invocation: &Invocation,
     operation: &str,
@@ -210,7 +198,7 @@ mod tests {
     use crate::domains::session::event_store::AgentTraceListOptions;
     use crate::engine::{
         ActorId, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant, FunctionId,
-        InvocationId, RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
+        InvocationId, RUNTIME_METADATA_WORKING_DIRECTORY, RiskLevel, TraceId,
     };
     use crate::shared::server::test_support::make_test_context;
 
