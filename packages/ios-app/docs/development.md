@@ -372,99 +372,40 @@ xcodebuild test -scheme Tron \
 The source-backed scorecard and evidence live under
 `packages/agent/docs/ios-thin-client-generic-runtime-shell-*`.
 
-### Simulator Deep-Link Harnessing
+### Simulator Deep-Link Smoke Test
 
-Use the simulator deep-link path only when a scenario is explicitly testing
-navigation/deep-link handling, or when visible iOS evidence for an exact
-server-created session is intentionally called out. Backend evidence harnesses
-should default to isolated temporary server homes and must not populate the
-user's normal session shell or jump the visible Simulator without an explicit
-flag.
-The completed post-100 UI/UX scorecard lives at
-`packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
-scenario ledger as the archived iPhone/mac evidence model for owner
-classification and cross-client confirmation.
-The completed recent-gap campaign lives at
-`packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. Its iPad rows
-use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for the
-closed split-view/sidebar, popover, pointer/keyboard, and wider-viewport
-coverage instead of reopening the closed iPhone/mac scorecard. Remaining
-confirmation-gated iPad generated UI, fork, pointer, and keyboard action flows
-are owned by `packages/agent/docs/ipad-action-time-followup-scorecard.md`.
-The app registers `tron` and `tron-mobile` URL schemes, and
-`DeepLinkRouter` handles session routes in the form
-`tron://session/<session_id>`.
+`Info.plist` registers the `tron` and `tron-mobile` URL schemes;
+`DeepLinkRouter` owns the routes they accept:
+
+- `tron://session/<session-id>`
+- `tron://session/<session-id>?capability=<invocation-id>`
+- `tron://session/<session-id>?event=<event-id>`
+- `tron://settings`
+- `tron://share`
+
+The same routes work with the `tron-mobile` scheme. Boot the target simulator,
+then build and install the current beta app before testing; unit tests do not
+update an installed simulator app.
 
 ```bash
-# Ensure a simulator is booted.
 xcrun simctl bootstatus booted
 
-# If iOS code changed, build and install the current beta app before collecting
-# app-path evidence. Unit tests alone do not update the running simulator app.
 cd packages/ios-app
 xcodebuild -scheme 'Tron Beta' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -derivedDataPath /tmp/tron-ios-beta-derived \
   build
+
 xcrun simctl terminate booted com.tron.mobile.beta || true
-xcrun simctl install booted /tmp/tron-ios-beta-derived/Build/Products/Beta-iphonesimulator/TronMobile.app
-
-# Launch the installed local beta app.
+xcrun simctl install booted \
+  /tmp/tron-ios-beta-derived/Build/Products/Beta-iphonesimulator/TronMobile.app
 xcrun simctl launch booted com.tron.mobile.beta
-
-# Open the exact server session in the app only for intentional deep-link evidence.
-xcrun simctl openurl booted "tron://session/<session_id>"
-
-# Capture the visible state as a test artifact.
-xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
+xcrun simctl openurl booted "tron://session/<session-id>"
 ```
 
-Harnesses must treat a nonzero `simctl openurl` return code or screenshot
-return code as invalid app-path evidence, even when the server DB reaches a
-terminal state. For non-navigation backend evidence, keep sessions in the
-isolated harness server and collect DB truth without opening them in the user's
-visible Simulator. Reset the old paired simulator or classify the run as
-`ios_rendering`/harness evidence failure instead of passing from stale UI state.
-Cold-start session routes are consumed through the pending deep-link path on
-`ContentView.onAppear`; if the app opens to the session list after a successful
-`openurl`, record the mismatch as parity drift.
-
-Record the session id, run log, screenshot path, dev-server PID or health
-snapshot, and the matching database evidence together. A screenshot captured
-right after `simctl openurl` is navigation evidence only. For chat parity
-evidence, reopen the same deep link and capture a final screenshot after the DB
-has no later `stream.turn_start` after the selected terminal event and stable
-invocation/resource/queue/stream rows. Later
-non-turn hook rows such as `hook.llm_result` should not keep a terminal session
-open by themselves. If iOS shows the system "Open in Tron?" confirmation
-instead of immediately navigating, capture that screenshot but do not treat it
-as pass evidence by itself; the canonical result still comes from engine DB
-reconstruction for the same session id.
-
-Use deep-link screenshots as a parity check, not just a navigation shortcut.
-For each harnessed session, compare the visible chat against the engine DB:
-the submitted `message.user` prompt should appear in the transcript, the latest
-assistant content should match the latest completed, paused, or blocked engine
-turn, and any generated action sheet should either disappear or become a
-clearly non-actionable historical marker once the engine has resolved it or
-moved past it. If the chat omits the user prompt, starts at agent content,
-leaves a stale actionable confirmation/action sheet mounted, or otherwise
-disagrees with events/invocations/resources, record that as chat parity drift
-while keeping DB evidence canonical for the scenario result.
-
-Harnesses should not classify a session immediately after the first
-`stream.turn_end`. A `stream.turn_end` with `stopReason = "tool_use"` is not
-terminal; it only means the provider yielded for engine tool execution and the
-assistant turn may continue after the tool result. Before collecting final
-evidence, wait for `stopReason = "end_turn"`, then verify the session family has
-no later `stream.turn_start` after the terminal event being used and that the
-DB rows for invocations, resources, queues, resource versions, streams, events,
-and logs are stable. Use
-`packages/agent/tests/fixtures/session_terminal_guard.py` for simulator or
-live-worker harnesses that need a repeatable DB-backed terminal-state gate.
-This prevents blocked-state tests and multi-step runtime tests from being
-marked complete while the engine is still recording a block or continuing into
-the next turn.
+A nonzero `simctl openurl` status fails this navigation smoke test. Engine
+session correctness and persistence belong to their server-owned tests, not to
+simulator screenshots or this developer workflow.
 
 ### Xcode
 
