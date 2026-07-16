@@ -4,7 +4,7 @@ import SwiftUI
 
 // MARK: - Context Protocol Conformances
 
-extension ChatViewModel: CompactionContext {}
+extension ChatViewModel: CompactionContext, EventDispatchTarget {}
 
 // MARK: - Event Handlers
 

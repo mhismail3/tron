@@ -164,8 +164,9 @@ func dispatch(type: String, transform: () -> (any EventResult)?, context: EventD
 ```
 
 `ChatViewModel` passes itself as the per-call dispatch target and the
-process-lifetime registry never retains it. The view model conforms to the
-composed target through small handler extensions. The root state object owns
+process-lifetime registry never retains it. `ChatViewModel+Events.swift` owns
+the composed target conformance, while small handler extensions implement its
+requirements. The root state object owns
 orchestration; streaming, UI queue,
 capability-completion, and live event callback installation lives in
 `ChatViewModel+RuntimeCallbacks.swift`. The target exposes chat/session
