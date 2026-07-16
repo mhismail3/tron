@@ -45,16 +45,16 @@ struct ServerStatusPollerTests {
         )
     }
 
-    @Test("snapshot tone follows state changes")
-    func snapshotToneFollowsStateChanges() {
+    @Test("state tone follows state changes")
+    func stateToneFollowsStateChanges() {
         var snapshot = ServerStatusSnapshot(state: .checking)
-        #expect(snapshot.tone == .attention)
+        #expect(snapshot.state.tone == .attention)
 
         snapshot.state = .running(version: "0.5.0", port: 9847)
-        #expect(snapshot.tone == .running)
+        #expect(snapshot.state.tone == .running)
 
         snapshot.state = .failed(reason: "unreachable")
-        #expect(snapshot.tone == .failed)
+        #expect(snapshot.state.tone == .failed)
     }
 
     @Test("running: ping succeeds, snapshot is .running with version + port")
@@ -64,7 +64,7 @@ struct ServerStatusPollerTests {
             pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true))
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .running)
+        #expect(snapshot.state.tone == .running)
         #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.processID == 16027)
@@ -95,7 +95,7 @@ struct ServerStatusPollerTests {
         let setup = Self.makeSetup(token: nil, pingResult: .unreachable)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .paused)
-        #expect(snapshot.tone == .paused)
+        #expect(snapshot.state.tone == .paused)
     }
 
     @Test("unreachable + launchd loaded: failed")
@@ -103,7 +103,7 @@ struct ServerStatusPollerTests {
         let setup = Self.makeSetup(token: "abc123", pingResult: .unreachable, launchAgentLoaded: true)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .failed(reason: "unreachable"))
-        #expect(snapshot.tone == .failed)
+        #expect(snapshot.state.tone == .failed)
     }
 
     @Test("timeout + launchd loaded maps to failed")
@@ -118,7 +118,7 @@ struct ServerStatusPollerTests {
         let setup = Self.makeSetup(token: "abc123", pingResult: .unauthorized)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .unauthorized)
-        #expect(snapshot.tone == .attention)
+        #expect(snapshot.state.tone == .attention)
     }
 
     @Test("malformed response + launchd loaded maps to failed")

@@ -259,7 +259,7 @@ private final class MenuBarHeaderView: NSView {
         addressField.lineBreakMode = .byTruncatingMiddle
         addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let status = diagnosticField(prefix: "Status: ", value: content.status, valueColor: color(for: content.health))
+        let status = diagnosticField(prefix: "Status: ", value: content.status, valueColor: color(for: content.tone))
         status.lineBreakMode = .byTruncatingTail
 
         var rows: [NSView] = [title, addressField, status]
@@ -296,15 +296,15 @@ private final class MenuBarHeaderView: NSView {
         ])
     }
 
-    private func color(for health: MenuHeaderContent.Health) -> NSColor {
-        switch health {
-        case .healthy:
+    private func color(for tone: MenuBarTone) -> NSColor {
+        switch tone {
+        case .running:
             return NSColor.systemGreen
         case .attention:
             return NSColor.systemYellow
         case .paused:
             return NSColor.secondaryLabelColor
-        case .stopped:
+        case .failed:
             return NSColor.systemRed
         }
     }
@@ -407,14 +407,6 @@ private final class MenuBarWindowController: NSWindowController, NSWindowDelegat
     func windowWillClose(_ notification: Notification) {
         onClose()
     }
-}
-
-/// Tone for the menu-bar icon - drives logo tint.
-enum MenuBarTone: Equatable {
-    case running
-    case attention
-    case paused
-    case failed
 }
 
 enum MenuBarIcon {

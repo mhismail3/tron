@@ -263,8 +263,9 @@ TronMacApp.main()
 The menu bar renders an explicit server state rather than a generic dot:
 `running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
 and `paused` is gray. `ServerStatusState` owns that tone and the running
-version/port; consumers pattern-match `ServerPingResult` directly, while
-snapshots store only orthogonal process and host metadata. `ServerPing.decodeFrame`
+version/port; the menu icon and header consume the same tone and map it to
+their context-specific colors. Consumers pattern-match `ServerPingResult`
+directly, while snapshots store only orthogonal process and host metadata. `ServerPing.decodeFrame`
 owns both ping-frame classification and `ServerInfo` projection, parsing each
 WebSocket frame once. The status poller,
 pairing window, log window, and feedback action each read the bearer token

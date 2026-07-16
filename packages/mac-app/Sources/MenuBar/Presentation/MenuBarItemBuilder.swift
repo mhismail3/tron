@@ -91,22 +91,11 @@ enum MenuBarItemBuilder {
     ) -> MenuHeaderContent {
         let port = snapshot.state.runningPort ?? defaultServerPort
         let address = snapshot.tailscaleIP.map { "\($0):\(port)" } ?? "Tailscale unavailable"
-        let health: MenuHeaderContent.Health
-        switch snapshot.state {
-        case .running:
-            health = .healthy
-        case .checking, .busy, .unauthorized:
-            health = .attention
-        case .paused:
-            health = .paused
-        case .failed:
-            health = .stopped
-        }
         return MenuHeaderContent(
             endpoint: address,
             hasEndpoint: snapshot.tailscaleIP != nil,
             status: statusLabel(snapshot: snapshot),
-            health: health,
+            tone: snapshot.state.tone,
             pid: snapshot.processID,
             uptime: snapshot.uptime,
             modeDetail: modeDetail(snapshot: snapshot)
@@ -121,18 +110,20 @@ enum MenuBarItemBuilder {
     }
 }
 
-struct MenuHeaderContent: Equatable, Sendable {
-    enum Health: Equatable, Sendable {
-        case healthy
-        case attention
-        case paused
-        case stopped
-    }
+/// State-owned visual classification shared by the menu icon and header.
+/// Each renderer maps the tone to its own context-appropriate color.
+enum MenuBarTone: Equatable, Sendable {
+    case running
+    case attention
+    case paused
+    case failed
+}
 
+struct MenuHeaderContent: Equatable, Sendable {
     var endpoint: String
     var hasEndpoint: Bool
     var status: String
-    var health: Health
+    var tone: MenuBarTone
     var pid: Int?
     var uptime: String?
     var modeDetail: String?
@@ -219,7 +210,6 @@ enum ServerStatusState: Equatable, Sendable {
 /// owners and never enter this presentation value.
 struct ServerStatusSnapshot: Equatable {
     var state: ServerStatusState
-    var tone: MenuBarTone { state.tone }
     var tailscaleIP: String?
     var processID: Int?
     var uptime: String?

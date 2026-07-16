@@ -28,7 +28,7 @@ struct MenuBarItemBuilderTests {
             #expect(content.status == "Paused")
             #expect(content.endpoint == "Tailscale unavailable")
             #expect(content.hasEndpoint == false)
-            #expect(content.health == .paused)
+            #expect(content.tone == .paused)
         } else {
             Issue.record("first item should be header")
         }
@@ -48,7 +48,7 @@ struct MenuBarItemBuilderTests {
             #expect(content.status == "Running")
             #expect(content.endpoint == "100.64.0.1:9847")
             #expect(content.hasEndpoint == true)
-            #expect(content.health == .healthy)
+            #expect(content.tone == .running)
             #expect(content.pid == 16027)
             #expect(content.uptime == "01:07:42")
             #expect(content.modeDetail == nil)
@@ -272,7 +272,7 @@ struct MenuBarItemBuilderTests {
         let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Stopped")
-            #expect(content.health == .stopped)
+            #expect(content.tone == .failed)
         } else {
             Issue.record("first item should be header")
         }
@@ -284,7 +284,7 @@ struct MenuBarItemBuilderTests {
         let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Needs token")
-            #expect(content.health == .attention)
+            #expect(content.tone == .attention)
         } else {
             Issue.record("first item should be header")
         }
@@ -296,7 +296,7 @@ struct MenuBarItemBuilderTests {
         let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Checking")
-            #expect(content.health == .attention)
+            #expect(content.tone == .attention)
         } else {
             Issue.record("first item should be header")
         }
