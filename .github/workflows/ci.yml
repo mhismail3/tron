@@ -270,11 +270,9 @@ jobs:
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
             -quiet
 
-      # Dry-run the DMG build so breakage in release-mac.yml is caught
-      # on PR rather than on tag push. We skip notarization + release
-      # publish (the forced dry-run mode) by running release-mac.yml's
-      # shell steps inline against the debug-signed binary. A real
-      # signed DMG only happens on `server-v*` tag pushes.
+      # Dry-run the package-owned DMG transaction on PRs without signing,
+      # notarization, or publication. The release workflow retains release
+      # orchestration; scripts/package-dmg.sh owns assembly and mount proof.
       - name: Dry-run DMG assembly
         if: github.event_name == 'pull_request'
         run: |
@@ -297,32 +295,13 @@ jobs:
             echo "::error::TronMac.app not produced by debug build"
             exit 1
           fi
-          test -x "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-          DMG_SOURCE="$RUNNER_TEMP/tron-dmg-source"
-          rm -rf "$DMG_SOURCE"
-          mkdir -p "$DMG_SOURCE"
-          ditto "$APP_PATH" "$DMG_SOURCE/TronMac.app"
           mkdir -p dist
           DMG_PATH="$(pwd)/dist/Tron-dryrun.dmg"
-          rm -f "$DMG_PATH"
-          create-dmg --skip-jenkins \
-            --volname "Tron Dry-Run" \
-            --app-drop-link 405 170 \
-            --hdiutil-quiet \
-            "$DMG_PATH" "$DMG_SOURCE"
-          test -s "$DMG_PATH"
-
-          MOUNT_POINT="$RUNNER_TEMP/tron-dmg-mount"
-          rm -rf "$MOUNT_POINT"
-          mkdir -p "$MOUNT_POINT"
-          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
-          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
-          test -d "$MOUNT_POINT/TronMac.app"
-          test -x "$MOUNT_POINT/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-          test -L "$MOUNT_POINT/Applications"
-          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
-          hdiutil detach "$MOUNT_POINT"
-          trap - EXIT
+          ./scripts/package-dmg.sh \
+            --app "$APP_PATH" \
+            --output "$DMG_PATH" \
+            --volume-name "Tron Dry-Run" \
+            --layout structural
 
   # Aggregate gate — the main ruleset points at this single check. Client jobs
   # may be skipped only when a successful PR path filter proves they are

@@ -101,9 +101,10 @@ CI exercises the same flow on every PR that touches `packages/mac-app/**`,
 Rust change affects the Mac app bundle). The iOS and Mac `project.yml` files are
 authoritative; CI generates their ignored Xcode projects before building. It
 also runs focused non-flaky wrapper tests for paths/status/Tailscale coverage
-and builds, remounts, and inspects a headless DMG before tag push. Missing apps,
-failed packaging, empty images, or images without the wrapper, helper, and
-`Applications` link fail the job.
+before packaging. PR CI and `release-mac.yml` both delegate DMG assembly and
+mounted-image verification to `packages/mac-app/scripts/package-dmg.sh`.
+Missing apps, failed packaging, empty images, or images without the wrapper,
+helper, and `Applications` link fail the job.
 
 ## Testing
 

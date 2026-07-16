@@ -3,7 +3,7 @@
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
 #   - Tag push matching `server-v*` (e.g. `server-v0.1.0-beta.1`)
-#   - Manual `workflow_dispatch`, which defaults to structural dry-run and
+#   - Manual `workflow_dispatch`, which defaults to an unsigned dry-run and
 #     never publishes. The version always comes from VERSION.env.
 #
 # ─── Pipeline overview ──────────────────────────────────────────────────
@@ -15,11 +15,12 @@
 #      `packages/mac-app/scripts/bundle-agent.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
 #      `TronMac` scheme with explicit Developer ID signing for a release;
-#      dry-runs disable signing and exercise only structural packaging.
+#      dry-runs disable signing and exercise the release-layout package path.
 #   5. Locate the archived `.app`; publishing uses Developer ID Application.
 #   6. Notarize the `.app` via `xcrun notarytool submit --wait`; staple with
 #      `stapler`.
-#   7. Build and sign the version-owned DMG via `create-dmg`.
+#   7. Build and verify the version-owned DMG through
+#      `packages/mac-app/scripts/package-dmg.sh`, then sign it.
 #   8. Notarize the signed DMG separately, then staple it. Notary tickets are
 #      artifact-specific; the stapled `.app` ticket does not apply to the DMG.
 #   9. Generate a SHA256 manifest and deterministic changelog.
@@ -400,33 +401,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           DMG_PATH="$(pwd)/dist/${{ steps.ver.outputs.dmg_name }}"
-          DMG_SOURCE="$(pwd)/build/dmg-source"
-          rm -rf "$DMG_SOURCE"
-          mkdir -p "$DMG_SOURCE"
-          ditto "$APP_PATH" "$DMG_SOURCE/$APP_BUNDLE"
-          rm -f "$DMG_PATH"
-          create-dmg \
-            --volname "${APP_NAME} ${{ steps.ver.outputs.version }}" \
-            --window-size 540 340 \
-            --icon "$APP_BUNDLE" 135 170 \
-            --app-drop-link 405 170 \
-            --hide-extension "$APP_BUNDLE" \
-            --hdiutil-quiet \
-            "$DMG_PATH" \
-            "$DMG_SOURCE"
-          test -s "$DMG_PATH"
-
-          MOUNT_POINT="$(pwd)/build/dmg-verify"
-          rm -rf "$MOUNT_POINT"
-          mkdir -p "$MOUNT_POINT"
-          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
-          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
-          test -d "$MOUNT_POINT/$APP_BUNDLE"
-          test -x "$MOUNT_POINT/$APP_BUNDLE/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-          test -L "$MOUNT_POINT/Applications"
-          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
-          hdiutil detach "$MOUNT_POINT"
-          trap - EXIT
+          ./packages/mac-app/scripts/package-dmg.sh \
+            --app "$APP_PATH" \
+            --output "$DMG_PATH" \
+            --volume-name "${APP_NAME} ${{ steps.ver.outputs.version }}" \
+            --layout release
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Sign DMG

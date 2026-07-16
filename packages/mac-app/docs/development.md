@@ -205,23 +205,24 @@ before launching. Release uses `~/.tron`; isolated Debug uses `~/.tron-dev`.
 
 ## CI pipeline
 
-The exact release pipeline is owned by
+Release orchestration remains owned by
 [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml).
 It verifies the `VERSION.env` mirrors, builds and stages the locked Rust agent,
 generates the Xcode project, archives the wrapper, signs inside-out, notarizes
-the app, and then builds a fail-closed DMG from a dedicated source directory.
-The mounted DMG must contain the wrapper, production helper, and
-`Applications -> /Applications` link before the separately signed/notarized
-image can reach a draft release. `scripts/tron-release-notes` owns the dynamic
-tag, changelog, and asset names; the workflow applies the release title exported
-by `scripts/tron-version`.
+the app, then calls [`scripts/package-dmg.sh`](../scripts/package-dmg.sh).
+That package owner copies the complete app, applies the explicit structural or
+release layout, and remounts the image to require the wrapper, helper, and
+`Applications -> /Applications` link. The workflow retains DMG signing,
+notarization, hashing, upload, and release handling; `scripts/tron-release-notes`
+and `scripts/tron-version` own the dynamic release metadata.
 
-Manual workflow dispatch defaults to structural dry-run and never publishes a
+Manual workflow dispatch defaults to an unsigned dry-run and never publishes a
 GitHub release; with `dry_run=false` and signing credentials, it can exercise
 signed and notarized packaging. Only the explicit manual dry-run may omit the
 five signing/notarization secrets; tag runs and manual `dry_run=false` runs
 reject any missing secret before the build. PR CI compiles the full Mac test
-bundle, runs focused stable suites, and remounts a headless unsigned DMG.
+bundle, runs focused stable suites, and calls the same owner with structural
+layout on an unsigned Debug app.
 Missing build products, helpers, links, or failed packaging are hard failures.
 
 ## Common tasks
