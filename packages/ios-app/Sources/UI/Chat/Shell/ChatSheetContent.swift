@@ -7,16 +7,11 @@ struct ChatSheetContent: View {
     let sheet: ChatSheet
     let viewModel: ChatViewModel
     let sessionId: String
-    let workspaceDeleted: Bool
     let sheetCoordinator: SheetCoordinator?
     @Environment(\.dependencies) var dependencies
 
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
-
-    private var sheetReadOnly: Bool {
-        SheetReadOnlyPolicy.isReadOnly(workspaceDeleted: workspaceDeleted, agentPhase: viewModel.agentPhase)
-    }
 
     var body: some View {
         sheetContent

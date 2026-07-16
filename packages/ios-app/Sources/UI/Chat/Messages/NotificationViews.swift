@@ -382,24 +382,6 @@ struct MessageDeletedNotificationView: View {
     }
 }
 
-// MARK: - Workspace Deleted Notification View
-
-struct WorkspaceDeletedNotificationView: View {
-    var body: some View {
-        NotificationPill(tint: .tronError) {
-            HStack(spacing: 8) {
-                Image(systemName: "folder.badge.questionmark")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronError)
-
-                Text("Workspace deleted \u{2013} session in read-only mode")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronError.opacity(0.9))
-            }
-        }
-    }
-}
-
 // MARK: - Turn Failed Notification View
 
 /// Renders a `turn.failed` notification pill. When the server marked the

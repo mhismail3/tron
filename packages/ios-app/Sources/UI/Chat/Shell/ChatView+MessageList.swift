@@ -21,7 +21,7 @@ extension ChatView {
                         contextPercentage: viewModel.contextState.contextPercentage,
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
-                        readOnly: workspaceDeleted || !(interactionPolicy?.isConnected ?? false),
+                        readOnly: !(interactionPolicy?.isConnected ?? false),
                         showDragHint: false
                     ),
                     actions: InputBarActions(
@@ -125,14 +125,6 @@ extension ChatView {
                             .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
                             .animation(viewModel.shouldShowBreathingLine ? .easeInOut(duration: 0.3) : nil, value: viewModel.shouldShowBreathingLine)
                             .id("processing")
-
-                        // Show workspace deleted notification when workspace folder no longer exists
-                        if workspaceDeleted {
-                            WorkspaceDeletedNotificationView()
-                                .opacity(initialLoadComplete ? 1 : 0)
-                                .animation(.smooth(duration: 0.3), value: initialLoadComplete)
-                                .id("workspaceDeleted")
-                        }
 
                         // Bottom anchor for scrolling
                         Color.clear

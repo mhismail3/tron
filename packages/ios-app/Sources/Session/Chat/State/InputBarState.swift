@@ -78,7 +78,7 @@ enum SendBlockReason: Equatable, Sendable {
     case disconnected
     /// Context compaction is in progress.
     case compacting
-    /// This chat view is read-only (shared, workspace deleted, etc.).
+    /// The shared interaction policy currently treats this chat view as read-only.
     case readOnly
 
     /// User-facing explanation shown in the disabled-button tooltip.

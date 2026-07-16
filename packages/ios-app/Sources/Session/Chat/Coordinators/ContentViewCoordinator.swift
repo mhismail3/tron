@@ -1,49 +1,15 @@
 import Foundation
 
-/// Manages connection state, workspace validation, and session lifecycle for ContentView.
+/// Manages deep-link navigation and session lifecycle actions for ContentView.
 /// Keeps ContentView focused on layout and presentation.
-@Observable
 @MainActor
 final class ContentViewCoordinator {
     private let dependencies: DependencyContainer
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
 
-    // MARK: - State
-
-    /// Tracks which sessions have deleted workspaces
-    var workspaceDeletedForSession: [String: Bool] = [:]
-    var isValidatingWorkspace = false
-
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
-    }
-
-    // MARK: - Connection State Handling
-
-    /// Called when connection state transitions to connected.
-    /// Session list refresh is handled centrally by `SessionRefreshService`; this handler
-    /// only re-validates the current session's workspace.
-    func handleConnectionEstablished(selectedSessionId: String?) {
-        if let sessionId = selectedSessionId {
-            validateWorkspace(for: sessionId)
-        }
-    }
-
-    /// Called when server settings change. Clears cached workspace states and enqueues a
-    /// coordinator-coalesced session refresh.
-    func handleServerSettingsChanged() {
-        workspaceDeletedForSession = [:]
-        eventStoreManager.requestSessionRefresh(reason: .settingsChanged)
-    }
-
-    // MARK: - Session Selection
-
-    /// Handles session selection: persists active session and validates workspace.
-    func handleSessionSelection(_ sessionId: String?) {
-        guard let id = sessionId else { return }
-        eventStoreManager.setActiveSession(id)
-        validateWorkspace(for: id)
     }
 
     // MARK: - Deep Link Handling
@@ -129,11 +95,5 @@ final class ContentViewCoordinator {
                 TronLogger.shared.error("Failed to create quick session: \(error)", category: .session)
             }
         }
-    }
-
-    // MARK: - Private
-
-    private func validateWorkspace(for sessionId: String) {
-        workspaceDeletedForSession.removeValue(forKey: sessionId)
     }
 }

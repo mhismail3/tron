@@ -67,13 +67,11 @@ struct ChatView: View {
     // MARK: - Stored Properties (internal for extension access)
     let sessionId: String
     let services: ChatSessionServices
-    let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(services: ChatSessionServices, sessionId: String, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(services: ChatSessionServices, sessionId: String, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
         self.services = services
-        self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
         _viewModel = State(wrappedValue: ChatViewModel(services: services, sessionId: sessionId))
@@ -87,8 +85,7 @@ struct ChatView: View {
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
-            sessionId: sessionId,
-            workspaceDeleted: workspaceDeleted
+            sessionId: sessionId
         )
         .sheet(isPresented: $viewModel.displayStreamState.showStreamSheet) {
             StreamSheetView(

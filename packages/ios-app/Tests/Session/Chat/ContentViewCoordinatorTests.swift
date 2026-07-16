@@ -1,13 +1,12 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for ContentViewCoordinator and its workspace resolution logic.
+/// Tests for ContentViewCoordinator and its workspace resolution helper.
 ///
 /// The coordinator delegates most work to EventStoreManager and EngineClient via
 /// async Tasks. Those delegation paths are tested indirectly through integration
 /// tests (ConnectionCoordinatorTests, ChatViewModelLifecycleTests). These tests
-/// cover the coordinator's own state management and the pure workspace resolution
-/// function it depends on.
+/// cover its deep-link input boundary and the pure workspace resolution function.
 @MainActor
 final class ContentViewCoordinatorTests: XCTestCase {
 
@@ -32,29 +31,6 @@ final class ContentViewCoordinatorTests: XCTestCase {
         await testState.cleanup()
     }
 
-    // MARK: - Initial State
-
-    func testInitialState() {
-        XCTAssertTrue(coordinator.workspaceDeletedForSession.isEmpty)
-        XCTAssertFalse(coordinator.isValidatingWorkspace)
-    }
-
-    // MARK: - handleServerSettingsChanged
-
-    func testHandleServerSettingsChangedClearsWorkspaceCache() {
-        coordinator.workspaceDeletedForSession = ["sess-1": true, "sess-2": false]
-        coordinator.handleServerSettingsChanged()
-        XCTAssertTrue(coordinator.workspaceDeletedForSession.isEmpty)
-    }
-
-    // MARK: - handleSessionSelection
-
-    func testHandleSessionSelectionNilDoesNotCrash() {
-        coordinator.handleSessionSelection(nil)
-        // Should not crash or mutate state
-        XCTAssertTrue(coordinator.workspaceDeletedForSession.isEmpty)
-    }
-
     // MARK: - handleDeepLink
 
     func testHandleDeepLinkNilSessionDoesNotNavigate() {
@@ -65,12 +41,6 @@ final class ContentViewCoordinatorTests: XCTestCase {
         XCTAssertFalse(navigated, "onNavigate should not be called for nil sessionId")
     }
 
-    // MARK: - handleConnectionEstablished
-
-    func testHandleConnectionEstablishedNilSessionDoesNotCrash() {
-        coordinator.handleConnectionEstablished(selectedSessionId: nil)
-        // Should not crash — just refreshes session list
-    }
 }
 
 // MARK: - Pending Deep Link State

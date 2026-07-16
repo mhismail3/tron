@@ -46,11 +46,6 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
-    func testWorkspaceDeletedNotificationCreation() {
-        let view = WorkspaceDeletedNotificationView()
-        XCTAssertNotNil(view)
-    }
-
     func testCatchingUpNotificationCreation() {
         let view = CatchingUpNotificationView()
         XCTAssertNotNil(view)
