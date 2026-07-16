@@ -1,5 +1,4 @@
 // Debug.xcconfig - Development build with dev bundle ID
-#include "Base.xcconfig"
 
 // Debug settings
 DEBUG_INFORMATION_FORMAT = dwarf

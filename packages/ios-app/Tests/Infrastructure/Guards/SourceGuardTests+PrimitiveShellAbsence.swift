@@ -209,10 +209,6 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("project.yml"),
             encoding: .utf8
         )
-        let baseConfig = try String(
-            contentsOf: iosRoot.appendingPathComponent("Configuration/Base.xcconfig"),
-            encoding: .utf8
-        )
         let appEntry = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
             encoding: .utf8
@@ -230,7 +226,6 @@ extension SourceGuardTests {
         )
 
         #expect(projectYML.contains(#"iOS: "26.0""#))
-        #expect(baseConfig.contains("IPHONEOS_DEPLOYMENT_TARGET = 26.0"))
         #expect(architectureDoc.contains("**Minimum iOS**: 26.0"))
         #expect(!architectureDoc.contains("**Minimum iOS**: 18.0"))
         #expect(rootReadme.contains("**Minimum iOS:** 26.0"))

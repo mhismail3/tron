@@ -90,8 +90,8 @@ directly when bundle identity, arguments, ports, or associations change.
 
 The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. Managed skills, transcription sidecars, and product capability assets are not bundled.
 
-Generate the Xcode project after clone and whenever the shared Swift/project-shape
-owner `project.yml` or the tracked source/resource layout changes:
+Generate the Xcode project after clone and whenever the shared deployment/Swift/project-shape
+owner `project.yml`, tracked `Configuration/`, or source/resource layout changes:
 
 ```bash
 cd packages/mac-app

@@ -1,5 +1,4 @@
 // Release.xcconfig - Release build for DMG distribution
-#include "Base.xcconfig"
 
 // Release settings
 DEBUG_INFORMATION_FORMAT = dwarf-with-dsym

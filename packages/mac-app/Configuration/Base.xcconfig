@@ -1,6 +1,0 @@
-// Base.xcconfig - Shared settings for all configurations
-
-// Deployment
-MACOSX_DEPLOYMENT_TARGET = 15.0
-
-// App info lives in project.yml and is generated from VERSION.env.

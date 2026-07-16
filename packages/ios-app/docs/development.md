@@ -16,10 +16,10 @@ xcodegen generate
 open TronMobile.xcodeproj
 ```
 
-`project.yml` is the authoritative project definition. The generated
-`TronMobile.xcodeproj` is local build output and remains ignored by Git.
-Shared signing, Swift, and version build settings live at the project level so
-the app and share extension inherit one value. `scripts/tron version sync`
+`project.yml` is the authoritative project definition; regenerate after it or
+tracked `Configuration/` changes. The generated `TronMobile.xcodeproj` remains
+ignored by Git. Shared deployment, signing, Swift, and version settings live at
+the project level, so all targets inherit one value. `scripts/tron version sync`
 updates the project-level version mirror from `VERSION.env`.
 
 ### Icon Assets

@@ -252,9 +252,6 @@ check_versions() {
     if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"; then
         note_failure "iOS Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
     fi
-    if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/mac-app/Configuration/Base.xcconfig"; then
-        note_failure "Mac Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
-    fi
 
     check_equals "iOS app Info.plist TRONCanonicalVersion" \
         "$(value_after_key "$PROJECT_DIR/packages/ios-app/Sources/Info.plist" "TRONCanonicalVersion")" \
