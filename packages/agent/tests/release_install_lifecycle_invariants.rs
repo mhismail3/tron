@@ -100,6 +100,28 @@ cmd_dev "$@"
     (output.status.code().unwrap_or(-1), stdout, stderr)
 }
 
+fn probe_install_command(args: &[&str]) -> std::process::Output {
+    Command::new("bash")
+        .arg("-c")
+        .arg(
+            r#"
+source "$INSTALL_SCRIPT"
+print_error() { printf '%s\n' "$1" >&2; }
+require_project_dir() { printf '%s\n' require-project; }
+build_rust() { printf '%s\n' build; }
+cmd_install "$@"
+"#,
+        )
+        .arg("bash")
+        .args(args)
+        .env(
+            "INSTALL_SCRIPT",
+            repo_path("scripts/tron.d/manual-deploy.sh"),
+        )
+        .output()
+        .expect("install parser probe should start")
+}
+
 #[test]
 fn port_9847_and_process_ownership_are_source_guarded() {
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
@@ -489,10 +511,8 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     for required in [
         "cmd_setup()",
         "cmd_install()",
-        "--gui-helper",
-        "--skip-service-start",
-        "Machine-readable contributor runs skip launchctl",
-        "Phases (ordered): dirs, build, cli, bundle, plist, symlink, launchd",
+        "print_status \"Starting service...\"",
+        "service_is_running && wait_for_service_health 12",
         "completed on first server start",
     ] {
         assert!(
@@ -500,6 +520,20 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
             "setup/install path missing {required}"
         );
     }
+    let invalid_install = probe_install_command(&["--unknown"]);
+    assert_eq!(
+        invalid_install.status.code(),
+        Some(2),
+        "unknown install options must exit 2"
+    );
+    assert!(
+        invalid_install.stdout.is_empty(),
+        "invalid options must fail before work"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&invalid_install.stderr).trim(),
+        "Unknown install option: --unknown"
+    );
     let tron = read_repo_file("scripts/tron");
     let installed_cli = read_repo_file("scripts/tron-cli");
     assert!(

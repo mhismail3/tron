@@ -419,158 +419,98 @@ cmd_manual_deploy() {
 }
 
 cmd_install() {
-    # --gui-helper: machine-readable contributor mode. Emits one JSON
-    # event per line on stdout, keeping stderr for anything else.
-    # Suppresses decorative banners and interactive prompts.
-    #
-    # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
-    # Phases (ordered): dirs, build, cli, bundle, plist, symlink, launchd
-    # The distributed Mac app does not call this path. Production
-    # installs are `/Applications/Tron.app` + SMAppService only.
-    local gui_helper=0
-    local skip_service_start=0
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --gui-helper)       gui_helper=1; shift ;;
-            --skip-service-start) skip_service_start=1; shift ;;
-            *) shift ;;
-        esac
-    done
-
-    _emit_event() {
-        # $1=phase $2=status $3=detail
-        if [ "$gui_helper" -eq 1 ]; then
-            # JSON-escape detail: backslash + double-quote.
-            local detail="${3:-}"
-            detail="${detail//\\/\\\\}"
-            detail="${detail//\"/\\\"}"
-            printf '{"phase":"%s","status":"%s","detail":"%s"}\n' \
-                "$1" "$2" "$detail"
-        fi
-    }
+    if [ "$#" -gt 0 ]; then
+        print_error "Unknown install option: $1"
+        return 2
+    fi
 
     require_project_dir
 
-    if [ "$gui_helper" -eq 0 ]; then
-        print_header "Installing Tron Service"
-        echo "  Workspace: $PROJECT_DIR"
-        echo ""
-    fi
+    print_header "Installing Tron Service"
+    echo "  Workspace: $PROJECT_DIR"
+    echo ""
 
-    _emit_event dirs start ""
     mkdir -p "$BIN_DIR"
     mkdir -p "$CONTRIBUTOR_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
-    _emit_event dirs ok "$BIN_DIR,$CONTRIBUTOR_DIR,$HOME/Library/LaunchAgents"
 
-    _emit_event build start "cargo build --release"
     if ! build_rust; then
-        _emit_event build fail "cargo build exited non-zero"
         return 1
     fi
-    _emit_event build ok "$RELEASE_BINARY"
 
     if ! begin_contributor_pair_update install; then
-        _emit_event cli fail "another contributor helper update is active"
         return 1
     fi
 
     # Publish either the complete prior pair or an explicit clean-install plan
     # before replacing any helper, CLI, plist, entrypoint, or commit marker.
     if ! backup_contributor_pair; then
-        _emit_event cli fail "contributor rollback plan publication failed"
         return 1
     fi
     rm -f "$DEPLOYED_COMMIT_FILE"
 
-    _emit_event cli start ""
     if ! install_runtime_cli_payload; then
-        _emit_event cli fail "runtime payload installation failed"
         return 1
     fi
-    [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
-    _emit_event cli ok "$CONTRIBUTOR_DIR/tron-cli"
+    print_success "Installed runtime CLI"
 
-    _emit_event bundle start "$INSTALLED_BUNDLE"
-    [ "$gui_helper" -eq 0 ] && print_status "Creating app bundle..."
+    print_status "Creating app bundle..."
     if ! create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY" \
         || ! codesign_bundle "$INSTALLED_BUNDLE" \
         || ! validate_contributor_bundle "$INSTALLED_BUNDLE"; then
-        _emit_event bundle fail "bundle construction or signing failed"
         return 1
     fi
-    [ "$gui_helper" -eq 0 ] && print_success "Installed app bundle"
-    _emit_event bundle ok "$INSTALLED_BUNDLE"
+    print_success "Installed app bundle"
 
-    _emit_event plist start "$PLIST_PATH"
-    [ "$gui_helper" -eq 0 ] && print_status "Creating launchd service..."
+    print_status "Creating launchd service..."
     if ! create_launchd_plist; then
-        _emit_event plist fail "launchd plist creation failed"
         return 1
     fi
-    [ "$gui_helper" -eq 0 ] && print_success "Created: $PLIST_PATH"
-    _emit_event plist ok "$PLIST_PATH"
+    print_success "Created: $PLIST_PATH"
 
-    _emit_event symlink start "$BIN_DIR/tron"
-    [ "$gui_helper" -eq 0 ] && print_status "Installing tron CLI..."
+    print_status "Installing tron CLI..."
     if ! ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$BIN_DIR/tron"; then
-        _emit_event symlink fail "CLI symlink creation failed"
         return 1
     fi
-    [ "$gui_helper" -eq 0 ] && print_success "Installed: $BIN_DIR/tron -> $CONTRIBUTOR_DIR/tron-cli"
+    print_success "Installed: $BIN_DIR/tron -> $CONTRIBUTOR_DIR/tron-cli"
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-        [ "$gui_helper" -eq 0 ] && print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
-        _emit_event symlink ok "path-missing:$BIN_DIR"
-    else
-        _emit_event symlink ok ""
+        print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
 
-    # Machine-readable contributor runs skip launchctl; interactive
-    # CLI-install runs keep the full behavior.
-    if [ "$skip_service_start" -eq 0 ] && [ "$gui_helper" -eq 0 ]; then
-        _emit_event launchd start ""
-        print_status "Starting service..."
-        launchd_start "$PLIST_NAME"
-        sleep 2
-        if service_is_running && wait_for_service_health 12; then
-            local pid
-            pid=$(get_service_pid)
-            local current_commit
-            current_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
-            if ! printf '%s\n' "$current_commit" > "$DEPLOYED_COMMIT_FILE"; then
-                _emit_event launchd fail "deployed commit recording failed"
-                return 1
-            fi
-            print_success "Service started (PID: ${pid:-unknown})"
-            _emit_event launchd ok "pid=${pid:-unknown}"
-        else
-            print_error "Installed contributor helper did not pass /health"
-            _emit_event launchd fail "health check failed"
+    print_status "Starting service..."
+    launchd_start "$PLIST_NAME"
+    sleep 2
+    if service_is_running && wait_for_service_health 12; then
+        local pid
+        pid=$(get_service_pid)
+        local current_commit
+        current_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+        if ! printf '%s\n' "$current_commit" > "$DEPLOYED_COMMIT_FILE"; then
             return 1
         fi
+        print_success "Service started (PID: ${pid:-unknown})"
     else
-        _emit_event launchd ok "skipped (gui-helper or --skip-service-start)"
+        print_error "Installed contributor helper did not pass /health"
+        return 1
     fi
     discard_contributor_pair_backup || return 1
     end_contributor_pair_update || return 1
 
-    if [ "$gui_helper" -eq 0 ]; then
-        echo ""
-        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-        echo -e "${GREEN}                    Tron Installation Complete!${NC}"
-        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo "  Server:  http://localhost:$PROD_PORT"
-        echo "  Health:  http://localhost:$PROD_PORT/health"
-        echo "  Binary:  $INSTALLED_BINARY"
-        echo "  CLI:     $BIN_DIR/tron"
-        echo ""
-        echo "  Next steps:"
-        echo "    tron login       # Authenticate with a provider"
-        echo "    tron dev         # Start dev server"
-        echo "    tron status      # Check service status"
-        echo ""
-    fi
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                    Tron Installation Complete!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  Server:  http://localhost:$PROD_PORT"
+    echo "  Health:  http://localhost:$PROD_PORT/health"
+    echo "  Binary:  $INSTALLED_BINARY"
+    echo "  CLI:     $BIN_DIR/tron"
+    echo ""
+    echo "  Next steps:"
+    echo "    tron login       # Authenticate with a provider"
+    echo "    tron dev         # Start dev server"
+    echo "    tron status      # Check service status"
+    echo ""
 }
 
 cmd_setup() {

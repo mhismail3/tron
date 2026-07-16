@@ -672,7 +672,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check, and fail-closed rollback (`--force` skips confirms; `--ci` is non-interactive). `deployed-commit` and the restart sentinel advance only after `/health` passes. No automatic deploy watcher or shorter deploy alias is retained. |
-| `tron install` | Contributor-only helper/CLI pair install for workspace testing. It always rebuilds, publishes a clean-install or prior-pair rollback plan, and holds the writer lock through bundle, payload, plist, symlink, and optional health validation; `deployed-commit` advances only when interactive startup passes `/health`, and remains absent for `--skip-service-start`. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
+| `tron install` | Contributor-only helper/CLI pair install for workspace testing. It always rebuilds, publishes a clean-install or prior-pair rollback plan, and holds the writer lock through bundle, payload, plist, symlink, service start, and health validation; `deployed-commit` advances only after `/health` passes. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 
 ### Runtime
 
