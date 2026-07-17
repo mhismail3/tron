@@ -217,10 +217,21 @@ async fn engine_upgrade_handler(
     let ctx = state.runtime_context;
     let clients = state.engine_clients;
     let max_message_size = state.config.max_message_size;
+    let heartbeat_interval = Duration::from_millis(state.config.heartbeat_interval_ms);
+    let heartbeat_timeout = Duration::from_millis(state.config.heartbeat_timeout_ms);
     Ok(ws
         .max_message_size(max_message_size)
         .on_upgrade(move |socket| async move {
-            run_engine_ws_session(socket, client_id, ctx, clients, max_message_size).await;
+            run_engine_ws_session(
+                socket,
+                client_id,
+                ctx,
+                clients,
+                max_message_size,
+                heartbeat_interval,
+                heartbeat_timeout,
+            )
+            .await;
         }))
 }
 

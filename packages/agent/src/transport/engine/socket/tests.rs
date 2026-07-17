@@ -29,6 +29,29 @@ fn test_session_with_frame_limit(
     )
 }
 
+#[test]
+fn client_lease_owns_exact_registry_lifetime() {
+    let clients = Arc::new(EngineClientRegistry::new());
+    assert_eq!(clients.connection_count(), 0);
+
+    {
+        let _lease = EngineClientLease::acquire(clients.clone());
+        assert_eq!(clients.connection_count(), 1);
+    }
+
+    assert_eq!(clients.connection_count(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn child_task_drain_aborts_a_stalled_socket_task() {
+    let mut child_tasks = JoinSet::new();
+    child_tasks.spawn(std::future::pending());
+
+    drain_child_tasks(&mut child_tasks).await;
+
+    assert!(child_tasks.is_empty());
+}
+
 #[tokio::test]
 async fn hello_sets_defaults() {
     let (mut session, mut rx) = test_session_with_frame_limit(4096);

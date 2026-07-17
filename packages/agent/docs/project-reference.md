@@ -79,6 +79,13 @@ this reference and its owning source documentation in the same commit.
 5. Domain output is serialized at the transport boundary
 6. Runtime events publish neutral `ServerEventPayload` records to engine streams, and `/engine` subscriptions deliver stream records
 
+The `/engine` socket owner sends server-driven Ping frames using the configured
+heartbeat interval and retires peers that return no activity before the
+configured timeout. Each upgraded socket owns one registry lease plus bounded
+writer/subscription tasks, so disconnect, timeout, panic unwind, and task
+cancellation cannot strand the health connection count or child tasks. Normal
+disconnect and heartbeat timeout also retire connection-owned subscriptions.
+
 ---
 
 ## Architecture Ownership

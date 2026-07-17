@@ -40,6 +40,14 @@ fn unique_home(root: &Path) -> PathBuf {
 }
 
 async fn boot_server() -> TestServer {
+    boot_server_with_config(ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        ..ServerConfig::default()
+    })
+    .await
+}
+
+async fn boot_server_with_config(config: ServerConfig) -> TestServer {
     let temp = tempfile::tempdir().unwrap();
     let home = unique_home(temp.path());
     let db_path = temp.path().join("tron.sqlite");
@@ -83,14 +91,7 @@ async fn boot_server() -> TestServer {
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let server = Arc::new(TronServer::new(
-        ServerConfig {
-            host: "127.0.0.1".to_owned(),
-            ..ServerConfig::default()
-        },
-        runtime_context,
-        metrics_handle,
-    ));
+    let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
     tron::transport::runtime::EngineRuntimeServices::start(&server);
     let (addr, _handle) = server.listen().await.unwrap();
 
@@ -164,6 +165,100 @@ fn unwrap_invoke_value(response: Value) -> Value {
     } else {
         response.get("result").cloned().unwrap_or(Value::Null)
     }
+}
+
+async fn wait_for_connection_count(server: &TronServer, expected: usize) {
+    timeout(TIMEOUT, async {
+        while server.engine_clients().connection_count() != expected {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("engine connection count did not reach {expected}"));
+}
+
+fn heartbeat_test_config() -> ServerConfig {
+    ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        heartbeat_interval_ms: 50,
+        heartbeat_timeout_ms: 250,
+        ..ServerConfig::default()
+    }
+}
+
+#[tokio::test]
+async fn engine_reaps_an_unresponsive_websocket_client() {
+    let runtime = boot_server_with_config(heartbeat_test_config()).await;
+    let mut ws = connect(&runtime.url, &runtime.auth_path).await;
+    wait_for_connection_count(&runtime.server, 1).await;
+
+    // Do not poll the client: tungstenite cannot process the server's Ping or
+    // write a Pong while its stream is idle.
+    wait_for_connection_count(&runtime.server, 0).await;
+
+    timeout(TIMEOUT, async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await
+    .expect("reaped websocket did not close");
+
+    runtime.server.shutdown().shutdown();
+}
+
+#[tokio::test]
+async fn engine_keeps_a_responsive_websocket_client_alive() {
+    let runtime = boot_server_with_config(heartbeat_test_config()).await;
+    let mut ws = connect(&runtime.url, &runtime.auth_path).await;
+    wait_for_connection_count(&runtime.server, 1).await;
+
+    ws.send(Message::text(
+        json!({"type": "hello", "id": "heartbeat-hello", "protocolVersion": 1}).to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let started = Instant::now();
+    let mut hello_seen = false;
+    let mut ping_count = 0;
+    while started.elapsed() < Duration::from_millis(800) {
+        let Ok(next) = timeout(Duration::from_millis(150), ws.next()).await else {
+            continue;
+        };
+        let Some(message) = next else {
+            panic!("responsive websocket closed unexpectedly");
+        };
+        match message.expect("responsive websocket read failed") {
+            Message::Ping(payload) => {
+                ping_count += 1;
+                ws.send(Message::Pong(payload)).await.unwrap();
+            }
+            Message::Text(text) => {
+                let value: Value = serde_json::from_str(&text).unwrap();
+                if value.get("id").and_then(Value::as_str) == Some("heartbeat-hello") {
+                    assert_eq!(value.get("type").and_then(Value::as_str), Some("hello.ok"));
+                    hello_seen = true;
+                }
+            }
+            Message::Close(frame) => panic!("responsive websocket closed: {frame:?}"),
+            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+        }
+    }
+
+    assert!(hello_seen, "responsive client did not complete hello");
+    assert!(
+        ping_count >= 3,
+        "responsive client saw only {ping_count} pings"
+    );
+    assert_eq!(runtime.server.engine_clients().connection_count(), 1);
+
+    ws.close(None).await.unwrap();
+    wait_for_connection_count(&runtime.server, 0).await;
+    runtime.server.shutdown().shutdown();
 }
 
 #[tokio::test]

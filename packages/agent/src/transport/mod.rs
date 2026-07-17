@@ -43,6 +43,10 @@
 //!   The WebSocket upgrade enforces it, the socket session advertises it during
 //!   hello, and correlated validation errors retain the request id. Outbound
 //!   queues and worker sends remain bounded by their owning loops.
+//! - The same server configuration owns `/engine` heartbeat timing. Each socket
+//!   has one registry lease and one bounded child-task owner; stale peers are
+//!   reaped, connection-owned subscriptions are retired, and the active gauge
+//!   cannot remain stranded after task cancellation.
 //! - Transport must not implement domain behavior or call handler-shaped
 //!   shortcuts; it dispatches canonical engine requests only.
 //! - `/engine/workers` is loopback/local external-worker transport; registration

@@ -13,7 +13,7 @@ pub struct ServerConfig {
     pub max_connections: usize,
     /// Heartbeat interval in milliseconds.
     pub heartbeat_interval_ms: u64,
-    /// Heartbeat timeout in milliseconds (close after this many missed pongs).
+    /// Timeout in milliseconds for an unanswered server Ping with no peer activity.
     pub heartbeat_timeout_ms: u64,
     /// Max WebSocket message size in bytes (default 150 MB).
     pub max_message_size: usize,

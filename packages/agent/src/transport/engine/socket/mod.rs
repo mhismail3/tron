@@ -1,23 +1,32 @@
 //! `/engine` WebSocket protocol over the canonical engine transport envelope.
 //!
 //! This module owns only WebSocket framing, protocol validation, correlation
-//! ids, heartbeat, and stream cursor subscription state. Worker/client
+//! ids, server-driven heartbeat, and stream cursor subscription state. One
+//! stack-owned connection lease covers registry accounting, while one bounded
+//! child-task set owns the socket writer and subscription pump. Worker/client
 //! discover/inspect/watch/invoke/promote messages are translated into
 //! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
 //! through the canonical engine transport path. Public context is limited to
 //! session/workspace/trace correlation; authority scopes and runtime metadata
 //! are not accepted on the wire. Model providers do not receive this transport
 //! surface; they receive only the capability-domain `execute` orchestrator.
+//!
+//! A peer remains live while it returns Pong or any other inbound activity.
+//! Missing activity after a sent Ping retires the socket; teardown cancels its
+//! pumps, unsubscribes connection-owned streams, and bounds child-task drain.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use metrics::counter;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
+use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(test)]
@@ -37,6 +46,8 @@ const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+const CONTROL_QUEUE_CAPACITY: usize = 1;
+const CHILD_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 mod outbound;
 mod stream_projection;
@@ -82,6 +93,29 @@ impl EngineClientRegistry {
     }
 }
 
+/// Exact connection-count ownership for one upgraded `/engine` socket.
+///
+/// The lease is intentionally stack-owned by `run_engine_ws_session`: normal
+/// return, panic unwinding, and task cancellation all retire the registry entry.
+struct EngineClientLease {
+    clients: Arc<EngineClientRegistry>,
+}
+
+impl EngineClientLease {
+    fn acquire(clients: Arc<EngineClientRegistry>) -> Self {
+        clients.add();
+        counter!("engine_ws_connections_total").increment(1);
+        Self { clients }
+    }
+}
+
+impl Drop for EngineClientLease {
+    fn drop(&mut self) {
+        self.clients.remove();
+        counter!("engine_ws_disconnections_total").increment(1);
+    }
+}
+
 /// Run one authenticated `/engine` client WebSocket connection.
 pub async fn run_engine_ws_session(
     ws: WebSocket,
@@ -89,22 +123,33 @@ pub async fn run_engine_ws_session(
     ctx: Arc<ServerRuntimeContext>,
     clients: Arc<EngineClientRegistry>,
     max_frame_bytes: usize,
+    heartbeat_interval: Duration,
+    heartbeat_timeout: Duration,
 ) {
-    clients.add();
-    counter!("engine_ws_connections_total").increment(1);
+    let _client_lease = EngineClientLease::acquire(clients);
     let (mut ws_tx, mut ws_rx) = ws.split();
     let (out_tx, mut out_rx) = mpsc::channel::<String>(OUTBOUND_QUEUE_CAPACITY);
-    let writer = tokio::spawn(async move {
-        while let Some(text) = out_rx.recv().await {
-            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+    let (control_tx, mut control_rx) = mpsc::channel::<Message>(CONTROL_QUEUE_CAPACITY);
+    let cancel = CancellationToken::new();
+    let writer_cancel = cancel.clone();
+    let mut child_tasks = JoinSet::new();
+    child_tasks.spawn(async move {
+        loop {
+            let message = tokio::select! {
+                biased;
+                Some(message) = control_rx.recv() => message,
+                Some(text) = out_rx.recv() => Message::Text(text.into()),
+                else => break,
+            };
+            if ws_tx.send(message).await.is_err() {
                 break;
             }
         }
+        writer_cancel.cancel();
     });
 
     let subscriptions = Arc::new(tokio::sync::Mutex::new(BTreeMap::new()));
-    let cancel = CancellationToken::new();
-    let push_task = tokio::spawn(push_subscription_events(
+    child_tasks.spawn(push_subscription_events(
         ctx.clone(),
         out_tx.clone(),
         subscriptions.clone(),
@@ -118,27 +163,79 @@ pub async fn run_engine_ws_session(
         cancel.clone(),
         max_frame_bytes,
     );
-    while let Some(frame) = ws_rx.next().await {
-        match frame {
-            Ok(Message::Text(text)) => {
-                if !session.handle_text(&text).await {
-                    break;
+
+    let mut heartbeat = tokio::time::interval(heartbeat_interval);
+    heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let _ = heartbeat.tick().await;
+    let mut first_unanswered_ping_at: Option<Instant> = None;
+
+    loop {
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => break,
+            frame = ws_rx.next() => {
+                let Some(frame) = frame else { break };
+                match frame {
+                    Ok(Message::Text(text)) => {
+                        first_unanswered_ping_at = None;
+                        if !session.handle_text(&text).await {
+                            break;
+                        }
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Binary(_)) => {
+                        first_unanswered_ping_at = None;
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "engine WebSocket receive failed");
+                        break;
+                    }
                 }
             }
-            Ok(Message::Close(_)) => break,
-            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Binary(_)) => {}
-            Err(error) => {
-                tracing::debug!(%error, "engine WebSocket receive failed");
-                break;
+            _ = heartbeat.tick() => {
+                if let Some(sent_at) = first_unanswered_ping_at {
+                    if sent_at.elapsed() >= heartbeat_timeout {
+                        tracing::debug!(
+                            timeout_ms = heartbeat_timeout.as_millis(),
+                            "engine WebSocket heartbeat timed out"
+                        );
+                        break;
+                    }
+                    continue;
+                }
+                match control_tx.try_send(Message::Ping(Vec::new().into())) {
+                    Ok(()) => first_unanswered_ping_at = Some(Instant::now()),
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        // An earlier Ping can still be queued when inbound
+                        // activity clears its prior deadline. Give that queued
+                        // probe the full timeout rather than treating one busy
+                        // writer interval as a dead connection.
+                        first_unanswered_ping_at = Some(Instant::now());
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => break,
+                }
             }
         }
     }
+
     cancel.cancel();
+    drop(ws_rx);
     session.cleanup().await;
     drop(session);
-    let _ = push_task.await;
-    let _ = writer.await;
-    clients.remove();
+    drop(control_tx);
+    drain_child_tasks(&mut child_tasks).await;
+}
+
+async fn drain_child_tasks(child_tasks: &mut JoinSet<()>) {
+    let drained = tokio::time::timeout(CHILD_TASK_DRAIN_TIMEOUT, async {
+        while child_tasks.join_next().await.is_some() {}
+    })
+    .await;
+    if drained.is_err() {
+        tracing::warn!("engine WebSocket child tasks exceeded drain timeout; aborting");
+        child_tasks.abort_all();
+        while child_tasks.join_next().await.is_some() {}
+    }
 }
 
 struct EngineWsSession {
