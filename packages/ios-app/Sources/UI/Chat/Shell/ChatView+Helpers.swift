@@ -189,6 +189,8 @@ extension ChatView {
         animation: Animation = .easeOut(duration: 0.2)
     ) {
         guard let scrollProxy else { return }
+        scrollCoordinator.appWillPositionScroll()
+        transcriptScrollPosition = ScrollPosition()
 
         if animated {
             withAnimation(animation) {

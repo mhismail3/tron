@@ -393,10 +393,22 @@ The chat timeline owns only truthful local/session presentation state:
   that can strand lazy content in empty space. Bottom autoscroll is centralized
   through `ScrollStateCoordinator`: a pinned transcript remains eligible while its
   programmatic bottom animation settles so streamed growth and foreground catch-up
-  can keep following the moving edge. Bottom jumps remain suppressed during user
-  interaction, user-driven rubber-band rebound, explicit scroll-away, or older-history
-  prepend. When the scene becomes active, the coordinator discards only transient
-  gesture and settling attribution before the view requests a guarded bottom catch-up;
+  can keep following the moving edge. Native `ScrollPosition` ownership distinguishes
+  app-issued bottom movement from touch, pointer, and native positioning paths even
+  when SwiftUI animates directly from idle; the proven `ScrollViewProxy` bottom anchor
+  performs physical movement after the app explicitly retakes native ownership. The
+  idle phase's own geometry snapshot closes SwiftUI's phase/geometry callback-order
+  race before transient input ownership is released. A page-scale upward offset change
+  with a matching increase in bottom distance, stable viewport, and stable composer
+  inset is the fallback user-intent signal for accessibility page scrolling on runtimes
+  that publish neither phase nor native ownership. Initial reconstruction and history
+  prepend remain explicitly excluded from that inference.
+  Returning to bottom transfers ownership back to the app. Bottom jumps remain
+  suppressed during user interaction, user-driven rubber-band rebound, explicit
+  scroll-away, or older-history prepend.
+  When the scene becomes active, the coordinator discards only transient gesture and
+  settling attribution, samples the bound native owner, and then permits a guarded
+  bottom catch-up only when neither native nor durable user intent blocks it;
   intentional scroll-away, unseen content, history prepend, and target navigation
   remain intact. Reconnect reconstruction preserves
   the user's already-expanded visible history window, merges it with the new

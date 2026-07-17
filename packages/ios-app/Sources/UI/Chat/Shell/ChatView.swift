@@ -41,6 +41,7 @@ struct ChatView: View {
 
     // MARK: - Scroll State (internal for extension access)
     @State var scrollProxy: ScrollViewProxy?
+    @State var transcriptScrollPosition = ScrollPosition()
 
     // MARK: - Message Loading State (internal for extension access)
     @State var initialLoadComplete = false
@@ -140,7 +141,9 @@ struct ChatView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            scrollCoordinator.sceneDidBecomeActive()
+            scrollCoordinator.sceneDidBecomeActive(
+                isPositionedByUser: transcriptScrollPosition.isPositionedByUser
+            )
             guard initialLoadComplete else { return }
             scrollToBottomIfAllowed(reason: "foreground activation")
         }

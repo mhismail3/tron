@@ -1,11 +1,10 @@
 import SwiftUI
 
-/// Coordinates scroll state for chat views using `onScrollPhaseChange`
-/// for definitive user-vs-programmatic scroll detection.
+/// Coordinates chat scroll state from native ownership, phase, and geometry signals.
 ///
 /// ## Architecture
 ///
-/// Two independent input signals drive the state machine:
+/// Three input signals drive the state machine:
 ///
 /// 1. **Phase signal** (`scrollPhaseChanged`) — tracks whether the user is physically
 ///    touching/flicking the scroll view and whether the scroll view is still
@@ -14,9 +13,16 @@ import SwiftUI
 ///    rebound and suppresses bottom scrolling until it ends; a programmatic bottom
 ///    animation remains eligible so live content can keep following the moving edge.
 ///
-/// 2. **Geometry signal** (`geometryChanged`) — tracks whether the viewport is near
-///    the bottom of the content. The threshold is computed in the view layer and
-///    accounts for `contentInsets.bottom` (input bar + safe area).
+/// 2. **Native ownership signal** (`scrollPositionChanged`) — reads
+///    `ScrollPosition.isPositionedByUser`, which covers touch, pointer, and native
+///    positioning paths even when SwiftUI animates directly from idle.
+///
+/// 3. **Geometry signal** (`geometryChanged`) — tracks whether the viewport is near
+///    the bottom of the content and whether a stable viewport moved materially toward
+///    older content. The directional fallback covers accessibility page scrolling on
+///    runtimes that publish neither a phase nor native ownership. The bottom threshold
+///    is computed in the view layer and accounts for `contentInsets.bottom` (input bar
+///    + safe area).
 ///
 /// Earlier-history loading is owned by the view-layer top-detent geometry.
 /// Leaving the bottom is not enough to mutate the message array: a fast upward
@@ -26,11 +32,12 @@ import SwiftUI
 /// close enough to matter, then captures the current viewport anchor immediately
 /// before prepending.
 ///
-/// The key invariant: **bottom auto-scroll is suppressed whenever the user is
-/// interacting, a user-driven rebound is settling, history is being prepended, OR
-/// the user has scrolled away.** Programmatic settling alone must not disable a
-/// pinned transcript because a suspended animation may never report a later idle
-/// phase. Earlier-history autoload still waits for every settling animation.
+/// The key invariant: **bottom auto-scroll is suppressed whenever native user
+/// ownership or its pending geometry is active, the user is interacting, a
+/// user-driven rebound is settling, history is being prepended, OR the user has
+/// scrolled away.** Programmatic settling alone must not disable a pinned transcript
+/// because a suspended animation may never report a later idle phase. Earlier-history
+/// autoload still waits for every settling animation.
 /// Foreground activation clears only transient phase attribution; durable scroll-away,
 /// unseen-content, prepend, and target-navigation state remain authoritative.
 ///
@@ -48,7 +55,7 @@ final class ScrollStateCoordinator {
     private(set) var isAtBottom = true
 
     /// Whether the user has intentionally scrolled away from the bottom.
-    /// Only set by user gestures (phase-based), never by programmatic scrolls.
+    /// Set by native ownership/geometry or direct gesture phases, never by app scrolls.
     private(set) var userScrolledAway = false
 
     /// Whether new content arrived while the user was scrolled away.
@@ -68,6 +75,19 @@ final class ScrollStateCoordinator {
     /// programmatic bottom animation, this rebound must not fight a live gesture.
     private var isUserDrivenSettling = false
 
+    /// SwiftUI's authoritative ownership bit for touch, pointer, and native user
+    /// positioning. App-issued positioning explicitly clears this ownership.
+    private var isScrollPositionedByUser = false
+
+    /// Bridges native ownership ending before its final geometry callback, just as
+    /// `hadUserInteraction` bridges the touch phase→geometry ordering race.
+    private var hasPendingNativeUserGeometry = false
+
+    /// Records whether the current idle→scroll activity epoch has produced geometry
+    /// while the bound `ScrollPosition` was user-owned. App-animation geometry cannot
+    /// satisfy a later native takeover.
+    private var hasObservedNativeUserGeometryInCurrentScrollActivity = false
+
     /// Bridges the phase→geometry callback ordering race. Set when interaction
     /// starts, consumed by the next geometry update after interaction ends.
     private var hadUserInteraction = false
@@ -84,11 +104,29 @@ final class ScrollStateCoordinator {
 
     // MARK: - Scroll Phase
 
-    func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase) {
+    func scrollPhaseChanged(
+        from oldPhase: ScrollPhase,
+        to newPhase: ScrollPhase,
+        finalIsNearBottom: Bool? = nil
+    ) {
+        if oldPhase == .idle && newPhase != .idle {
+            hasObservedNativeUserGeometryInCurrentScrollActivity = false
+        }
+
+        // ScrollPhaseChangeContext carries the phase transition's authoritative
+        // geometry snapshot. Resolve it before clearing interaction/native state
+        // so a geometry callback delivered after phase → idle cannot lose its
+        // user attribution.
+        if newPhase == .idle, let finalIsNearBottom {
+            geometryChanged(isNearBottom: finalIsNearBottom)
+        }
+
         let wasUserInteracting = isUserInteracting
+        let wasUserDrivenSettling = isUserDrivenSettling
         isUserInteracting = newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating
         isScrollSettling = newPhase == .animating
-        isUserDrivenSettling = isScrollSettling && Self.isUserDrivenPhase(oldPhase)
+        isUserDrivenSettling = isScrollSettling
+            && (wasUserDrivenSettling || Self.isUserDrivenPhase(oldPhase))
 
         if isUserInteracting && !wasUserInteracting {
             hadUserInteraction = true
@@ -101,15 +139,61 @@ final class ScrollStateCoordinator {
         if wasUserInteracting && !isUserInteracting && !isAtBottom {
             userScrolledAway = true
         }
+
+        if newPhase == .idle && isAtBottom && !hasPendingNativeUserGeometry {
+            // Geometry can arrive after idle. Release only native ownership here;
+            // keep hadUserInteraction so a late away geometry sample still commits
+            // the gesture instead of being mistaken for streamed content growth.
+            isScrollPositionedByUser = false
+        }
+    }
+
+    /// Updates native scroll ownership. Geometry and ownership callbacks can arrive
+    /// in either order, so an already-away viewport is committed immediately while
+    /// a bottom-originating gesture blocks auto-scroll until geometry follows.
+    func scrollPositionChanged(isPositionedByUser: Bool) {
+        let ownershipTransferredToUser = isPositionedByUser && !isScrollPositionedByUser
+        isScrollPositionedByUser = isPositionedByUser
+        if isPositionedByUser {
+            if isScrollSettling {
+                isUserDrivenSettling = true
+            }
+            if ownershipTransferredToUser {
+                hasObservedNativeUserGeometryInCurrentScrollActivity = false
+            }
+            hasPendingNativeUserGeometry = !hasObservedNativeUserGeometryInCurrentScrollActivity
+            if !isAtBottom {
+                userScrolledAway = true
+                hasPendingNativeUserGeometry = false
+            }
+        }
+    }
+
+    /// Explicit app positioning takes ownership synchronously. Binding callbacks
+    /// that merely report `false` do not clear pending late user geometry.
+    func appWillPositionScroll() {
+        isScrollPositionedByUser = false
+        hasPendingNativeUserGeometry = false
+        hasObservedNativeUserGeometryInCurrentScrollActivity = false
+        isUserDrivenSettling = false
     }
 
     /// Clears phase state that cannot remain authoritative while the app is inactive.
     /// Intentional viewport state and in-flight navigation/history ownership survive.
-    func sceneDidBecomeActive() {
+    func sceneDidBecomeActive(isPositionedByUser: Bool = false) {
         isUserInteracting = false
         isScrollSettling = false
         isUserDrivenSettling = false
         hadUserInteraction = false
+        hasObservedNativeUserGeometryInCurrentScrollActivity = false
+        isScrollPositionedByUser = isPositionedByUser
+        hasPendingNativeUserGeometry = isPositionedByUser
+        if isPositionedByUser {
+            if !isAtBottom {
+                userScrolledAway = true
+                hasPendingNativeUserGeometry = false
+            }
+        }
         if let snapshot = targetNavigationSnapshot {
             targetNavigationSnapshot = TargetNavigationSnapshot(
                 userScrolledAway: snapshot.userScrolledAway,
@@ -122,21 +206,50 @@ final class ScrollStateCoordinator {
 
     // MARK: - Geometry Updates
 
-    func geometryChanged(isNearBottom: Bool) {
+    func geometryChanged(
+        isNearBottom: Bool,
+        isPositionedByUser: Bool? = nil,
+        userMovedTowardOlderContent: Bool = false
+    ) {
+        if let isPositionedByUser {
+            scrollPositionChanged(isPositionedByUser: isPositionedByUser)
+        }
+
+        let hadPendingNativeUserGeometry = hasPendingNativeUserGeometry
+        if isScrollPositionedByUser {
+            hasObservedNativeUserGeometryInCurrentScrollActivity = true
+        }
+        if isScrollPositionedByUser || hadPendingNativeUserGeometry {
+            hasPendingNativeUserGeometry = false
+        }
+
         isAtBottom = isNearBottom
 
-        // Attribute scroll-away to user if they're interacting or recently were.
-        // hadUserInteraction is consumed (cleared) once used, preventing content
-        // growth without user interaction from falsely setting userScrolledAway.
-        if (isUserInteracting || hadUserInteraction) && !isNearBottom {
+        // Attribute scroll-away to direct interaction, its late geometry callback,
+        // native user ownership, a geometry-only accessibility page movement, or a
+        // user-driven animation whose ownership bit cleared just before the phase
+        // transition's final geometry snapshot. History prepend owns its geometry
+        // shifts, so those must never manufacture user intent.
+        if (isUserInteracting
+            || hadUserInteraction
+            || isUserDrivenSettling
+            || isScrollPositionedByUser
+            || hadPendingNativeUserGeometry
+            || (userMovedTowardOlderContent && !isPrependingHistory))
+            && !isNearBottom {
             userScrolledAway = true
+            hasPendingNativeUserGeometry = false
             if !isUserInteracting {
                 hadUserInteraction = false
             }
         }
 
         if isNearBottom {
-            returnToBottom()
+            clearScrollAwayState()
+            if shouldReleaseNativeScrollOwnership {
+                isScrollPositionedByUser = false
+                hasPendingNativeUserGeometry = false
+            }
         }
     }
 
@@ -153,7 +266,8 @@ final class ScrollStateCoordinator {
 
     // MARK: - User Actions
 
-    func userSentMessage() {
+    func userSentMessage(scrollPosition: Binding<ScrollPosition>) {
+        scrollPosition.wrappedValue = ScrollPosition()
         returnToBottom()
     }
 
@@ -231,11 +345,62 @@ final class ScrollStateCoordinator {
     // MARK: - Query
 
     var shouldAutoScroll: Bool {
-        !userScrolledAway && !isUserInteracting && !isUserDrivenSettling && !isPrependingHistory
+        !userScrolledAway
+            && !isUserInteracting
+            && !isUserDrivenSettling
+            && !isScrollPositionedByUser
+            && !hasPendingNativeUserGeometry
+            && !isPrependingHistory
     }
 
     var shouldShowNewContentPill: Bool {
         userScrolledAway && hasUnseenContent
+    }
+
+    /// Detects an upward page-sized viewport movement without relying on phase or
+    /// native ownership callbacks. Those callbacks are absent for accessibility page
+    /// scrolling on some runtimes. Requiring matching movement away from the bottom
+    /// distinguishes a real viewport move from live-prune anchor preservation, while
+    /// stable viewport and inset geometry reject keyboard, rotation, and composer
+    /// layout shifts. Direct touch remains phase-owned.
+    static func isMovementTowardOlderContent(
+        oldContentOffsetY: CGFloat,
+        newContentOffsetY: CGFloat,
+        oldDistanceFromBottom: CGFloat,
+        newDistanceFromBottom: CGFloat,
+        oldViewportHeight: CGFloat,
+        newViewportHeight: CGFloat,
+        oldBottomInset: CGFloat,
+        newBottomInset: CGFloat
+    ) -> Bool {
+        guard oldContentOffsetY.isFinite,
+              newContentOffsetY.isFinite,
+              oldDistanceFromBottom.isFinite,
+              newDistanceFromBottom.isFinite,
+              oldViewportHeight.isFinite,
+              newViewportHeight.isFinite,
+              oldBottomInset.isFinite,
+              newBottomInset.isFinite,
+              oldViewportHeight > 0,
+              newViewportHeight > 0,
+              abs(oldViewportHeight - newViewportHeight) <= 1,
+              abs(oldBottomInset - newBottomInset) <= 1 else {
+            return false
+        }
+
+        let minimumMovement = max(64, newViewportHeight * 0.2)
+        return oldContentOffsetY - newContentOffsetY > minimumMovement
+            && newDistanceFromBottom - oldDistanceFromBottom > minimumMovement
+    }
+
+    /// Native ownership can be released without moving the viewport only after a
+    /// bottom-positioned gesture or native user animation has fully settled.
+    var shouldReleaseNativeScrollOwnership: Bool {
+        isAtBottom
+            && !isUserInteracting
+            && !isScrollSettling
+            && !isUserDrivenSettling
+            && !hasPendingNativeUserGeometry
     }
 
     func shouldAutoloadEarlierMessages(
@@ -258,6 +423,14 @@ final class ScrollStateCoordinator {
     /// Resets all scroll-away state. Called when the user returns to the bottom
     /// by any means: scrolling back, tapping the pill, or sending a message.
     private func returnToBottom() {
+        clearScrollAwayState()
+        isScrollPositionedByUser = false
+        hasPendingNativeUserGeometry = false
+        hasObservedNativeUserGeometryInCurrentScrollActivity = false
+        isUserDrivenSettling = false
+    }
+
+    private func clearScrollAwayState() {
         userScrolledAway = false
         hasUnseenContent = false
         hadUserInteraction = false

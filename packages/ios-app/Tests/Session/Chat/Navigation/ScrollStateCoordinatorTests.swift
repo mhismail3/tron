@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 @testable import TronMobile
 
-/// Tests for ScrollStateCoordinator — phase-based scroll detection
+/// Tests phase, native-ownership, and directional-geometry scroll attribution.
 @Suite("ScrollStateCoordinator Tests")
 @MainActor
 struct ScrollStateCoordinatorTests {
@@ -287,6 +287,11 @@ struct ScrollStateCoordinatorTests {
     @Test("userSentMessage clears userScrolledAway")
     func testUserSentMessage() {
         let coordinator = ScrollStateCoordinator()
+        var scrollPosition = ScrollPosition()
+        let scrollPositionBinding = Binding(
+            get: { scrollPosition },
+            set: { scrollPosition = $0 }
+        )
 
         coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
         coordinator.geometryChanged(isNearBottom: false)
@@ -295,10 +300,30 @@ struct ScrollStateCoordinatorTests {
         #expect(coordinator.userScrolledAway)
         #expect(coordinator.hasUnseenContent)
 
-        coordinator.userSentMessage()
+        coordinator.userSentMessage(scrollPosition: scrollPositionBinding)
 
         #expect(!coordinator.userScrolledAway)
         #expect(!coordinator.hasUnseenContent)
+        #expect(!scrollPosition.isPositionedByUser)
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("Sending during native animation retakes scroll ownership")
+    func testUserSentMessageDuringNativeAnimation() {
+        let coordinator = ScrollStateCoordinator()
+        var scrollPosition = ScrollPosition()
+        scrollPosition.isPositionedByUser = true
+        let scrollPositionBinding = Binding(
+            get: { scrollPosition },
+            set: { scrollPosition = $0 }
+        )
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .animating)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.userSentMessage(scrollPosition: scrollPositionBinding)
+
+        #expect(!coordinator.userScrolledAway)
+        #expect(!scrollPosition.isPositionedByUser)
         #expect(coordinator.shouldAutoScroll)
     }
 
