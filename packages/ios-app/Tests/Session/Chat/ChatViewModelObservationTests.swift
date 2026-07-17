@@ -5,6 +5,25 @@ import XCTest
 @MainActor
 final class ChatViewModelObservationTests: XCTestCase {
 
+    private func makeViewModel(
+        connection: ChatViewModelObservationConnectionRepository
+    ) -> ChatViewModel {
+        let transport = MockEngineTransport()
+        return ChatViewModel(
+            services: ChatSessionServices(
+                connection: connection,
+                events: PaginationTestSessionEventRepository(),
+                sessions: PaginationTestSessionRepository(),
+                agent: AgentClient(transport: transport),
+                models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
+                messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
+                transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
+                workerLifecycle: DefaultWorkerLifecycleRepository(client: WorkerLifecycleClient(transport: transport))
+            ),
+            sessionId: "test-session"
+        )
+    }
+
     func testObserveLoopCancelsWhileWaitingForObservedChange() async {
         let probe = ChatViewModelObservationProbe()
         let observationInstalled = expectation(description: "observation installed")
@@ -33,21 +52,8 @@ final class ChatViewModelObservationTests: XCTestCase {
     }
 
     func testDisconnectThenActiveReconstructionPreservesStopping() async {
-        let transport = MockEngineTransport()
         let connection = ChatViewModelObservationConnectionRepository()
-        let viewModel = ChatViewModel(
-            services: ChatSessionServices(
-                connection: connection,
-                events: PaginationTestSessionEventRepository(),
-                sessions: PaginationTestSessionRepository(),
-                agent: AgentClient(transport: transport),
-                models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
-                messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
-                transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
-                workerLifecycle: DefaultWorkerLifecycleRepository(client: WorkerLifecycleClient(transport: transport))
-            ),
-            sessionId: "test-session"
-        )
+        let viewModel = makeViewModel(connection: connection)
         for _ in 0..<10 { await Task.yield() }
 
         viewModel.agentPhase = .stopping
@@ -83,6 +89,36 @@ final class ChatViewModelObservationTests: XCTestCase {
         )
 
         XCTAssertEqual(viewModel.agentPhase, .stopping)
+    }
+
+    func testDisconnectPreservesStreamingUntilReconstructionCapturesSnapshot() async {
+        let connection = ChatViewModelObservationConnectionRepository()
+        let viewModel = makeViewModel(connection: connection)
+        for _ in 0..<10 { await Task.yield() }
+
+        let streamingMessageId = UUID()
+        viewModel.streamingManager.onCreateStreamingMessage = { streamingMessageId }
+        viewModel.streamingManager.handleTextDelta("partially rendered")
+        viewModel.isCompacting = true
+
+        connection.connectionState = .disconnected
+        for _ in 0..<100 {
+            guard viewModel.isCompacting else { break }
+            await Task.yield()
+        }
+
+        XCTAssertFalse(viewModel.isCompacting, "proves the disconnect observer completed")
+        XCTAssertEqual(viewModel.streamingManager.streamingMessageId, streamingMessageId)
+        XCTAssertEqual(viewModel.streamingManager.streamingText, "partially rendered")
+        XCTAssertNil(viewModel.streamingRecoverySnapshot)
+
+        viewModel.cleanUpStreamingState()
+
+        XCTAssertEqual(
+            viewModel.streamingRecoverySnapshot,
+            StreamingRecoverySnapshot(messageId: streamingMessageId, text: "partially rendered")
+        )
+        XCTAssertNil(viewModel.streamingManager.streamingMessageId)
     }
 }
 

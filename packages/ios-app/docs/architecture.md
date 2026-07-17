@@ -336,7 +336,10 @@ the root state object. Its session-lifetime observation tasks retain only their
 observed sources, capture the view model weakly for mutations, and use a
 cancellation-aware wait so releasing the view model terminates idle bindings;
 the connection-state binding owns only local cleanup after an observed
-disconnect. `AppConnectionRepository.connectionState` is the sole raw
+disconnect. It retains the live streaming buffer until
+`ConnectionCoordinator.cleanUpStreamingState` snapshots its text and message
+identity immediately before server reconstruction replaces transient state.
+`AppConnectionRepository.connectionState` is the sole raw
 connectivity fact. `ChatView` derives its immediate `InputBarConfig`
 transport-safety gate from that state, while `InteractionPolicy` remains the
 shared debounced read-only policy.

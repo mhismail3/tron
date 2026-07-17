@@ -294,7 +294,6 @@ final class ChatViewModel {
                 if agentPhase == .processing {
                     agentPhase = .idle
                 }
-                streamingManager.reset()
                 isCompacting = false
                 compactionInProgressMessageId = nil
                 runningCapabilityInvocationCount = 0
