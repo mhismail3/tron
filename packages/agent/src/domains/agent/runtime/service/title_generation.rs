@@ -5,6 +5,8 @@
 //! normal `session_updated` event. It does not restore the old hook/subagent
 //! surface or add presentation-specific behavior to the runtime. Provider
 //! creation uses the same admitted API-settings snapshot as the main run.
+//! Generated text is normalized at this owner, including exact repeated-title
+//! output, before it can become durable session metadata.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -206,8 +208,11 @@ async fn generate_title(
             } if text.trim().is_empty() => {
                 text = completed;
             }
-            StreamEvent::Done { message, .. } if text.trim().is_empty() => {
-                text = extract_assistant_text(&message.content);
+            StreamEvent::Done { message, .. } => {
+                let completed = extract_assistant_text(&message.content);
+                if !completed.trim().is_empty() {
+                    text = completed;
+                }
             }
             StreamEvent::Error { error } => return Err(ModelResponseError::other(error)),
             _ => {}
@@ -285,6 +290,7 @@ fn clean_generated_title(raw: &str) -> Option<String> {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+    let title = collapse_exact_repeated_title(&title);
 
     let mut bounded = String::new();
     for char in title.chars() {
@@ -296,6 +302,18 @@ fn clean_generated_title(raw: &str) -> Option<String> {
 
     let cleaned = bounded.trim().to_owned();
     (!cleaned.is_empty() && !session_needs_generated_title(Some(&cleaned))).then_some(cleaned)
+}
+
+fn collapse_exact_repeated_title(title: &str) -> &str {
+    let midpoint = title.len() / 2;
+    if title.len() % 2 != 0 || !title.is_char_boundary(midpoint) {
+        return title;
+    }
+
+    let (candidate, remainder) = title.split_at(midpoint);
+    (candidate.split_whitespace().count() >= 2 && candidate == remainder)
+        .then_some(candidate)
+        .unwrap_or(title)
 }
 
 fn emit_title_update(broadcast: &Arc<EventEmitter>, session: &SessionRow, title: String) {
@@ -349,6 +367,14 @@ mod tests {
             clean_generated_title("- Session title: Harden Local Transcription"),
             Some("Harden Local Transcription".to_owned())
         );
+        assert_eq!(
+            clean_generated_title("Simulator Test IdentifiersSimulator Test Identifiers"),
+            Some("Simulator Test Identifiers".to_owned())
+        );
+        assert_eq!(
+            clean_generated_title("New York New York"),
+            Some("New York New York".to_owned())
+        );
         assert_eq!(clean_generated_title("Workspace"), None);
         assert_eq!(
             clean_generated_title(
@@ -373,7 +399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_session_title_generation_persists_and_broadcasts_title() {
+    async fn run_session_title_generation_normalizes_and_broadcasts_title() {
         let store = Arc::new(setup_event_store());
         let created = store
             .create_session("mock-title", "/tmp/project", None, None)
@@ -391,18 +417,18 @@ mod tests {
             emitter,
             &created.session.id,
             "please implement the runtime changes",
-            "Implement Runtime Changes",
+            "Simulator Test IdentifiersSimulator Test Identifiers",
         )
         .await;
 
         assert!(updated);
         let session = store.get_session(&created.session.id).unwrap().unwrap();
-        assert_eq!(session.title.as_deref(), Some("Implement Runtime Changes"));
+        assert_eq!(session.title.as_deref(), Some("Simulator Test Identifiers"));
 
         let event = receiver.recv().await.unwrap();
         match event {
             TronEvent::SessionUpdated { title, .. } => {
-                assert_eq!(title.as_deref(), Some("Implement Runtime Changes"));
+                assert_eq!(title.as_deref(), Some("Simulator Test Identifiers"));
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -601,7 +627,8 @@ mod tests {
             let title = self.title.clone();
             let events = vec![
                 Ok(StreamEvent::TextDelta {
-                    delta: title.clone(),
+                    // All persistence fixtures exercise terminal-snapshot precedence.
+                    delta: format!("{title}{title}"),
                 }),
                 Ok(StreamEvent::Done {
                     message: AssistantMessage {
