@@ -754,9 +754,46 @@ async fn error_mid_stream() {
     .await;
 
     assert!(result.is_err());
+    let failure = result.unwrap_err();
+    assert!(matches!(failure.error, RuntimeError::ModelResponse(_)));
+    assert_eq!(failure.partial.partial_content.as_deref(), Some("partial"));
+    assert_eq!(failure.partial.stop_reason, "error");
+    assert!(!failure.partial.interrupted);
+}
+
+#[tokio::test]
+async fn journal_write_failure_stops_before_unrecoverable_live_delta() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    let read_only = std::fs::File::open(temp.path()).unwrap();
+    let mut journal =
+        StreamingJournal::from_test_file(read_only, temp.path().to_path_buf(), "s1", 1);
+    let emitter = make_emitter();
+    let mut receiver = emitter.subscribe();
+    let cancel = CancellationToken::new();
+    let stream = stream_from_provider_events(vec![
+        StreamEvent::Start,
+        StreamEvent::TextDelta {
+            delta: "must not be shown".into(),
+        },
+    ]);
+
+    let failure = process_stream(
+        stream,
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        Some(&mut journal),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(failure.error, RuntimeError::Persistence(_)));
+    assert!(failure.partial.message.content.is_empty());
     assert!(matches!(
-        result.unwrap_err(),
-        RuntimeError::ModelResponse(_)
+        receiver.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
     ));
 }
 

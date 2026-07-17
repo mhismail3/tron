@@ -105,6 +105,7 @@ pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,
     acquire_database_lock, check_integrity, new_file, new_in_memory, run_migrations,
 };
+pub(crate) use store::AppendBatchItem;
 pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
     ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,

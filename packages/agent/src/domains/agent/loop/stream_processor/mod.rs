@@ -6,7 +6,9 @@
 //! `process_stream` entry point that drives the `tokio::select!` loop.
 //! Final results normalize provider terminal metadata against accumulated
 //! content so persisted replay cannot claim `end_turn` while carrying a
-//! finalized capability invocation.
+//! finalized capability invocation. Provider and journal failures return a
+//! [`StreamFailure`] containing the content accumulated before the error; the
+//! turn runner owns atomic partial-message plus failure persistence.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -23,6 +25,30 @@ use crate::domains::model::responder::ModelResponseStream;
 use crate::engine::{InvocationId, TraceId};
 
 use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
+
+/// A stream error paired with the assistant content accumulated before the
+/// failure. The turn owner persists that partial message and its terminal
+/// failure atomically so live text does not disappear after reconstruction.
+#[derive(Debug)]
+pub(crate) struct StreamFailure {
+    pub(crate) error: RuntimeError,
+    pub(crate) partial: StreamResult,
+}
+
+impl std::fmt::Display for StreamFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for StreamFailure {}
+
+fn failed(state: StreamState, error: RuntimeError) -> StreamFailure {
+    StreamFailure {
+        error,
+        partial: state.build_failed_result(),
+    }
+}
 
 /// Process an LLM stream, accumulating content and emitting events.
 ///
@@ -43,7 +69,7 @@ pub async fn process_stream(
     turn_stopping_capabilities: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
     journal: Option<&mut StreamingJournal>,
-) -> Result<StreamResult, RuntimeError> {
+) -> Result<StreamResult, StreamFailure> {
     process_stream_with_trace(
         stream,
         session_id,
@@ -71,7 +97,7 @@ pub async fn process_stream_with_trace(
     mut journal: Option<&mut StreamingJournal>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
-) -> Result<StreamResult, RuntimeError> {
+) -> Result<StreamResult, StreamFailure> {
     let mut state = StreamState::new();
     let (stop_reason, final_message);
     let trace_context = StreamTraceContext {
@@ -91,15 +117,16 @@ pub async fn process_stream_with_trace(
 
         match event {
             None => {
-                return Err(RuntimeError::Internal(
-                    "Stream ended without Done event".into(),
+                return Err(failed(
+                    state,
+                    RuntimeError::Internal("Stream ended without Done event".into()),
                 ));
             }
             Some(Err(error)) if error.is_cancelled() => {
                 return Ok(state.build_interrupted_result());
             }
             Some(Err(e)) => {
-                return Err(RuntimeError::ModelResponse(e));
+                return Err(failed(state, RuntimeError::ModelResponse(e)));
             }
             Some(Ok(stream_event)) => {
                 let action = if state.draining {
@@ -131,7 +158,7 @@ pub async fn process_stream_with_trace(
                         final_message = fm;
                         break;
                     }
-                    StreamAction::Err(e) => return Err(e),
+                    StreamAction::Err(e) => return Err(failed(state, e)),
                 }
             }
         }

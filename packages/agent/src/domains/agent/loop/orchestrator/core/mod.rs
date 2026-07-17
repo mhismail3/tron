@@ -264,7 +264,19 @@ impl Orchestrator {
                 "sequence counter not initialized for session {session_id}"
             ))
         })?;
-        let seq = entry.value().fetch_add(1, Ordering::SeqCst) + 1;
+        let counter = entry.value();
+        let mut current = counter.load(Ordering::SeqCst);
+        let seq = loop {
+            let next = current.checked_add(1).ok_or_else(|| {
+                RuntimeError::Persistence(format!(
+                    "event sequence exhausted for session {session_id}"
+                ))
+            })?;
+            match counter.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break next,
+                Err(observed) => current = observed,
+            }
+        };
         trace!(session_id, seq, "sequence assigned");
         Ok(seq)
     }

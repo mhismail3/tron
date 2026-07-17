@@ -21,9 +21,11 @@
 //! settings from the authoritative `ProfileRuntime`; the spawned run keeps that
 //! immutable value instead of consulting a second mutable settings owner. Main
 //! response and background title providers are both created from that same
-//! admitted API-settings snapshot.
-
-use std::sync::atomic::AtomicI64;
+//! admitted API-settings snapshot. Each resumed prompt fail-closed reads the
+//! durable sequence and turn high-water marks, then seeds its agent from the
+//! maximum of reconstructed, completed, and started turns. A cancelled
+//! zero-content attempt therefore consumes its ordinal, while corrupt or
+//! exhausted counters never wrap or reuse identity.
 
 use crate::domains::agent::r#loop::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use crate::domains::agent::r#loop::orchestrator::agent_runner::run_agent;

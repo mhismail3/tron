@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use crate::shared::protocol::events::TronEvent;
 use tokio::sync::broadcast;
-use tracing::trace;
+use tracing::{error, trace};
 
 /// Default broadcast channel capacity.
 const DEFAULT_CAPACITY: usize = 1024;
@@ -47,7 +47,21 @@ impl EventEmitter {
     /// Atomically increments the counter and assigns the sequence to the event
     /// before broadcasting. Returns the number of receivers that got the event.
     pub fn emit_sequenced(&self, mut event: TronEvent, counter: &AtomicI64) -> usize {
-        let seq = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut current = counter.load(Ordering::SeqCst);
+        let seq = loop {
+            let Some(next) = current.checked_add(1) else {
+                error!(
+                    event_type = event.event_type(),
+                    session_id = event.session_id(),
+                    "event sequence exhausted; refusing unsequenced broadcast"
+                );
+                return 0;
+            };
+            match counter.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break next,
+                Err(observed) => current = observed,
+            }
+        };
         event.set_sequence(seq);
         trace!(
             event_type = event.event_type(),
@@ -130,6 +144,21 @@ mod tests {
         let r2 = rx2.recv().await.unwrap();
         assert_eq!(r1.session_id(), "s1");
         assert_eq!(r2.session_id(), "s1");
+    }
+
+    #[tokio::test]
+    async fn sequenced_emit_fails_closed_at_i64_max() {
+        let emitter = EventEmitter::new();
+        let mut receiver = emitter.subscribe();
+        let counter = AtomicI64::new(i64::MAX);
+
+        assert_eq!(emitter.emit_sequenced(agent_start_event("s1"), &counter), 0);
+        assert_eq!(counter.load(Ordering::SeqCst), i64::MAX);
+        assert_eq!(emitter.emit_count(), 0);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]

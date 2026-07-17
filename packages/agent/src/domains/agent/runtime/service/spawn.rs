@@ -24,15 +24,6 @@ pub fn spawn_prompt_run(
             .map(|coord| coord.token()),
         shutdown_coordinator: runtime_deps.shutdown_coordinator.clone(),
         engine_host: runtime_deps.engine_host.clone(),
-        sequence_counter: {
-            let sid = &request.session_id;
-            let max_seq = runtime_deps.event_store.get_max_sequence(sid).unwrap_or(0);
-            Some(
-                runtime_deps
-                    .orchestrator
-                    .ensure_sequence_counter_at_least(sid, max_seq),
-            )
-        },
         server_origin: runtime_deps.origin.clone(),
         run_id,
         model: session.latest_model.clone(),

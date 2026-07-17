@@ -2102,10 +2102,26 @@ capability identity. Server-authored capability identity only promotes
 `operationName` after the actual `operation` value matches the canonical
 execute operation registry; caller-supplied aliases or stale names remain
 requested arguments instead of becoming authoritative UI labels.
-Live `agent.turn_failed` and `error` runtime events are emitted through
-canonical server builders. A turn failure is persisted as `turn.failed` before
-its live broadcast, and both use the durable row sequence so reconnect and live
-rendering observe the same terminal truth. New runtime emissions carry stable code/category,
+Live turn lifecycle and `error` runtime events are emitted through canonical
+server builders. Starts, ends, and failures persist before broadcast and reuse
+the durable row sequence, so reconnect and live rendering observe the same
+ordering. Cancellation is terminalized inside the active turn runner, where the
+session-global ordinal and partial content are authoritative; partial assistant
+content plus failure commit atomically. Capability starts commit as one batch
+before execution; executed and skipped completions then commit as one ordered
+terminal batch before any completion broadcast. The streaming journal remains
+until capability results and the turn terminal are durable. Journal writes fail closed before an
+unrecoverable delta is broadcast, and provider/network stream failures retain
+already visible partial content in the same atomic batch as `turn.failed`.
+Compaction cancellation restores its pre-summary checkpoint and emits a paired
+failed completion before the turn is terminalized, so clients cannot remain in
+a compacting state. The next prompt advances from the
+greatest reconstructed, completed, or started turn even when cancellation had
+no assistant content; corrupt, exhausted, or unreadable sequence/turn high-water
+state fails closed. Startup recovery recognizes legacy rows without starts,
+does not duplicate an already durable assistant, repairs incomplete capability
+invocations, atomically closes the interrupted turn, and sweeps durable starts
+with no terminal even when no stream journal was created. New runtime emissions carry stable code/category,
 retryability, recoverability, origin, and `details.failure`; provider-backed
 failures also preserve provider/model/status/error-type semantics when known.
 iOS decodes the same server-authored envelope through `CanonicalFailurePayload`

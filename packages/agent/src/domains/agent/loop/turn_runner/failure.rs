@@ -1,13 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
+use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::types::RunContext;
-use crate::domains::session::event_store::EventType;
+use crate::domains::session::event_store::{EventRow, EventType};
 use crate::shared::protocol::events::{BaseEvent, turn_failed_event};
 use crate::shared::server::failure::FailureEnvelope;
-use serde_json::json;
+use serde_json::{Value, json};
 use tracing::warn;
 
 fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
@@ -23,6 +24,98 @@ fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
     )
 }
 
+fn turn_failure_payload(
+    turn: u32,
+    failure: &FailureEnvelope,
+    partial_content: Option<&str>,
+) -> Value {
+    json!({
+        "turn": turn,
+        "error": failure.message,
+        "code": failure.code,
+        "category": failure.category.as_str(),
+        "retryable": failure.retryable,
+        "recoverable": failure.recoverable,
+        "origin": failure.origin.as_str(),
+        "details": failure.details_with_failure(),
+        "partialContent": partial_content,
+    })
+}
+
+fn emit_persisted_turn_failure(
+    emitter: &EventEmitter,
+    row: &EventRow,
+    turn: u32,
+    run_context: &RunContext,
+    failure: &FailureEnvelope,
+    partial_content: Option<String>,
+) {
+    let base = BaseEvent {
+        session_id: row.session_id.clone(),
+        timestamp: row.timestamp.clone(),
+        sequence: Some(row.sequence),
+        trace_id: run_context
+            .engine_trace_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned()),
+        parent_invocation_id: run_context
+            .parent_invocation_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned()),
+    };
+    let _ = emitter.emit(turn_failed_event(base, turn, failure, partial_content));
+}
+
+pub(super) fn terminalize_interrupted_turn(
+    emitter: &Arc<EventEmitter>,
+    persister: Option<&EventPersister>,
+    session_id: &str,
+    turn: u32,
+    run_context: &RunContext,
+    sequence_counter: Option<&AtomicI64>,
+    failure: &FailureEnvelope,
+    assistant_payload: Option<Value>,
+    partial_content: Option<String>,
+) -> Result<(), RuntimeError> {
+    let Some(persister) = persister else {
+        let event = turn_failed_event(
+            run_base(session_id, run_context),
+            turn,
+            failure,
+            partial_content,
+        );
+        if let Some(counter) = sequence_counter {
+            let _ = emitter.emit_sequenced(event, counter);
+        } else {
+            let _ = emitter.emit(event);
+        }
+        return Ok(());
+    };
+
+    let mut events = Vec::with_capacity(usize::from(assistant_payload.is_some()) + 1);
+    if let Some(payload) = assistant_payload {
+        events.push((EventType::MessageAssistant, payload));
+    }
+    events.push((
+        EventType::TurnFailed,
+        turn_failure_payload(turn, failure, partial_content.as_deref()),
+    ));
+    let rows =
+        persister.append_batch_with_runtime_sequence(session_id, &events, sequence_counter)?;
+    let failure_row = rows.last().ok_or_else(|| {
+        RuntimeError::Persistence("interrupted terminal batch produced no failure row".to_owned())
+    })?;
+    emit_persisted_turn_failure(
+        emitter,
+        failure_row,
+        turn,
+        run_context,
+        failure,
+        partial_content,
+    );
+    Ok(())
+}
+
 pub(super) fn emit_turn_failure(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
@@ -34,17 +127,7 @@ pub(super) fn emit_turn_failure(
     partial_content: Option<String>,
 ) -> bool {
     if let Some(persister) = persister {
-        let payload = json!({
-            "turn": turn,
-            "error": failure.message,
-            "code": failure.code,
-            "category": failure.category.as_str(),
-            "retryable": failure.retryable,
-            "recoverable": failure.recoverable,
-            "origin": failure.origin.as_str(),
-            "details": failure.details_with_failure(),
-            "partialContent": partial_content,
-        });
+        let payload = turn_failure_payload(turn, failure, partial_content.as_deref());
         let row = match persister.append_with_runtime_sequence(
             session_id,
             EventType::TurnFailed,
@@ -57,20 +140,7 @@ pub(super) fn emit_turn_failure(
                 return false;
             }
         };
-        let base = BaseEvent {
-            session_id: row.session_id,
-            timestamp: row.timestamp,
-            sequence: Some(row.sequence),
-            trace_id: run_context
-                .engine_trace_id
-                .as_ref()
-                .map(|id| id.as_str().to_owned()),
-            parent_invocation_id: run_context
-                .parent_invocation_id
-                .as_ref()
-                .map(|id| id.as_str().to_owned()),
-        };
-        let _ = emitter.emit(turn_failed_event(base, turn, failure, partial_content));
+        emit_persisted_turn_failure(emitter, &row, turn, run_context, failure, partial_content);
         return true;
     }
 

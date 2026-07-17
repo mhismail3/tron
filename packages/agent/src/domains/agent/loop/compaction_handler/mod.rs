@@ -5,13 +5,17 @@
 //! the server records the context-control action/snapshot proof first. If that
 //! proof path is unavailable or fails, the handler restores the pre-compaction
 //! context checkpoint and emits a failed live event instead of appending a bare
-//! boundary.
+//! boundary. Turn cancellation is handled inside this owner: if Stop arrives
+//! while the summarizer is awaited, the handler restores its checkpoint and
+//! pairs the already-emitted start with a failed completion before returning
+//! `RuntimeError::Cancelled` to the turn runner.
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::domains::agent::context::compaction_trigger::CompactionTrigger;
 use crate::domains::agent::context::context_manager::ContextManager;
@@ -103,6 +107,7 @@ impl CompactionHandler {
         session_id: &str,
         emitter: &Arc<EventEmitter>,
         sequence_counter: Option<&AtomicI64>,
+        cancel: &CancellationToken,
     ) -> Result<bool, RuntimeError> {
         let context_limit = context_manager.get_context_limit();
         if context_limit == 0 {
@@ -137,12 +142,13 @@ impl CompactionHandler {
         );
 
         let success = self
-            .execute_compaction(
+            .execute_compaction_inner(
                 context_manager,
                 session_id,
                 emitter,
                 CompactionReason::ThresholdExceeded,
                 sequence_counter,
+                Some(cancel),
             )
             .await?;
         if success {
@@ -159,6 +165,29 @@ impl CompactionHandler {
         reason: CompactionReason,
         sequence_counter: Option<&AtomicI64>,
     ) -> Result<bool, RuntimeError> {
+        self.execute_compaction_inner(
+            context_manager,
+            session_id,
+            emitter,
+            reason,
+            sequence_counter,
+            None,
+        )
+        .await
+    }
+
+    async fn execute_compaction_inner(
+        &self,
+        context_manager: &mut ContextManager,
+        session_id: &str,
+        emitter: &Arc<EventEmitter>,
+        reason: CompactionReason,
+        sequence_counter: Option<&AtomicI64>,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<bool, RuntimeError> {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Err(RuntimeError::Cancelled);
+        }
         if self
             .is_compacting
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -182,11 +211,51 @@ impl CompactionHandler {
 
         let compaction_start = std::time::Instant::now();
         let checkpoint = context_manager.compaction_checkpoint();
-        let result = context_manager
-            .execute_compaction(self.summarizer.as_ref(), None)
-            .await;
+        let result = if let Some(cancel) = cancel {
+            tokio::select! {
+                () = cancel.cancelled() => {
+                    context_manager.restore_compaction_checkpoint(checkpoint);
+                    emit_complete(
+                        emitter,
+                        session_id,
+                        false,
+                        tokens_before,
+                        tokens_before,
+                        1.0,
+                        Some(reason),
+                        Some("Compaction cancelled; the original context was restored.".to_owned()),
+                        sequence_counter,
+                    );
+                    return Err(RuntimeError::Cancelled);
+                }
+                result = context_manager.execute_compaction(self.summarizer.as_ref(), None) => result,
+            }
+        } else {
+            context_manager
+                .execute_compaction(self.summarizer.as_ref(), None)
+                .await
+        };
         let effective_result = result.as_ref().is_ok_and(is_effective_compaction_result);
         let tokens_after = context_manager.get_current_tokens();
+
+        // Once proof recording begins it is allowed to finish so cancellation
+        // cannot drop a partially committed context-control action. A stop
+        // observed here rolls back before that commit boundary.
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            context_manager.restore_compaction_checkpoint(checkpoint);
+            emit_complete(
+                emitter,
+                session_id,
+                false,
+                tokens_before,
+                tokens_before,
+                1.0,
+                Some(reason),
+                Some("Compaction cancelled; the original context was restored.".to_owned()),
+                sequence_counter,
+            );
+            return Err(RuntimeError::Cancelled);
+        }
 
         if tokens_after >= tokens_before && effective_result {
             warn!(

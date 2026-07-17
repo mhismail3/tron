@@ -182,6 +182,16 @@ pub struct StreamingJournal {
 }
 
 impl StreamingJournal {
+    #[cfg(test)]
+    pub(crate) fn from_test_file(file: File, path: PathBuf, session_id: &str, turn: u32) -> Self {
+        Self {
+            file,
+            path,
+            session_id: session_id.to_owned(),
+            turn,
+        }
+    }
+
     /// Create a new journal for the given session/turn.
     /// Creates parent directories as needed.
     pub fn create(session_id: &str, turn: u32) -> io::Result<Self> {

@@ -3,6 +3,7 @@ use crate::domains::agent::context::types::{CompactionConfig, ContextManagerConf
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::primitive_surface::PrimitiveExecutionTarget;
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::{EventStore, ListEventsOptions};
@@ -146,10 +147,18 @@ struct PhasePersistenceHarness {
 }
 
 async fn phase_persistence_harness() -> PhasePersistenceHarness {
+    phase_persistence_harness_with_trigger(None).await
+}
+
+async fn phase_persistence_harness_with_trigger(trigger: Option<&str>) -> PhasePersistenceHarness {
     let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
         run_migrations(&conn).unwrap();
+        if let Some(trigger) = trigger {
+            conn.execute_batch(trigger)
+                .expect("install failure trigger");
+        }
     }
     let store = Arc::new(EventStore::new(pool));
     let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -556,6 +565,32 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         sorted_live_completion_sequences,
         persisted_completion_sequences
     );
+    let live_completion_ids = lifecycle
+        .iter()
+        .filter_map(|event| match event {
+            TronEvent::CapabilityInvocationCompleted { invocation_id, .. } => {
+                Some(invocation_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        live_completion_ids,
+        vec!["call-slow", "call-fast"],
+        "completion broadcasts preserve provider invocation order"
+    );
+    let persisted_completion_payloads = h
+        .store
+        .resolve_event_payloads(&persisted_completions)
+        .expect("resolve completion payloads");
+    assert_eq!(
+        persisted_completion_payloads
+            .iter()
+            .map(|payload| payload["invocationId"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["call-slow", "call-fast"],
+        "completion rows preserve provider invocation order"
+    );
 
     let started = lifecycle
         .iter()
@@ -592,6 +627,67 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     assert_eq!(completed.0.as_ref().unwrap().is_error, Some(false));
     assert_eq!(completed.1.operation_name.as_deref(), Some("log_recent"));
     assert_eq!(completed.1.theme_color.as_deref(), Some("#10B981"));
+}
+
+#[tokio::test]
+async fn parent_cancellation_during_capability_wave_marks_active_turn_interrupted() {
+    let h = phase_persistence_harness().await;
+    let (engine_host, surface) = phase_engine_surface().await;
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = crate::shared::foundation::paths::normalize_working_directory(
+        tempdir.path().to_str().expect("utf8 tempdir"),
+    )
+    .expect("normalized working directory")
+    .display()
+    .to_string();
+    let mut context_manager = context_manager_for_workdir(&working_directory);
+    let cancel = CancellationToken::new();
+    let cancel_task_token = cancel.clone();
+    let cancel_task = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        cancel_task_token.cancel();
+    });
+    let stream_result = stream_result_with_invocations(vec![CapabilityInvocationDraft::new(
+        "call-cancelled",
+        "execute",
+        Map::from_iter([
+            ("operation".to_owned(), json!("log_recent")),
+            ("traceId".to_owned(), json!("slow")),
+        ]),
+    )]);
+
+    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+        turn: 8,
+        stream_result: &stream_result,
+        context_manager: &mut context_manager,
+        primitive_surface: &surface,
+        session_id: &h.session_id,
+        emitter: &h.emitter,
+        cancel: &cancel,
+        workspace_id: None,
+        persister: Some(&h.persister),
+        sequence_counter: Some(&h.counter),
+        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
+        engine_host: &engine_host,
+        run_id: Some("run-cancelled-wave"),
+        provider_type: "openai",
+        trace_id: None,
+        parent_invocation_id: None,
+    })
+    .await;
+    cancel_task.await.unwrap();
+
+    assert!(outcome.interrupted);
+    assert_eq!(outcome.capability_invocations_executed, 1);
+    assert_eq!(
+        persisted_rows(
+            &h.store,
+            &h.session_id,
+            EventType::CapabilityInvocationCompleted.as_str(),
+        )
+        .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -706,9 +802,99 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
     .await;
 
     assert_eq!(outcome.capability_invocations_executed, 0);
+    assert!(outcome.error.is_some());
     let result = tokio::time::timeout(std::time::Duration::from_millis(100), h.rx.recv()).await;
     assert!(
         result.is_err(),
         "no live start should broadcast when start persistence fails: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn completion_batch_failure_rolls_back_every_terminal_without_broadcasting_any() {
+    let mut h = phase_persistence_harness_with_trigger(Some(
+        "CREATE TRIGGER fail_second_capability_completion
+         BEFORE INSERT ON events
+         WHEN NEW.type = 'capability.invocation.completed'
+          AND NEW.invocation_id = 'call-fast'
+         BEGIN
+           SELECT RAISE(FAIL, 'forced second capability completion failure');
+         END;",
+    ))
+    .await;
+    let (engine_host, surface) = phase_engine_surface().await;
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
+    let mut context_manager = context_manager_for_workdir(working_directory);
+    let cancel = CancellationToken::new();
+    let stream_result = stream_result_with_invocations(vec![
+        CapabilityInvocationDraft::new(
+            "call-slow",
+            "execute",
+            Map::from_iter([
+                ("operation".to_owned(), json!("log_recent")),
+                ("traceId".to_owned(), json!("slow")),
+            ]),
+        ),
+        CapabilityInvocationDraft::new(
+            "call-fast",
+            "execute",
+            Map::from_iter([
+                ("operation".to_owned(), json!("log_recent")),
+                ("traceId".to_owned(), json!("fast")),
+            ]),
+        ),
+    ]);
+
+    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+        turn: 9,
+        stream_result: &stream_result,
+        context_manager: &mut context_manager,
+        primitive_surface: &surface,
+        session_id: &h.session_id,
+        emitter: &h.emitter,
+        cancel: &cancel,
+        workspace_id: None,
+        persister: Some(&h.persister),
+        sequence_counter: Some(&h.counter),
+        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
+        engine_host: &engine_host,
+        run_id: Some("run-completion-rollback"),
+        provider_type: "openai",
+        trace_id: None,
+        parent_invocation_id: None,
+    })
+    .await;
+
+    assert!(outcome.error.is_some(), "batch failure must fail the phase");
+    assert_eq!(
+        persisted_rows(
+            &h.store,
+            &h.session_id,
+            EventType::CapabilityInvocationStarted.as_str(),
+        )
+        .len(),
+        2,
+        "the already-committed start batch remains durable"
+    );
+    assert!(
+        persisted_rows(
+            &h.store,
+            &h.session_id,
+            EventType::CapabilityInvocationCompleted.as_str(),
+        )
+        .is_empty(),
+        "the completion transaction must roll back its first insert"
+    );
+
+    let mut live_completions = Vec::new();
+    while let Ok(event) = h.rx.try_recv() {
+        if let TronEvent::CapabilityInvocationCompleted { invocation_id, .. } = event {
+            live_completions.push(invocation_id);
+        }
+    }
+    assert!(
+        live_completions.is_empty(),
+        "no completion may broadcast before the terminal batch commits"
     );
 }

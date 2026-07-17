@@ -27,6 +27,7 @@
 //!   on resume; prompt-request and agent-construction owners retain configuration
 //!   policy.
 //! - [`recovery::recover_incomplete_turns`] replays orphaned streaming journals
+//!   and closes durable starts that lack a later terminal row
 //!   during startup.
 //!
 //! ## Dependency Direction
@@ -42,8 +43,11 @@
 //! `Orchestrator::sequence_counters` (`DashMap<String, Arc<AtomicI64>>`). The counter
 //! is initialized on session create (start=0) or resume (start=MAX from DB), and
 //! threaded through: `Orchestrator → AgentRunner → TronAgent → TurnRunner →
-//! StreamProcessor / CapabilityInvocationExecutor`. All emitted events carry `sequence` in both
-//! the `TronEvent` (via `BaseEvent.sequence`) and server stream event sequence fields.
+//! StreamProcessor / CapabilityInvocationExecutor`. Agent-loop lifecycle and
+//! content events emitted while that counter is attached carry `sequence` in
+//! both the `TronEvent` (via `BaseEvent.sequence`) and server stream event
+//! sequence fields. Pre-run failures that occur before a counter can be safely
+//! attached remain explicitly outside this ordered run stream.
 //! Runtime-persisted events that pre-assign from the counter must go through
 //! `EventPersister::append_with_runtime_sequence`: it advances the counter from
 //! DB truth and retries sequence collisions caused by any direct event-store
@@ -53,20 +57,30 @@
 //!
 //! Each active LLM turn writes streaming deltas to a journal file at
 //! `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`. On normal
-//! completion or durable turn failure the journal is deleted. If cleanup is
-//! interrupted after a durable failure, startup recovery treats `turn.failed`
-//! as authoritative and removes the stale journal without replaying it. Other
-//! orphaned journals are recovered on next startup by
-//! `recovery::recover_incomplete_turns`, which persists partial content as
-//! assistant messages before accepting connections.
+//! completion or durable turn failure the journal is deleted. It remains open
+//! through capability execution and turn-end persistence, not merely assistant
+//! persistence. Startup recovery scopes rows to the latest start for an ordinal,
+//! recognizes legacy terminal rows without starts, closes incomplete capability
+//! invocations, and atomically appends any missing assistant/turn-end lifecycle
+//! before accepting connections. A database sweep also closes durable starts
+//! that have no terminal even when a crash or failed write happened before a
+//! journal existed.
 //! The journal records block-final snapshots and capability draft start/end
 //! markers so recovered `message.assistant.content` uses the same ordered,
 //! canonical content shape as normal turn completion.
 //!
 //! ## Invariants
 //!
-//! - Per-session sequence counters are monotonic and reconciled against durable
-//!   event-store truth before runtime persistence.
+//! - Per-session sequence counters are monotonic, exhaustion is fail-closed,
+//!   and counters are reconciled against durable event-store truth before
+//!   runtime persistence; row-backed turn starts, ends, and failures allocate
+//!   after any earlier transient runtime event.
+//! - Requested capability starts commit as one batch before execution. A
+//!   phase's executed and skipped completions likewise commit as one ordered
+//!   batch before broadcast. A lifecycle persistence failure stops the turn
+//!   rather than continuing with provider context that cannot be reconstructed.
+//! - Journal appends fail closed. Provider-stream errors atomically persist any
+//!   accumulated assistant content with `turn.failed` before journal cleanup.
 //! - The event store, not an agent-owned queue, serializes per-session writes
 //!   and owns parent/head threading; persistence calls return after commit.
 //! - Active runs must hold a registry permit and remove their active session

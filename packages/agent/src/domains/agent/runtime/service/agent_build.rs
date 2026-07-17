@@ -26,7 +26,7 @@ pub(super) async fn build_prompt_agent(
     working_dir: &str,
     server_origin: String,
     messages: Vec<crate::shared::protocol::messages::Message>,
-    initial_turn_count: u32,
+    initial_turn_offset: u32,
     resolved_workspace_id: Option<String>,
 ) -> Result<BuiltPromptAgent, ()> {
     let responder = match responder_factory
@@ -81,7 +81,7 @@ pub(super) async fn build_prompt_agent(
         CreateAgentOpts::primitive(
             responder,
             messages,
-            initial_turn_count,
+            initial_turn_offset,
             compactor_settings.into(),
             invocation_abort_registry,
             engine_host,

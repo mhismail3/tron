@@ -76,7 +76,8 @@ async fn emit_turn_start_persists_before_broadcasting() {
         Some(&h.counter),
         None,
         None,
-    );
+    )
+    .unwrap();
 
     // Collect the broadcast event.
     let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
@@ -122,7 +123,8 @@ async fn emit_turn_start_advances_stale_sequence_counter_from_db() {
         Some(&h.counter),
         None,
         None,
-    );
+    )
+    .unwrap();
 
     let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
         .await
@@ -132,6 +134,32 @@ async fn emit_turn_start_advances_stale_sequence_counter_from_db() {
     assert_eq!(persisted, vec![2]);
     assert_eq!(broadcast.sequence(), Some(2));
     assert_eq!(h.counter.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn emit_turn_start_allocates_after_live_runtime_events() {
+    let mut h = harness();
+    h.counter.store(5, Ordering::SeqCst);
+
+    emit_turn_start(
+        &h.emitter,
+        Some(&h.persister),
+        &h.session_id,
+        1,
+        Some(&h.counter),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+        .await
+        .expect("broadcast should arrive")
+        .expect("broadcast channel alive");
+    let persisted = persisted_events(&h.store, &h.session_id, "stream.turn_start");
+    assert_eq!(persisted, vec![6]);
+    assert_eq!(broadcast.sequence(), Some(6));
+    assert_eq!(h.counter.load(Ordering::SeqCst), 6);
 }
 
 #[tokio::test]
@@ -149,7 +177,8 @@ async fn emit_turn_start_without_persister_still_broadcasts() {
         Some(&h.counter),
         None,
         None,
-    );
+    )
+    .unwrap();
 
     let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
         .await
@@ -162,7 +191,7 @@ async fn emit_turn_start_without_persister_still_broadcasts() {
 async fn emit_turn_start_skips_broadcast_on_persist_failure() {
     let mut h = harness();
 
-    emit_turn_start(
+    let persist_result = emit_turn_start(
         &h.emitter,
         Some(&h.persister),
         "missing-session",
@@ -171,6 +200,7 @@ async fn emit_turn_start_skips_broadcast_on_persist_failure() {
         None,
         None,
     );
+    assert!(persist_result.is_err());
 
     // A broadcast would arrive immediately if the emit fired — give it a
     // short window, then confirm no event appeared.
@@ -217,7 +247,8 @@ async fn emit_turn_end_persists_before_broadcasting() {
         Some(&h.counter),
         None,
         None,
-    );
+    )
+    .unwrap();
 
     let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
         .await
@@ -233,11 +264,9 @@ async fn emit_turn_end_persists_before_broadcasting() {
         payloads[0].get("tokenUsage").is_none(),
         "turn_end without provider usage must not persist synthetic zero-token usage"
     );
-    assert!(
-        persisted[0] < broadcast_seq,
-        "persist (seq {}) must precede broadcast (seq {})",
-        persisted[0],
-        broadcast_seq
+    assert_eq!(
+        persisted[0], broadcast_seq,
+        "durable and live turn end must share one sequence"
     );
 }
 
@@ -246,7 +275,7 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
     let mut h = harness();
     let stream = stream_result_stub();
 
-    emit_turn_end(
+    let error = emit_turn_end(
         &h.emitter,
         Some(&h.persister),
         "missing-session",
@@ -262,7 +291,9 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
         Some(&h.counter),
         None,
         None,
-    );
+    )
+    .expect_err("turn-end persistence failure must propagate");
+    assert!(error.to_string().contains("missing-session"));
 
     let result = tokio::time::timeout(std::time::Duration::from_millis(100), h.rx.recv()).await;
     assert!(
@@ -361,7 +392,8 @@ fn emit_turn_end_persists_reasoning_status_evidence() {
         Some(&h.counter),
         None,
         None,
-    );
+    )
+    .unwrap();
 
     let payloads = persisted_payloads(&h.store, &h.session_id, "stream.turn_end");
     let evidence = &payloads[0]["reasoningStatusEvidence"];

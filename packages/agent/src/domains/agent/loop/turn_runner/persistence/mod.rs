@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
 
 use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::EventType;
@@ -129,19 +129,6 @@ fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Optio
     }
 }
 
-fn advance_counter_at_least(counter: Option<&AtomicI64>, floor: i64) {
-    let Some(counter) = counter else {
-        return;
-    };
-    let mut current = counter.load(Ordering::SeqCst);
-    while current < floor {
-        match counter.compare_exchange(current, floor, Ordering::SeqCst, Ordering::SeqCst) {
-            Ok(_) => break,
-            Err(next) => current = next,
-        }
-    }
-}
-
 /// Broadcast a persisted capability start row with the row's durable sequence.
 ///
 /// INVARIANT: start broadcasts are row-backed. Callers must first persist every
@@ -182,9 +169,9 @@ pub(super) fn emit_persisted_capability_invocation_completed(
 /// succeeds. If persistence fails, no subscriber sees the event, so iOS
 /// and the DB cannot diverge — a reconnecting client that reconstructs
 /// from the DB will see the same set of events as a live subscriber.
-/// The persisted and broadcast events share the same sequence; when a
-/// resumed session's in-memory counter is behind the DB, the DB allocator
-/// wins and the counter is advanced before any later pre-assigned events.
+/// The persisted and broadcast events share the same sequence. Allocation is
+/// reconciled against both the DB maximum and the live runtime counter so
+/// earlier transient run events cannot collide with or sort after this row.
 pub(super) fn emit_turn_start(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
@@ -193,26 +180,26 @@ pub(super) fn emit_turn_start(
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
-) {
+) -> Result<(), RuntimeError> {
     if let Some(persister) = persister {
-        let row = match persister.append(
+        let row = match persister.append_with_runtime_sequence(
             session_id,
             EventType::StreamTurnStart,
             json!({ "turn": turn }),
+            sequence_counter,
         ) {
             Ok(row) => row,
             Err(error) => {
                 warn!(session_id, turn, error = %error, "failed to persist turn-start event; skipping broadcast");
-                return;
+                return Err(error);
             }
         };
-        advance_counter_at_least(sequence_counter, row.sequence);
         let _ = emitter.emit(TronEvent::TurnStart {
             base: base_event(session_id, trace_id, parent_invocation_id)
                 .with_sequence(row.sequence),
             turn,
         });
-        return;
+        return Ok(());
     }
     emit_maybe_sequenced(
         emitter,
@@ -222,6 +209,7 @@ pub(super) fn emit_turn_start(
         },
         sequence_counter,
     );
+    Ok(())
 }
 
 pub(super) fn build_interrupted_message_payload(
@@ -261,6 +249,30 @@ pub(super) fn build_interrupted_message_payload(
     Some(payload)
 }
 
+pub(super) fn build_failed_message_payload(
+    message: &AssistantMessage,
+    token_usage: Option<&TokenUsage>,
+    session_id: &str,
+    turn: u32,
+    model: &str,
+    provider_type: Provider,
+    previous_context_baseline: u64,
+) -> Option<Value> {
+    let mut payload = build_interrupted_message_payload(
+        message,
+        token_usage,
+        session_id,
+        turn,
+        model,
+        provider_type,
+        previous_context_baseline,
+    )?;
+    payload["stopReason"] = json!("error");
+    payload["interrupted"] = json!(false);
+    payload["partial"] = json!(true);
+    Some(payload)
+}
+
 /// Persist the provider request audit before the model stream is opened.
 ///
 /// INVARIANT: callers must complete this write before invoking
@@ -288,28 +300,6 @@ pub(super) fn persist_model_provider_request_audit(
         sequence_counter,
     )?;
     Ok(())
-}
-
-pub(super) fn persist_interrupted_message(
-    persister: Option<&EventPersister>,
-    session_id: &str,
-    payload: Option<Value>,
-    sequence_counter: Option<&AtomicI64>,
-) {
-    if let (Some(persister), Some(payload)) = (persister, payload) {
-        if let Err(error) = persister.append_with_runtime_sequence(
-            session_id,
-            EventType::MessageAssistant,
-            payload,
-            sequence_counter,
-        ) {
-            error!(
-                session_id,
-                error = %error,
-                "failed to persist interrupted message.assistant"
-            );
-        }
-    }
 }
 
 pub(super) fn build_token_record_json(
@@ -537,7 +527,22 @@ pub(super) fn emit_turn_end(
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
-) {
+) -> Result<(), RuntimeError> {
+    let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        cache_read_tokens: u.cache_read_tokens,
+        cached_input_tokens: u.cached_input_tokens,
+        cache_creation_tokens: u.cache_creation_tokens,
+        cache_creation_5m_tokens: u.cache_creation_5m_tokens,
+        cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+        reasoning_output_tokens: u.reasoning_output_tokens,
+        thought_tokens: u.thought_tokens,
+        tool_use_prompt_tokens: u.tool_use_prompt_tokens,
+        total_tokens: u.total_tokens,
+        provider_type: u.provider_type,
+    });
+
     if let Some(persister) = persister {
         let reasoning_status_evidence = ModelProviderReasoningStatusEvidence::response(
             ModelProviderReasoningStatusPhase::TurnEnd,
@@ -572,36 +577,32 @@ pub(super) fn emit_turn_end(
             payload["cost"] = json!(cost);
         }
 
-        if let Err(error) = persister.append_with_runtime_sequence(
+        let row = persister.append_with_runtime_sequence(
             session_id,
             EventType::StreamTurnEnd,
             payload,
             sequence_counter,
-        ) {
-            warn!(
-                session_id,
-                turn,
-                error = %error,
-                "failed to persist turn-end event; skipping broadcast"
-            );
-            return;
-        }
+        )?;
+        let base = BaseEvent {
+            session_id: row.session_id,
+            timestamp: row.timestamp,
+            sequence: Some(row.sequence),
+            trace_id: trace_id.map(|id| id.as_str().to_owned()),
+            parent_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
+        };
+        let _ = emitter.emit(TronEvent::TurnEnd {
+            base,
+            turn,
+            duration: duration_ms,
+            token_usage: turn_token_usage,
+            token_record: token_record_json,
+            cost,
+            stop_reason: Some(stream_result.stop_reason.clone()),
+            context_limit: Some(context_limit),
+            model: Some(model_name.to_owned()),
+        });
+        return Ok(());
     }
-
-    let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TokenUsage {
-        input_tokens: u.input_tokens,
-        output_tokens: u.output_tokens,
-        cache_read_tokens: u.cache_read_tokens,
-        cached_input_tokens: u.cached_input_tokens,
-        cache_creation_tokens: u.cache_creation_tokens,
-        cache_creation_5m_tokens: u.cache_creation_5m_tokens,
-        cache_creation_1h_tokens: u.cache_creation_1h_tokens,
-        reasoning_output_tokens: u.reasoning_output_tokens,
-        thought_tokens: u.thought_tokens,
-        tool_use_prompt_tokens: u.tool_use_prompt_tokens,
-        total_tokens: u.total_tokens,
-        provider_type: u.provider_type,
-    });
 
     emit_maybe_sequenced(
         emitter,
@@ -618,6 +619,7 @@ pub(super) fn emit_turn_end(
         },
         sequence_counter,
     );
+    Ok(())
 }
 
 pub(super) fn emit_capability_invocation_batch(

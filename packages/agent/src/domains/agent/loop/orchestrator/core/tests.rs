@@ -462,6 +462,17 @@ fn next_sequence_error_contains_session_id() {
     );
 }
 
+#[test]
+fn next_sequence_fails_closed_at_i64_max() {
+    let orch = make_orchestrator();
+    let counter = orch.ensure_sequence_counter_at_least("s1", i64::MAX);
+
+    let error = orch.next_sequence("s1").unwrap_err();
+
+    assert!(matches!(error, RuntimeError::Persistence(_)));
+    assert_eq!(counter.load(Ordering::SeqCst), i64::MAX);
+}
+
 // --- Orphaned run cleanup ---
 
 #[tokio::test]

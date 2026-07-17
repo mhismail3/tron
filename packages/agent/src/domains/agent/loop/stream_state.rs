@@ -364,6 +364,18 @@ impl StreamState {
     pub(super) fn build_interrupted_result(
         self,
     ) -> crate::domains::agent::r#loop::types::StreamResult {
+        self.build_partial_result("interrupted", true)
+    }
+
+    pub(super) fn build_failed_result(self) -> crate::domains::agent::r#loop::types::StreamResult {
+        self.build_partial_result("error", false)
+    }
+
+    fn build_partial_result(
+        self,
+        stop_reason: &str,
+        interrupted: bool,
+    ) -> crate::domains::agent::r#loop::types::StreamResult {
         let partial = if self.text_acc.is_empty() {
             None
         } else {
@@ -381,9 +393,9 @@ impl StreamState {
                 self.ordered_content.into_message(None)
             },
             capability_invocations: self.capability_invocations,
-            stop_reason: "interrupted".into(),
+            stop_reason: stop_reason.into(),
             token_usage: self.token_usage,
-            interrupted: true,
+            interrupted,
             partial_content: partial,
             ttft_ms: self.ttft_ms,
         }
@@ -541,7 +553,9 @@ impl StreamState {
             StreamEvent::TextDelta { delta } => {
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("text", &delta) {
-                        tracing::warn!(session_id, error = %e, "journal write failed for text delta");
+                        return StreamAction::Err(RuntimeError::Persistence(format!(
+                            "stream journal write failed for text delta: {e}"
+                        )));
                     }
                 }
                 self.handle_text_delta(delta, session_id, emitter, sequence_counter, trace_context);
@@ -571,11 +585,9 @@ impl StreamState {
             StreamEvent::TextEnd { text, signature } => {
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("text_end", &text) {
-                        tracing::warn!(
-                            session_id,
-                            error = %e,
-                            "journal write failed for text end"
-                        );
+                        return StreamAction::Err(RuntimeError::Persistence(format!(
+                            "stream journal write failed for text end: {e}"
+                        )));
                     }
                 }
                 if self.saw_streamed_content {
@@ -623,7 +635,9 @@ impl StreamState {
             StreamEvent::ThinkingDelta { delta, kind } => {
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("thinking", &delta) {
-                        tracing::warn!(session_id, error = %e, "journal write failed for thinking delta");
+                        return StreamAction::Err(RuntimeError::Persistence(format!(
+                            "stream journal write failed for thinking delta: {e}"
+                        )));
                     }
                 }
                 self.handle_thinking_delta(
@@ -643,11 +657,9 @@ impl StreamState {
             } => {
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("thinking_end", &thinking) {
-                        tracing::warn!(
-                            session_id,
-                            error = %e,
-                            "journal write failed for thinking end"
-                        );
+                        return StreamAction::Err(RuntimeError::Persistence(format!(
+                            "stream journal write failed for thinking end: {e}"
+                        )));
                     }
                 }
                 tracing::trace!(
@@ -683,11 +695,9 @@ impl StreamState {
                     if let Err(e) =
                         j.append_delta("capability_invocation_start", &start.to_string())
                     {
-                        tracing::warn!(
-                            session_id,
-                            error = %e,
-                            "journal write failed for capability invocation start"
-                        );
+                        return StreamAction::Err(RuntimeError::Persistence(format!(
+                            "stream journal write failed for capability invocation start: {e}"
+                        )));
                     }
                 }
                 self.handle_capability_invocation_start(
@@ -732,10 +742,18 @@ impl StreamState {
                     "model stream capability invocation ended"
                 );
                 if let Some(j) = journal {
-                    if let Ok(serialized) = serde_json::to_string(&capability_invocation) {
-                        if let Err(e) = j.append_delta("capability_invocation", &serialized) {
-                            tracing::warn!(session_id, error = %e, "journal write failed for capability invocation");
+                    let serialized = match serde_json::to_string(&capability_invocation) {
+                        Ok(serialized) => serialized,
+                        Err(error) => {
+                            return StreamAction::Err(RuntimeError::Internal(format!(
+                                "failed to encode capability invocation for stream journal: {error}"
+                            )));
                         }
+                    };
+                    if let Err(e) = j.append_delta("capability_invocation", &serialized) {
+                        return StreamAction::Err(RuntimeError::Persistence(format!(
+                            "stream journal write failed for capability invocation: {e}"
+                        )));
                     }
                 }
                 let should_drain = capability_invocation_stops_turn(

@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
 use crate::domains::session::event_store::reconstruction::{
     ReconstructionResult, reconstruct_from_events,
@@ -27,7 +25,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = event_rows_to_session_events(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors)?;
         Ok(reconstruct_from_events(&events))
     }
 
@@ -41,7 +39,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = event_rows_to_session_events(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors)?;
         Ok(reconstruct_from_events(&events))
     }
 
@@ -57,7 +55,7 @@ impl EventStore {
             .as_deref()
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
-        let events = event_rows_to_session_events(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors)?;
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, head_id, reconstruction))
     }
@@ -71,7 +69,7 @@ impl EventStore {
         if ancestors.is_empty() {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
-        let events = event_rows_to_session_events(&conn, &ancestors);
+        let events = event_rows_to_session_events(&conn, &ancestors)?;
         let reconstruction = reconstruct_from_events(&events);
         Ok(build_session_state(&session, event_id, reconstruction))
     }
@@ -81,41 +79,32 @@ impl EventStore {
 ///
 /// Payloads are resolved through the owning SQLite connection so inline JSON
 /// and blob-backed payload-ref envelopes follow the same storage path. Invalid
-/// payloads on known event types log a warning and become `Value::Null` (the
-/// reconstruction downstream skips missing payloads).
+/// payloads and unknown event types fail reconstruction; silently omitting a
+/// durable ancestor would let a provider continue with incomplete history.
 ///
 /// Rows whose `event_type` string does not parse into a known [`EventType`] are
-/// dropped and logged as corrupt — previously such rows were silently reclassified
-/// as [`EventType::SessionStart`], which would cause reconstruction to fake a new
-/// session boundary at an arbitrary point.
+/// rejected as corrupt — they must never be silently reclassified or dropped.
 pub(super) fn event_rows_to_session_events(
     conn: &rusqlite::Connection,
     rows: &[EventRow],
-) -> Vec<SessionEvent> {
+) -> Result<Vec<SessionEvent>> {
     rows.iter()
-        .filter_map(|row| {
-            let event_type: EventType = match row.event_type.parse() {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!(
-                        event_id = %row.id,
-                        event_type = %row.event_type,
-                        error = %e,
-                        "dropping event row with unknown event_type"
-                    );
-                    return None;
-                }
-            };
+        .map(|row| {
+            let event_type: EventType = row.event_type.parse().map_err(|error| {
+                EventStoreError::InvalidOperation(format!(
+                    "event {} has unknown type '{}': {error}",
+                    row.id, row.event_type
+                ))
+            })?;
             let payload = crate::shared::storage::resolve_stored_json_value(conn, &row.payload)
-                .unwrap_or_else(|error| {
-                    tracing::warn!(
-                        event_id = %row.id,
-                        error = %error,
-                        "stored event payload could not be resolved, defaulting to null"
-                    );
-                    Value::Null
-                });
-            Some(SessionEvent {
+                .map_err(|error| {
+                    EventStoreError::Internal(format!(
+                        "event {} payload could not be resolved: {error:#}",
+                        row.id
+                    ))
+                })?;
+            validate_provider_history_payload(&row.id, event_type, &payload)?;
+            Ok(SessionEvent {
                 id: row.id.clone(),
                 parent_id: row.parent_id.clone(),
                 session_id: row.session_id.clone(),
@@ -128,6 +117,67 @@ pub(super) fn event_rows_to_session_events(
             })
         })
         .collect()
+}
+
+/// Reject malformed payloads that can contribute to a future provider request.
+///
+/// Full runtime-message decoding remains owned by the agent projection after
+/// reconstruction has applied compaction and message merging. Capability
+/// completions need a minimal check here because reconstruction can legitimately
+/// discard an unmatched result; without it, a malformed completion could vanish
+/// before the runtime projection sees it.
+fn validate_provider_history_payload(
+    event_id: &str,
+    event_type: EventType,
+    payload: &serde_json::Value,
+) -> Result<()> {
+    if event_type != EventType::CapabilityInvocationCompleted {
+        return Ok(());
+    }
+
+    if payload
+        .get("invocationId")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+        .is_none()
+    {
+        return Err(EventStoreError::InvalidOperation(format!(
+            "event {event_id} has invalid capability completion payload: \
+             invocationId must be a non-empty string"
+        )));
+    }
+
+    match payload.get("modelContextContent") {
+        Some(value) if !value.is_string() => {
+            return Err(EventStoreError::InvalidOperation(format!(
+                "event {event_id} has invalid capability completion payload: \
+                 modelContextContent must be a string when present"
+            )));
+        }
+        Some(_) => {}
+        None if !payload
+            .get("content")
+            .is_some_and(serde_json::Value::is_string) =>
+        {
+            return Err(EventStoreError::InvalidOperation(format!(
+                "event {event_id} has invalid capability completion payload: \
+                 content must be a string"
+            )));
+        }
+        None => {}
+    }
+
+    if !payload
+        .get("isError")
+        .is_some_and(serde_json::Value::is_boolean)
+    {
+        return Err(EventStoreError::InvalidOperation(format!(
+            "event {event_id} has invalid capability completion payload: \
+             isError must be a boolean"
+        )));
+    }
+
+    Ok(())
 }
 
 pub(super) fn build_session_state(

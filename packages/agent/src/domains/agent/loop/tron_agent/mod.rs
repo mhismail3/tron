@@ -54,7 +54,7 @@ pub struct TronAgent {
     emitter: Arc<EventEmitter>,
     compaction: Arc<CompactionHandler>,
     session_id: String,
-    completed_turn_offset: AtomicU32,
+    turn_offset: AtomicU32,
     current_turn: AtomicU32,
     is_running: AtomicBool,
     abort_token: CancellationToken,
@@ -74,7 +74,7 @@ impl TronAgent {
             emitter: Arc::new(EventEmitter::new()),
             compaction: Arc::new(CompactionHandler::new(deps.compaction_trigger_config)),
             session_id,
-            completed_turn_offset: AtomicU32::new(0),
+            turn_offset: AtomicU32::new(0),
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
@@ -161,15 +161,21 @@ impl TronAgent {
         );
 
         let max_turns = self.config.max_turns;
-        let turn_offset = self.completed_turn_offset.load(Ordering::Relaxed);
+        let turn_offset = self.turn_offset.load(Ordering::Relaxed);
         let mut run_turn = 0u32;
         let mut exited_via_break = false;
         let mut previous_context_baseline =
             self.context_manager.get_api_context_tokens().unwrap_or(0);
 
         while run_turn < max_turns {
-            run_turn += 1;
-            let session_turn = turn_offset.saturating_add(run_turn);
+            let next_run_turn = run_turn.saturating_add(1);
+            let Some(session_turn) = turn_offset.checked_add(next_run_turn) else {
+                final_stop_reason = StopReason::Error;
+                error = Some("Session turn ordinal exhausted".to_owned());
+                exited_via_break = true;
+                break;
+            };
+            run_turn = next_run_turn;
             self.current_turn.store(session_turn, Ordering::Relaxed);
             debug!(
                 component = "agent.loop",
@@ -256,8 +262,10 @@ impl TronAgent {
             final_stop_reason = StopReason::MaxTurns;
         }
 
-        self.completed_turn_offset
-            .store(turn_offset.saturating_add(run_turn), Ordering::Relaxed);
+        self.turn_offset.store(
+            turn_offset.checked_add(run_turn).unwrap_or(u32::MAX),
+            Ordering::Relaxed,
+        );
 
         info!(
             component = "agent.loop",
@@ -324,8 +332,9 @@ impl TronAgent {
         self.sequence_counter = Some(counter);
     }
 
-    pub fn set_completed_turn_offset(&mut self, offset: u32) {
-        self.completed_turn_offset.store(offset, Ordering::Relaxed);
+    /// Seed the session-global turn ordinal immediately preceding this run.
+    pub fn set_turn_offset(&mut self, offset: u32) {
+        self.turn_offset.store(offset, Ordering::Relaxed);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {

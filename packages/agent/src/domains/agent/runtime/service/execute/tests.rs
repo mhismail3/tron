@@ -6,7 +6,8 @@ use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::model::responder::{ModelResponder, ModelResponderFactory, ModelResponseError};
 use crate::domains::session::event_store::{
-    ConnectionConfig, ConnectionPool, EventStore, ListEventsOptions, new_in_memory, run_migrations,
+    AppendOptions, ConnectionConfig, ConnectionPool, EventStore, EventType, ListEventsOptions,
+    new_in_memory, run_migrations,
 };
 use crate::shared::protocol::events::TronEvent;
 use crate::shared::server::errors::EVENT_STORE_FAILURE;
@@ -92,7 +93,6 @@ impl PromptFailureHarness {
             shutdown_token: None,
             shutdown_coordinator: None,
             engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
-            sequence_counter: None,
             server_origin: "localhost:9847".to_owned(),
             run_id: run_id.to_owned(),
             model: self.model.clone(),
@@ -218,4 +218,154 @@ async fn session_reconstruction_failure_never_substitutes_empty_history() {
         terminal_error_code(&mut outcome.events),
         RUNTIME_PERSISTENCE_ERROR
     );
+}
+
+#[tokio::test]
+async fn sequence_high_water_failure_stops_before_provider_construction() {
+    let harness = PromptFailureHarness::new();
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute_batch(
+            "CREATE TRIGGER corrupt_sequence_after_user
+             AFTER INSERT ON events
+             WHEN NEW.type = 'message.user'
+             BEGIN
+               UPDATE events SET sequence = X'00' WHERE type = 'session.start';
+             END;",
+        )
+        .expect("corruption trigger");
+    }
+
+    let mut outcome = harness.execute("run-sequence-read-failure").await;
+
+    harness.assert_stopped_before_provider(&outcome);
+    let conn = harness.pool.get().expect("event connection");
+    let provider_request_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM events WHERE type = 'model.provider_request'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("provider request count");
+    assert_eq!(provider_request_count, 0);
+    assert_eq!(
+        terminal_error_code(&mut outcome.events),
+        RUNTIME_PERSISTENCE_ERROR
+    );
+}
+
+#[tokio::test]
+async fn exhausted_sequence_stops_before_provider_construction() {
+    let harness = PromptFailureHarness::new();
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute(
+            "UPDATE events SET sequence = ?1 WHERE id = ?2",
+            rusqlite::params![i64::MAX - 1, harness.root_event_id],
+        )
+        .expect("seed final available user-message sequence");
+    }
+
+    let mut outcome = harness.execute("run-sequence-exhausted").await;
+
+    harness.assert_stopped_before_provider(&outcome);
+    let conn = harness.pool.get().expect("event connection");
+    let user_sequence: i64 = conn
+        .query_row(
+            "SELECT sequence FROM events WHERE type = 'message.user'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("durable user message");
+    assert_eq!(user_sequence, i64::MAX);
+    assert_eq!(
+        terminal_error_code(&mut outcome.events),
+        RUNTIME_PERSISTENCE_ERROR
+    );
+}
+
+#[test]
+fn failed_started_turn_advances_the_next_prompt_offset() {
+    let harness = PromptFailureHarness::new();
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute(
+            "UPDATE sessions SET turn_count = 19 WHERE id = ?1",
+            rusqlite::params![harness.session_id],
+        )
+        .expect("seed completed turn count");
+    }
+    harness
+        .event_store
+        .append(&AppendOptions {
+            session_id: &harness.session_id,
+            event_type: EventType::StreamTurnStart,
+            payload: serde_json::json!({"turn": 20}),
+            parent_id: None,
+            sequence: None,
+        })
+        .expect("persist turn start");
+    harness
+        .event_store
+        .append(&AppendOptions {
+            session_id: &harness.session_id,
+            event_type: EventType::TurnFailed,
+            payload: serde_json::json!({"turn": 20, "error": "cancelled"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .expect("persist turn failure");
+
+    let offset = resolve_turn_offset(&harness.event_store, &harness.session_id, 19).unwrap();
+    assert_eq!(offset, 20);
+    assert_eq!(offset.saturating_add(1), 21);
+}
+
+#[test]
+fn turn_high_water_read_failure_is_not_downgraded() {
+    let harness = PromptFailureHarness::new();
+    harness
+        .event_store
+        .append(&AppendOptions {
+            session_id: &harness.session_id,
+            event_type: EventType::StreamTurnStart,
+            payload: serde_json::json!({"turn": 20}),
+            parent_id: None,
+            sequence: None,
+        })
+        .expect("persist turn start");
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute(
+            "UPDATE events SET turn = X'00' WHERE type = 'stream.turn_start'",
+            [],
+        )
+        .expect("corrupt denormalized turn");
+    }
+
+    let error = resolve_turn_offset(&harness.event_store, &harness.session_id, 19).unwrap_err();
+    assert!(matches!(
+        error,
+        crate::domains::agent::r#loop::errors::RuntimeError::Persistence(_)
+    ));
+}
+
+#[test]
+fn exhausted_turn_high_water_is_rejected() {
+    let harness = PromptFailureHarness::new();
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute(
+            "UPDATE sessions SET turn_count = ?1 WHERE id = ?2",
+            rusqlite::params![i64::from(u32::MAX), harness.session_id],
+        )
+        .expect("seed exhausted turn count");
+    }
+
+    let error =
+        resolve_turn_offset(&harness.event_store, &harness.session_id, u32::MAX).unwrap_err();
+    assert!(matches!(
+        error,
+        crate::domains::agent::r#loop::errors::RuntimeError::Internal(_)
+    ));
 }

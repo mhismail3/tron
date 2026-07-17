@@ -1,4 +1,4 @@
-use super::{AtomicI64, PromptRequest, StartedRun};
+use super::{PromptRequest, StartedRun};
 use std::sync::Arc;
 
 pub(crate) struct PromptRunPlan {
@@ -13,7 +13,6 @@ pub(crate) struct PromptRunPlan {
     pub(super) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
-    pub(super) sequence_counter: Option<Arc<AtomicI64>>,
     pub(super) server_origin: String,
     pub(super) run_id: String,
     pub(super) model: String,

@@ -13,6 +13,9 @@
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled.
+//! Executed and skipped completion payloads are collected in provider-request
+//! order and commit as one terminal batch; no completion is broadcast when any
+//! row in that batch fails.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,6 +23,7 @@ use std::sync::atomic::AtomicI64;
 
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::r#loop::capability_invocation_executor;
+use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
@@ -27,12 +31,12 @@ use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::capability::{is_supported_operation, provider_result_text};
-use crate::domains::session::event_store::{EventRow, EventType};
+use crate::domains::session::event_store::EventType;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
@@ -57,6 +61,8 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
 pub(super) struct CapabilityInvocationPhaseOutcome {
     pub capability_invocations_executed: usize,
     pub stop_turn_requested: bool,
+    pub interrupted: bool,
+    pub error: Option<RuntimeError>,
 }
 
 struct ExecutedCapabilityInvocation {
@@ -163,12 +169,14 @@ pub(super) async fn execute_capability_invocation_phase(
             turn = params.turn,
             "agent capability phase skipped"
         );
-        return CapabilityInvocationPhaseOutcome::default();
+        return CapabilityInvocationPhaseOutcome {
+            interrupted: params.cancel.is_cancelled(),
+            ..Default::default()
+        };
     }
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
-    let mut persist_failed = false;
-    let mut persisted_started_rows: Vec<(EventRow, Value)> =
+    let mut started_payloads =
         Vec::with_capacity(params.stream_result.capability_invocations.len());
     info!(
         component = "agent.capability",
@@ -181,72 +189,72 @@ pub(super) async fn execute_capability_invocation_phase(
         "agent capability phase started"
     );
     for capability_invocation in &params.stream_result.capability_invocations {
-        if let Some(persister) = params.persister {
-            let mut payload = json!({
-                "invocationId": capability_invocation.id,
-                "name": capability_invocation.name,
-                "arguments": capability_invocation.arguments,
-                "turn": params.turn,
-                "runId": params.run_id,
-                "traceId": params.trace_id.map(|id| id.as_str()),
-                "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-            });
-            if let (Some(payload), Some(identity)) = (
-                payload.as_object_mut(),
-                primitive_identity_json(
-                    &capability_invocation.name,
-                    &capability_invocation.arguments,
-                    params.trace_id,
-                    params.parent_invocation_id,
-                )
-                .as_object()
-                .cloned(),
-            ) {
-                payload.extend(identity);
-            }
-            let row = match persister.append_with_runtime_sequence(
-                params.session_id,
-                EventType::CapabilityInvocationStarted,
-                payload.clone(),
-                params.sequence_counter,
-            ) {
-                Ok(row) => row,
-                Err(error) => {
-                    warn!(
-                        params.session_id,
-                        turn = params.turn,
-                        invocation_id = %capability_invocation.id,
-                        error = %error,
-                        "failed to persist capability-invocation event; skipping execution"
-                    );
-                    persist_failed = true;
-                    break;
-                }
-            };
-            trace!(
-                component = "agent.capability",
-                agent_event = "capability_invocation_started_persisted",
-                session_id = params.session_id,
-                run_id = params.run_id.unwrap_or("none"),
-                trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
-                turn = params.turn,
-                invocation_id = %capability_invocation.id,
-                primitive_name = %capability_invocation.name,
-                "capability invocation start persisted"
-            );
-            persisted_started_rows.push((row, payload));
+        let mut payload = json!({
+            "invocationId": capability_invocation.id,
+            "name": capability_invocation.name,
+            "arguments": capability_invocation.arguments,
+            "turn": params.turn,
+            "runId": params.run_id,
+            "traceId": params.trace_id.map(|id| id.as_str()),
+            "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+        });
+        if let (Some(payload), Some(identity)) = (
+            payload.as_object_mut(),
+            primitive_identity_json(
+                &capability_invocation.name,
+                &capability_invocation.arguments,
+                params.trace_id,
+                params.parent_invocation_id,
+            )
+            .as_object()
+            .cloned(),
+        ) {
+            payload.extend(identity);
         }
+        started_payloads.push(payload);
     }
 
-    if persist_failed {
-        return CapabilityInvocationPhaseOutcome::default();
-    }
-
-    for (row, payload) in &persisted_started_rows {
-        super::persistence::emit_persisted_capability_invocation_started(
-            params.emitter,
-            row,
-            payload,
+    if let Some(persister) = params.persister {
+        let events = started_payloads
+            .iter()
+            .cloned()
+            .map(|payload| (EventType::CapabilityInvocationStarted, payload))
+            .collect::<Vec<_>>();
+        let rows = match persister.append_batch_with_runtime_sequence(
+            params.session_id,
+            &events,
+            params.sequence_counter,
+        ) {
+            Ok(rows) => rows,
+            Err(error) => {
+                warn!(
+                    params.session_id,
+                    turn = params.turn,
+                    error = %error,
+                    "failed to atomically persist capability starts; skipping execution"
+                );
+                return CapabilityInvocationPhaseOutcome {
+                    error: Some(error),
+                    ..Default::default()
+                };
+            }
+        };
+        for (row, payload) in rows.iter().zip(&started_payloads) {
+            super::persistence::emit_persisted_capability_invocation_started(
+                params.emitter,
+                row,
+                payload,
+            );
+        }
+        trace!(
+            component = "agent.capability",
+            agent_event = "capability_invocation_starts_persisted",
+            session_id = params.session_id,
+            run_id = params.run_id.unwrap_or("none"),
+            trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+            turn = params.turn,
+            invocation_count = rows.len(),
+            "capability invocation starts persisted atomically"
         );
     }
 
@@ -288,22 +296,25 @@ pub(super) async fn execute_capability_invocation_phase(
         (0..params.stream_result.capability_invocations.len())
             .map(|_| None)
             .collect();
+    let mut completion_payloads = vec![None; params.stream_result.capability_invocations.len()];
+    let mut interrupted = false;
 
     for (wave_index, wave) in waves.iter().enumerate() {
         if params.cancel.is_cancelled() {
+            interrupted = true;
             let skipped = waves
                 .iter()
                 .skip(wave_index)
                 .flatten()
                 .copied()
                 .collect::<Vec<_>>();
-            persist_skipped_invocations(
+            record_skipped_invocations(
                 &skipped,
                 &params,
+                &mut completion_payloads,
                 "agent_run_cancelled",
                 "CAPABILITY_INVOCATION_CANCELLED",
-            )
-            .await;
+            );
             break;
         }
         debug!(
@@ -381,70 +392,16 @@ pub(super) async fn execute_capability_invocation_phase(
                         "capability invocation execution completed"
                     );
 
-                    if let Some(persister) = params.persister {
-                        let result_text = extract_result_text(&result);
-                        let is_error = result.result.is_error.unwrap_or(false);
-                        let base_identity = primitive_identity_json(
-                            &capability_invocation.name,
-                            &capability_invocation.arguments,
+                    let completion_payload = params.persister.map(|_| {
+                        executed_completion_payload(
+                            capability_invocation,
+                            &result,
+                            &provider_text,
+                            params.run_id,
                             params.trace_id,
                             params.parent_invocation_id,
-                        );
-                        let mut payload = json!({
-                            "invocationId": capability_invocation.id,
-                            "name": capability_invocation.name,
-                            "content": result_text,
-                            "isError": is_error,
-                            "duration": result.duration_ms,
-                            "details": result.result.details,
-                            "runId": params.run_id,
-                            "traceId": params.trace_id.map(|id| id.as_str()),
-                            "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                        });
-                        if provider_text != result_text
-                            && let Some(payload) = payload.as_object_mut()
-                        {
-                            payload.insert(
-                                "modelContextContent".to_owned(),
-                                Value::String(provider_text.clone()),
-                            );
-                        }
-                        if let (Some(payload), Some(identity)) = (
-                            payload.as_object_mut(),
-                            result_identity_json(
-                                &capability_invocation.name,
-                                base_identity,
-                                &result,
-                            )
-                            .as_object()
-                            .cloned(),
-                        ) {
-                            payload.extend(identity);
-                        }
-                        match persister.append_with_runtime_sequence(
-                            params.session_id,
-                            EventType::CapabilityInvocationCompleted,
-                            payload.clone(),
-                            params.sequence_counter,
-                        ) {
-                            Ok(row) => {
-                                super::persistence::emit_persisted_capability_invocation_completed(
-                                    params.emitter,
-                                    &row,
-                                    &payload,
-                                );
-                            }
-                            Err(error) => {
-                                error!(
-                                    params.session_id,
-                                    turn = params.turn,
-                                    invocation_id = %capability_invocation.id,
-                                    error = %error,
-                                    "failed to persist capability-result event"
-                                );
-                            }
-                        }
-                    }
+                        )
+                    });
 
                     (
                         idx,
@@ -452,13 +409,32 @@ pub(super) async fn execute_capability_invocation_phase(
                             result,
                             provider_text,
                         },
+                        completion_payload,
                     )
                 }
             })
             .collect();
 
-        for (idx, result) in futures::future::join_all(futures).await {
+        for (idx, result, completion_payload) in futures::future::join_all(futures).await {
             results[idx] = Some(result);
+            completion_payloads[idx] = completion_payload;
+        }
+        if params.cancel.is_cancelled() {
+            interrupted = true;
+            let skipped = waves
+                .iter()
+                .skip(wave_index + 1)
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+            record_skipped_invocations(
+                &skipped,
+                &params,
+                &mut completion_payloads,
+                "agent_run_cancelled",
+                "CAPABILITY_INVOCATION_CANCELLED",
+            );
+            break;
         }
         let wave_requested_turn_stop = wave_requests_turn_stop(wave, &results);
         debug!(
@@ -489,18 +465,26 @@ pub(super) async fn execute_capability_invocation_phase(
                 .flatten()
                 .copied()
                 .collect::<Vec<_>>();
-            persist_skipped_invocations(
+            record_skipped_invocations(
                 &skipped,
                 &params,
+                &mut completion_payloads,
                 "context_boundary_committed",
                 "CAPABILITY_INVOCATION_SKIPPED_AFTER_CONTEXT_BOUNDARY",
-            )
-            .await;
+            );
             break;
         }
     }
 
-    process_capability_results(results, params).await
+    if let Err(error) = persist_completion_batch(&params, completion_payloads) {
+        return CapabilityInvocationPhaseOutcome {
+            interrupted,
+            error: Some(error),
+            ..Default::default()
+        };
+    }
+
+    process_capability_results(results, params, interrupted).await
 }
 
 fn wave_requests_turn_stop(
@@ -514,15 +498,62 @@ fn wave_requests_turn_stop(
     })
 }
 
-async fn persist_skipped_invocations(
+fn executed_completion_payload(
+    invocation: &crate::shared::protocol::messages::CapabilityInvocationDraft,
+    result: &CapabilityInvocationExecutionResult,
+    provider_text: &str,
+    run_id: Option<&str>,
+    trace_id: Option<&crate::engine::TraceId>,
+    parent_invocation_id: Option<&crate::engine::InvocationId>,
+) -> Value {
+    let result_text = extract_result_text(result);
+    let is_error = result.result.is_error.unwrap_or(false);
+    let base_identity = primitive_identity_json(
+        &invocation.name,
+        &invocation.arguments,
+        trace_id,
+        parent_invocation_id,
+    );
+    let mut payload = json!({
+        "invocationId": invocation.id,
+        "name": invocation.name,
+        "content": result_text,
+        "isError": is_error,
+        "duration": result.duration_ms,
+        "details": result.result.details,
+        "runId": run_id,
+        "traceId": trace_id.map(|id| id.as_str()),
+        "parentInvocationId": parent_invocation_id.map(|id| id.as_str()),
+    });
+    if provider_text != result_text
+        && let Some(payload) = payload.as_object_mut()
+    {
+        payload.insert(
+            "modelContextContent".to_owned(),
+            Value::String(provider_text.to_owned()),
+        );
+    }
+    if let (Some(payload), Some(identity)) = (
+        payload.as_object_mut(),
+        result_identity_json(&invocation.name, base_identity, result)
+            .as_object()
+            .cloned(),
+    ) {
+        payload.extend(identity);
+    }
+    payload
+}
+
+fn record_skipped_invocations(
     indices: &[usize],
     params: &CapabilityInvocationPhaseParams<'_>,
+    completion_payloads: &mut [Option<Value>],
     reason: &str,
     code: &str,
 ) {
-    let Some(persister) = params.persister else {
+    if params.persister.is_none() {
         return;
-    };
+    }
     for &idx in indices {
         let invocation = &params.stream_result.capability_invocations[idx];
         let mut payload = json!({
@@ -555,33 +586,57 @@ async fn persist_skipped_invocations(
         ) {
             payload.extend(identity);
         }
-        match persister.append_with_runtime_sequence(
-            params.session_id,
-            EventType::CapabilityInvocationCompleted,
-            payload.clone(),
-            params.sequence_counter,
-        ) {
-            Ok(row) => super::persistence::emit_persisted_capability_invocation_completed(
-                params.emitter,
-                &row,
-                &payload,
-            ),
-            Err(error) => error!(
-                session_id = params.session_id,
-                invocation_id = %invocation.id,
-                skip_reason = reason,
-                error = %error,
-                "failed to persist terminal skipped capability invocation"
-            ),
-        }
+        completion_payloads[idx] = Some(payload);
     }
+}
+
+fn persist_completion_batch(
+    params: &CapabilityInvocationPhaseParams<'_>,
+    completion_payloads: Vec<Option<Value>>,
+) -> Result<(), RuntimeError> {
+    let Some(persister) = params.persister else {
+        return Ok(());
+    };
+    let expected_count = completion_payloads.len();
+    let payloads = completion_payloads
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            RuntimeError::Persistence(
+                "capability phase ended without terminalizing every requested invocation"
+                    .to_owned(),
+            )
+        })?;
+    debug_assert_eq!(payloads.len(), expected_count);
+    let events = payloads
+        .iter()
+        .cloned()
+        .map(|payload| (EventType::CapabilityInvocationCompleted, payload))
+        .collect::<Vec<_>>();
+    let rows = persister.append_batch_with_runtime_sequence(
+        params.session_id,
+        &events,
+        params.sequence_counter,
+    )?;
+    for (row, payload) in rows.iter().zip(&payloads) {
+        super::persistence::emit_persisted_capability_invocation_completed(
+            params.emitter,
+            row,
+            payload,
+        );
+    }
+    Ok(())
 }
 
 async fn process_capability_results(
     mut results: Vec<Option<ExecutedCapabilityInvocation>>,
     params: CapabilityInvocationPhaseParams<'_>,
+    interrupted: bool,
 ) -> CapabilityInvocationPhaseOutcome {
-    let mut outcome = CapabilityInvocationPhaseOutcome::default();
+    let mut outcome = CapabilityInvocationPhaseOutcome {
+        interrupted,
+        ..Default::default()
+    };
 
     for (idx, capability_invocation) in params
         .stream_result
@@ -621,6 +676,7 @@ async fn process_capability_results(
         turn = params.turn,
         executed_count = outcome.capability_invocations_executed,
         stop_turn_requested = outcome.stop_turn_requested,
+        interrupted = outcome.interrupted,
         "agent capability phase completed"
     );
     outcome

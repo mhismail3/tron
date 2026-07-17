@@ -25,7 +25,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         shutdown_token,
         shutdown_coordinator,
         engine_host,
-        sequence_counter,
         server_origin,
         run_id,
         model,
@@ -138,6 +137,42 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         "agent user message persistence completed"
     );
 
+    let durable_sequence_high_water = match event_store.get_max_sequence(&session_id) {
+        Ok(sequence) => sequence,
+        Err(error) => {
+            warn!(
+                session_id = %session_id,
+                run_id = %run_id,
+                error = %error,
+                "failed to resolve durable sequence high-water; aborting prompt run"
+            );
+            let failure = crate::domains::agent::r#loop::errors::RuntimeError::Persistence(
+                format!("failed to resolve durable sequence high-water: {error}"),
+            )
+            .to_failure()
+            .with_session_id(Some(session_id.clone()));
+            let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+            return;
+        }
+    };
+    if durable_sequence_high_water == i64::MAX {
+        warn!(
+            session_id = %session_id,
+            run_id = %run_id,
+            "durable sequence exhausted; aborting prompt run"
+        );
+        let failure = crate::domains::agent::r#loop::errors::RuntimeError::Persistence(format!(
+            "event sequence exhausted for session {session_id}"
+        ))
+        .to_failure()
+        .with_session_id(Some(session_id.clone()));
+        let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+        return;
+    }
+    let sequence_counter = Some(
+        orchestrator.ensure_sequence_counter_at_least(&session_id, durable_sequence_high_water),
+    );
+
     let persister = Arc::new(EventPersister::new(event_store.clone()));
 
     let working_dir = state.working_directory.clone().unwrap_or(working_dir);
@@ -178,13 +213,21 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     );
 
     let messages = state.messages.clone();
-    let initial_turn_count = event_store
-        .get_session(&session_id)
-        .ok()
-        .flatten()
-        .map_or(state.turn_count, |session| {
-            u32::try_from(session.turn_count).unwrap_or(state.turn_count)
-        });
+    let initial_turn_offset = match resolve_turn_offset(&event_store, &session_id, state.turn_count)
+    {
+        Ok(offset) => offset,
+        Err(error) => {
+            warn!(
+                session_id = %session_id,
+                run_id = %run_id,
+                error = %error,
+                "failed to resolve durable turn high-water; aborting prompt run"
+            );
+            let failure = error.to_failure().with_session_id(Some(session_id.clone()));
+            let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+            return;
+        }
+    };
     let model_for_error = model.clone();
     let BuiltPromptAgent {
         mut agent,
@@ -200,7 +243,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         &working_dir,
         server_origin.clone(),
         messages,
-        initial_turn_count,
+        initial_turn_offset,
         resolved_workspace_id.clone(),
     )
     .await
@@ -216,7 +259,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         provider_type = %provider_type,
         model = %model,
         workspace_id = resolved_workspace_id.as_deref().unwrap_or("none"),
-        initial_turn_count,
+        initial_turn_offset,
         "agent runtime built prompt agent"
     );
 
@@ -277,14 +320,13 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         &prompt,
         run_context,
         &broadcast,
-        sequence_counter,
+        sequence_counter.clone(),
     )
     .await;
     orchestrator.remove_compaction_handler(&session_id);
 
     finalize_prompt_run(PromptRunCompletion {
         result,
-        persister,
         run_cleanup: &mut run_cleanup,
         event_store,
         broadcast,
@@ -294,8 +336,52 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         run_id,
         provider_type,
         model_for_error,
+        sequence_counter,
     })
     .await;
+}
+
+fn resolve_turn_offset(
+    event_store: &crate::domains::session::event_store::EventStore,
+    session_id: &str,
+    reconstructed_turn_count: u32,
+) -> Result<u32, crate::domains::agent::r#loop::errors::RuntimeError> {
+    let session = event_store
+        .get_session(session_id)
+        .map_err(|error| {
+            crate::domains::agent::r#loop::errors::RuntimeError::Persistence(error.to_string())
+        })?
+        .ok_or_else(|| {
+            crate::domains::agent::r#loop::errors::RuntimeError::SessionNotFound(
+                session_id.to_owned(),
+            )
+        })?;
+    let completed_turn_count = u32::try_from(session.turn_count).map_err(|_| {
+        crate::domains::agent::r#loop::errors::RuntimeError::Persistence(format!(
+            "invalid completed turn count {} for session {session_id}",
+            session.turn_count
+        ))
+    })?;
+    let latest_started_turn = event_store
+        .get_max_turn_by_type(
+            session_id,
+            crate::domains::session::event_store::EventType::StreamTurnStart,
+        )
+        .map_err(|error| {
+            crate::domains::agent::r#loop::errors::RuntimeError::Persistence(error.to_string())
+        })?
+        .unwrap_or(0);
+    let turn_offset = reconstructed_turn_count
+        .max(completed_turn_count)
+        .max(latest_started_turn);
+    if turn_offset == u32::MAX {
+        return Err(
+            crate::domains::agent::r#loop::errors::RuntimeError::Internal(format!(
+                "session turn ordinal exhausted for {session_id}"
+            )),
+        );
+    }
+    Ok(turn_offset)
 }
 
 #[cfg(test)]

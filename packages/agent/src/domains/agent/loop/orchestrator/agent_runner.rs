@@ -92,9 +92,14 @@ pub async fn run_agent(
     // INVARIANT: agent.ready MUST be emitted AFTER agent.complete so clients see
     // a terminal run before returning to idle. The send button now depends only
     // on active processing/compaction plus the async ledger.
-    let _ = broadcast.emit(TronEvent::AgentReady {
+    let ready = TronEvent::AgentReady {
         base: BaseEvent::now(&session_id),
-    });
+    };
+    if let Some(counter) = sequence_counter.as_deref() {
+        let _ = broadcast.emit_sequenced(ready, counter);
+    } else {
+        let _ = broadcast.emit(ready);
+    }
 
     result
 }
@@ -114,7 +119,7 @@ mod tests {
     use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
     use crate::shared::protocol::messages::TokenUsage;
     use async_trait::async_trait;
-    use futures::stream;
+    use futures::{StreamExt, stream};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::domains::agent::r#loop::tron_agent::AgentDeps;
@@ -171,6 +176,65 @@ mod tests {
         }
     }
 
+    struct PartialThenCancelResponder;
+
+    #[async_trait]
+    impl ModelResponder for PartialThenCancelResponder {
+        fn info(&self) -> ModelResponderInfo {
+            ModelResponderInfo {
+                provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+                provider_name: "anthropic",
+                model: "mock".to_owned(),
+                context_window: 200_000,
+            }
+        }
+
+        async fn respond(
+            &self,
+            request: ModelResponseRequest,
+        ) -> Result<ModelResponse, ModelResponseError> {
+            let cancel = request.cancel;
+            let events = vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::TextDelta {
+                    delta: "partial".into(),
+                }),
+            ];
+            let stream = stream::iter(events.into_iter().enumerate()).map(move |(index, event)| {
+                if index == 1 {
+                    cancel.cancel();
+                }
+                event
+            });
+            Ok(ModelResponse {
+                info: self.info(),
+                stream: Box::pin(stream),
+            })
+        }
+    }
+
+    struct CancelBeforeStreamResponder;
+
+    #[async_trait]
+    impl ModelResponder for CancelBeforeStreamResponder {
+        fn info(&self) -> ModelResponderInfo {
+            ModelResponderInfo {
+                provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+                provider_name: "anthropic",
+                model: "mock".to_owned(),
+                context_window: 200_000,
+            }
+        }
+
+        async fn respond(
+            &self,
+            request: ModelResponseRequest,
+        ) -> Result<ModelResponse, ModelResponseError> {
+            request.cancel.cancel();
+            Err(ModelResponseError::other("provider observed cancellation"))
+        }
+    }
+
     fn default_events() -> Vec<Result<StreamEvent, ModelResponseError>> {
         vec![
             Ok(StreamEvent::Start),
@@ -187,6 +251,38 @@ mod tests {
                     }),
                 },
                 stop_reason: "end_turn".into(),
+            }),
+        ]
+    }
+
+    fn capability_events() -> Vec<Result<StreamEvent, ModelResponseError>> {
+        let mut arguments = serde_json::Map::new();
+        let _ = arguments.insert("operation".to_owned(), serde_json::json!("observe"));
+        let _ = arguments.insert("input".to_owned(), serde_json::json!("lifecycle test"));
+        vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id: "call-lifecycle".to_owned(),
+                name: "execute".to_owned(),
+            }),
+            Ok(StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id: "call-lifecycle".to_owned(),
+                arguments_delta: serde_json::to_string(&arguments).unwrap(),
+            }),
+            Ok(StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation:
+                    crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+                        "call-lifecycle",
+                        "execute",
+                        arguments,
+                    ),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: Vec::new(),
+                    token_usage: None,
+                },
+                stop_reason: "capability_invocation".to_owned(),
             }),
         ]
     }
@@ -283,6 +379,760 @@ mod tests {
         assert!(
             complete_pos.unwrap() < ready_pos.unwrap(),
             "agent_end must come before agent_ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_turn_uses_session_ordinal_and_row_backed_sequence() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+        use crate::shared::server::failure::RUNTIME_CANCELLED;
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("cancel"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new(default_events())),
+            session.session.id.clone(),
+        );
+        agent.set_turn_offset(19);
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        agent.set_abort_token(cancel);
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "cancel now",
+            run_context(),
+            &broadcast,
+            Some(counter),
+        )
+        .await;
+
+        assert!(result.interrupted, "unexpected run result: {result:?}");
+        assert_eq!(result.turns_executed, 1);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        let failures = rows
+            .iter()
+            .filter(|row| row.event_type == "turn.failed")
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1, "cancellation has one durable owner");
+        let start = rows
+            .iter()
+            .find(|row| row.event_type == "stream.turn_start")
+            .expect("cancelled turn must have a durable start");
+        let failure_payload: serde_json::Value =
+            serde_json::from_str(&failures[0].payload).unwrap();
+        assert_eq!(failure_payload["turn"], 20);
+        assert_eq!(failure_payload["code"], RUNTIME_CANCELLED);
+
+        let live_events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+        let live_start = live_events
+            .iter()
+            .find(|event| matches!(event, TronEvent::TurnStart { turn: 20, .. }))
+            .expect("cancelled turn start must be broadcast");
+        assert_eq!(live_start.sequence(), Some(start.sequence));
+        let live_failure = live_events
+            .iter()
+            .find(|event| matches!(event, TronEvent::TurnFailed { turn: 20, .. }))
+            .expect("cancelled turn failure must be broadcast");
+        assert_eq!(live_failure.sequence(), Some(failures[0].sequence));
+
+        let sequenced = live_events
+            .iter()
+            .filter_map(TronEvent::sequence)
+            .collect::<Vec<_>>();
+        assert!(
+            sequenced.windows(2).all(|pair| pair[0] < pair[1]),
+            "live cancellation lifecycle must be strictly sequenced: {sequenced:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_cancellation_atomically_persists_message_and_failure() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("partial cancel"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(PartialThenCancelResponder),
+            session.session.id.clone(),
+        );
+        agent.set_turn_offset(19);
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "cancel after partial",
+            run_context(),
+            &broadcast,
+            Some(counter),
+        )
+        .await;
+
+        assert!(result.interrupted, "unexpected run result: {result:?}");
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        let assistant = rows
+            .iter()
+            .filter(|row| row.event_type == "message.assistant")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assistant.len(),
+            1,
+            "partial assistant has one durable owner"
+        );
+        let failure = rows
+            .iter()
+            .filter(|row| row.event_type == "turn.failed")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            failure.len(),
+            1,
+            "cancellation failure has one durable owner"
+        );
+        let assistant = assistant[0];
+        let failure = failure[0];
+        assert_eq!(failure.sequence, assistant.sequence + 1);
+        assert_eq!(failure.parent_id.as_deref(), Some(assistant.id.as_str()));
+        assert_eq!(assistant.turn, Some(20));
+        assert_eq!(failure.turn, Some(20));
+        let assistant_payload: serde_json::Value =
+            serde_json::from_str(&assistant.payload).unwrap();
+        assert_eq!(assistant_payload["content"][0]["text"], "partial");
+        let failure_payload: serde_json::Value = serde_json::from_str(&failure.payload).unwrap();
+        assert_eq!(failure_payload["partialContent"], "partial");
+        assert_eq!(
+            store
+                .get_session(&session.session.id)
+                .unwrap()
+                .unwrap()
+                .turn_count,
+            1
+        );
+        let live_failure = std::iter::from_fn(|| rx.try_recv().ok())
+            .find(|event| matches!(event, TronEvent::TurnFailed { turn: 20, .. }))
+            .expect("row-backed failure broadcast");
+        assert_eq!(live_failure.sequence(), Some(failure.sequence));
+        assert!(!StreamingJournal::journal_path(&session.session.id, 20).exists());
+    }
+
+    #[tokio::test]
+    async fn persisted_happy_path_has_one_ordered_lifecycle_and_no_journal() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("happy lifecycle"), None)
+            .unwrap();
+        let (mut agent, _cleanup) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new(default_events())),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut receiver = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "complete normally",
+            run_context(),
+            &broadcast,
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        let lifecycle = [
+            "stream.turn_start",
+            "model.provider_request",
+            "message.assistant",
+            "stream.turn_end",
+        ]
+        .map(|event_type| {
+            rows.iter()
+                .filter(|row| row.event_type == event_type)
+                .collect::<Vec<_>>()
+        });
+        assert!(lifecycle.iter().all(|matches| matches.len() == 1));
+        let durable_sequences = lifecycle
+            .iter()
+            .map(|matches| matches[0].sequence)
+            .collect::<Vec<_>>();
+        assert!(durable_sequences.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(lifecycle[0][0].turn, Some(1));
+        assert_eq!(lifecycle[2][0].turn, Some(1));
+        assert_eq!(lifecycle[3][0].turn, Some(1));
+        assert!(!StreamingJournal::journal_path(&session.session.id, 1).exists());
+
+        let live = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+        let live_sequences = live
+            .iter()
+            .filter_map(TronEvent::sequence)
+            .collect::<Vec<_>>();
+        assert!(
+            live_sequences.windows(2).all(|pair| pair[0] < pair[1]),
+            "live lifecycle must be strictly ordered: {live_sequences:?}"
+        );
+        let start = live
+            .iter()
+            .find(|event| matches!(event, TronEvent::TurnStart { .. }))
+            .expect("live turn start");
+        let end = live
+            .iter()
+            .find(|event| matches!(event, TronEvent::TurnEnd { .. }))
+            .expect("live turn end");
+        assert_eq!(start.sequence(), Some(lifecycle[0][0].sequence));
+        assert_eq!(end.sequence(), Some(lifecycle[3][0].sequence));
+
+        let agent_end = live
+            .iter()
+            .position(|event| matches!(event, TronEvent::AgentEnd { .. }))
+            .unwrap();
+        let processing_false = live
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    TronEvent::SessionProcessingChanged {
+                        is_processing: false,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let ready = live
+            .iter()
+            .position(|event| matches!(event, TronEvent::AgentReady { .. }))
+            .unwrap();
+        assert!(agent_end < processing_false && processing_false < ready);
+    }
+
+    #[tokio::test]
+    async fn provider_stream_failure_atomically_preserves_visible_partial_output() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("partial failure"), None)
+            .unwrap();
+        let events = vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::TextDelta {
+                delta: "visible partial".into(),
+            }),
+            Err(ModelResponseError::other("provider connection lost")),
+        ];
+        let (mut agent, _cleanup) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new(events)),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut receiver = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "fail after output",
+            run_context(),
+            &broadcast,
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("provider connection lost"))
+        );
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        let assistant = rows
+            .iter()
+            .filter(|row| row.event_type == "message.assistant")
+            .collect::<Vec<_>>();
+        let failure = rows
+            .iter()
+            .filter(|row| row.event_type == "turn.failed")
+            .collect::<Vec<_>>();
+        assert_eq!(assistant.len(), 1);
+        assert_eq!(failure.len(), 1);
+        assert_eq!(failure[0].sequence, assistant[0].sequence + 1);
+        assert_eq!(
+            failure[0].parent_id.as_deref(),
+            Some(assistant[0].id.as_str())
+        );
+        assert!(rows.iter().all(|row| row.event_type != "stream.turn_end"));
+        let payload: serde_json::Value = serde_json::from_str(&assistant[0].payload).unwrap();
+        assert_eq!(payload["content"][0]["text"], "visible partial");
+        assert_eq!(payload["stopReason"], "error");
+        assert_eq!(payload["partial"], true);
+        assert!(!StreamingJournal::journal_path(&session.session.id, 1).exists());
+
+        let live_failure = std::iter::from_fn(|| receiver.try_recv().ok())
+            .find(|event| matches!(event, TronEvent::TurnFailed { turn: 1, .. }))
+            .expect("row-backed live failure");
+        assert_eq!(live_failure.sequence(), Some(failure[0].sequence));
+        let reconstructed =
+            crate::domains::agent::r#loop::orchestrator::session_reconstructor::reconstruct(
+                &store,
+                &session.session.id,
+            )
+            .expect("partial failure reconstructs");
+        assert!(reconstructed.messages.iter().any(|message| {
+            matches!(
+                message,
+                crate::shared::protocol::messages::Message::Assistant { content, .. }
+                    if content.iter().any(|block| matches!(
+                        block,
+                        AssistantContent::Text { text, .. } if text == "visible partial"
+                    ))
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_stream_open_terminalizes_current_turn_once() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("pre-stream cancel"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(CancelBeforeStreamResponder),
+            session.session.id.clone(),
+        );
+        agent.set_turn_offset(8);
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+
+        let result = run_agent(
+            &mut agent,
+            "cancel before stream",
+            run_context(),
+            &Arc::new(EventEmitter::new()),
+            Some(counter),
+        )
+        .await;
+
+        assert!(result.interrupted, "unexpected run result: {result:?}");
+        assert_eq!(result.stop_reason, StopReason::Interrupted);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "stream.turn_start" && row.turn == Some(9))
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "turn.failed" && row.turn == Some(9))
+                .count(),
+            1
+        );
+        assert!(rows.iter().all(|row| {
+            row.event_type != "message.assistant" && row.event_type != "stream.turn_end"
+        }));
+    }
+
+    #[tokio::test]
+    async fn partial_cancellation_rolls_back_message_when_terminal_write_fails() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_partial_cancel_terminal
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'turn.failed'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced partial terminal failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("partial rollback"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(PartialThenCancelResponder),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+
+        let result = run_agent(
+            &mut agent,
+            "cancel after partial",
+            run_context(),
+            &Arc::new(EventEmitter::new()),
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        assert!(!result.interrupted);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert!(rows.iter().all(|row| {
+            row.event_type != "message.assistant" && row.event_type != "turn.failed"
+        }));
+        assert!(
+            StreamingJournal::journal_path(&session.session.id, 1).exists(),
+            "failed atomic terminalization must retain recoverable stream data"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_turn_end_is_terminal_error_not_success() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_turn_end
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'stream.turn_end'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced turn-end failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("end failure"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new(default_events())),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+
+        let result = run_agent(
+            &mut agent,
+            "finish durably",
+            run_context(),
+            &Arc::new(EventEmitter::new()),
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        assert!(!result.interrupted);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "message.assistant")
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "turn.failed")
+                .count(),
+            1
+        );
+        assert!(rows.iter().all(|row| row.event_type != "stream.turn_end"));
+        assert!(!StreamingJournal::journal_path(&session.session.id, 1).exists());
+    }
+
+    #[tokio::test]
+    async fn failed_capability_start_batch_stops_turn_and_retains_recovery_journal() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_capability_start
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'capability.invocation.started'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced capability-start failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("capability start failure"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new(capability_events())),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+
+        let result = run_agent(
+            &mut agent,
+            "use a capability",
+            run_context(),
+            &Arc::new(EventEmitter::new()),
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "message.assistant")
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "turn.failed")
+                .count(),
+            1
+        );
+        assert!(rows.iter().all(|row| {
+            row.event_type != "capability.invocation.started"
+                && row.event_type != "capability.invocation.completed"
+                && row.event_type != "stream.turn_end"
+        }));
+        assert!(
+            StreamingJournal::journal_path(&session.session.id, 1).exists(),
+            "incomplete capability lifecycle must remain recoverable on restart"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_turn_start_stops_before_provider_execution() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_turn_start
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'stream.turn_start'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced turn-start failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("start failure"), None)
+            .unwrap();
+        let respond_calls = Arc::new(AtomicUsize::new(0));
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new_counted(
+                default_events(),
+                Arc::clone(&respond_calls),
+            )),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "do not invoke provider",
+            run_context(),
+            &broadcast,
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        assert_eq!(respond_calls.load(Ordering::SeqCst), 0);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert!(rows.iter().all(|row| row.event_type != "stream.turn_start"));
+        assert!(
+            rows.iter()
+                .all(|row| row.event_type != "model.provider_request")
+        );
+        assert!(
+            std::iter::from_fn(|| rx.try_recv().ok())
+                .all(|event| !matches!(event, TronEvent::TurnStart { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_cancellation_terminalization_is_not_reported_as_interrupted_success() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_cancel_terminal
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'turn.failed'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced cancellation terminal failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("cancel failure"), None)
+            .unwrap();
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new(default_events())),
+            session.session.id.clone(),
+        );
+        agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        agent.set_abort_token(cancel);
+        let counter = Arc::new(AtomicI64::new(
+            store.get_max_sequence(&session.session.id).unwrap(),
+        ));
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let result = run_agent(
+            &mut agent,
+            "cancel",
+            run_context(),
+            &broadcast,
+            Some(counter),
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        assert!(!result.interrupted);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("failed to persist interrupted turn"))
+        );
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        assert!(rows.iter().all(|row| row.event_type != "turn.failed"));
+        assert!(
+            std::iter::from_fn(|| rx.try_recv().ok())
+                .all(|event| !matches!(event, TronEvent::TurnFailed { .. }))
         );
     }
 

@@ -2,7 +2,9 @@
 //!
 //! Composes all repository operations into atomic, session-centric methods.
 //! Every write method runs inside a single `SQLite` transaction — callers
-//! never observe partial state. The event log is append-only except for the
+//! never observe partial state. Session-local lifecycle batches commit every
+//! row with one parent chain or roll back the entire batch. The event log is
+//! append-only except for the
 //! session-scoped cleanup performed by [`EventStore::delete_session`];
 //! individual message removal is represented by a durable `message.deleted`
 //! event and applied during reconstruction.
@@ -61,6 +63,13 @@ pub struct AppendOptions<'a> {
     /// (serializes across-process). See the `INVARIANT:` block in
     /// `append_event_in_tx_with_identity` for the full correctness argument.
     pub sequence: Option<i64>,
+}
+
+/// One event in an atomic, session-local append batch.
+pub(crate) struct AppendBatchItem {
+    pub(crate) event_type: EventType,
+    pub(crate) payload: Value,
+    pub(crate) sequence: Option<i64>,
 }
 
 /// Options for forking a session.
