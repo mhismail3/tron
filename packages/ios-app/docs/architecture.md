@@ -190,13 +190,22 @@ transition state only; native layout owns keyboard geometry. Its four stored
 notification tasks drive composer menu gating and hidden-to-visible message
 scrolling without a separate teardown path.
 
-Prompt submission is transactional at the composer boundary. Text,
-attachments, selected-photo state, the optimistic user row, and the persisted
-draft are committed only after `/engine` accepts `agent::prompt`; a pre-accept
-encoding, size, transport, or protocol failure removes the optimistic row and
-restores the exact composer state. Acceptance requires an affirmative
+Prompt submission is transactional at the composer boundary. Text, prepared
+attachments, the optimistic user row, and the persisted draft are committed
+only after `/engine` accepts `agent::prompt`; a pre-accept encoding, size,
+transport, or protocol failure removes the optimistic row and leaves the latest
+composer state intact. Acceptance requires an affirmative
 `acknowledged` response; a false value is an invalid success envelope and stays
-on the same rollback path. `hello.ok` supplies the server's canonical
+on the same rollback path. `MessagingCoordinator` owns one pre-accept
+submission reservation shared by send and retry, acquired before the live-event
+subscription can suspend; accepted/running state remains owned by the session's
+agent phase. The sendable payload is snapshotted when the user submits it;
+acceptance consumes only that text prefix and those prepared attachment IDs,
+while later composer edits remain the next unsent draft. Pending
+`PhotosPickerItem` state stays exclusively with the image-processing owner,
+which clears a selection only after conversion commits prepared attachments.
+`InputBarConfig.canSend` gates both trailing Send and keyboard Return.
+`hello.ok` supplies the server's canonical
 frame budget, and `EngineConnection` checks the final encoded JSON byte count
 before sending so an oversized attachment cannot force a disconnect or erase a
 retryable prompt. `InputBarState.hasContent` is the single composer-content

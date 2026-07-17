@@ -14,6 +14,21 @@ struct InputBarKeyboardTraversalTests {
         #expect(source.contains("return .handled"))
     }
 
+    @Test("Return and trailing Send share the complete send policy")
+    func testReturnUsesSharedSendPolicy() throws {
+        let source = try Self.inputBarSource()
+        let submitStart = try #require(source.range(of: ".onSubmit {"))
+        let submitEnd = try #require(
+            source.range(of: ".onKeyPress(.tab)", range: submitStart.upperBound..<source.endIndex)
+        )
+        let submit = source[submitStart.lowerBound..<submitEnd.lowerBound]
+
+        #expect(submit.contains("guard canSend else { return }"))
+        #expect(submit.contains("actions.onSend()"))
+        #expect(!submit.contains("trimmingCharacters"))
+        #expect(!submit.contains("config.readOnly"))
+    }
+
     private static func inputBarSource() throws -> String {
         let iosRoot = try iosAppRoot()
         let sourceURL = iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift")

@@ -1,4 +1,6 @@
 import XCTest
+import PhotosUI
+import SwiftUI
 @testable import TronMobile
 
 /// Focused regression coverage for the Slice 4 audit findings around local
@@ -59,6 +61,99 @@ final class MessagingCoordinatorAuditRegressionTests: XCTestCase {
         XCTAssertEqual(mockContext.currentTurn, 4)
         XCTAssertTrue(mockContext.appendedMessages.isEmpty)
         XCTAssertEqual(mockContext.removedMessageIds.count, 1)
+    }
+
+    func testSendFailurePreservesDraftEditedWhileSubscriptionSuspends() async {
+        mockContext.inputText = "original prompt"
+        mockContext.suspendLiveEventSubscription = true
+        mockContext.sendPromptShouldFail = true
+        let subscriptionSuspended = expectation(description: "subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = { subscriptionSuspended.fulfill() }
+
+        let send = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [subscriptionSuspended], timeout: 1.0)
+        mockContext.inputText = "newer draft"
+        mockContext.resumeAllLiveEventSubscriptions()
+        await send.value
+
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.lastSentText, "original prompt")
+        XCTAssertEqual(mockContext.inputText, "newer draft")
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+    }
+
+    func testAcceptedSendPreservesDraftEditedWhileSubscriptionSuspends() async {
+        mockContext.inputText = "original prompt"
+        mockContext.suspendLiveEventSubscription = true
+        let subscriptionSuspended = expectation(description: "subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = { subscriptionSuspended.fulfill() }
+
+        let send = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [subscriptionSuspended], timeout: 1.0)
+        mockContext.inputText += "newer draft"
+        mockContext.resumeAllLiveEventSubscriptions()
+        await send.value
+
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.lastSentText, "original prompt")
+        XCTAssertEqual(mockContext.inputText, "newer draft")
+        XCTAssertEqual(mockContext.appendedMessages.first?.content.textContent, "original prompt")
+    }
+
+    func testAcceptedTextSendLeavesPendingPhotoSelectionWithProcessingOwner() async {
+        mockContext.inputText = "send while photo conversion is pending"
+        mockContext.selectedImages = [PhotosPickerItem(itemIdentifier: "pending-photo")]
+        mockContext.suspendLiveEventSubscription = true
+        let subscriptionSuspended = expectation(description: "subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = { subscriptionSuspended.fulfill() }
+
+        let send = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [subscriptionSuspended], timeout: 1.0)
+        mockContext.resumeAllLiveEventSubscriptions()
+        await send.value
+
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertNil(mockContext.lastSentAttachments)
+        XCTAssertEqual(mockContext.selectedImages.map(\.itemIdentifier), ["pending-photo"])
+    }
+
+    func testAcceptedSendConsumesOnlySnapshottedAttachments() async {
+        let submitted = Attachment(
+            type: .image,
+            data: Data([0x01]),
+            mimeType: "image/jpeg",
+            fileName: "submitted.jpg",
+            originalSize: 1
+        )
+        let newerDraft = Attachment(
+            type: .image,
+            data: Data([0x02]),
+            mimeType: "image/jpeg",
+            fileName: "newer-draft.jpg",
+            originalSize: 1
+        )
+        mockContext.inputText = "send the prepared attachment"
+        mockContext.attachments = [submitted]
+        mockContext.suspendLiveEventSubscription = true
+        let subscriptionSuspended = expectation(description: "subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = { subscriptionSuspended.fulfill() }
+
+        let send = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [subscriptionSuspended], timeout: 1.0)
+        mockContext.attachments.append(newerDraft)
+        mockContext.resumeAllLiveEventSubscriptions()
+        await send.value
+
+        XCTAssertEqual(mockContext.lastSentAttachments?.map(\.fileName), ["submitted.jpg"])
+        XCTAssertEqual(mockContext.attachments, [newerDraft])
     }
 
     func testRetryMessageDoesNotSendWhenLiveEventSubscriptionFails() async {

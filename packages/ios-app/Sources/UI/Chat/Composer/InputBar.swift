@@ -223,9 +223,8 @@ struct InputBar: View {
                 .disabled(config.readOnly)
                 .accessibilityLabel("Message input")
                 .onSubmit {
-                    if !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !config.readOnly {
-                        actions.onSend()
-                    }
+                    guard canSend else { return }
+                    actions.onSend()
                 }
                 .onKeyPress(.tab) {
                     resignInputFocusForKeyboardTraversal()

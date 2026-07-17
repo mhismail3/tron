@@ -92,6 +92,105 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.inputText, "Stream the response live")
     }
 
+    func testConcurrentSendsAdmitOnlyFirstPrompt() async {
+        mockContext.inputText = "Send exactly once"
+        mockContext.suspendLiveEventSubscription = true
+        let firstSubscriptionSuspended = expectation(description: "first send subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = {
+            firstSubscriptionSuspended.fulfill()
+            self.mockContext.onLiveEventSubscriptionSuspended = nil
+        }
+
+        let firstSend = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [firstSubscriptionSuspended], timeout: 1.0)
+
+        let competingSendReturned = expectation(description: "competing send rejected")
+        let competingSend = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+            competingSendReturned.fulfill()
+        }
+        await fulfillment(of: [competingSendReturned], timeout: 1.0)
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 1)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 0)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+        XCTAssertEqual(mockContext.currentTurn, 0)
+        XCTAssertEqual(mockContext.inputText, "Send exactly once")
+
+        mockContext.resumeAllLiveEventSubscriptions()
+        await competingSend.value
+        await firstSend.value
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 1)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.appendedMessages.count, 1)
+        XCTAssertEqual(mockContext.currentTurn, 1)
+    }
+
+    func testSendAndRetryShareOnePromptAdmission() async {
+        mockContext.inputText = "Original send"
+        mockContext.suspendLiveEventSubscription = true
+        let firstSubscriptionSuspended = expectation(description: "send subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = {
+            firstSubscriptionSuspended.fulfill()
+            self.mockContext.onLiveEventSubscriptionSuspended = nil
+        }
+
+        let firstSend = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [firstSubscriptionSuspended], timeout: 1.0)
+
+        let retryReturned = expectation(description: "overlapping retry rejected")
+        let retry = Task { @MainActor in
+            await self.coordinator.retryMessage(
+                prompt: "Overlapping retry",
+                attachments: nil,
+                context: self.mockContext
+            )
+            retryReturned.fulfill()
+        }
+        await fulfillment(of: [retryReturned], timeout: 1.0)
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 1)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 0)
+
+        mockContext.resumeAllLiveEventSubscriptions()
+        await retry.value
+        await firstSend.value
+
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.lastSentText, "Original send")
+    }
+
+    func testSendWhileProcessingDoesNotMutateOrSubscribe() async {
+        mockContext.inputText = "Keep this draft"
+        mockContext.isProcessing = true
+
+        await coordinator.sendMessage(context: mockContext)
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 0)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 0)
+        XCTAssertFalse(mockContext.clearLocalNotificationsCalled)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+        XCTAssertEqual(mockContext.currentTurn, 0)
+        XCTAssertEqual(mockContext.inputText, "Keep this draft")
+    }
+
+    func testSubscriptionFailureReleasesPromptAdmission() async {
+        mockContext.inputText = "Try after reconnect"
+        mockContext.ensureLiveEventSubscriptionShouldFail = true
+        await coordinator.sendMessage(context: mockContext)
+
+        mockContext.ensureLiveEventSubscriptionShouldFail = false
+        await coordinator.sendMessage(context: mockContext)
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 2)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.lastSentText, "Try after reconnect")
+    }
+
     func testSendMessageDoesNotRecordRecentInputWhenLiveEventSubscriptionFails() async {
         // Given: Valid text, but the live stream cannot be established.
         let history = InputHistoryStore(defaults: testState.defaults)
@@ -422,6 +521,7 @@ final class MockMessagingContext: MessagingContext {
     var sessionId: String = "test-session"
     // MARK: - Tracking for Assertions
     var sendPromptCalled = false
+    var sendPromptCallCount = 0
     var lastSentText: String?
     var lastSentAttachments: [FileAttachment]?
     var lastSentReasoningLevel: String?
@@ -443,7 +543,11 @@ final class MockMessagingContext: MessagingContext {
     var cancelActiveDeviceRequestsCalled = false
     var showErrorCalled = false
     var ensureLiveEventSubscriptionCalled = false
+    var ensureLiveEventSubscriptionCallCount = 0
     var ensureLiveEventSubscriptionShouldFail = false
+    var suspendLiveEventSubscription = false
+    var liveEventSubscriptionContinuations: [CheckedContinuation<Void, Never>] = []
+    var onLiveEventSubscriptionSuspended: (() -> Void)?
     var clearLocalNotificationsCalled = false
     var callOrder: [String] = []
 
@@ -461,6 +565,7 @@ final class MockMessagingContext: MessagingContext {
     ) async throws {
         callOrder.append("sendPromptToServer")
         sendPromptCalled = true
+        sendPromptCallCount += 1
         lastSentText = text
         lastSentAttachments = attachments
         lastSentReasoningLevel = reasoningLevel
@@ -473,9 +578,23 @@ final class MockMessagingContext: MessagingContext {
     func ensureLiveEventSubscription() async throws {
         callOrder.append("ensureLiveEventSubscription")
         ensureLiveEventSubscriptionCalled = true
+        ensureLiveEventSubscriptionCallCount += 1
         if ensureLiveEventSubscriptionShouldFail {
             throw MessagingTestError.serverError
         }
+        if suspendLiveEventSubscription {
+            await withCheckedContinuation { continuation in
+                liveEventSubscriptionContinuations.append(continuation)
+                onLiveEventSubscriptionSuspended?()
+            }
+        }
+    }
+
+    func resumeAllLiveEventSubscriptions() {
+        suspendLiveEventSubscription = false
+        let continuations = liveEventSubscriptionContinuations
+        liveEventSubscriptionContinuations.removeAll()
+        continuations.forEach { $0.resume() }
     }
 
     func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {

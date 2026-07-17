@@ -72,6 +72,7 @@ protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenti
 ///
 /// Responsibilities:
 /// - Sending messages with text, attachments, and reasoning levels
+/// - Admitting only one prompt submission before server acceptance
 /// - Creating appropriate user message UI
 /// - Managing agent abort with proper state cleanup
 /// - Attachment add/remove operations
@@ -81,6 +82,11 @@ protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenti
 /// making it independently testable while maintaining the same behavior.
 @MainActor
 final class MessagingCoordinator {
+
+    /// Short-lived reservation between a local send/retry action and server
+    /// acceptance. Accepted/running lifecycle state remains owned by
+    /// `MessagingContext.isProcessing`.
+    private var promptSubmissionInFlight = false
 
     // MARK: - Initialization
 
@@ -100,20 +106,21 @@ final class MessagingCoordinator {
         context: MessagingContext,
         onPromptSent: ((String) -> Void)? = nil
     ) async {
-        let text = context.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !context.attachments.isEmpty else {
+        let submittedInput = context.inputText
+        let submittedAttachments = context.attachments
+        let text = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !submittedAttachments.isEmpty else {
             context.logVerbose("sendMessage() called but no text or attachments to send")
             return
         }
+        guard reservePromptSubmission(context: context) else { return }
+        defer { promptSubmissionInFlight = false }
 
-        context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
+        context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(submittedAttachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
         guard await preparePromptSend(context: context, lastUserPrompt: nil) else { return }
 
-        let pendingInput = context.inputText
-        let pendingAttachments = context.attachments
-        let pendingSelectedImages = context.selectedImages
-        let fileAttachments = pendingAttachments.map { FileAttachment(attachment: $0) }
-        let attachmentsToShow = pendingAttachments.isEmpty ? nil : pendingAttachments
+        let fileAttachments = submittedAttachments.map { FileAttachment(attachment: $0) }
+        let attachmentsToShow = submittedAttachments.isEmpty ? nil : submittedAttachments
         let optimisticMessage: ChatMessage
         let incrementsTurn: Bool
 
@@ -121,22 +128,18 @@ final class MessagingCoordinator {
             optimisticMessage = ChatMessage.user(text, attachments: attachmentsToShow)
             incrementsTurn = true
             context.appendMessage(optimisticMessage)
-            context.logDebug("Added user text message with \(pendingAttachments.count) attachments")
+            context.logDebug("Added user text message with \(submittedAttachments.count) attachments")
             context.currentTurn += 1
         } else {
             optimisticMessage = ChatMessage(
                 role: .user,
-                content: .attachments(pendingAttachments),
-                attachments: pendingAttachments
+                content: .attachments(submittedAttachments),
+                attachments: submittedAttachments
             )
             incrementsTurn = false
             context.appendMessage(optimisticMessage)
-            context.logDebug("Added attachment-only message with \(pendingAttachments.count) attachments")
+            context.logDebug("Added attachment-only message with \(submittedAttachments.count) attachments")
         }
-
-        context.inputText = ""
-        context.attachments = []
-        context.selectedImages = []
 
         do {
             context.logDebug("Calling sendPromptToServer with \(fileAttachments.count) attachments...")
@@ -148,7 +151,16 @@ final class MessagingCoordinator {
             )
             context.logInfo("Prompt sent successfully")
             context.updateSessionActivitySummary(lastUserPrompt: text, lastAssistantResponse: nil)
-            await context.draftStore?.clearDraft(sessionId: context.sessionId)
+            commitSubmittedComposer(
+                input: submittedInput,
+                attachments: submittedAttachments,
+                context: context
+            )
+            if context.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               context.attachments.isEmpty,
+               context.selectedImages.isEmpty {
+                await context.draftStore?.clearDraft(sessionId: context.sessionId)
+            }
             if !text.isEmpty {
                 onPromptSent?(text)
             }
@@ -158,9 +170,6 @@ final class MessagingCoordinator {
             if incrementsTurn {
                 context.currentTurn = max(0, context.currentTurn - 1)
             }
-            context.inputText = pendingInput
-            context.attachments = pendingAttachments
-            context.selectedImages = pendingSelectedImages
             handlePreAcceptPromptFailure(
                 context: context,
                 dedupKey: "agent.prompt.send.failed",
@@ -169,6 +178,22 @@ final class MessagingCoordinator {
                 suggestion: "Check the connection, then send the message again."
             )
         }
+    }
+
+    /// Commit only the composer values represented by the accepted prompt.
+    /// Any edits made after the user initiated submission remain as the next
+    /// unsent draft.
+    private func commitSubmittedComposer(
+        input submittedInput: String,
+        attachments submittedAttachments: [Attachment],
+        context: MessagingContext
+    ) {
+        if context.inputText.hasPrefix(submittedInput) {
+            context.inputText = String(context.inputText.dropFirst(submittedInput.count))
+        }
+
+        let submittedAttachmentIds = Set(submittedAttachments.map(\.id))
+        context.attachments.removeAll { submittedAttachmentIds.contains($0.id) }
     }
 
     /// Retry a prompt already present in history without consuming composer
@@ -180,6 +205,8 @@ final class MessagingCoordinator {
     ) async {
         context.logInfo("Retrying last turn (\"\(prompt.prefix(50))...\")")
 
+        guard reservePromptSubmission(context: context) else { return }
+        defer { promptSubmissionInFlight = false }
         guard await preparePromptSend(context: context, lastUserPrompt: prompt) else { return }
 
         do {
@@ -199,6 +226,15 @@ final class MessagingCoordinator {
                 suggestion: "Check the connection, then retry the turn again."
             )
         }
+    }
+
+    private func reservePromptSubmission(context: MessagingContext) -> Bool {
+        guard !promptSubmissionInFlight, !context.isProcessing else {
+            context.logDebug("Ignoring prompt submission while another turn is being admitted or processed")
+            return false
+        }
+        promptSubmissionInFlight = true
+        return true
     }
 
     private func preparePromptSend(
