@@ -91,4 +91,26 @@ struct AgentClientTests {
         }
         #expect(transport.lastWriteFunctionId == nil)
     }
+
+    @Test("Prompt requires an affirmative server acknowledgement")
+    func promptRejectsNegativeAcknowledgement() async {
+        let transport = makeConnectedTransport()
+        let client = AgentClient(transport: transport)
+        transport.writeHandler = { functionId, _, _, _ in
+            #expect(functionId.rawValue == "agent::prompt")
+            return AgentPromptResult(acknowledged: false)
+        }
+
+        do {
+            try await client.sendPrompt(
+                "Hello",
+                idempotencyKey: .userAction("agent.prompt.negative-ack-test")
+            )
+            Issue.record("a negative acknowledgement must not commit prompt submission")
+        } catch let error as EngineConnectionError {
+            #expect(error == .invalidResponse)
+        } catch {
+            Issue.record("unexpected prompt error: \(error)")
+        }
+    }
 }

@@ -15,8 +15,9 @@
 //!    catalog revision before this domain handler runs.
 //! 3. `agent::prompt` derives the run id, records the accepted prompt, invokes
 //!    hidden `agent::prompt_apply` synchronously through an engine-owned
-//!    internal causal context, and returns the acknowledgement envelope. The
-//!    prompt path does not race the background queue drainer for its own receipt.
+//!    internal causal context, and returns an affirmative acknowledgement plus
+//!    run id. Rejection is an engine error, never a negative success envelope.
+//!    The prompt path does not race the background queue drainer for its own receipt.
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
 //! 5. The turn runner builds provider input from session state and supplies one

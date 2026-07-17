@@ -35,8 +35,9 @@ final class AgentClient: EngineDomainClient, AgentRepository {
             context: sessionInvocationContext(sessionId)
         )
 
-        if !result.acknowledged {
+        guard result.acknowledged else {
             logger.warning("Prompt not acknowledged by server", category: .chat)
+            throw EngineConnectionError.invalidResponse
         }
     }
 

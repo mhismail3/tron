@@ -1821,7 +1821,10 @@ The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,
 `agent::abort_invocation`, and `agent::status`. Hidden internal functions
 `agent::prompt_apply` and `agent::run_turn` serialize accepted prompts into the
-provider loop and keep session truth consistent. On completion, the durable
+provider loop and keep session truth consistent. Their success contracts carry
+a run id and only `acknowledged: true`; validation failures and busy sessions
+return canonical child errors rather than negative success acknowledgements.
+On completion, the durable
 `agent_result` resource derives its final answer and source event reference from
 the flushed event-store reconstruction, so replay uses the same canonical text
 as session history rather than a parallel runtime copy.

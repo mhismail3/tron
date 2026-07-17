@@ -194,7 +194,9 @@ Prompt submission is transactional at the composer boundary. Text,
 attachments, selected-photo state, the optimistic user row, and the persisted
 draft are committed only after `/engine` accepts `agent::prompt`; a pre-accept
 encoding, size, transport, or protocol failure removes the optimistic row and
-restores the exact composer state. `hello.ok` supplies the server's canonical
+restores the exact composer state. Acceptance requires an affirmative
+`acknowledged` response; a false value is an invalid success envelope and stays
+on the same rollback path. `hello.ok` supplies the server's canonical
 frame budget, and `EngineConnection` checks the final encoded JSON byte count
 before sending so an oversized attachment cannot force a disconnect or erase a
 retryable prompt. `InputBarState.hasContent` is the single composer-content
