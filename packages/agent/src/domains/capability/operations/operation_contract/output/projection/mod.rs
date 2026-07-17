@@ -30,6 +30,19 @@
 //! content-free navigation facts; complete copy-ready ref objects remain JSON
 //! strings so the generic evidence normalizer cannot misclassify them as
 //! resource-store records.
+//! Filesystem reads use an operation-specific projection rather than the
+//! generic metadata allowlist: bounded text chunks, directory/path matches,
+//! search previews, and read-only diffs remain useful to the provider while
+//! relative-path validation, credential redaction, and explicit source/provider
+//! truncation keep local data under the provider boundary. Source owners report
+//! actual result/walk overflow, while canonical normalized collections own final
+//! provider item counts after structural byte-budget reduction. Filesystem mutations
+//! retain the metadata/resource-only projection and never echo proposed file
+//! bodies or diffs.
+//! Filesystem text redaction preserves a slash literal only when explicit source
+//! syntax owns it as a quoted route-call argument (for example,
+//! `router.get("/api/users")`). Generic quoted, unquoted, Markdown-code, Windows,
+//! UNC, and ambiguous absolute paths fail closed as local paths.
 
 use std::sync::LazyLock;
 
@@ -40,6 +53,8 @@ use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use super::spec::OutputProfile;
+
+mod filesystem;
 
 #[cfg(test)]
 fn extract_model_context_result_text(result: &CapabilityResult) -> String {
@@ -94,10 +109,11 @@ pub(super) fn project_evidence(
                 project_capability_cockpit_evidence(details)
             }
             OutputProfile::Web => project_web_evidence(operation, details),
-            OutputProfile::Summary
-            | OutputProfile::Filesystem
-            | OutputProfile::Runtime
-            | OutputProfile::Governance => project_metadata_operation_evidence(operation, details),
+            OutputProfile::Filesystem => filesystem::project_evidence(operation, details)
+                .or_else(|| project_metadata_operation_evidence(operation, details)),
+            OutputProfile::Summary | OutputProfile::Runtime | OutputProfile::Governance => {
+                project_metadata_operation_evidence(operation, details)
+            }
         }?
     };
     if let (Value::Object(projected), Some(outcome)) =

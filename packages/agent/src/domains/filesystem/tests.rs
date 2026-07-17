@@ -244,6 +244,8 @@ async fn agent_search_text_is_bounded_and_skips_binary() {
     .await;
     assert!(value["matches"].as_array().unwrap().len() >= 3);
     assert_eq!(value["skippedBinaryFiles"], 1);
+    assert_eq!(value["resultLimitReached"], false);
+    assert_eq!(value["truncated"], false);
 
     let bounded = invoke_ok(
         &ctx,
@@ -253,6 +255,154 @@ async fn agent_search_text_is_bounded_and_skips_binary() {
     )
     .await;
     assert_eq!(bounded["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["resultLimitReached"], true);
+    assert_eq!(bounded["truncated"], true);
+}
+
+#[tokio::test]
+async fn agent_list_distinguishes_exact_limit_from_actual_overflow() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("only.txt"), "one").expect("only");
+
+    let exact = invoke_ok(
+        &ctx,
+        contract::LIST_FUNCTION,
+        json!({"path": ".", "maxResults": 1}),
+        client_context(root.path(), "list-exact-limit", false),
+    )
+    .await;
+    assert_eq!(exact["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(exact["resultLimitReached"], false);
+    assert_eq!(exact["truncated"], false);
+
+    fs::write(root.path().join("overflow.txt"), "two").expect("overflow");
+    let overflow = invoke_ok(
+        &ctx,
+        contract::LIST_FUNCTION,
+        json!({"path": ".", "maxResults": 1}),
+        client_context(root.path(), "list-actual-overflow", false),
+    )
+    .await;
+    assert_eq!(overflow["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(overflow["total"], 2);
+    assert_eq!(overflow["omitted"], 1);
+    assert_eq!(overflow["resultLimitReached"], true);
+    assert_eq!(overflow["truncated"], true);
+}
+
+#[tokio::test]
+async fn agent_find_reports_result_limit_truncation() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("needle-one.txt"), "one").expect("one");
+    fs::write(root.path().join("needle-two.txt"), "two").expect("two");
+
+    let bounded = invoke_ok(
+        &ctx,
+        contract::FIND_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 1}),
+        client_context(root.path(), "find-result-limit", false),
+    )
+    .await;
+
+    assert_eq!(bounded["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["resultLimitReached"], true);
+    assert_eq!(bounded["truncated"], true);
+}
+
+#[tokio::test]
+async fn agent_find_exact_limit_without_an_extra_match_is_complete() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("needle.txt"), "one").expect("match");
+    fs::write(root.path().join("other.txt"), "two").expect("non-match");
+
+    let exact = invoke_ok(
+        &ctx,
+        contract::FIND_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 1}),
+        client_context(root.path(), "find-exact-limit", false),
+    )
+    .await;
+
+    assert_eq!(exact["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(exact["resultLimitReached"], false);
+    assert_eq!(exact["truncated"], false);
+}
+
+#[tokio::test]
+async fn agent_search_exact_limit_without_an_extra_match_is_complete() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("one.txt"), "needle once\n").expect("match");
+    fs::write(root.path().join("other.txt"), "no match\n").expect("non-match");
+
+    let exact = invoke_ok(
+        &ctx,
+        contract::SEARCH_TEXT_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 1}),
+        client_context(root.path(), "search-exact-limit", false),
+    )
+    .await;
+
+    assert_eq!(exact["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(exact["resultLimitReached"], false);
+    assert_eq!(exact["truncated"], false);
+}
+
+#[tokio::test]
+async fn agent_search_reports_source_preview_omission() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let preview_limit = agent_support::MAX_LINE_PREVIEW;
+    let line = format!("needle {}", "x".repeat(preview_limit + 40));
+    fs::write(root.path().join("long-line.txt"), format!("{line}\n")).expect("long line");
+
+    let result = invoke_ok(
+        &ctx,
+        contract::SEARCH_TEXT_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 10}),
+        client_context(root.path(), "search-preview-omission", false),
+    )
+    .await;
+    let search_match = &result["matches"][0];
+    assert_eq!(search_match["previewSourceBytes"], line.len());
+    assert_eq!(search_match["previewReturnedBytes"], preview_limit);
+    assert_eq!(
+        search_match["previewOmittedBytes"],
+        line.len() - preview_limit
+    );
+    assert_eq!(search_match["previewTruncated"], true);
+}
+
+#[tokio::test]
+async fn agent_search_reports_truncated_input_files() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(
+        root.path().join("large.txt"),
+        format!("{}needle after bounded prefix\n", "prefix\n".repeat(20)),
+    )
+    .expect("large file");
+
+    let bounded = invoke_ok(
+        &ctx,
+        contract::SEARCH_TEXT_FUNCTION,
+        json!({
+            "path": ".",
+            "query": "needle",
+            "maxResults": 10,
+            "maxFileBytes": 16
+        }),
+        client_context(root.path(), "search-truncated-input", false),
+    )
+    .await;
+
+    assert!(bounded["matches"].as_array().is_some_and(Vec::is_empty));
+    assert_eq!(bounded["truncatedInputFiles"], 1);
+    assert_eq!(bounded["resultLimitReached"], false);
+    assert_eq!(bounded["truncated"], true);
 }
 
 #[tokio::test]

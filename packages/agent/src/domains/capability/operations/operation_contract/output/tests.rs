@@ -27,6 +27,24 @@ fn successful_details(operation: &str) -> Value {
                 "evidence": {"resourceRefs": []}
             }
         }),
+        "filesystem_read" => json!({
+            "primitiveOperation": operation,
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "read",
+                "path": {"root": "working_directory", "relativePath": "README.md"},
+                "file": {
+                    "exists": true,
+                    "isBinary": false,
+                    "sizeBytes": 12,
+                    "contentHash": "sha256-test",
+                    "truncated": false,
+                    "content": "hello world\n"
+                }
+            }
+        }),
         "web_robots_check" => json!({
             "primitiveOperation": operation,
             "status": "ok",
