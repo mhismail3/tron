@@ -104,6 +104,87 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertFalse(source.contains("else if let record = message.tokenRecord"))
     }
 
+    func testStreamingRevealFadesOnlyTheNewCharacterTailAndConverges() {
+        let stableOpacity = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 99,
+            lineCharacterCount: 104,
+            targetCharacterCount: 104,
+            revealedCharacterCount: 100,
+            reduceMotion: false
+        )
+        let firstNewCharacterOpacity = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 100,
+            lineCharacterCount: 104,
+            targetCharacterCount: 104,
+            revealedCharacterCount: 100,
+            reduceMotion: false
+        )
+        let halfwayOpacity = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 102,
+            lineCharacterCount: 104,
+            targetCharacterCount: 104,
+            revealedCharacterCount: 102.5,
+            reduceMotion: false
+        )
+        let settledOpacity = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 103,
+            lineCharacterCount: 104,
+            targetCharacterCount: 104,
+            revealedCharacterCount: 104,
+            reduceMotion: false
+        )
+
+        XCTAssertEqual(stableOpacity, 1)
+        XCTAssertEqual(firstNewCharacterOpacity, StreamingTextRevealPolicy.minimumOpacity)
+        XCTAssertEqual(
+            halfwayOpacity,
+            StreamingTextRevealPolicy.minimumOpacity
+                + ((1 - StreamingTextRevealPolicy.minimumOpacity) * 0.5),
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(settledOpacity, 1)
+    }
+
+    func testStreamingRevealIsBoundedAndHonorsReduceMotion() {
+        let beforeBoundedTail = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 975,
+            lineCharacterCount: 1_000,
+            targetCharacterCount: 1_000,
+            revealedCharacterCount: 0,
+            reduceMotion: false
+        )
+        let firstBoundedTailCharacter = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 976,
+            lineCharacterCount: 1_000,
+            targetCharacterCount: 1_000,
+            revealedCharacterCount: 0,
+            reduceMotion: false
+        )
+        let reducedMotionOpacity = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 999,
+            lineCharacterCount: 1_000,
+            targetCharacterCount: 1_000,
+            revealedCharacterCount: 0,
+            reduceMotion: true
+        )
+
+        XCTAssertEqual(beforeBoundedTail, 1)
+        XCTAssertEqual(firstBoundedTailCharacter, StreamingTextRevealPolicy.minimumOpacity)
+        XCTAssertEqual(reducedMotionOpacity, 1)
+    }
+
+    func testStreamingRevealDoesNotAnimateBackwardReplacement() {
+        let opacity = StreamingTextRevealPolicy.opacity(
+            forCharacterAt: 0,
+            lineCharacterCount: 1,
+            targetCharacterCount: 4,
+            revealedCharacterCount: 8,
+            reduceMotion: false
+        )
+
+        XCTAssertEqual(opacity, 1)
+    }
+
     private func source(_ relativePath: String) throws -> String {
         try String(
             contentsOf: iosAppRoot.appendingPathComponent(relativePath),

@@ -466,6 +466,12 @@ The chat timeline owns only truthful local/session presentation state:
   Capability-bearing responses get no footer even when capability execution
   explicitly stops, while their token records still contribute to
   session/context accounting.
+  Live assistant text keeps each cadence-smoothed prefix in one native,
+  selectable and accessible `Text` while a draw-time `TextRenderer` fades only
+  the bounded newly appended source-character tail in the final visual line
+  over 70ms. Settled spans and earlier lines use native bulk drawing, composed
+  characters share one opacity, Reduce Motion bypasses the effect, and initially
+  mounted or static messages do not replay the reveal.
 - Capability evidence uses `CapabilityEvidencePresentation` for one-line chat
   chips and `CapabilityInvocationBriefPresentation` for detail sheets. Chips
   stay compact; detail sheets read as a progressive briefing: what happened,
