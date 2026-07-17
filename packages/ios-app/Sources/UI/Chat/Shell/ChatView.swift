@@ -40,31 +40,17 @@ struct ChatView: View {
     @State var toolbarTitleOffsetY: CGFloat = 4
 
     // MARK: - Scroll State (internal for extension access)
-    @State var scrollProxy: ScrollViewProxy?
+    var scrollProxy: ScrollViewProxy? {
+        get { viewportMeasurements.scrollProxy }
+        nonmutating set { viewportMeasurements.scrollProxy = newValue }
+    }
     @State var transcriptScrollPosition = ScrollPosition()
 
     // MARK: - Message Loading State (internal for extension access)
     @State var initialLoadComplete = false
-    @State var autoloadEarlierTask: Task<Void, Never>?
-    /// Content height reported by scroll geometry during initial load.
-    /// Used by the scroll convergence loop to detect when LazyVStack heights stabilize.
-    @State var initContentHeight: Int = 0
-    /// Measured distance from the visible viewport to the bottom anchor during
-    /// initial load. The transcript is not revealed until this reaches the
-    /// bottom tolerance, which prevents resumed sessions from opening mid-log.
-    @State var initDistanceFromBottom: CGFloat = .greatestFiniteMagnitude
-    /// Bottom scroll target position in the named viewport. Initial reveal uses
-    /// this source-owned target instead of padded scroll-content extent.
-    @State var initBottomAnchorMaxY: CGFloat = .greatestFiniteMagnitude
-    /// Visible message frames in the scroll viewport coordinate space.
-    /// Used only to preserve the user's reading position when older history is prepended.
-    @State var messageViewportFrames: [UUID: CGRect] = [:]
-    @State var messageViewportHeight: CGFloat = 0
-    @State var isNearTopHistoryDetent = false
-    /// True after a top-detent sample has inserted one older page. This prevents
-    /// repeated loads from the same stale geometry sample while still allowing
-    /// the next user scroll to explicitly re-arm older-history paging.
-    @State var hasConsumedTopHistoryDetent = false
+    /// Non-observable measurement cache. Geometry callbacks must not invalidate
+    /// the same LazyVStack layout pass that produced their values.
+    @State var viewportMeasurements = ChatViewportMeasurements()
 
     // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?
@@ -152,8 +138,6 @@ struct ChatView: View {
         }
         .onDisappear {
             taskCoordinator.invalidate()
-            autoloadEarlierTask?.cancel()
-            autoloadEarlierTask = nil
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             viewModel.clearLocalNotifications()

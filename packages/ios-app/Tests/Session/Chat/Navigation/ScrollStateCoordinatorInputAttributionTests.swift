@@ -27,8 +27,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
         let coordinator = ScrollStateCoordinator()
         coordinator.geometryChanged(
             isNearBottom: false,
-            isPositionedByUser: false,
-            userMovedTowardOlderContent: true
+            geometryOnlyMovement: .towardOlderContent(distance: 200, threshold: 100)
         )
         coordinator.contentDidArrive()
 
@@ -45,8 +44,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
         coordinator.willPrependHistory(anchor: nil)
         coordinator.geometryChanged(
             isNearBottom: false,
-            isPositionedByUser: false,
-            userMovedTowardOlderContent: true
+            geometryOnlyMovement: .towardOlderContent(distance: 200, threshold: 100)
         )
         coordinator.contentDidArrive()
 
@@ -60,7 +58,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
 
     @Test("Stable page-sized upward movement is directional user intent")
     func testDetectsStablePageSizedUpwardMovement() {
-        #expect(ScrollStateCoordinator.isMovementTowardOlderContent(
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 15_930,
             newContentOffsetY: 12_347,
             oldDistanceFromBottom: 49,
@@ -69,12 +67,12 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 780,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
+        ) == .towardOlderContent(distance: 3_583, threshold: 100))
     }
 
     @Test("A real page move remains detectable while content grows")
     func testDetectsPageMovementDuringContentGrowth() {
-        #expect(ScrollStateCoordinator.isMovementTowardOlderContent(
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 4_000,
             newContentOffsetY: 3_200,
             oldDistanceFromBottom: 20,
@@ -83,12 +81,12 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 800,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
+        ) == .towardOlderContent(distance: 800, threshold: 100))
     }
 
     @Test("Downward app movement and stationary content growth are not upward intent")
     func testRejectsAppMovementAndStationaryContentGrowth() {
-        #expect(!ScrollStateCoordinator.isMovementTowardOlderContent(
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 1_000,
             newContentOffsetY: 1_600,
             oldDistanceFromBottom: 20,
@@ -97,8 +95,8 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 780,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
-        #expect(!ScrollStateCoordinator.isMovementTowardOlderContent(
+        ) == .reset)
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 1_000,
             newContentOffsetY: 1_000,
             oldDistanceFromBottom: 20,
@@ -107,12 +105,12 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 780,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
+        ) == .stationaryContentGrowth)
     }
 
     @Test("Anchor correction with flat bottom distance is not upward user intent")
     func testRejectsAnchorCorrectionWithFlatBottomDistance() {
-        #expect(!ScrollStateCoordinator.isMovementTowardOlderContent(
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 1_000,
             newContentOffsetY: 500,
             oldDistanceFromBottom: 300,
@@ -121,12 +119,12 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 780,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
+        ) == .reset)
     }
 
-    @Test("Small layout correction is below the accessibility page threshold")
-    func testRejectsSmallUpwardCorrection() {
-        #expect(!ScrollStateCoordinator.isMovementTowardOlderContent(
+    @Test("Sub-page movement is a candidate rather than durable intent")
+    func testClassifiesSubPageMovementAsCandidate() {
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 1_000,
             newContentOffsetY: 900,
             oldDistanceFromBottom: 20,
@@ -135,12 +133,12 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 780,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
+        ) == .towardOlderContent(distance: 100, threshold: 100))
     }
 
     @Test("Container or composer resize cannot masquerade as upward user intent")
     func testRejectsUpwardOffsetDuringLayoutResize() {
-        #expect(!ScrollStateCoordinator.isMovementTowardOlderContent(
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 1_000,
             newContentOffsetY: 500,
             oldDistanceFromBottom: 20,
@@ -149,8 +147,8 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 480,
             oldBottomInset: 84,
             newBottomInset: 84
-        ))
-        #expect(!ScrollStateCoordinator.isMovementTowardOlderContent(
+        ) == .reset)
+        #expect(ScrollStateCoordinator.classifyGeometryOnlyMovement(
             oldContentOffsetY: 1_000,
             newContentOffsetY: 500,
             oldDistanceFromBottom: 20,
@@ -159,7 +157,133 @@ struct ScrollStateCoordinatorInputAttributionTests {
             newViewportHeight: 780,
             oldBottomInset: 84,
             newBottomInset: 384
-        ))
+        ) == .reset)
+    }
+
+    @Test("Bottom-origin geometry-only drag blocks immediately and commits at the follow boundary")
+    func testBottomOriginGeometryOnlyDragCommitsScrollAway() {
+        let coordinator = ScrollStateCoordinator()
+        let distances: [CGFloat] = [0, 30, 60, 90, 120]
+        var oldOffset: CGFloat = 1_000
+
+        for index in 1..<distances.count {
+            let newOffset = oldOffset - 30
+            let movement = ScrollStateCoordinator.classifyGeometryOnlyMovement(
+                oldContentOffsetY: oldOffset,
+                newContentOffsetY: newOffset,
+                oldDistanceFromBottom: distances[index - 1],
+                newDistanceFromBottom: distances[index],
+                oldViewportHeight: 780,
+                newViewportHeight: 780,
+                oldBottomInset: 84,
+                newBottomInset: 84
+            )
+            let committed = coordinator.geometryChanged(
+                isNearBottom: distances[index] < 100,
+                geometryOnlyMovement: movement
+            )
+            oldOffset = newOffset
+
+            if index < distances.count - 1 {
+                #expect(!committed)
+                #expect(!coordinator.userScrolledAway)
+                #expect(!coordinator.shouldAutoScroll)
+                coordinator.contentDidArrive()
+                #expect(!coordinator.beginAutomaticBottomScroll())
+            } else {
+                #expect(committed)
+            }
+        }
+
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnseenContent)
+        #expect(coordinator.shouldShowNewContentPill)
+        #expect(!coordinator.shouldAutoScroll)
+    }
+
+    @Test("The exact follow boundary commits geometry-only intent")
+    func testExactFollowBoundaryCommitsScrollAway() {
+        let coordinator = ScrollStateCoordinator()
+
+        let committed = coordinator.geometryChanged(
+            isNearBottom: false,
+            geometryOnlyMovement: .towardOlderContent(distance: 100, threshold: 100)
+        )
+
+        #expect(committed)
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
+    }
+
+    @Test("A phase callback without new geometry preserves a pending candidate")
+    func testPhaseCallbackPreservesGeometryOnlyCandidate() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .animating)
+        coordinator.geometryChanged(
+            isNearBottom: true,
+            geometryOnlyMovement: .towardOlderContent(distance: 40, threshold: 100)
+        )
+        coordinator.contentDidArrive()
+        coordinator.scrollPhaseChanged(
+            from: .animating,
+            to: .idle,
+            finalIsNearBottom: true
+        )
+
+        #expect(!coordinator.beginAutomaticBottomScroll())
+        #expect(!coordinator.userScrolledAway)
+    }
+
+    @Test("Foreground promotes pending away intent and its unseen content")
+    func testForegroundPromotesPendingGeometryOnlyIntent() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.geometryChanged(
+            isNearBottom: false,
+            geometryOnlyMovement: .towardOlderContent(distance: 40, threshold: 100)
+        )
+        coordinator.contentDidArrive()
+        coordinator.sceneDidBecomeActive()
+
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnseenContent)
+        #expect(coordinator.shouldShowNewContentPill)
+        #expect(!coordinator.shouldAutoScroll)
+    }
+
+    @Test("An isolated geometry candidate vetoes only one automatic request")
+    func testIsolatedGeometryCandidateVetoIsOneShot() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.geometryChanged(
+            isNearBottom: false,
+            geometryOnlyMovement: .towardOlderContent(distance: 40, threshold: 100)
+        )
+
+        #expect(!coordinator.beginAutomaticBottomScroll())
+        #expect(coordinator.beginAutomaticBottomScroll())
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("Reverse or incompatible geometry clears a sub-page candidate")
+    func testGeometryResetClearsIncrementalCandidate() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.geometryChanged(
+            isNearBottom: false,
+            geometryOnlyMovement: .towardOlderContent(distance: 80, threshold: 100)
+        )
+        #expect(!coordinator.shouldAutoScroll)
+
+        coordinator.geometryChanged(
+            isNearBottom: false,
+            geometryOnlyMovement: .reset
+        )
+
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
     }
 
     @Test("Directional geometry inside bottom tolerance does not latch scroll-away")
@@ -168,11 +292,13 @@ struct ScrollStateCoordinatorInputAttributionTests {
 
         coordinator.geometryChanged(
             isNearBottom: true,
-            userMovedTowardOlderContent: true
+            geometryOnlyMovement: .towardOlderContent(distance: 200, threshold: 100)
         )
 
         #expect(!coordinator.userScrolledAway)
-        #expect(coordinator.shouldAutoScroll)
+        #expect(!coordinator.shouldAutoScroll)
+        #expect(!coordinator.beginAutomaticBottomScroll())
+        #expect(coordinator.beginAutomaticBottomScroll())
     }
 
     @Test("Near-bottom accessibility animation retains ownership until idle")
@@ -188,7 +314,11 @@ struct ScrollStateCoordinatorInputAttributionTests {
         #expect(!coordinator.shouldAutoScroll)
         #expect(!coordinator.shouldReleaseNativeScrollOwnership)
 
-        coordinator.scrollPhaseChanged(from: .animating, to: .idle)
+        coordinator.scrollPhaseChanged(
+            from: .animating,
+            to: .idle,
+            finalIsNearBottom: true
+        )
 
         #expect(coordinator.shouldReleaseNativeScrollOwnership)
         #expect(coordinator.shouldAutoScroll)
@@ -199,15 +329,16 @@ struct ScrollStateCoordinatorInputAttributionTests {
         let coordinator = ScrollStateCoordinator()
 
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
-        coordinator.geometryChanged(
-            isNearBottom: true,
-            isPositionedByUser: true
-        )
+        coordinator.geometryChanged(isNearBottom: true)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
 
         #expect(!coordinator.shouldAutoScroll)
 
-        coordinator.scrollPhaseChanged(from: .animating, to: .idle)
+        coordinator.scrollPhaseChanged(
+            from: .animating,
+            to: .idle,
+            finalIsNearBottom: true
+        )
 
         #expect(coordinator.shouldReleaseNativeScrollOwnership)
         #expect(coordinator.shouldAutoScroll)
@@ -218,19 +349,13 @@ struct ScrollStateCoordinatorInputAttributionTests {
         let coordinator = ScrollStateCoordinator()
 
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
-        coordinator.geometryChanged(
-            isNearBottom: true,
-            isPositionedByUser: false
-        )
+        coordinator.geometryChanged(isNearBottom: true)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.scrollPhaseChanged(from: .animating, to: .idle)
 
         #expect(!coordinator.shouldAutoScroll)
 
-        coordinator.geometryChanged(
-            isNearBottom: false,
-            isPositionedByUser: true
-        )
+        coordinator.geometryChanged(isNearBottom: false)
 
         #expect(coordinator.userScrolledAway)
         #expect(!coordinator.shouldAutoScroll)
@@ -242,10 +367,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
 
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.scrollPositionChanged(isPositionedByUser: false)
-        coordinator.geometryChanged(
-            isNearBottom: true,
-            isPositionedByUser: false
-        )
+        coordinator.geometryChanged(isNearBottom: true)
 
         #expect(coordinator.shouldReleaseNativeScrollOwnership)
         #expect(coordinator.shouldAutoScroll)
@@ -258,10 +380,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.scrollPositionChanged(isPositionedByUser: false)
-        coordinator.geometryChanged(
-            isNearBottom: true,
-            isPositionedByUser: false
-        )
+        coordinator.geometryChanged(isNearBottom: true)
 
         #expect(!coordinator.shouldAutoScroll)
 
@@ -292,10 +411,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
 
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(
-            isNearBottom: true,
-            isPositionedByUser: true
-        )
+        coordinator.geometryChanged(isNearBottom: true)
         coordinator.scrollPhaseChanged(
             from: .animating,
             to: .idle,
@@ -315,10 +431,7 @@ struct ScrollStateCoordinatorInputAttributionTests {
 
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(
-            isNearBottom: true,
-            isPositionedByUser: true
-        )
+        coordinator.geometryChanged(isNearBottom: true)
         coordinator.scrollPositionChanged(isPositionedByUser: false)
         coordinator.scrollPhaseChanged(
             from: .animating,
@@ -328,6 +441,25 @@ struct ScrollStateCoordinatorInputAttributionTests {
 
         #expect(coordinator.userScrolledAway)
         #expect(!coordinator.shouldAutoScroll)
+    }
+
+    @Test("Released native ownership is not reasserted by stationary content growth")
+    func testReleasedNativeOwnershipStaysReleasedDuringContentGrowth() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .animating)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(isNearBottom: true)
+        coordinator.scrollPositionChanged(isPositionedByUser: false)
+        coordinator.scrollPhaseChanged(from: .animating, to: .idle)
+
+        coordinator.geometryChanged(
+            isNearBottom: true,
+            geometryOnlyMovement: .stationaryContentGrowth
+        )
+
+        #expect(coordinator.beginAutomaticBottomScroll())
+        #expect(coordinator.shouldAutoScroll)
     }
 
     @Test("Native ownership arriving after geometry still commits scroll-away")

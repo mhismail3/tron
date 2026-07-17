@@ -332,7 +332,7 @@ live in `ChatView+MessageList.swift` and the existing toolbar/helper extensions.
 `TypewriterAnimationState` is the toolbar title's single mutable
 display/task owner, shared by the production view and its focused tests.
 View-local async work is owned by `ChatViewTaskCoordinator`: every
-delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets
+delayed scroll or history autoload, reconnect refresh, model prefetch, and deep-link navigation gets
 a session-generation ticket and is cancelled on disappearance so stale work
 cannot mutate a replaced chat view. Initial and later connected edges both use
 the single `connectAndReconstruct` session-reconstruction entry point. Explicit
@@ -414,7 +414,20 @@ The chat timeline owns only truthful local/session presentation state:
   allows repeated older-history paging without an uncontrolled load loop.
   Prepends preserve the first visible row identity by restoring it to `.top`;
   viewport-relative offsets are not replayed as SwiftUI target anchors because
-  that can strand lazy content in empty space. Bottom autoscroll is centralized
+  that can strand lazy content in empty space. A non-observable
+  `ChatViewportMeasurements` cache is owned by the transcript UI. Raw viewport,
+  row-frame, bottom-anchor, and top-detent samples guide imperative scroll and history
+  tasks without invalidating the `LazyVStack` layout pass that produced them; the same
+  non-observable owner retains the imperative scroll-proxy handle. Stable container
+  geometry supplies viewport height; after reveal, one consolidated scroll-geometry
+  callback publishes bottom distance and the history top detent. Row-frame probes mount
+  only after reveal and only while older history remains available. During initial
+  reconstruction an absent bottom anchor is represented explicitly and remains
+  unmeasured until the lazy target materializes. Its viewport-relative distance is then
+  authoritative. The convergence loop requires consecutive bottom samples at a
+  layout-safe cadence and retains a roughly two-second worst-case budget for very tall
+  lazy rows while ordinary transcripts exit after the first stable samples.
+  Bottom autoscroll is centralized
   through `ScrollStateCoordinator`: a pinned transcript remains eligible while its
   programmatic bottom animation settles so streamed growth and foreground catch-up
   can keep following the moving edge. Native `ScrollPosition` ownership distinguishes
@@ -422,11 +435,21 @@ The chat timeline owns only truthful local/session presentation state:
   when SwiftUI animates directly from idle; the proven `ScrollViewProxy` bottom anchor
   performs physical movement after the app explicitly retakes native ownership. The
   idle phase's own geometry snapshot closes SwiftUI's phase/geometry callback-order
-  race before transient input ownership is released. A page-scale upward offset change
-  with a matching increase in bottom distance, stable viewport, and stable composer
-  inset is the fallback user-intent signal for accessibility page scrolling on runtimes
-  that publish neither phase nor native ownership. Initial reconstruction and history
-  prepend remain explicitly excluded from that inference.
+  race before transient input ownership is released. Consecutive upward offset samples
+  with matching increases in bottom distance, a stable viewport, and a stable composer
+  inset accumulate from the pinned position through the automatic-follow boundary for
+  runtimes that publish neither phase nor native ownership. Each qualifying sample vetoes
+  the next automatic bottom request, so a streaming tick cannot interrupt continuing
+  movement; if no new movement follows, the one-shot veto is consumed and normal following
+  resumes. Phase callbacks without a new geometry sample preserve that evidence, and
+  foregrounding promotes an away candidate before clearing transient ownership. Reverse
+  or incompatible geometry resets the candidate. Initial reconstruction and history
+  prepend remain explicitly excluded. Native ownership input enters through the bound
+  scroll-position change callback. App positioning uses the proxy without writing a
+  second position owner in the same frame; the bound owner is re-armed only at the
+  settled idle phase, never from geometry. Geometry therefore observes position without
+  writing back into the same layout pass during keyboard dismissal and live transcript
+  updates.
   Returning to bottom transfers ownership back to the app. Bottom jumps remain
   suppressed during user interaction, user-driven rubber-band rebound, explicit
   scroll-away, or older-history prepend.

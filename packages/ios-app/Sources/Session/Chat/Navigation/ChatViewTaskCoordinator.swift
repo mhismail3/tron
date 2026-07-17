@@ -14,6 +14,7 @@ final class ChatViewTaskCoordinator {
         case modelPrefetch
         case connectionRefresh
         case deepLinkScroll
+        case historyAutoload
         case keyboardScroll
     }
 
@@ -79,6 +80,17 @@ final class ChatViewTaskCoordinator {
             pendingCoalescedOperations[key] = operation
             return
         }
+        startCoalescedTask(key, operation: operation)
+    }
+
+    /// Start one keyed operation only when that owner is idle. Top-detent samples
+    /// use this path so repeated geometry cannot restart and starve their stable-layout delay.
+    func startTaskIfAbsent(
+        _ key: Key,
+        operation: @escaping @MainActor (ChatViewTaskTicket) async -> Void
+    ) {
+        guard tasks[key] == nil else { return }
+        pendingCoalescedOperations[key] = nil
         startCoalescedTask(key, operation: operation)
     }
 

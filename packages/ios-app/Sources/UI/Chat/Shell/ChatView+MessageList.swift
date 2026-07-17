@@ -25,8 +25,8 @@ extension ChatView {
                         showDragHint: false
                     ),
                     actions: InputBarActions(
-                        onSend: { [viewModel, inputHistory, scrollCoordinator, scrollPosition = $transcriptScrollPosition] in
-                            scrollCoordinator.userSentMessage(scrollPosition: scrollPosition)
+                        onSend: { [viewModel, inputHistory, scrollCoordinator] in
+                            scrollCoordinator.userSentMessage()
                             UIApplication.shared.sendAction(
                                 #selector(UIResponder.resignFirstResponder),
                                 to: nil, from: nil, for: nil
@@ -129,7 +129,11 @@ extension ChatView {
                         // Bottom anchor for scrolling
                         Color.clear
                             .frame(height: 1)
-                            .background(BottomAnchorViewportProbe())
+                            .background {
+                                if !initialLoadComplete {
+                                    BottomAnchorViewportProbe()
+                                }
+                            }
                             .id("bottom")
                     }
                     .padding()
@@ -141,13 +145,17 @@ extension ChatView {
                 // Instead, we manually scroll to bottom on initial load and when keyboard appears.
                 .coordinateSpace(name: ChatMessageScrollCoordinateSpace.name)
                 .scrollPosition($transcriptScrollPosition)
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { viewportHeight in
+                    viewportMeasurements.recordViewportHeight(viewportHeight)
+                }
                 .onPreferenceChange(MessageViewportFramePreferenceKey.self) { frames in
-                    messageViewportFrames = frames
+                    viewportMeasurements.messageViewportFrames = frames
                 }
                 .onPreferenceChange(BottomAnchorViewportMaxYPreferenceKey.self) { anchorMaxY in
                     guard !initialLoadComplete else { return }
-                    initBottomAnchorMaxY = anchorMaxY
-                    updateInitialBottomDistanceFromAnchor()
+                    viewportMeasurements.recordInitialBottomAnchor(maxY: anchorMaxY)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 // Track physical interaction and settling. Native ScrollPosition
@@ -155,11 +163,6 @@ extension ChatView {
                 .onScrollPhaseChange { oldPhase, newPhase, context in
                     if !initialLoadComplete {
                         logger.debug("[INIT] phase: \(oldPhase) → \(newPhase)", category: .ui)
-                    }
-                    if newPhase == .idle {
-                        scrollCoordinator.scrollPositionChanged(
-                            isPositionedByUser: transcriptScrollPosition.isPositionedByUser
-                        )
                     }
                     let finalIsNearBottom: Bool? = if initialLoadComplete && newPhase == .idle {
                         ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(
@@ -178,19 +181,20 @@ extension ChatView {
                         to: newPhase,
                         finalIsNearBottom: finalIsNearBottom
                     )
-                    if newPhase != .idle {
-                        scrollCoordinator.scrollPositionChanged(
-                            isPositionedByUser: transcriptScrollPosition.isPositionedByUser
-                        )
+                    if newPhase == .idle,
+                       transcriptScrollPosition.isPositionedByUser,
+                       scrollCoordinator.shouldReleaseNativeScrollOwnership {
+                        // Re-arm the native binding once from the phase boundary.
+                        // Geometry remains read-only so it cannot create a layout loop.
+                        transcriptScrollPosition = ScrollPosition()
                     }
                     if ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
                         phase: newPhase,
                         isPositionedByUser: transcriptScrollPosition.isPositionedByUser
                     ) {
-                        hasConsumedTopHistoryDetent = false
+                        viewportMeasurements.hasConsumedTopHistoryDetent = false
                     }
-                    releaseSettledNativeScrollOwnershipIfNeeded()
-                    if isNearTopHistoryDetent {
+                    if viewportMeasurements.isNearTopHistoryDetent {
                         scheduleAutoloadEarlierMessages()
                     }
                 }
@@ -199,17 +203,19 @@ extension ChatView {
                         isPositionedByUser: isPositionedByUser
                     )
                     if isPositionedByUser {
-                        hasConsumedTopHistoryDetent = false
-                        if isNearTopHistoryDetent {
+                        viewportMeasurements.hasConsumedTopHistoryDetent = false
+                        if viewportMeasurements.isNearTopHistoryDetent {
                             scheduleAutoloadEarlierMessages()
                         }
                     }
                 }
-                // Track bottom geometry continuously. Initial-load reveal waits
-                // for measured bottom convergence; after reveal this feeds the
-                // normal scroll-away/new-content coordinator.
-                .onScrollGeometryChange(for: ChatScrollGeometryMetrics.self) { geometry in
-                    ChatScrollGeometryMetrics(
+                // After initial reveal, one observer owns bottom distance and the
+                // history top detent so overlapping scroll-geometry callbacks cannot
+                // invalidate each other's LazyVStack layout pass.
+                .onScrollGeometryChange(for: ChatScrollGeometryMetrics?.self) { geometry in
+                    guard initialLoadComplete else { return nil }
+                    let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
+                    return ChatScrollGeometryMetrics(
                         distanceFromBottom: ChatTranscriptRevealPolicy.bottomDistance(
                             contentHeight: geometry.contentSize.height,
                             contentOffsetY: geometry.contentOffset.y,
@@ -218,24 +224,26 @@ extension ChatView {
                         ),
                         contentOffsetY: geometry.contentOffset.y,
                         viewportHeight: geometry.containerSize.height,
-                        bottomInset: geometry.contentInsets.bottom
+                        bottomInset: geometry.contentInsets.bottom,
+                        historyTopMetrics: ChatHistoryTopMetrics(
+                            topDistance: topDistance,
+                            viewportHeight: geometry.containerSize.height
+                        )
                     )
-                } action: { oldMetrics, metrics in
-                    messageViewportHeight = metrics.viewportHeight
-
-                    guard initialLoadComplete else {
-                        if initBottomAnchorMaxY.isFinite {
-                            updateInitialBottomDistanceFromAnchor()
-                        } else {
-                            initDistanceFromBottom = metrics.distanceFromBottom
-                        }
-                        return
+                } action: { oldMetrics, newMetrics in
+                    guard let metrics = newMetrics else { return }
+                    let oldMetrics = oldMetrics ?? metrics
+                    viewportMeasurements.recordViewportHeight(metrics.viewportHeight)
+                    viewportMeasurements.isNearTopHistoryDetent = metrics.historyTopMetrics.isNearTop
+                    if !metrics.historyTopMetrics.isNearTop,
+                       viewportMeasurements.hasConsumedTopHistoryDetent {
+                        viewportMeasurements.hasConsumedTopHistoryDetent = false
                     }
 
                     let isNearBottom = ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(
                         distanceFromBottom: metrics.distanceFromBottom
                     )
-                    let movedTowardOlderContent = ScrollStateCoordinator.isMovementTowardOlderContent(
+                    let geometryOnlyMovement = ScrollStateCoordinator.classifyGeometryOnlyMovement(
                         oldContentOffsetY: oldMetrics.contentOffsetY,
                         newContentOffsetY: metrics.contentOffsetY,
                         oldDistanceFromBottom: oldMetrics.distanceFromBottom,
@@ -245,48 +253,21 @@ extension ChatView {
                         oldBottomInset: oldMetrics.bottomInset,
                         newBottomInset: metrics.bottomInset
                     )
-                    let directionalUserIntent = movedTowardOlderContent
-                        && !isNearBottom
-                        && !scrollCoordinator.isPrependingHistory
+                    let committedGeometryOnlyMovement = scrollCoordinator.geometryChanged(
+                        isNearBottom: isNearBottom,
+                        geometryOnlyMovement: geometryOnlyMovement
+                    )
                     if ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
                         phase: .idle,
                         isPositionedByUser: transcriptScrollPosition.isPositionedByUser,
-                        movedTowardOlderContent: directionalUserIntent
+                        movedTowardOlderContent: committedGeometryOnlyMovement
                     ) {
-                        hasConsumedTopHistoryDetent = false
-                        if isNearTopHistoryDetent {
+                        viewportMeasurements.hasConsumedTopHistoryDetent = false
+                        if viewportMeasurements.isNearTopHistoryDetent {
                             scheduleAutoloadEarlierMessages()
                         }
                     }
-                    scrollCoordinator.geometryChanged(
-                        isNearBottom: isNearBottom,
-                        isPositionedByUser: transcriptScrollPosition.isPositionedByUser,
-                        userMovedTowardOlderContent: directionalUserIntent
-                    )
-                    releaseSettledNativeScrollOwnershipIfNeeded()
-                }
-                // Track content height during initial load for convergence detection.
-                // The scroll loop reads initContentHeight to know when LazyVStack
-                // has finished materializing cells and heights have stabilized.
-                .onScrollGeometryChange(for: Int.self) { geometry in
-                    Int(geometry.contentSize.height)
-                } action: { _, contentH in
-                    guard !initialLoadComplete else { return }
-                    initContentHeight = contentH
-                }
-                .onScrollGeometryChange(for: ChatHistoryTopMetrics.self) { geometry in
-                    let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
-                    return ChatHistoryTopMetrics(
-                        topDistance: topDistance,
-                        viewportHeight: geometry.containerSize.height
-                    )
-                } action: { _, metrics in
-                    guard initialLoadComplete else { return }
-                    isNearTopHistoryDetent = metrics.isNearTop
-                    if !metrics.isNearTop {
-                        hasConsumedTopHistoryDetent = false
-                    }
-                    if metrics.isNearTop {
+                    if metrics.historyTopMetrics.isNearTop {
                         scheduleAutoloadEarlierMessages()
                     }
                 }
@@ -342,7 +323,6 @@ extension ChatView {
                 .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
                     guard initialLoadComplete else { return }
                     guard !wasVisible && isVisible else { return }
-                    guard scrollCoordinator.shouldAutoScroll else { return }
 
                     taskCoordinator.replaceTask(.keyboardScroll) { ticket in
                         try? await Task.sleep(for: .milliseconds(50))
@@ -420,7 +400,11 @@ extension ChatView {
                 onTap: { action in handleBubbleTap(action) }
             )
             .id(message.id)
-            .background(MessageViewportProbe(id: message.id))
+            .background {
+                if initialLoadComplete, viewModel.hasMoreMessages {
+                    MessageViewportProbe(id: message.id)
+                }
+            }
             .opacity(messageIsVisible(at: index, total: total) ? 1 : 0)
             .offset(y: messageIsVisible(at: index, total: total) ? 0 : 6)
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
@@ -437,7 +421,11 @@ extension ChatView {
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(group.id)
-            .background(MessageViewportProbe(id: group.messages.first?.id ?? UUID()))
+            .background {
+                if initialLoadComplete, viewModel.hasMoreMessages {
+                    MessageViewportProbe(id: group.messages.first?.id ?? UUID())
+                }
+            }
             .opacity(messageIsVisible(at: index, total: total) ? 1 : 0)
             .offset(y: messageIsVisible(at: index, total: total) ? 0 : 6)
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
@@ -460,13 +448,13 @@ extension ChatView {
 
         let orderedMessageIds = viewModel.messages.map(\.id)
         let measuredAnchor = ScrollViewportAnchorResolver.capture(
-            frames: messageViewportFrames,
-            viewportHeight: messageViewportHeight,
+            frames: viewportMeasurements.messageViewportFrames,
+            viewportHeight: viewportMeasurements.messageViewportHeight,
             orderedMessageIds: orderedMessageIds
         )
         let anchor = ScrollViewportAnchorResolver.captureOrFirstLoaded(
-            frames: messageViewportFrames,
-            viewportHeight: messageViewportHeight,
+            frames: viewportMeasurements.messageViewportFrames,
+            viewportHeight: viewportMeasurements.messageViewportHeight,
             orderedMessageIds: orderedMessageIds
         )
         logger.debug(
@@ -495,17 +483,14 @@ extension ChatView {
             // geometry changes cannot immediately chain more pages from stale
             // frames. The latch is re-armed by the next user scroll or by leaving
             // and re-entering the top detent.
-            hasConsumedTopHistoryDetent = true
+            viewportMeasurements.hasConsumedTopHistoryDetent = true
         }
         return insertedCount
     }
 
     func scheduleAutoloadEarlierMessages() {
-        guard autoloadEarlierTask == nil else { return }
         guard shouldAutoloadEarlierMessagesNow() else { return }
-        let ticket = taskCoordinator.currentTicket()
-        autoloadEarlierTask = Task { @MainActor in
-            defer { autoloadEarlierTask = nil }
+        taskCoordinator.startTaskIfAbsent(.historyAutoload) { ticket in
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
 
             try? await Task.sleep(for: .milliseconds(ChatHistoryAutoloadPolicy.stableGeometryDelayMilliseconds))
@@ -515,21 +500,13 @@ extension ChatView {
     }
 
     func shouldAutoloadEarlierMessagesNow() -> Bool {
-        guard !hasConsumedTopHistoryDetent else { return false }
+        guard !viewportMeasurements.hasConsumedTopHistoryDetent else { return false }
         return scrollCoordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: viewModel.hasMoreMessages,
             initialLoadComplete: initialLoadComplete,
             isLoadingMoreMessages: viewModel.isLoadingMoreMessages,
-            isNearTop: isNearTopHistoryDetent
+            isNearTop: viewportMeasurements.isNearTopHistoryDetent
         )
-    }
-
-    func releaseSettledNativeScrollOwnershipIfNeeded() {
-        guard transcriptScrollPosition.isPositionedByUser else { return }
-        guard scrollCoordinator.shouldReleaseNativeScrollOwnership else { return }
-        // Re-arm native ownership without moving the viewport. A programmatic
-        // scroll here would fight input still inside the near-bottom tolerance.
-        transcriptScrollPosition = ScrollPosition()
     }
 
     var topAutoloadSentinel: some View {
@@ -591,6 +568,7 @@ private struct ChatScrollGeometryMetrics: Equatable {
     let contentOffsetY: CGFloat
     let viewportHeight: CGFloat
     let bottomInset: CGFloat
+    let historyTopMetrics: ChatHistoryTopMetrics
 }
 
 private struct MessageViewportProbe: View {
@@ -618,9 +596,9 @@ private struct BottomAnchorViewportProbe: View {
 }
 
 private struct BottomAnchorViewportMaxYPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = .greatestFiniteMagnitude
+    static let defaultValue: CGFloat? = nil
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         value = nextValue()
     }
 }

@@ -18,11 +18,11 @@ import SwiftUI
 ///    positioning paths even when SwiftUI animates directly from idle.
 ///
 /// 3. **Geometry signal** (`geometryChanged`) — tracks whether the viewport is near
-///    the bottom of the content and whether a stable viewport moved materially toward
-///    older content. The directional fallback covers accessibility page scrolling on
-///    runtimes that publish neither a phase nor native ownership. The bottom threshold
-///    is computed in the view layer and accounts for `contentInsets.bottom` (input bar
-///    + safe area).
+///    the bottom and accumulates stable movement toward older content. This fallback
+///    covers accessibility and indirect scrolling on runtimes that publish neither a
+///    phase nor native ownership. The coordinator owns the attribution threshold; the
+///    view supplies bottom distance including `contentInsets.bottom` (input bar + safe
+///    area).
 ///
 /// Earlier-history loading is owned by the view-layer top-detent geometry.
 /// Leaving the bottom is not enough to mutate the message array: a fast upward
@@ -92,6 +92,13 @@ final class ScrollStateCoordinator {
     /// starts, consumed by the next geometry update after interaction ends.
     private var hadUserInteraction = false
 
+    /// Consecutive stable geometry-only movement toward older content. The first
+    /// sample pauses bottom ownership; only cumulative page-scale movement commits
+    /// durable scroll-away intent.
+    private var pendingGeometryOnlyOlderMovement: CGFloat = 0
+    private var geometryOnlyAutoscrollVetoArmed = false
+    private var pendingGeometryOnlyHasUnseenContent = false
+
     // MARK: - History Loading
 
     /// Suppresses scroll-away detection during history prepend.
@@ -138,6 +145,7 @@ final class ScrollStateCoordinator {
         // so onScrollGeometryChange never fires and geometryChanged is never called.
         if wasUserInteracting && !isUserInteracting && !isAtBottom {
             userScrolledAway = true
+            commitPendingGeometryOnlyContent()
         }
 
         if newPhase == .idle && isAtBottom && !hasPendingNativeUserGeometry {
@@ -164,6 +172,7 @@ final class ScrollStateCoordinator {
             hasPendingNativeUserGeometry = !hasObservedNativeUserGeometryInCurrentScrollActivity
             if !isAtBottom {
                 userScrolledAway = true
+                commitPendingGeometryOnlyContent()
                 hasPendingNativeUserGeometry = false
             }
         }
@@ -172,6 +181,7 @@ final class ScrollStateCoordinator {
     /// Explicit app positioning takes ownership synchronously. Binding callbacks
     /// that merely report `false` do not clear pending late user geometry.
     func appWillPositionScroll() {
+        resetPendingGeometryOnlyMovement()
         isScrollPositionedByUser = false
         hasPendingNativeUserGeometry = false
         hasObservedNativeUserGeometryInCurrentScrollActivity = false
@@ -181,6 +191,12 @@ final class ScrollStateCoordinator {
     /// Clears phase state that cannot remain authoritative while the app is inactive.
     /// Intentional viewport state and in-flight navigation/history ownership survive.
     func sceneDidBecomeActive(isPositionedByUser: Bool = false) {
+        if hasPendingGeometryOnlyMovement && !isAtBottom {
+            userScrolledAway = true
+            commitPendingGeometryOnlyContent()
+        } else {
+            resetPendingGeometryOnlyMovement()
+        }
         isUserInteracting = false
         isScrollSettling = false
         isUserDrivenSettling = false
@@ -206,15 +222,11 @@ final class ScrollStateCoordinator {
 
     // MARK: - Geometry Updates
 
+    @discardableResult
     func geometryChanged(
         isNearBottom: Bool,
-        isPositionedByUser: Bool? = nil,
-        userMovedTowardOlderContent: Bool = false
-    ) {
-        if let isPositionedByUser {
-            scrollPositionChanged(isPositionedByUser: isPositionedByUser)
-        }
-
+        geometryOnlyMovement: GeometryOnlyMovement = .preserve
+    ) -> Bool {
         let hadPendingNativeUserGeometry = hasPendingNativeUserGeometry
         if isScrollPositionedByUser {
             hasObservedNativeUserGeometryInCurrentScrollActivity = true
@@ -223,21 +235,31 @@ final class ScrollStateCoordinator {
             hasPendingNativeUserGeometry = false
         }
 
-        isAtBottom = isNearBottom
+        if isAtBottom != isNearBottom {
+            isAtBottom = isNearBottom
+        }
 
-        // Attribute scroll-away to direct interaction, its late geometry callback,
-        // native user ownership, a geometry-only accessibility page movement, or a
-        // user-driven animation whose ownership bit cleared just before the phase
-        // transition's final geometry snapshot. History prepend owns its geometry
-        // shifts, so those must never manufacture user intent.
-        if (isUserInteracting
+        let hasDirectUserAttribution = isUserInteracting
             || hadUserInteraction
             || isUserDrivenSettling
             || isScrollPositionedByUser
             || hadPendingNativeUserGeometry
-            || (userMovedTowardOlderContent && !isPrependingHistory))
+        let committedGeometryOnlyMovement = hasDirectUserAttribution
+            ? false
+            : applyGeometryOnlyMovement(
+                geometryOnlyMovement,
+                isNearBottom: isNearBottom
+            )
+
+        // Attribute scroll-away to direct interaction, its late geometry callback,
+        // native user ownership, cumulative geometry-only accessibility movement, or a
+        // user-driven animation whose ownership bit cleared just before the phase
+        // transition's final geometry snapshot. History prepend owns its geometry
+        // shifts, so those must never manufacture user intent.
+        if (hasDirectUserAttribution || committedGeometryOnlyMovement)
             && !isNearBottom {
             userScrolledAway = true
+            commitPendingGeometryOnlyContent()
             hasPendingNativeUserGeometry = false
             if !isUserInteracting {
                 hadUserInteraction = false
@@ -245,12 +267,18 @@ final class ScrollStateCoordinator {
         }
 
         if isNearBottom {
-            clearScrollAwayState()
+            if !hasDirectUserAttribution && geometryOnlyMovement.preservesPendingCandidate {
+                clearDurableScrollAwayState()
+            } else {
+                clearScrollAwayState()
+            }
             if shouldReleaseNativeScrollOwnership {
                 isScrollPositionedByUser = false
                 hasPendingNativeUserGeometry = false
             }
         }
+
+        return committedGeometryOnlyMovement
     }
 
     // MARK: - Content Tracking
@@ -261,13 +289,14 @@ final class ScrollStateCoordinator {
         guard !isPrependingHistory else { return }
         if userScrolledAway {
             hasUnseenContent = true
+        } else if hasPendingGeometryOnlyMovement {
+            pendingGeometryOnlyHasUnseenContent = true
         }
     }
 
     // MARK: - User Actions
 
-    func userSentMessage(scrollPosition: Binding<ScrollPosition>) {
-        scrollPosition.wrappedValue = ScrollPosition()
+    func userSentMessage() {
         returnToBottom()
     }
 
@@ -276,6 +305,7 @@ final class ScrollStateCoordinator {
     }
 
     func beginTargetNavigation() {
+        resetPendingGeometryOnlyMovement()
         targetNavigationSnapshot = TargetNavigationSnapshot(
             userScrolledAway: userScrolledAway,
             hasUnseenContent: hasUnseenContent,
@@ -311,6 +341,7 @@ final class ScrollStateCoordinator {
     // MARK: - History Loading
 
     func willPrependHistory(anchor: ScrollViewportAnchor?) {
+        resetPendingGeometryOnlyMovement()
         prependAnchor = anchor
         isPrependingHistory = true
     }
@@ -335,6 +366,7 @@ final class ScrollStateCoordinator {
     // MARK: - Navigation
 
     func scrollToTarget(messageId: UUID, using proxy: ScrollViewProxy?) {
+        resetPendingGeometryOnlyMovement()
         userScrolledAway = true
         hadUserInteraction = false
         withAnimation(.easeOut(duration: 0.3)) {
@@ -345,6 +377,24 @@ final class ScrollStateCoordinator {
     // MARK: - Query
 
     var shouldAutoScroll: Bool {
+        isEligibleForAutomaticScroll
+            && !geometryOnlyAutoscrollVetoArmed
+    }
+
+    /// Atomically grants app ownership for an automatic bottom movement. A
+    /// sub-threshold indirect movement vetoes one request; another movement sample
+    /// re-arms the veto, while a second request with no movement safely resumes.
+    func beginAutomaticBottomScroll() -> Bool {
+        guard isEligibleForAutomaticScroll else { return false }
+        if geometryOnlyAutoscrollVetoArmed {
+            geometryOnlyAutoscrollVetoArmed = false
+            return false
+        }
+        appWillPositionScroll()
+        return true
+    }
+
+    private var isEligibleForAutomaticScroll: Bool {
         !userScrolledAway
             && !isUserInteracting
             && !isUserDrivenSettling
@@ -357,13 +407,12 @@ final class ScrollStateCoordinator {
         userScrolledAway && hasUnseenContent
     }
 
-    /// Detects an upward page-sized viewport movement without relying on phase or
-    /// native ownership callbacks. Those callbacks are absent for accessibility page
-    /// scrolling on some runtimes. Requiring matching movement away from the bottom
-    /// distinguishes a real viewport move from live-prune anchor preservation, while
-    /// stable viewport and inset geometry reject keyboard, rotation, and composer
-    /// layout shifts. Direct touch remains phase-owned.
-    static func isMovementTowardOlderContent(
+    /// Classifies one geometry-only movement sample without relying on phase or
+    /// native ownership callbacks. Matching movement away from the bottom
+    /// distinguishes viewport motion from stationary streamed growth, while stable
+    /// viewport and inset geometry reject keyboard, rotation, and composer shifts.
+    /// Consecutive `.towardOlderContent` samples are accumulated by the coordinator.
+    static func classifyGeometryOnlyMovement(
         oldContentOffsetY: CGFloat,
         newContentOffsetY: CGFloat,
         oldDistanceFromBottom: CGFloat,
@@ -372,7 +421,7 @@ final class ScrollStateCoordinator {
         newViewportHeight: CGFloat,
         oldBottomInset: CGFloat,
         newBottomInset: CGFloat
-    ) -> Bool {
+    ) -> GeometryOnlyMovement {
         guard oldContentOffsetY.isFinite,
               newContentOffsetY.isFinite,
               oldDistanceFromBottom.isFinite,
@@ -385,12 +434,41 @@ final class ScrollStateCoordinator {
               newViewportHeight > 0,
               abs(oldViewportHeight - newViewportHeight) <= 1,
               abs(oldBottomInset - newBottomInset) <= 1 else {
-            return false
+            return .reset
         }
 
-        let minimumMovement = max(64, newViewportHeight * 0.2)
-        return oldContentOffsetY - newContentOffsetY > minimumMovement
-            && newDistanceFromBottom - oldDistanceFromBottom > minimumMovement
+        let offsetMovement = oldContentOffsetY - newContentOffsetY
+        let bottomMovement = newDistanceFromBottom - oldDistanceFromBottom
+        if abs(offsetMovement) <= 1, bottomMovement > 1 {
+            return .stationaryContentGrowth
+        }
+        guard offsetMovement > 1, bottomMovement > 1 else {
+            return .reset
+        }
+        return .towardOlderContent(
+            distance: min(offsetMovement, bottomMovement),
+            threshold: min(
+                max(64, newViewportHeight * 0.2),
+                ChatTranscriptRevealPolicy.autoscrollBottomTolerance
+            )
+        )
+    }
+
+    enum GeometryOnlyMovement: Equatable {
+        case towardOlderContent(distance: CGFloat, threshold: CGFloat)
+        case stationaryContentGrowth
+        /// No geometry sample was available, so existing evidence remains valid.
+        case preserve
+        case reset
+
+        fileprivate var preservesPendingCandidate: Bool {
+            switch self {
+            case .towardOlderContent, .stationaryContentGrowth, .preserve:
+                true
+            case .reset:
+                false
+            }
+        }
     }
 
     /// Native ownership can be released without moving the viewport only after a
@@ -431,13 +509,73 @@ final class ScrollStateCoordinator {
     }
 
     private func clearScrollAwayState() {
-        userScrolledAway = false
-        hasUnseenContent = false
-        hadUserInteraction = false
+        resetPendingGeometryOnlyMovement()
+        clearDurableScrollAwayState()
+    }
+
+    private func clearDurableScrollAwayState() {
+        if userScrolledAway {
+            userScrolledAway = false
+        }
+        if hasUnseenContent {
+            hasUnseenContent = false
+        }
+        if hadUserInteraction {
+            hadUserInteraction = false
+        }
     }
 
     private static func isUserDrivenPhase(_ phase: ScrollPhase) -> Bool {
         phase == .interacting || phase == .tracking || phase == .decelerating
+    }
+
+    private var hasPendingGeometryOnlyMovement: Bool {
+        pendingGeometryOnlyOlderMovement > 0
+    }
+
+    private func applyGeometryOnlyMovement(
+        _ movement: GeometryOnlyMovement,
+        isNearBottom: Bool
+    ) -> Bool {
+        guard !isPrependingHistory else {
+            resetPendingGeometryOnlyMovement()
+            return false
+        }
+
+        switch movement {
+        case .towardOlderContent(let distance, let threshold):
+            guard distance.isFinite, threshold.isFinite, distance > 0, threshold > 0 else {
+                resetPendingGeometryOnlyMovement()
+                return false
+            }
+            pendingGeometryOnlyOlderMovement += distance
+            geometryOnlyAutoscrollVetoArmed = true
+            return !isNearBottom && pendingGeometryOnlyOlderMovement >= threshold
+        case .stationaryContentGrowth, .preserve:
+            return false
+        case .reset:
+            resetPendingGeometryOnlyMovement()
+            return false
+        }
+    }
+
+    private func commitPendingGeometryOnlyContent() {
+        if pendingGeometryOnlyHasUnseenContent {
+            hasUnseenContent = true
+        }
+        resetPendingGeometryOnlyMovement()
+    }
+
+    private func resetPendingGeometryOnlyMovement() {
+        if pendingGeometryOnlyOlderMovement != 0 {
+            pendingGeometryOnlyOlderMovement = 0
+        }
+        if geometryOnlyAutoscrollVetoArmed {
+            geometryOnlyAutoscrollVetoArmed = false
+        }
+        if pendingGeometryOnlyHasUnseenContent {
+            pendingGeometryOnlyHasUnseenContent = false
+        }
     }
 
     private struct TargetNavigationSnapshot {

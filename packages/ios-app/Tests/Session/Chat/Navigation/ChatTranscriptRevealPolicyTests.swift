@@ -59,12 +59,12 @@ struct ChatTranscriptRevealPolicyTests {
         ) == 0)
         #expect(ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: true,
-            contentHeightStable: true,
+            consecutiveBottomSamples: 2,
             distanceFromBottom: settledAnchorDistance
         ))
         #expect(!ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: true,
-            contentHeightStable: true,
+            consecutiveBottomSamples: 2,
             distanceFromBottom: ChatTranscriptRevealPolicy.bottomAnchorDistance(
                 viewportHeight: 800,
                 anchorMaxY: 988
@@ -72,29 +72,29 @@ struct ChatTranscriptRevealPolicyTests {
         ))
     }
 
-    @Test("Initial reveal waits for proxy, stable height, and real bottom")
+    @Test("Initial reveal waits for proxy, consecutive samples, and real bottom")
     func initialRevealWaitsForBottomConvergence() {
         #expect(!ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: false,
-            contentHeightStable: true,
+            consecutiveBottomSamples: 2,
             distanceFromBottom: 0
         ))
 
         #expect(!ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: true,
-            contentHeightStable: false,
+            consecutiveBottomSamples: 1,
             distanceFromBottom: 0
         ))
 
         #expect(!ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: true,
-            contentHeightStable: true,
+            consecutiveBottomSamples: 2,
             distanceFromBottom: ChatTranscriptRevealPolicy.initialBottomTolerance + 1
         ))
 
         #expect(ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: true,
-            contentHeightStable: true,
+            consecutiveBottomSamples: 2,
             distanceFromBottom: ChatTranscriptRevealPolicy.initialBottomTolerance
         ))
     }
