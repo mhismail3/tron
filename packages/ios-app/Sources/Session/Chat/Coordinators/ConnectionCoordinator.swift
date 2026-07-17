@@ -39,10 +39,22 @@ protocol ConnectionContext: ChatCoordinatorContext, LocalChatNotificationPresent
     /// Clean up stale streaming state before reconstruction
     func cleanUpStreamingState()
 
-    /// Drain events that were buffered during reconstruction
+    /// Drain events that were buffered during a successfully committed reconstruction
     func drainEventBuffer()
 
     func setSessionProcessing(_ isProcessing: Bool)
+}
+
+/// Terminal state for one connection/reconstruction attempt.
+///
+/// A retryable or cancelled attempt deliberately leaves reconstruction mode
+/// active and retains its buffered live suffix. Only a committed server
+/// snapshot may release that suffix for sequence-filtered dispatch.
+enum ConnectionReconstructionOutcome: Equatable {
+    case completed
+    case retryableFailure
+    case terminalFailure
+    case cancelled
 }
 
 /// Coordinates session connection, reconnection, and state reconstruction for ChatViewModel.
@@ -69,7 +81,7 @@ final class ConnectionCoordinator {
     /// Single flow for both initial connect and reconnection. The server's
     /// `session::reconstruct` response provides everything: persisted events,
     /// in-flight state, and session metadata.
-    func connectAndReconstruct(context: ConnectionContext) async {
+    func connectAndReconstruct(context: ConnectionContext) async -> ConnectionReconstructionOutcome {
         context.logInfo("connectAndReconstruct() called for session \(context.sessionId)")
 
         // Suppress events BEFORE connecting. Events that arrive during reconstruction
@@ -78,27 +90,42 @@ final class ConnectionCoordinator {
 
         // Connect to server
         await context.connect()
+        guard !Task.isCancelled else {
+            context.logInfo("[RECONSTRUCT] Cancelled during connect; retaining buffered events")
+            return .cancelled
+        }
 
         if !context.isConnected {
             try? await Task.sleep(for: .milliseconds(100))
         }
+        guard !Task.isCancelled else {
+            context.logInfo("[RECONSTRUCT] Cancelled during connect grace period; retaining buffered events")
+            return .cancelled
+        }
 
         guard context.isConnected else {
             context.logWarning("Failed to connect to server - isConnected=false")
-            context.isReconstructing = false
-            return
+            return .retryableFailure
         }
         context.logInfo("Connected to server successfully")
 
         // Resume the session (binds session to this WebSocket connection)
         do {
             try await context.resumeSession(sessionId: context.sessionId)
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Cancelled during resume; retaining buffered events")
+                return .cancelled
+            }
             context.logInfo("Session resumed successfully")
         } catch {
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Resume cancelled; retaining buffered events")
+                return .cancelled
+            }
             context.logError("Failed to resume session: \(error.localizedDescription)")
-            handleSessionResumeFailure(error, context: context)
-            context.isReconstructing = false
-            return
+            return handleSessionResumeFailure(error, context: context)
+                ? .terminalFailure
+                : .retryableFailure
         }
 
         // Reconstruct session state from server (single engine invocation)
@@ -108,15 +135,25 @@ final class ConnectionCoordinator {
                 limit: context.reconstructionEventLimit,
                 beforeEventId: nil
             )
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Cancelled after snapshot fetch; retaining buffered events")
+                return .cancelled
+            }
+
+            // Commit the authoritative sequence cut before any projection work
+            // that can suspend. If that work is cancelled, the replacement
+            // reconstruction retains the buffer and starts from a safe cut.
+            context.sequenceHighWaterMark = max(context.sequenceHighWaterMark, result.lastSequence)
 
             // Clean up stale streaming state from previous connection
             context.cleanUpStreamingState()
 
             // Process the reconstruction result
             await context.processReconstructionResult(result)
-
-            // Set high-water mark from server's lastSequence
-            context.sequenceHighWaterMark = result.lastSequence
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Cancelled during projection; retaining buffered events")
+                return .cancelled
+            }
 
             // Reconciliation is server-authoritative: a completed reconstruction
             // must clear local processing state just as firmly as a running one
@@ -125,27 +162,31 @@ final class ConnectionCoordinator {
             context.setSessionProcessing(result.isRunning)
 
             context.logInfo("[RECONSTRUCT] Complete: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), highWaterMark=\(context.sequenceHighWaterMark)")
+            context.isReconstructing = false
+            context.logInfo("[RECONSTRUCT] Snapshot committed; draining buffered live suffix")
+            context.drainEventBuffer()
+            return .completed
         } catch {
+            guard !Task.isCancelled else {
+                context.logInfo("[RECONSTRUCT] Fetch cancelled; retaining buffered events")
+                return .cancelled
+            }
             context.logWarning("[RECONSTRUCT] Failed: \(error.localizedDescription)")
             context.appendLocalError(
                 dedupKey: "session.reconstruct.failed",
                 title: "Could not load chat",
                 message: "Session history could not be loaded: \(error.localizedDescription)",
-                suggestion: "Check the connection, then reopen this chat to retry loading history."
+                suggestion: "Check the connection. Tron will retry while the server remains reachable."
             )
+            return .retryableFailure
         }
-
-        // Always reset reconstruction flag and drain buffered events
-        context.isReconstructing = false
-        context.logInfo("[RECONSTRUCT] Draining event buffer, isReconstructing=false")
-        context.drainEventBuffer()
     }
 
     // MARK: - Session Resume Error Handling
 
     /// Handles session resume failures for the shared connection/reconstruction path.
     /// Detects session-not-found errors and sets shouldDismiss to navigate away.
-    private func handleSessionResumeFailure(_ error: Error, context: ConnectionContext) {
+    private func handleSessionResumeFailure(_ error: Error, context: ConnectionContext) -> Bool {
         let isNotFound: Bool
         if let rpcError = error as? EngineProtocolError {
             isNotFound = rpcError.errorCode == .sessionNotFound
@@ -158,5 +199,6 @@ final class ConnectionCoordinator {
             context.shouldDismiss = true
             context.showError("Session not found on server")
         }
+        return isNotFound
     }
 }

@@ -122,9 +122,9 @@ pub async fn persist_user_message_event(
     event_store: Arc<EventStore>,
     session_id: String,
     payload: Value,
-) -> Result<(), CapabilityError> {
+) -> Result<crate::domains::session::event_store::EventRow, CapabilityError> {
     run_blocking_task("agent.prompt.persist_user", move || {
-        event_store
+        let event = event_store
             .append(&crate::domains::session::event_store::AppendOptions {
                 session_id: &session_id,
                 event_type: crate::domains::session::event_store::EventType::MessageUser,
@@ -133,7 +133,7 @@ pub async fn persist_user_message_event(
                 sequence: None,
             })
             .map_err(map_event_store_error)?;
-        Ok(())
+        Ok(event)
     })
     .await
 }

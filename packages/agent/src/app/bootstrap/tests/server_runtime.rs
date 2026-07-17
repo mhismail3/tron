@@ -59,7 +59,6 @@ async fn server_boots_and_responds() {
         orchestrator.subscribe(),
         server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
-        orchestrator.turn_accumulators().clone(),
     );
     let _stream_event_pump = tokio::spawn(pump.run());
 

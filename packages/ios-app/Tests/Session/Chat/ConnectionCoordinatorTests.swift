@@ -21,26 +21,26 @@ final class ConnectionCoordinatorTests: XCTestCase {
     // MARK: - Connect and Reconstruct Tests
 
     func testConnectAndReconstructCallsConnect() async {
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.connectCalled)
     }
 
     func testConnectAndReconstructCallsResumeSession() async {
         mockContext.isConnected = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.resumeSessionCalled)
         XCTAssertEqual(mockContext.lastResumeSessionId, "test-session")
     }
 
     func testConnectAndReconstructDoesNotResumeIfNotConnected() async {
         mockContext.connectWillSucceed = false
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.resumeSessionCalled)
     }
 
     func testConnectAndReconstructCallsReconstruct() async {
         mockContext.isConnected = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.reconstructSessionCalled)
     }
 
@@ -48,7 +48,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
         mockContext.isConnected = true
         mockContext.reconstructionEventLimit = 250
 
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
 
         XCTAssertEqual(mockContext.lastReconstructLimit, 250)
     }
@@ -56,22 +56,25 @@ final class ConnectionCoordinatorTests: XCTestCase {
     func testConnectAndReconstructSetsShouldDismissOnSessionNotFound() async {
         mockContext.isConnected = true
         mockContext.resumeSessionError = ConnectionTestError.sessionNotFound
-        await coordinator.connectAndReconstruct(context: mockContext)
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.shouldDismiss)
         XCTAssertTrue(mockContext.showErrorCalled)
+        XCTAssertEqual(outcome, .terminalFailure)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
     }
 
     func testConnectAndReconstructDoesNotDismissOnOtherErrors() async {
         mockContext.isConnected = true
         mockContext.resumeSessionError = ConnectionTestError.generic
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.shouldDismiss)
     }
 
     func testConnectAndReconstructSetsProcessingWhenRunning() async {
         mockContext.isConnected = true
         mockContext.reconstructResultIsRunning = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.isProcessing)
         XCTAssertTrue(mockContext.setSessionProcessingCalled)
     }
@@ -80,7 +83,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
         mockContext.isConnected = true
         mockContext.agentPhase = .processing
         mockContext.reconstructResultIsRunning = false
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.isProcessing)
         XCTAssertEqual(mockContext.agentPhase, .idle)
         XCTAssertEqual(mockContext.lastSessionProcessingValue, false)
@@ -89,19 +92,20 @@ final class ConnectionCoordinatorTests: XCTestCase {
     func testConnectAndReconstructSetsHighWaterMark() async {
         mockContext.isConnected = true
         mockContext.reconstructResultLastSequence = 42
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertEqual(mockContext.sequenceHighWaterMark, 42)
+        XCTAssertEqual(mockContext.sequenceHighWaterMarkDuringProcessing, 42)
     }
 
     func testConnectAndReconstructCallsCleanUpStreamingState() async {
         mockContext.isConnected = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
     }
 
     func testConnectAndReconstructProcessesResult() async {
         mockContext.isConnected = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.processReconstructionResultCalled)
     }
 
@@ -109,62 +113,114 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
     func testIsReconstructingSetBeforeConnect() async {
         mockContext.captureReconstructingDuringConnect = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.wasReconstructingDuringConnect)
     }
 
     func testIsReconstructingClearedAfterReconstruction() async {
         mockContext.isConnected = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.isReconstructing)
     }
 
-    func testIsReconstructingClearedOnConnectionFailure() async {
+    func testConnectionFailureRetainsReconstructionGateAndBufferForRetry() async {
         mockContext.connectWillSucceed = false
-        await coordinator.connectAndReconstruct(context: mockContext)
-        XCTAssertFalse(mockContext.isReconstructing)
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
     }
 
-    func testIsReconstructingClearedOnResumeFailure() async {
+    func testResumeFailureRetainsReconstructionGateAndBufferForRetry() async {
         mockContext.isConnected = true
         mockContext.resumeSessionError = ConnectionTestError.generic
-        await coordinator.connectAndReconstruct(context: mockContext)
-        XCTAssertFalse(mockContext.isReconstructing)
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
     }
 
     func testDrainEventBufferCalledAfterReconstruction() async {
         mockContext.isConnected = true
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.drainEventBufferCalled)
     }
 
-    func testDrainEventBufferCalledOnReconstructionError() async {
+    func testReconstructionErrorRetainsGateAndBufferForRetry() async {
         mockContext.isConnected = true
         mockContext.reconstructShouldFail = true
-        await coordinator.connectAndReconstruct(context: mockContext)
-        XCTAssertTrue(mockContext.drainEventBufferCalled)
+        let outcome = await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
+        XCTAssertTrue(mockContext.isReconstructing)
+    }
+
+    func testSuccessfulRetryCommitsAndReleasesPreviouslyRetainedBuffer() async {
+        mockContext.isConnected = true
+        mockContext.reconstructShouldFail = true
+
+        let failedOutcome = await coordinator.connectAndReconstruct(context: mockContext)
+        XCTAssertEqual(failedOutcome, .retryableFailure)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
+
+        mockContext.reconstructShouldFail = false
+        mockContext.reconstructResultLastSequence = 42
+        let retryOutcome = await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(retryOutcome, .completed)
+        XCTAssertEqual(mockContext.sequenceHighWaterMark, 42)
         XCTAssertFalse(mockContext.isReconstructing)
+        XCTAssertTrue(mockContext.drainEventBufferCalled)
     }
 
     func testReconstructionFailureSurfacesLocalLoadError() async {
         mockContext.isConnected = true
         mockContext.reconstructShouldFail = true
 
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
 
         XCTAssertTrue(mockContext.appendLocalErrorCalled)
         XCTAssertEqual(mockContext.lastLocalErrorDedupKey, "session.reconstruct.failed")
         XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not load chat")
         XCTAssertEqual(
             mockContext.lastLocalErrorSuggestion,
-            "Check the connection, then reopen this chat to retry loading history."
+            "Check the connection. Tron will retry while the server remains reachable."
         )
+    }
+
+    func testCancellationDuringProjectionRetainsCommittedCutAndBufferedSuffix() async {
+        mockContext.isConnected = true
+        mockContext.reconstructResultLastSequence = 42
+        var releaseProjection: CheckedContinuation<Void, Never>?
+        mockContext.processReconstructionResultHandler = {
+            await withCheckedContinuation { continuation in
+                releaseProjection = continuation
+            }
+        }
+
+        let attempt = Task { @MainActor in
+            await coordinator.connectAndReconstruct(context: mockContext)
+        }
+        while releaseProjection == nil { await Task.yield() }
+
+        XCTAssertEqual(mockContext.sequenceHighWaterMark, 42)
+        XCTAssertEqual(mockContext.sequenceHighWaterMarkDuringProcessing, 42)
+        XCTAssertTrue(mockContext.isReconstructing)
+
+        attempt.cancel()
+        releaseProjection?.resume()
+        let outcome = await attempt.value
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertTrue(mockContext.isReconstructing)
+        XCTAssertFalse(mockContext.drainEventBufferCalled)
     }
 
     func testSuccessfulEmptyReconstructionStaysQuiet() async {
         mockContext.isConnected = true
 
-        await coordinator.connectAndReconstruct(context: mockContext)
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
 
         XCTAssertFalse(mockContext.appendLocalErrorCalled)
         XCTAssertFalse(mockContext.showErrorCalled)
@@ -211,6 +267,8 @@ final class MockConnectionContext: ConnectionContext {
     var reconstructSessionCalled = false
     var lastReconstructLimit: Int?
     var processReconstructionResultCalled = false
+    var sequenceHighWaterMarkDuringProcessing: Int64?
+    var processReconstructionResultHandler: (() async -> Void)?
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
     var showErrorCalled = false
@@ -281,6 +339,8 @@ final class MockConnectionContext: ConnectionContext {
 
     func processReconstructionResult(_ result: SessionReconstructResult) async {
         processReconstructionResultCalled = true
+        sequenceHighWaterMarkDuringProcessing = sequenceHighWaterMark
+        await processReconstructionResultHandler?()
     }
 
     func cleanUpStreamingState() {

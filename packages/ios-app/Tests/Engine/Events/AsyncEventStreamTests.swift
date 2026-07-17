@@ -196,10 +196,10 @@ final class AsyncEventStreamTests: XCTestCase {
         let stream = AsyncEventStream<Int>(bufferingPolicy: .bufferingNewest(2))
         let events = stream.events
 
-        stream.send(1)
-        stream.send(2)
-        stream.send(3)
-        stream.send(4)
+        XCTAssertEqual(stream.send(1), 0)
+        XCTAssertEqual(stream.send(2), 0)
+        XCTAssertEqual(stream.send(3), 1)
+        XCTAssertEqual(stream.send(4), 1)
         stream.finish()
 
         var iterator = events.makeAsyncIterator()
@@ -210,6 +210,41 @@ final class AsyncEventStreamTests: XCTestCase {
         XCTAssertEqual(first, 3)
         XCTAssertEqual(second, 4)
         XCTAssertNil(third)
+    }
+
+    func test_filteredAndUnfilteredSubscribersReportTheirOwnEvictions() async {
+        let stream = AsyncEventStream<Int>(bufferingPolicy: .bufferingNewest(1))
+        let allEvents = stream.events
+        let evenEvents = stream.filtered { $0.isMultiple(of: 2) }
+        var allIterator = allEvents.makeAsyncIterator()
+        var evenIterator = evenEvents.makeAsyncIterator()
+
+        XCTAssertEqual(stream.send(1), 0)
+        let nonmatchingValue = await allIterator.next()
+        XCTAssertEqual(nonmatchingValue, 1)
+        XCTAssertEqual(stream.send(2), 0)
+        XCTAssertEqual(stream.send(4), 2)
+        stream.finish()
+
+        let retainedAllValue = await allIterator.next()
+        let retainedEvenValue = await evenIterator.next()
+        let allCompletion = await allIterator.next()
+        let evenCompletion = await evenIterator.next()
+        XCTAssertEqual(retainedAllValue, 4)
+        XCTAssertEqual(retainedEvenValue, 4)
+        XCTAssertNil(allCompletion)
+        XCTAssertNil(evenCompletion)
+    }
+
+    func test_subscriptionAfterFinishCompletesImmediately() async {
+        let stream = AsyncEventStream<Int>()
+        stream.finish()
+
+        var iterator = stream.events.makeAsyncIterator()
+        let completion = await iterator.next()
+
+        XCTAssertNil(completion)
+        XCTAssertEqual(stream.send(1), 0)
     }
 }
 

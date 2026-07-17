@@ -83,12 +83,3 @@ pub struct ActivitySummaryLine {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turns: Option<i64>,
 }
-
-/// Observer contract for components that maintain state from [`TronEvent`]s.
-///
-/// Transport adapters can fan out runtime events through this contract without
-/// importing the domain implementation that owns the state.
-pub trait TronEventObserver: Send + Sync {
-    /// Observe one runtime event.
-    fn observe_tron_event(&self, event: &TronEvent);
-}

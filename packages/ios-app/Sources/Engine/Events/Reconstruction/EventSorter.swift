@@ -6,9 +6,11 @@ import Foundation
 /// eliminating duplicate sorting logic for RawEvent and SessionEvent.
 enum EventSorter {
 
-    /// Sort events by sequence number (primary), which is the authoritative order from the database.
+    /// Sort events within one session by its sequence number.
     ///
-    /// Sequence number is always reliable and represents the actual event order.
+    /// Sequence is authoritative only inside one session. Fork reconstruction
+    /// crosses independent parent/child sequence domains and must preserve the
+    /// server-authored ancestor-chain order instead of calling this helper.
     /// Thinking blocks within message.assistant content are already in correct order
     /// and are handled by the interleaved content processor.
     ///

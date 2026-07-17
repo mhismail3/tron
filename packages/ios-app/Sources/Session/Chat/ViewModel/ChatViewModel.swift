@@ -122,11 +122,19 @@ final class ChatViewModel {
     var thinkingMessageId: UUID?
     /// True while reconstruction is in progress — buffers real-time events for replay after
     var isReconstructing = false
-    /// Events buffered during reconstruction, drained after sequenceHighWaterMark is set.
+    /// Events buffered during reconstruction. They drain only after a server
+    /// snapshot commits its sequence high-water mark and projection.
     @ObservationIgnored
     var eventBuffer: [ParsedEventV2] = []
     /// Highest processed event sequence number. Events with seq <= this are dropped (dedup).
     var sequenceHighWaterMark: Int64 = -1
+    /// Monotonic request observed by the mounted ChatView. The view owns the
+    /// cancel-and-replace reconstruction task; the event handler owns no Task.
+    private(set) var streamRecoveryRequestGeneration: UInt64 = 0
+
+    func advanceStreamRecoveryRequest() {
+        streamRecoveryRequestGeneration &+= 1
+    }
     /// Oldest event ID from the loaded reconstruction window (for pagination cursor).
     var reconstructionOldestEventId: String?
     /// Whether the server reported older reconstruction pages before `reconstructionOldestEventId`.

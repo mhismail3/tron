@@ -66,6 +66,37 @@ final class CatchUpEventBufferTests: XCTestCase {
         XCTAssertEqual(viewModel.eventBuffer.count, 0)
     }
 
+    func testRecoveryMarkerRemainsUnconsumedUntilCommittedDrain() {
+        // This test exercises ChatViewModel's production shared dispatch path.
+        EventRegistry.shared.register(StreamRecoveryRequiredPlugin.self)
+        let initialGeneration = viewModel.streamRecoveryRequestGeneration
+        let marker = ParsedEventV2.plugin(
+            type: StreamRecoveryRequiredPlugin.eventType,
+            event: ParsedEventData(value: 0),
+            sessionId: nil,
+            sequence: nil,
+            transform: {
+                StreamRecoveryRequiredPlugin.Result(
+                    reason: "client_buffer_overflow",
+                    droppedEventCount: 1
+                )
+            }
+        )
+
+        viewModel.isReconstructing = true
+        viewModel.handleEventV2(marker)
+
+        XCTAssertEqual(viewModel.eventBuffer.count, 1)
+        XCTAssertEqual(viewModel.streamRecoveryRequestGeneration, initialGeneration)
+
+        // Only a committed snapshot may release the retained suffix.
+        viewModel.isReconstructing = false
+        viewModel.drainEventBuffer()
+
+        XCTAssertTrue(viewModel.eventBuffer.isEmpty)
+        XCTAssertEqual(viewModel.streamRecoveryRequestGeneration, initialGeneration + 1)
+    }
+
     func testDrainIsNoOpWhenBufferEmpty() {
         // Given: No events buffered
         XCTAssertEqual(viewModel.eventBuffer.count, 0)

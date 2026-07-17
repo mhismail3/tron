@@ -201,7 +201,8 @@ struct ChatView: View {
 
             // Connect, resume, and reconstruct session state in one flow
             logger.debug("[INIT] starting connectAndReconstruct", category: .ui)
-            await viewModel.connectAndReconstruct()
+            let recoveryGenerationBeforeReconstruction = viewModel.streamRecoveryRequestGeneration
+            let initialReconstructionOutcome = await viewModel.connectAndReconstruct()
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
@@ -211,19 +212,22 @@ struct ChatView: View {
             await handleInitialMessageVisibility(guardedBy: ticket)
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
+            if initialReconstructionOutcome == .retryableFailure
+                || viewModel.streamRecoveryRequestGeneration != recoveryGenerationBeforeReconstruction {
+                scheduleCoalescedRecoveryRefresh()
+            }
         }
         .onChange(of: services.connection.connectionState) { oldState, newState in
             // React when connection transitions to connected
-            if newState.isConnected && !oldState.isConnected {
-                taskCoordinator.replaceTask(.connectionRefresh) { ticket in
-                    guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                    // Initial and later connected edges share one reconstruction flow.
-                    await viewModel.connectAndReconstruct()
-                    guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                }
+            if initialLoadComplete, newState.isConnected && !oldState.isConnected {
+                scheduleReconstructionRefresh()
             }
             // Input-bar read-only mode is derived from `interactionPolicy` (500ms
             // reconnect debounce) — no per-view debounce state needed.
+        }
+        .onChange(of: viewModel.streamRecoveryRequestGeneration) { _, _ in
+            guard initialLoadComplete else { return }
+            scheduleCoalescedRecoveryRefresh()
         }
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
             // Navigate back when session doesn't exist on server
@@ -246,6 +250,65 @@ struct ChatView: View {
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                 await performDeepLinkScroll(to: target, guardedBy: ticket)
                 guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            }
+        }
+    }
+
+    /// Connected edges and explicit stream-continuity markers share one
+    /// cancel-and-replace reconstruction task owner.
+    private func scheduleReconstructionRefresh() {
+        taskCoordinator.replaceTask(.connectionRefresh) { ticket in
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            await restoreContinuity(guardedBy: ticket)
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+        }
+    }
+
+    /// A marker burst represents one outstanding continuity gap. Keep one
+    /// follow-up behind any reconstruction already in flight instead of
+    /// repeatedly cancelling the repair.
+    private func scheduleCoalescedRecoveryRefresh() {
+        taskCoordinator.coalesceTask(.connectionRefresh) { ticket in
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            await restoreContinuity(guardedBy: ticket)
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+        }
+    }
+
+    /// Keep one continuity repair outstanding while the socket remains
+    /// connected. Retryable RPC failures retain the live-event buffer and use
+    /// bounded backoff; disconnects stop this task and the next connected edge
+    /// restarts it through the same keyed owner.
+    private func restoreContinuity(guardedBy ticket: ChatViewTaskTicket) async {
+        let retryDelays: [Duration] = [
+            .milliseconds(250),
+            .seconds(1),
+            .seconds(2),
+            .seconds(5),
+            .seconds(10)
+        ]
+        var retryIndex = 0
+
+        while taskCoordinator.isCurrent(ticket), !Task.isCancelled {
+            let outcome = await viewModel.connectAndReconstruct()
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+
+            switch outcome {
+            case .completed, .terminalFailure, .cancelled:
+                return
+            case .retryableFailure:
+                guard services.connection.connectionState.isConnected else { return }
+                let delay = retryDelays[min(retryIndex, retryDelays.count - 1)]
+                retryIndex += 1
+                logger.warning(
+                    "[RECONSTRUCT] Continuity repair failed; retrying after \(delay)",
+                    category: .session
+                )
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
             }
         }
     }

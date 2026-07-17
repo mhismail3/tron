@@ -287,299 +287,286 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(textContent(viewModel.messages.last), "message 200")
     }
 
-    func testReconnectReconstructionPreservesGeneratingCapabilityChip() async {
+    func testReconnectExpandedWindowTrustsServerPaginationExhaustion() async {
         let (viewModel, _) = makeViewModel()
-
-        await viewModel.processReconstructionResult(
-            reconstructResult(
-                events: [],
-                hasMoreEvents: false,
-                oldestEventId: nil,
-                inFlight: InFlightState(
-                    capabilityInvocations: [
-                        CurrentTurnCapabilityInvocation(
-                            invocationId: "capability-generating-1",
-                            arguments: nil,
-                            status: "generating",
-                            result: nil,
-                            isError: nil,
-                            startedAt: nil,
-                            completedAt: nil,
-                            streamingOutput: nil,
-                            modelPrimitiveName: "execute",
-                            operationName: "process_run",
-                            operation: nil,
-                            traceId: nil,
-                            rootInvocationId: nil,
-                            themeColor: nil,
-                            presentationHints: nil
-                        )
-                    ],
-                    contentSequence: [.capabilityRef(invocationId: "capability-generating-1")],
-                    streaming: nil
-                )
-            )
+        let previousEvents = rawMessageEvents(range: 101...350)
+        viewModel.loadedReconstructionEvents = previousEvents
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(
+            previousEvents,
+            presorted: true
         )
-
-        XCTAssertEqual(viewModel.messages.count, 1)
-        guard case .capabilityInvocation(let invocation) = viewModel.messages[0].content else {
-            return XCTFail("Expected visible in-flight capability chip")
-        }
-        XCTAssertEqual(invocation.id, "capability-generating-1")
-        XCTAssertEqual(invocation.status, .generating)
-        XCTAssertEqual(invocation.identity.operationName, "process_run")
-        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("capability-generating-1"))
-    }
-
-    func testSuccessfulReconnectReconstructionClearsStalePrunedLiveBuffer() async {
-        let (viewModel, _) = makeViewModel()
-        viewModel.loadedReconstructionEvents = rawMessageEvents(range: 1...100)
-        viewModel.prunedLiveMessages = (0..<20).map { makeMessage("stale live \($0)") }
-        viewModel.hasInitiallyLoaded = true
+        viewModel.replaceAllMessages(with: Array(viewModel.allReconstructedMessages.suffix(100)))
         viewModel.displayedMessageCount = 100
+        viewModel.hasInitiallyLoaded = true
+        viewModel.reconstructionOldestEventId = "event-101"
+        viewModel.hasOlderServerReconstructionPages = true
 
         await viewModel.processReconstructionResult(
             reconstructResult(
-                events: rawMessageEvents(range: 1...120),
+                events: rawMessageEvents(range: 1...350),
                 hasMoreEvents: false,
                 oldestEventId: "event-1"
             )
         )
 
-        XCTAssertTrue(viewModel.prunedLiveMessages.isEmpty)
-        XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 120)
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.map(\.id), (1...350).map { "event-\($0)" })
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, "event-1")
+        XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
     }
 
-    // MARK: - Helpers
-
-    private func makeViewModel() -> (ChatViewModel, TestSessionRepository) {
-        let transport = MockEngineTransport()
-        let sessions = TestSessionRepository()
-        let services = ChatSessionServices(
-            connection: TestConnectionRepository(),
-            events: TestSessionEventRepository(),
-            sessions: sessions,
-            agent: AgentClient(transport: transport),
-            models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
-            messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
-            transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
-            workerLifecycle: DefaultWorkerLifecycleRepository(client: WorkerLifecycleClient(transport: transport))
+    func testReconnectGapFailureReplacesDisjointCacheAndKeepsRecoveryCursor() async {
+        let (viewModel, sessions) = makeViewModel()
+        let previousEvents = rawMessageEvents(range: 1...100)
+        viewModel.loadedReconstructionEvents = previousEvents
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(
+            previousEvents,
+            presorted: true
         )
-        return (ChatViewModel(services: services, sessionId: "test-session"), sessions)
-    }
-
-    private func populateMessages(_ viewModel: ChatViewModel, count: Int) {
-        for index in 0..<count {
-            viewModel.appendToMessages(makeMessage("message \(index)"))
-        }
-    }
-
-    private func expectedDrainLoads(total: Int, batchSize: Int) -> [Int] {
-        guard total > 0, batchSize > 0 else { return [] }
-        var remaining = total
-        var loads: [Int] = []
-        while remaining > 0 {
-            let load = min(batchSize, remaining)
-            loads.append(load)
-            remaining -= load
-        }
-        return loads
-    }
-
-    private func makeMessage(_ text: String) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .text(text), timestamp: Date())
-    }
-
-    private func textContent(_ message: ChatMessage?) -> String? {
-        guard let message, case .text(let text) = message.content else {
-            return nil
-        }
-        return text
-    }
-
-    private func rawMessageEvents(range: ClosedRange<Int>) -> [RawEvent] {
-        range.map { sequence in
-            rawEvent(
-                id: "event-\(sequence)",
-                type: "message.user",
-                content: "message \(sequence)",
-                sequence: sequence
-            )
-        }
-    }
-
-    private func reconstructResult(
-        events: [RawEvent],
-        hasMoreEvents: Bool,
-        oldestEventId: String?,
-        inFlight: InFlightState? = nil
-    ) -> SessionReconstructResult {
-        SessionReconstructResult(
-            events: events,
-            hasMoreEvents: hasMoreEvents,
-            oldestEventId: oldestEventId,
-            inFlight: inFlight,
-            lastSequence: Int64(events.map(\.sequence).max() ?? 0),
-            isRunning: inFlight != nil,
-            agentPhase: inFlight == nil ? "idle" : "processing",
-            metadata: ReconstructMetadata(
-                model: nil,
-                turnCount: nil,
-                workingDirectory: nil,
-                title: nil,
-                tokenUsage: nil,
-                totalCost: nil
-            )
-        )
-    }
-
-    private func rawEvent(
-        id: String,
-        type: String,
-        content: String,
-        sequence: Int
-    ) -> RawEvent {
-        RawEvent(
-            id: id,
-            parentId: nil,
-            sessionId: "test-session",
-            workspaceId: "/test/workspace",
-            type: type,
-            timestamp: "2026-01-01T00:00:00Z",
-            sequence: sequence,
-            payload: ["content": AnyCodable(content)]
-        )
-    }
-
-    private func rawCapabilityStarted(id: String, invocationId: String, sequence: Int) -> RawEvent {
-        RawEvent(
-            id: id,
-            parentId: nil,
-            sessionId: "test-session",
-            workspaceId: "/test/workspace",
-            type: "capability.invocation.started",
-            timestamp: "2026-01-01T00:00:00Z",
-            sequence: sequence,
-            payload: [
-                "invocationId": AnyCodable(invocationId),
-                "modelPrimitiveName": AnyCodable("execute"),
-                "arguments": AnyCodable(["command": "true"]),
-                "turn": AnyCodable(1)
-            ]
-        )
-    }
-
-    private func rawCapabilityCompleted(id: String, invocationId: String, sequence: Int) -> RawEvent {
-        RawEvent(
-            id: id,
-            parentId: nil,
-            sessionId: "test-session",
-            workspaceId: "/test/workspace",
-            type: "capability.invocation.completed",
-            timestamp: "2026-01-01T00:00:01Z",
-            sequence: sequence,
-            payload: [
-                "invocationId": AnyCodable(invocationId),
-                "modelPrimitiveName": AnyCodable("execute"),
-                "content": AnyCodable("done"),
-                "isError": AnyCodable(false),
-                "duration": AnyCodable(20)
-            ]
-        )
-    }
-
-    private func rawAssistantWithCapability(id: String, invocationId: String, sequence: Int) -> RawEvent {
-        RawEvent(
-            id: id,
-            parentId: nil,
-            sessionId: "test-session",
-            workspaceId: "/test/workspace",
-            type: "message.assistant",
-            timestamp: "2026-01-01T00:00:02Z",
-            sequence: sequence,
-            payload: [
-                "content": AnyCodable([
-                    [
-                        "type": "capability_invocation",
-                        "id": invocationId,
-                        "name": "execute",
-                        "input": ["command": "true"]
-                    ] as [String: Any]
-                ]),
-                "turn": AnyCodable(1),
-                "model": AnyCodable("claude-sonnet-4"),
-                "stopReason": AnyCodable("end_turn")
-            ]
-        )
-    }
-}
-
-@MainActor
-private final class TestConnectionRepository: AppConnectionRepository {
-    var connectionState: ConnectionState = .connected
-
-    func connect() async {}
-}
-
-@MainActor
-private final class TestSessionEventRepository: SessionEventRepository {
-    var currentSessionId: String?
-    var currentModel: String = "claude-sonnet-4"
-    var hasActiveSession: Bool = true
-
-    func events(for sessionId: String?) -> AsyncStream<ParsedEventV2> {
-        AsyncStream { continuation in
-            continuation.finish()
-        }
-    }
-
-    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws {}
-}
-
-@MainActor
-private final class TestSessionRepository: NetworkSessionRepository {
-    var reconstructCalls: [(sessionId: String, limit: Int?, beforeEventId: String?)] = []
-    var reconstructHandler: ((String, Int?, String?) async throws -> SessionReconstructResult)?
-
-    func create(
-        workingDirectory: String,
-        model: String?,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> SessionCreateResult {
-        throw EngineConnectionError.invalidResponse
-    }
-
-    func list(
-        workingDirectory: String?,
-        limit: Int,
-        cursor: String?,
-        includeArchived: Bool
-    ) async throws -> SessionListResult {
-        throw EngineConnectionError.invalidResponse
-    }
-
-    func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {}
-
-    func reconstruct(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
-        reconstructCalls.append((sessionId: sessionId, limit: limit, beforeEventId: beforeEventId))
-        guard let reconstructHandler else {
+        viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
+        viewModel.displayedMessageCount = 100
+        viewModel.hasInitiallyLoaded = true
+        viewModel.hasOlderServerReconstructionPages = false
+        sessions.reconstructHandler = { _, _, _ in
             throw EngineConnectionError.invalidResponse
         }
-        return try await reconstructHandler(sessionId, limit, beforeEventId)
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: rawMessageEvents(range: 181...200),
+                hasMoreEvents: true,
+                oldestEventId: "event-181"
+            )
+        )
+
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["event-181"])
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.map(\.id), (181...200).map { "event-\($0)" })
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, "event-181")
+        XCTAssertTrue(viewModel.hasOlderServerReconstructionPages)
+        XCTAssertTrue(viewModel.hasMoreMessages)
     }
 
-    func archive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {}
-    func unarchive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {}
+    func testReconnectGapBackfillCapKeepsLatestContiguousWindowPageable() async {
+        let (viewModel, sessions) = makeViewModel()
+        let previousEvents = rawMessageEvents(range: 1...100)
+        viewModel.loadedReconstructionEvents = previousEvents
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(
+            previousEvents,
+            presorted: true
+        )
+        viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
+        viewModel.displayedMessageCount = 100
+        viewModel.hasInitiallyLoaded = true
+        sessions.reconstructHandler = { _, _, beforeEventId in
+            guard let beforeEventId,
+                  let sequence = Int(beforeEventId.replacingOccurrences(of: "event-", with: "")) else {
+                XCTFail("Expected an event sequence cursor")
+                return self.reconstructResult(events: [], hasMoreEvents: false, oldestEventId: nil)
+            }
+            let precedingSequence = sequence - 1
+            return self.reconstructResult(
+                events: self.rawMessageEvents(range: precedingSequence...precedingSequence),
+                hasMoreEvents: true,
+                oldestEventId: "event-\(precedingSequence)"
+            )
+        }
 
-    func fork(
-        sessionId: String,
-        fromEventId: String?,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> SessionForkResult {
-        throw EngineConnectionError.invalidResponse
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: rawMessageEvents(range: 1_000...1_000),
+                hasMoreEvents: true,
+                oldestEventId: "event-1000"
+            )
+        )
+
+        XCTAssertEqual(sessions.reconstructCalls.count, 20)
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.first?.id, "event-980")
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.last?.id, "event-1000")
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, "event-980")
+        XCTAssertTrue(viewModel.hasOlderServerReconstructionPages)
     }
 
-    func getHistory(limit: Int) async throws -> [HistoryMessage] {
-        []
+    func testInitialForkReconstructionPreservesServerChainOrderAndOldestCursor() async {
+        let (viewModel, _) = makeViewModel()
+        let parent = chainEvent(
+            id: "parent-message",
+            sessionId: "parent-session",
+            type: "message.user",
+            content: "parent prompt",
+            sequence: 10
+        )
+        let forkRoot = chainEvent(
+            id: "fork-root",
+            sessionId: "test-session",
+            type: "session.fork",
+            content: "",
+            sequence: 0
+        )
+        let child = chainEvent(
+            id: "child-message-1",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child prompt",
+            sequence: 1
+        )
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [parent, forkRoot, child],
+                hasMoreEvents: false,
+                oldestEventId: parent.id
+            )
+        )
+
+        XCTAssertEqual(
+            viewModel.loadedReconstructionEvents.map(\.id),
+            [parent.id, forkRoot.id, child.id]
+        )
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, parent.id)
+        XCTAssertEqual(
+            viewModel.messages.compactMap { textContent($0) },
+            ["parent prompt", "child prompt"]
+        )
     }
+
+    func testForkReconnectBackfillsOnlyChildSequenceGap() async {
+        let (viewModel, sessions) = makeViewModel()
+        let parent = chainEvent(
+            id: "parent-message",
+            sessionId: "parent-session",
+            type: "message.user",
+            content: "parent prompt",
+            sequence: 1_000
+        )
+        let forkRoot = chainEvent(
+            id: "fork-root",
+            sessionId: "test-session",
+            type: "session.fork",
+            content: "",
+            sequence: 0
+        )
+        let child1 = chainEvent(
+            id: "child-message-1",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child one",
+            sequence: 1
+        )
+        let child2 = chainEvent(
+            id: "child-message-2",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child two",
+            sequence: 2
+        )
+        let child3 = chainEvent(
+            id: "child-message-3",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child three",
+            sequence: 3
+        )
+        let previous = [parent, forkRoot, child1]
+        viewModel.loadedReconstructionEvents = previous
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.reconstructSessionState(
+            from: previous,
+            presorted: true
+        ).messages
+        viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
+        viewModel.displayedMessageCount = viewModel.messages.count
+        viewModel.hasInitiallyLoaded = true
+
+        sessions.reconstructHandler = { _, _, beforeEventId in
+            XCTAssertEqual(beforeEventId, child3.id)
+            return self.reconstructResult(
+                events: [child2],
+                hasMoreEvents: false,
+                oldestEventId: child2.id
+            )
+        }
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [child3],
+                hasMoreEvents: true,
+                oldestEventId: child3.id
+            )
+        )
+
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), [child3.id])
+        XCTAssertEqual(
+            viewModel.loadedReconstructionEvents.map(\.id),
+            [parent.id, forkRoot.id, child1.id, child2.id, child3.id]
+        )
+        XCTAssertEqual(
+            viewModel.messages.compactMap { textContent($0) },
+            ["parent prompt", "child one", "child two", "child three"]
+        )
+    }
+
+    func testForkReconnectMergesOverlappingServerChainInLinearOrder() async {
+        let (viewModel, _) = makeViewModel()
+        let parent = chainEvent(
+            id: "parent-message",
+            sessionId: "parent-session",
+            type: "message.user",
+            content: "parent prompt",
+            sequence: 1_000
+        )
+        let forkRoot = chainEvent(
+            id: "fork-root",
+            sessionId: "test-session",
+            type: "session.fork",
+            content: "",
+            sequence: 0
+        )
+        let child1 = chainEvent(
+            id: "child-message-1",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child one",
+            sequence: 1
+        )
+        let child2 = chainEvent(
+            id: "child-message-2",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child two",
+            sequence: 2
+        )
+        let child3 = chainEvent(
+            id: "child-message-3",
+            sessionId: "test-session",
+            type: "message.user",
+            content: "child three",
+            sequence: 3
+        )
+        let previous = [parent, forkRoot, child1, child2]
+        viewModel.loadedReconstructionEvents = previous
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.reconstructSessionState(
+            from: previous,
+            presorted: true
+        ).messages
+        viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
+        viewModel.displayedMessageCount = viewModel.messages.count
+        viewModel.hasInitiallyLoaded = true
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [forkRoot, child1, child2, child3],
+                hasMoreEvents: true,
+                oldestEventId: forkRoot.id
+            )
+        )
+
+        XCTAssertEqual(
+            viewModel.loadedReconstructionEvents.map(\.id),
+            [parent.id, forkRoot.id, child1.id, child2.id, child3.id]
+        )
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, parent.id)
+        XCTAssertEqual(
+            viewModel.messages.compactMap { textContent($0) },
+            ["parent prompt", "child one", "child two", "child three"]
+        )
+    }
+
 }

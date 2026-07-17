@@ -243,6 +243,14 @@ extension ChatViewModel {
         compactionInProgressMessageId = nil
     }
 
+    func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result) {
+        logger.warning(
+            "Live event continuity lost: reason=\(result.reason), dropped=\(result.droppedEventCount); requesting reconstruction",
+            category: .events
+        )
+        advanceStreamRecoveryRequest()
+    }
+
     private func capabilityStatus(
         forRunStatus status: String,
         current: CapabilityInvocationStatus

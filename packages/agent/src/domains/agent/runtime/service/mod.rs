@@ -17,12 +17,17 @@
 //! before `message.user` persistence or provider construction. Durable
 //! prior-history reconstruction and the new `message.user` append are likewise
 //! prerequisites for model execution; either persistence failure releases the
-//! run without opening a provider stream. Prompt-run composition derives broadcast access from its authoritative
-//! orchestrator and owns its event persister; the session cache retains only
-//! reconstructed event-store state and no parallel runtime service. Completion
-//! does not maintain a second final-answer state. Run-turn admission snapshots
-//! settings from the authoritative `ProfileRuntime`; the spawned run keeps that
-//! immutable value instead of consulting a second mutable settings owner. Main
+//! run without opening a provider stream. Normal completion and every admitted
+//! setup failure publish agent-end, canonical failure when present,
+//! processing-false, and ready while the matching run still serializes
+//! same-session admission; the run slot and its projection are released before
+//! that boundary unlocks. Prompt-run composition derives broadcast access from
+//! its authoritative orchestrator and owns its event persister; the session
+//! cache retains only reconstructed event-store state and no parallel runtime
+//! service. Completion does not maintain a second final-answer state. Run-turn
+//! admission snapshots settings from the authoritative `ProfileRuntime`; the
+//! spawned run keeps that immutable value instead of consulting a second
+//! mutable settings owner. Main
 //! response and background title providers are both created from that same
 //! admitted API-settings snapshot. Each resumed prompt fail-closed reads the
 //! durable sequence and turn high-water marks, then seeds its agent from the

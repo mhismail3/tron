@@ -12,7 +12,7 @@ use super::{
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
 };
-use crate::shared::protocol::events::{BaseEvent, error_event};
+use crate::shared::protocol::events::{BaseEvent, TronEvent, error_event};
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_RUN_ERROR,
 };
@@ -64,16 +64,32 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         has_error = result.error.is_some(),
         "agent prompt run finalizing"
     );
-    emit_run_error_if_needed(
-        &broadcast,
-        &session_id,
-        &provider_type,
-        &model_for_error,
-        &result,
-        sequence_counter.as_deref(),
-    );
     let agent_result_message =
         resolve_agent_result_message(&event_store, &session_id, result.error.as_deref());
+    // INVARIANT: the active-run slot owns every event that consumes its shared
+    // sequence counter. Publish the final session metadata first. Terminal
+    // error/idle/ready events and matching run release then share one registry
+    // boundary, so event-triggered prompt admission cannot observe SessionBusy
+    // and no old terminal event can race a replacement run.
+    emit_session_update(
+        &event_store,
+        &broadcast,
+        &session_id,
+        sequence_counter.as_deref(),
+    )
+    .await;
+    let terminal_failure =
+        run_error_event_if_needed(&session_id, &provider_type, &model_for_error, &result);
+    let _ = run_cleanup.release_with_terminal(|| {
+        publish_terminal_lifecycle(
+            &broadcast,
+            &session_id,
+            result.error.clone(),
+            sequence_counter.as_deref(),
+            terminal_failure,
+        );
+    });
+
     let agent_result_refs = create_agent_result_resource(
         &engine_host,
         engine_causality.as_ref(),
@@ -84,15 +100,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     )
     .await;
     let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
-
-    run_cleanup.release();
-    emit_session_update(
-        &event_store,
-        &broadcast,
-        &session_id,
-        sequence_counter.as_deref(),
-    )
-    .await;
 
     info!(
         component = "agent.runtime",
@@ -121,6 +128,49 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         }),
     )
     .await;
+}
+
+pub(super) fn publish_terminal_lifecycle(
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+    session_id: &str,
+    error: Option<String>,
+    sequence_counter: Option<&AtomicI64>,
+    failure_event: Option<TronEvent>,
+) {
+    emit_maybe_sequenced(
+        broadcast,
+        TronEvent::AgentEnd {
+            base: BaseEvent::now(session_id),
+            error,
+        },
+        sequence_counter,
+    );
+    if let Some(event) = failure_event {
+        emit_maybe_sequenced(broadcast, event, sequence_counter);
+    }
+    for event in [
+        TronEvent::SessionProcessingChanged {
+            base: BaseEvent::now(session_id),
+            is_processing: false,
+        },
+        TronEvent::AgentReady {
+            base: BaseEvent::now(session_id),
+        },
+    ] {
+        emit_maybe_sequenced(broadcast, event, sequence_counter);
+    }
+}
+
+fn emit_maybe_sequenced(
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+    event: TronEvent,
+    sequence_counter: Option<&AtomicI64>,
+) {
+    if let Some(counter) = sequence_counter {
+        let _ = broadcast.emit_sequenced(event, counter);
+    } else {
+        let _ = broadcast.emit(event);
+    }
 }
 
 async fn create_agent_result_resource(
@@ -262,16 +312,14 @@ fn assistant_content_text(content: &serde_json::Value) -> String {
     }
 }
 
-fn emit_run_error_if_needed(
-    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+fn run_error_event_if_needed(
     session_id: &str,
     provider_type: &str,
     model_for_error: &str,
     result: &crate::domains::agent::r#loop::types::RunResult,
-    sequence_counter: Option<&AtomicI64>,
-) {
+) -> Option<TronEvent> {
     let Some(ref error_message) = result.error else {
-        return;
+        return None;
     };
     let failure = FailureEnvelope::new(
         RUNTIME_RUN_ERROR,
@@ -283,12 +331,7 @@ fn emit_run_error_if_needed(
     )
     .with_provider_model(provider_type, model_for_error)
     .with_details(Some(serde_json::json!({ "source": "run_result" })));
-    let event = error_event(BaseEvent::now(session_id), &failure, None);
-    if let Some(counter) = sequence_counter {
-        let _ = broadcast.emit_sequenced(event, counter);
-    } else {
-        let _ = broadcast.emit(event);
-    }
+    Some(error_event(BaseEvent::now(session_id), &failure, None))
 }
 
 async fn emit_session_update(
@@ -392,6 +435,50 @@ mod tests {
                 text: "run failed".into(),
                 event_ref: Some("evt-call".into()),
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_lifecycle_is_contiguous_and_ready_is_last() {
+        let broadcast = Arc::new(crate::domains::agent::r#loop::EventEmitter::new());
+        let mut events = broadcast.subscribe();
+        let sequence = AtomicI64::new(10);
+        let failure = FailureEnvelope::new(
+            RUNTIME_RUN_ERROR,
+            FailureCategory::Unknown,
+            "provider stopped",
+            false,
+            false,
+            FailureOrigin::AgentRuntime,
+        );
+
+        publish_terminal_lifecycle(
+            &broadcast,
+            "session-a",
+            Some("provider stopped".to_owned()),
+            Some(&sequence),
+            Some(error_event(BaseEvent::now("session-a"), &failure, None)),
+        );
+
+        let received = [
+            events.recv().await.unwrap(),
+            events.recv().await.unwrap(),
+            events.recv().await.unwrap(),
+            events.recv().await.unwrap(),
+        ];
+        assert!(matches!(&received[0], TronEvent::AgentEnd { .. }));
+        assert!(matches!(&received[1], TronEvent::Error { .. }));
+        assert!(matches!(
+            &received[2],
+            TronEvent::SessionProcessingChanged {
+                is_processing: false,
+                ..
+            }
+        ));
+        assert!(matches!(&received[3], TronEvent::AgentReady { .. }));
+        assert_eq!(
+            received.iter().map(TronEvent::sequence).collect::<Vec<_>>(),
+            vec![Some(11), Some(12), Some(13), Some(14)]
         );
     }
 }

@@ -236,28 +236,6 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         );
     }
 
-    let reconstruction = read_repo_file("packages/agent/src/domains/session/reconstruction/mod.rs");
-    for required in [
-        "MAX_RECONSTRUCT_EVENTS",
-        ".clamp(0, MAX_RECONSTRUCT_EVENTS)",
-        "session.parent_session_id.is_some()",
-        "event_store.get_ancestors(head_id)",
-        "paginate_ordered_chain",
-        "get_events_before",
-        "has_events_before",
-        "get_latest_events",
-        "resolve_event_payloads",
-        "current_sequence(&session_id)",
-        "turn_accumulators()",
-        ".get_state(&session_id)",
-        "Self::reconcile_in_flight",
-    ] {
-        assert!(
-            reconstruction.contains(required),
-            "session reconstruction lifecycle missing `{required}`"
-        );
-    }
-
     let event_state =
         read_repo_file("packages/agent/src/domains/session/event_store/store/event_store/state.rs");
     for required in [

@@ -479,7 +479,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         orchestrator_for_stream_events.subscribe(),
         server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
-        orchestrator_for_stream_events.turn_accumulators().clone(),
     );
     let stream_event_pump_handle = tokio::spawn(pump.run());
     crate::transport::runtime::EngineRuntimeServices::start(&server);

@@ -1,9 +1,10 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 
 use tracing::{info, trace, warn};
 
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
-use super::completion::{PromptRunCompletion, finalize_prompt_run};
+use super::completion::{PromptRunCompletion, finalize_prompt_run, publish_terminal_lifecycle};
 use super::context::load_agent_state_context;
 use super::{
     PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, SessionTitleGenerationRequest,
@@ -12,6 +13,7 @@ use super::{
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::shared::protocol::events::{BaseEvent, error_event};
+use crate::shared::server::failure::FailureEnvelope;
 use crate::shared::server::failure::FailureOrigin;
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
@@ -87,7 +89,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
                 "failed to reconstruct session; aborting prompt run"
             );
             let failure = error.to_failure(FailureOrigin::AgentRuntime);
-            let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+            terminate_prompt_failure(&mut run_cleanup, &broadcast, &session_id, &failure, None);
             return;
         }
     };
@@ -121,18 +123,32 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             );
         }
     }
-    if let Err(error) =
-        persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)
-            .await
+    let user_event = match persist_user_message_event(
+        event_store.clone(),
+        session_id.clone(),
+        user_event_payload,
+    )
+    .await
     {
+        Ok(event) => event,
+        Err(error) => {
+            warn!(
+                session_id = %session_id,
+                run_id = %run_id,
+                error = %error,
+                "failed to persist message.user event; aborting prompt run"
+            );
+            let failure = error.to_failure(FailureOrigin::EventStore);
+            terminate_prompt_failure(&mut run_cleanup, &broadcast, &session_id, &failure, None);
+            return;
+        }
+    };
+    if !orchestrator.commit_run_admission(&session_id, &run_id, user_event.sequence) {
         warn!(
             session_id = %session_id,
             run_id = %run_id,
-            error = %error,
-            "failed to persist message.user event; aborting prompt run"
+            "prompt admission lost run ownership after durable user message"
         );
-        let failure = error.to_failure(FailureOrigin::EventStore);
-        let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
         return;
     }
     info!(
@@ -158,7 +174,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             )
             .to_failure()
             .with_session_id(Some(session_id.clone()));
-            let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+            terminate_prompt_failure(&mut run_cleanup, &broadcast, &session_id, &failure, None);
             return;
         }
     };
@@ -173,7 +189,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         ))
         .to_failure()
         .with_session_id(Some(session_id.clone()));
-        let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+        terminate_prompt_failure(&mut run_cleanup, &broadcast, &session_id, &failure, None);
         return;
     }
     let sequence_counter = Some(
@@ -231,7 +247,13 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
                 "failed to resolve durable turn high-water; aborting prompt run"
             );
             let failure = error.to_failure().with_session_id(Some(session_id.clone()));
-            let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+            terminate_prompt_failure(
+                &mut run_cleanup,
+                &broadcast,
+                &session_id,
+                &failure,
+                sequence_counter.as_deref(),
+            );
             return;
         }
     };
@@ -243,7 +265,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         responder_factory,
         engine_host.clone(),
         orchestrator.invocation_abort_registry().clone(),
-        &broadcast,
         &settings,
         &session_id,
         &model,
@@ -256,7 +277,16 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     .await
     {
         Ok(built) => built,
-        Err(()) => return,
+        Err(failure) => {
+            terminate_prompt_failure(
+                &mut run_cleanup,
+                &broadcast,
+                &session_id,
+                &failure,
+                sequence_counter.as_deref(),
+            );
+            return;
+        }
     };
     info!(
         component = "agent.runtime",
@@ -346,6 +376,26 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         sequence_counter,
     })
     .await;
+}
+
+fn terminate_prompt_failure(
+    run_cleanup: &mut PromptRunCleanup,
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+    session_id: &str,
+    failure: &FailureEnvelope,
+    sequence_counter: Option<&AtomicI64>,
+) {
+    let terminal_error = failure.message.clone();
+    let event = error_event(BaseEvent::now(session_id), failure, None);
+    let _ = run_cleanup.release_with_terminal(|| {
+        publish_terminal_lifecycle(
+            broadcast,
+            session_id,
+            Some(terminal_error),
+            sequence_counter,
+            Some(event),
+        );
+    });
 }
 
 fn resolve_turn_offset(

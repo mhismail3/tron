@@ -399,8 +399,28 @@ final class EngineClient: EngineTransport {
             NotificationCenter.default.post(name: .authDidUpdate, object: nil)
         }
 
-        // Publish event to async stream
-        _eventStream.send(eventV2)
+        // Publish before acknowledging the upstream cursor. A full subscriber
+        // buffer retains this newest event but evicts older live state, so queue
+        // an explicit global recovery marker that drives source reconstruction.
+        let droppedSubscriberDeliveries = _eventStream.send(eventV2)
+        if droppedSubscriberDeliveries > 0 {
+            logger.error(
+                "Local live event buffer overflowed for \(droppedSubscriberDeliveries) subscriber(s); requiring reconstruction",
+                category: .events
+            )
+            let result = StreamRecoveryRequiredPlugin.Result(
+                reason: "client_buffer_overflow",
+                droppedEventCount: UInt64(droppedSubscriberDeliveries)
+            )
+            let recoveryEvent = ParsedEventV2.plugin(
+                type: StreamRecoveryRequiredPlugin.eventType,
+                event: ParsedEventData(value: result),
+                sessionId: nil,
+                sequence: nil,
+                transform: { result }
+            )
+            _eventStream.send(recoveryEvent)
+        }
 
         recordAndAck(delivery)
     }

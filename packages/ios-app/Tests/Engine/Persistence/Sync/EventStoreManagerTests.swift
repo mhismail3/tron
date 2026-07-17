@@ -439,6 +439,65 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(streams.subscriptionCount(for: clientC), 1)
     }
 
+    func testRecoveryMarkersCoalesceIntoOneSessionListRefreshAfterReconnect() async throws {
+        let database = testState.makeDatabase(fileName: "stream-recovery-refresh.db")
+        try await database.initialize()
+        let stream = ControlledGlobalEventStream()
+        let accepted = AcceptedEventCapture()
+        let client = makeEngineClient(port: 65514)
+        let transport = makeConnectedTransport(port: 65514)
+        client.session = SessionClient(transport: transport)
+        var sessionListReadCount = 0
+        transport.readHandler = { functionId, _, _ in
+            guard functionId.rawValue == "session::list" else {
+                throw EngineConnectionError.invalidResponse
+            }
+            sessionListReadCount += 1
+            return SessionListResult(
+                sessions: [],
+                totalCount: 0,
+                hasMore: false,
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-17T00:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: client,
+            defaults: testState.defaults,
+            globalEventStream: { _ in stream.stream },
+            acceptedEventHook: { event in await accepted.record(event.eventType) }
+        )
+        let connectionProvider = MockConnectionStateProvider()
+        let connectionManager = ConnectionManager(provider: connectionProvider)
+        manager.attachConnectionManager(connectionManager)
+        let recoveryResult = StreamRecoveryRequiredPlugin.Result(
+            reason: "source_lag",
+            droppedEventCount: 4
+        )
+        let recoveryEvent = ParsedEventV2.plugin(
+            type: StreamRecoveryRequiredPlugin.eventType,
+            event: ParsedEventData(value: recoveryResult),
+            sessionId: nil,
+            sequence: nil,
+            transform: { recoveryResult }
+        )
+
+        stream.send(recoveryEvent)
+        stream.send(recoveryEvent)
+        await accepted.waitForCount(2)
+        await Task.yield()
+        connectionProvider.connectionState = .connected
+        for _ in 0..<100 where sessionListReadCount == 0 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(sessionListReadCount, 1)
+        await manager.shutdown()
+        stream.finish()
+    }
+
     func testRetiredClientRefreshDoesNotReconcileItsSnapshot() async throws {
         let database = testState.makeDatabase(fileName: "retired-refresh-success.db")
         try await database.initialize()

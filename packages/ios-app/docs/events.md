@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-15 (registry-owned dispatch; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
+> Last verified: 2026-07-17 (registry-owned dispatch; source/client stream-loss recovery; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -34,9 +34,10 @@ server reports an in-flight invocation.
 
 `EventStoreManager` owns the current global event subscription without owning
 the shared `AsyncEventStream` bus. The idle subscription task captures the
-manager weakly. Filtered bridges likewise own only their upstream subscription,
-not the source bus; releasing the final bus owner finishes both direct and
-filtered subscribers. `finish()` owns both explicit and deinitializer cleanup:
+manager weakly. Direct and filtered consumers register at that same bus owner;
+filter predicates run before the consumer's single bounded buffer, so filtering
+does not create a second hidden queue or task. Releasing the final bus owner
+finishes every subscriber. `finish()` owns both explicit and deinitializer cleanup:
 it removes the continuation snapshot under lock, then notifies subscribers
 after unlocking. Client replacement is predecessor-chained—including the first
 load—so rapid A→B→C replacement cannot let events or direct projection loads
@@ -49,6 +50,21 @@ Those origin-bound overrides retain explicit true and false values and retire
 only when a later refresh supplies processing state for that session; partial
 or omitted processing truth cannot erase them. Reconnect refresh stays behind
 `SessionRefreshService`'s single coalescing owner.
+
+Live continuity failures are explicit. If the server projection receiver lags,
+it publishes a global `stream.recovery_required` marker. If an iOS subscriber
+buffer evicts an older delivery, `EngineClient` queues the same marker before
+acknowledging the upstream cursor. A mounted chat turns the marker into a
+generation change observed by `ChatView`, which routes reconstruction through
+the existing connection-refresh task. Replacement cancels and joins its keyed
+predecessor before new state mutation. Only a committed server snapshot clears
+reconstruction mode and drains the buffered live suffix; retryable failures and
+cancellation retain both the gate and buffer. The snapshot sequence cut commits
+before cancellable projection work, and the keyed view task retries transient
+failures with capped backoff while connected. Marker bursts retain at most one
+follow-up reconstruction behind the current repair rather than repeatedly
+cancelling it. The global event owner also requests a coalesced session-list
+refresh. Neither event handler opens a second socket or owns retry tasks.
 
 Acceptance is the boundary for shutdown semantics: after the lane accepts an
 event, its database mutation and completion callback are awaited inline. The
@@ -195,6 +211,9 @@ Capability identity fields stay primitive: model primitive, operation,
 trace/root invocation ids, theme color, and presentation hints. Reconstruction
 must not recover retired contract, implementation, worker, risk, or binding
 metadata from old payloads.
+When persisted capability lifecycle rows already establish success or error,
+that terminal chip remains authoritative over any lower-fidelity current-turn
+projection returned in the same reconstruction snapshot.
 
 Unsupported event payloads should remain visible as diagnostics or
 transport-only facts. They should not be converted into fixed panels,

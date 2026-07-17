@@ -186,4 +186,59 @@ struct EngineClientObservationTests {
         let secondCursor = coalescer.takeForFlush(subscriptionId: "sub-1")
         #expect(secondCursor == EngineStreamCursor(rawValue: 22))
     }
+
+    @Test("Local subscriber overflow publishes an explicit recovery marker")
+    func testLocalSubscriberOverflowPublishesRecoveryMarker() async throws {
+        EventRegistry.shared.registerAll()
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65528/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let connection = try #require(rpc.engineConnection)
+        let firstStream = rpc.events
+        let secondStream = rpc.events
+        let payload = ServerEventPayload(
+            type: AgentReadyPlugin.eventType,
+            sessionId: "overflow-session",
+            workspaceId: nil,
+            timestamp: "2026-07-17T00:00:00Z",
+            data: nil,
+            runId: nil,
+            sequence: nil,
+            traceId: nil,
+            parentInvocationId: nil,
+            sourceEventId: nil,
+            sourceSequence: nil,
+            streamCursor: nil
+        )
+        let eventData = try JSONEncoder().encode(payload)
+
+        for _ in 0...256 {
+            connection.onEvent?(
+                EngineEventDelivery(
+                    topic: "events.session",
+                    subscriptionId: nil,
+                    cursor: nil,
+                    event: payload,
+                    eventData: eventData
+                )
+            )
+        }
+
+        var iterator = firstStream.makeAsyncIterator()
+        var recovery: StreamRecoveryRequiredPlugin.Result?
+        for _ in 0..<256 {
+            guard let event = await iterator.next() else { break }
+            if event.eventType == StreamRecoveryRequiredPlugin.eventType {
+                recovery = event.getResult() as? StreamRecoveryRequiredPlugin.Result
+                break
+            }
+        }
+
+        #expect(recovery?.reason == "client_buffer_overflow")
+        #expect(recovery?.droppedEventCount == 2)
+        withExtendedLifetime(secondStream) {}
+    }
 }

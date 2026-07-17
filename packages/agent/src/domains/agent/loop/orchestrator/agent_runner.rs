@@ -6,11 +6,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
-use crate::shared::protocol::events::{BaseEvent, TronEvent};
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
-
-use tracing::{debug, instrument, warn};
+#[cfg(test)]
+use crate::shared::protocol::events::TronEvent;
+use tracing::{debug, instrument};
 
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::tron_agent::TronAgent;
@@ -21,8 +19,10 @@ use crate::domains::agent::r#loop::types::{RunContext, RunResult};
 /// This wraps `TronAgent::run` with:
 /// 1. Build and inject the primitive `RunContext`
 /// 2. Execute `agent.run(content, ctx)`
-/// 3. Forward streamed agent events
-/// 4. Emit `agent.ready` after the forwarded `agent.complete`
+/// 3. Emit run events directly through the orchestrator's canonical emitter
+///
+/// Terminal readiness is owned by prompt completion, which publishes the final
+/// session projection and synchronizes `agent.ready` with run-slot release.
 #[instrument(skip_all, fields(session_id = agent.session_id()))]
 pub async fn run_agent(
     agent: &mut TronAgent,
@@ -39,67 +39,14 @@ pub async fn run_agent(
         agent.set_sequence_counter(counter.clone());
     }
 
-    // Forward agent events to broadcast channel.
-    let mut agent_rx = agent.subscribe();
-    let broadcast_clone = broadcast.clone();
-    let forward_cancel = CancellationToken::new();
-    let forward_cancel_clone = forward_cancel.clone();
-    let forward_handle = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                event = agent_rx.recv() => {
-                    match event {
-                        Ok(e) => { let _ = broadcast_clone.emit(e); }
-                        Err(broadcast::error::RecvError::Closed) => break,
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            metrics::counter!("broadcast_lagged_events_total", "source" => "agent_forward").increment(n);
-                        }
-                    }
-                }
-                () = forward_cancel_clone.cancelled() => {
-                    // Drain any remaining buffered events
-                    while let Ok(event) = agent_rx.try_recv() {
-                        let _ = broadcast_clone.emit(event);
-                    }
-                    break;
-                }
-            }
-        }
-    });
+    // INVARIANT: there is no intermediate broadcast hop. The outer emitter
+    // synchronously updates reconnect state before broadcasting each event.
+    agent.set_emitter(broadcast.clone());
 
     // Run the agent.
     let result = agent.run(content, ctx).await;
 
-    // Signal the forward task to drain remaining buffered events and exit
-    forward_cancel.cancel();
-    // Wait for it to finish draining (bounded timeout as safety net).
-    // Obtain AbortHandle BEFORE passing the JoinHandle to timeout(),
-    // since timeout() consumes the handle on expiry.
-    let abort_handle = forward_handle.abort_handle();
-    if tokio::time::timeout(std::time::Duration::from_millis(100), forward_handle)
-        .await
-        .is_err()
-    {
-        warn!(
-            session_id,
-            "forward task did not drain within 100ms, aborting"
-        );
-        abort_handle.abort();
-    }
-
     debug!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
-
-    // INVARIANT: agent.ready MUST be emitted AFTER agent.complete so clients see
-    // a terminal run before returning to idle. The send button now depends only
-    // on active processing/compaction plus the async ledger.
-    let ready = TronEvent::AgentReady {
-        base: BaseEvent::now(&session_id),
-    };
-    if let Some(counter) = sequence_counter.as_deref() {
-        let _ = broadcast.emit_sequenced(ready, counter);
-    } else {
-        let _ = broadcast.emit(ready);
-    }
 
     result
 }
@@ -110,6 +57,7 @@ mod tests {
     use crate::domains::agent::context::context_manager::ContextManager;
     use crate::domains::agent::context::types::ContextManagerConfig;
     use crate::domains::agent::r#loop::errors::StopReason;
+    use crate::domains::agent::r#loop::event_emitter::TronEventObserver;
     use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
     use crate::domains::model::responder::{
         ModelResponder, ModelResponderInfo, ModelResponse, ModelResponseError,
@@ -121,6 +69,7 @@ mod tests {
     use async_trait::async_trait;
     use futures::{StreamExt, stream};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio_util::sync::CancellationToken;
 
     use crate::domains::agent::r#loop::tron_agent::AgentDeps;
     use crate::domains::agent::r#loop::types::AgentConfig;
@@ -353,8 +302,19 @@ mod tests {
         RunContext::default()
     }
 
+    #[derive(Default)]
+    struct MessageUpdateObserver(AtomicUsize);
+
+    impl TronEventObserver for MessageUpdateObserver {
+        fn observe_tron_event(&self, event: &TronEvent) {
+            if matches!(event, TronEvent::MessageUpdate { .. }) {
+                let _ = self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
     #[tokio::test]
-    async fn run_agent_emits_complete_then_ready() {
+    async fn run_agent_defers_terminal_lifecycle_to_prompt_completion() {
         let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
@@ -370,15 +330,12 @@ mod tests {
             event_types.push(event.event_type().to_owned());
         }
 
-        // agent.complete (agent_end) must come before agent.ready
-        let complete_pos = event_types.iter().position(|t| t == "agent_end");
-        let ready_pos = event_types.iter().position(|t| t == "agent_ready");
-
-        assert!(complete_pos.is_some(), "agent_end must be emitted");
-        assert!(ready_pos.is_some(), "agent_ready must be emitted");
         assert!(
-            complete_pos.unwrap() < ready_pos.unwrap(),
-            "agent_end must come before agent_ready"
+            event_types.iter().all(|event_type| !matches!(
+                event_type.as_str(),
+                "agent_end" | "agent_ready" | "session.processing_changed"
+            )),
+            "run_agent must not publish terminal admission events: {event_types:?}"
         );
     }
 
@@ -633,27 +590,15 @@ mod tests {
         assert_eq!(start.sequence(), Some(lifecycle[0][0].sequence));
         assert_eq!(end.sequence(), Some(lifecycle[3][0].sequence));
 
-        let agent_end = live
-            .iter()
-            .position(|event| matches!(event, TronEvent::AgentEnd { .. }))
-            .unwrap();
-        let processing_false = live
-            .iter()
-            .position(|event| {
-                matches!(
-                    event,
-                    TronEvent::SessionProcessingChanged {
-                        is_processing: false,
-                        ..
-                    }
-                )
-            })
-            .unwrap();
-        let ready = live
-            .iter()
-            .position(|event| matches!(event, TronEvent::AgentReady { .. }))
-            .unwrap();
-        assert!(agent_end < processing_false && processing_false < ready);
+        assert!(live.iter().all(|event| !matches!(
+            event,
+            TronEvent::AgentEnd { .. }
+                | TronEvent::SessionProcessingChanged {
+                    is_processing: false,
+                    ..
+                }
+                | TronEvent::AgentReady { .. }
+        )));
     }
 
     #[tokio::test]
@@ -1162,14 +1107,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_no_duplicate_agent_end() {
+    async fn run_agent_does_not_publish_agent_end() {
         let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
         let _ = run_agent(&mut agent, "Hello", run_context(), &broadcast, None).await;
 
-        // Count agent_end events — there should be exactly one (from TronAgent, forwarded)
         let mut agent_end_count = 0;
         while let Ok(event) = rx.try_recv() {
             if event.event_type() == "agent_end" {
@@ -1177,13 +1121,13 @@ mod tests {
             }
         }
         assert_eq!(
-            agent_end_count, 1,
-            "expected exactly 1 agent_end, got {agent_end_count}"
+            agent_end_count, 0,
+            "prompt completion owns agent_end, got {agent_end_count} early events"
         );
     }
 
     #[tokio::test]
-    async fn run_agent_error_still_emits_ready() {
+    async fn run_agent_error_still_defers_terminal_lifecycle() {
         let (mut agent, _journal) = make_agent_with_responder(Arc::new(
             StreamBackedResponder::new(vec![Err(ModelResponseError::other("expired"))]),
         ));
@@ -1194,14 +1138,14 @@ mod tests {
         let result = run_agent(&mut agent, "Hi", run_context(), &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::Error);
 
-        // Should still emit agent_ready after error
-        let mut saw_ready = false;
+        let mut saw_terminal = false;
         while let Ok(event) = rx.try_recv() {
-            if event.event_type() == "agent_ready" {
-                saw_ready = true;
-            }
+            saw_terminal |= matches!(
+                event,
+                TronEvent::AgentEnd { .. } | TronEvent::AgentReady { .. }
+            );
         }
-        assert!(saw_ready, "agent_ready must be emitted even after error");
+        assert!(!saw_terminal, "prompt completion owns error termination");
     }
 
     #[tokio::test]
@@ -1334,7 +1278,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forward_task_drains_all_events() {
+    async fn canonical_emitter_receives_all_run_events() {
         let (mut agent, _journal) =
             make_agent_with_responder(Arc::new(StreamBackedResponder::new(vec![
                 Ok(StreamEvent::Start),
@@ -1368,17 +1312,6 @@ mod tests {
             event_types.push(event.event_type().to_owned());
         }
 
-        // agent_end must be present (it's the last event from TronAgent)
-        assert!(
-            event_types.contains(&"agent_end".to_owned()),
-            "agent_end must be forwarded; got: {event_types:?}"
-        );
-        // agent_ready must be last
-        assert_eq!(
-            event_types.last().map(String::as_str),
-            Some("agent_ready"),
-            "agent_ready must be the last event"
-        );
         // All message_update deltas should be forwarded
         let update_count = event_types
             .iter()
@@ -1388,45 +1321,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forward_task_aborted_on_timeout() {
-        // Verify run_agent completes promptly even if the forward task
-        // would otherwise hang (the abort path prevents leaking tasks).
-        let (mut agent, _journal) = make_agent();
-        let broadcast = Arc::new(EventEmitter::new());
+    async fn canonical_observer_is_lossless_above_broadcast_capacity() {
+        const DELTA_COUNT: usize = 1_300;
+        let mut events = Vec::with_capacity(DELTA_COUNT + 2);
+        events.push(Ok(StreamEvent::Start));
+        events.extend((0..DELTA_COUNT).map(|_| {
+            Ok(StreamEvent::TextDelta {
+                delta: "x".to_owned(),
+            })
+        }));
+        events.push(Ok(StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![AssistantContent::text("complete")],
+                token_usage: None,
+            },
+            stop_reason: "end_turn".to_owned(),
+        }));
+        let (mut agent, _journal) =
+            make_agent_with_responder(Arc::new(StreamBackedResponder::new(events)));
+        let observer = Arc::new(MessageUpdateObserver::default());
+        let broadcast = Arc::new(EventEmitter::with_observer(observer.clone()));
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            run_agent(&mut agent, "Hello", run_context(), &broadcast, None),
-        )
-        .await;
-
-        // run_agent must complete (not hang due to leaked forward task)
-        assert!(result.is_ok(), "run_agent should complete within 5s");
-        let result = result.unwrap();
-        assert_eq!(result.stop_reason, StopReason::EndTurn);
-    }
-
-    #[tokio::test]
-    async fn forward_task_completes_within_timeout_no_abort() {
-        let (mut agent, _journal) = make_agent();
-        let broadcast = Arc::new(EventEmitter::new());
-        let mut rx = broadcast.subscribe();
-
-        let result = run_agent(&mut agent, "Hello", run_context(), &broadcast, None).await;
+        let result = run_agent(&mut agent, "Hi", run_context(), &broadcast, None).await;
 
         assert_eq!(result.stop_reason, StopReason::EndTurn);
-
-        // All events should be forwarded (forward task completed normally)
-        let mut saw_ready = false;
-        let mut saw_end = false;
-        while let Ok(event) = rx.try_recv() {
-            match event.event_type() {
-                "agent_end" => saw_end = true,
-                "agent_ready" => saw_ready = true,
-                _ => {}
-            }
-        }
-        assert!(saw_end, "agent_end must be forwarded");
-        assert!(saw_ready, "agent_ready must be emitted");
+        assert_eq!(observer.0.load(Ordering::SeqCst), DELTA_COUNT);
     }
 }

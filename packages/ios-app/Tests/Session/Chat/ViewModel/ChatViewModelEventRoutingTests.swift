@@ -436,6 +436,19 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.agentPhase, .idle)
     }
 
+    func test_streamRecoveryRequiredAdvancesReconstructionRequest() {
+        let initialGeneration = viewModel.streamRecoveryRequestGeneration
+
+        viewModel.handleStreamRecoveryRequired(
+            StreamRecoveryRequiredPlugin.Result(
+                reason: "source_lag",
+                droppedEventCount: 3
+            )
+        )
+
+        XCTAssertEqual(viewModel.streamRecoveryRequestGeneration, initialGeneration + 1)
+    }
+
     func test_turnStart_resetsCapabilityTracking() {
         // Given - have some capability invocations from previous turn
         viewModel.currentTurnCapabilityMessageIds = [UUID()]

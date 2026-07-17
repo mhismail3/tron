@@ -173,6 +173,40 @@ fn stream_filters_match_neutral_server_event_scope() {
     ));
 }
 
+#[test]
+fn recovery_marker_crosses_session_filter_but_respects_event_type_filter() {
+    let event = crate::engine::EngineStreamEvent {
+        cursor: StreamCursor(8),
+        topic: "events.session".to_owned(),
+        payload: json!({
+            "serverEvent": ServerEventPayload::new(
+                crate::transport::runtime::streams::STREAM_RECOVERY_REQUIRED_EVENT_TYPE,
+                None,
+                Some(json!({"reason": "source_lag", "droppedEventCount": 3}))
+            )
+        }),
+        visibility: VisibilityScope::System,
+        session_id: None,
+        workspace_id: None,
+        producer: "test".to_owned(),
+        trace_id: None,
+        parent_invocation_id: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    assert!(stream_event_matches_filters(
+        &event,
+        Some(&json!({"sessionId": "session-a"}))
+    ));
+    assert!(!stream_event_matches_filters(
+        &event,
+        Some(&json!({
+            "sessionId": "session-a",
+            "eventType": "agent.ready"
+        }))
+    ));
+}
+
 #[tokio::test]
 async fn stream_poll_returns_neutral_events() {
     let (mut session, _rx) = test_session();

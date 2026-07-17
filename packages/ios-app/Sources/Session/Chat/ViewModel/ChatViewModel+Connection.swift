@@ -101,7 +101,7 @@ extension ChatViewModel: ConnectionContext {
     }
 
     /// Drain events that were buffered during reconstruction.
-    /// Called by ConnectionCoordinator after reconstruction completes and
+    /// Called by ConnectionCoordinator only after reconstruction commits and
     /// sequenceHighWaterMark is set.
     ///
     /// Sort the buffered batch by `sequence` before dispatch so
@@ -164,8 +164,11 @@ extension ChatViewModel: ConnectionContext {
 
 extension ChatViewModel {
 
-    /// Connect, resume, and reconstruct the session
-    func connectAndReconstruct() async {
+    /// Connect, resume, and reconstruct the session.
+    ///
+    /// Retryable and cancelled attempts retain the buffered live suffix; the
+    /// mounted view's single connection-refresh task owns retry scheduling.
+    func connectAndReconstruct() async -> ConnectionReconstructionOutcome {
         await connectionCoordinator.connectAndReconstruct(context: self)
     }
 }

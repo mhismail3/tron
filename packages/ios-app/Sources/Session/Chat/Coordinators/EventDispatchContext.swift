@@ -36,6 +36,7 @@ import Foundation
 
 @MainActor protocol ServerEventHandler: AnyObject {
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result)
+    func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result)
 }
 
 @MainActor protocol DisplayStreamEventHandler: AnyObject {

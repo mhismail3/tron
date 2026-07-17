@@ -418,6 +418,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             inFlight: nil,
             lastSequence: Int64(events.map(\.sequence).max() ?? 0),
             isRunning: false,
+            isCompacting: false,
+            compactionReason: nil,
             agentPhase: "idle",
             metadata: ReconstructMetadata(
                 model: nil,

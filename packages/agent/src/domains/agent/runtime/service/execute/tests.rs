@@ -169,10 +169,28 @@ async fn user_message_persistence_failure_aborts_before_provider_construction() 
             .all(|row| row.event_type != "model.provider_request")
     );
     assert!(rows.iter().all(|row| row.event_type != "message.assistant"));
+    let terminal_events = std::iter::from_fn(|| outcome.events.try_recv().ok()).collect::<Vec<_>>();
     assert_eq!(
-        terminal_error_code(&mut outcome.events),
-        EVENT_STORE_FAILURE
+        terminal_events
+            .iter()
+            .map(TronEvent::event_type)
+            .collect::<Vec<_>>(),
+        vec![
+            "agent_end",
+            "error",
+            "session_processing_changed",
+            "agent_ready",
+        ]
     );
+    let TronEvent::Error { code, .. } = &terminal_events[1] else {
+        panic!("second terminal event must be the canonical failure");
+    };
+    assert_eq!(code.as_deref(), Some(EVENT_STORE_FAILURE));
+    let replacement = outcome
+        .orchestrator
+        .begin_run(&harness.session_id, "run-after-persistence-failure")
+        .expect("terminal boundary must immediately admit the replacement run");
+    drop(replacement);
 }
 
 #[tokio::test]

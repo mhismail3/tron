@@ -21,7 +21,6 @@ impl SessionLifecycleService {
         })
         .await?;
 
-        deps.orchestrator.remove_sequence_counter(&session_id);
         deps.orchestrator.remove_compaction_handler(&session_id);
 
         let _ = deps
@@ -70,8 +69,8 @@ impl SessionLifecycleService {
     ///     point.
     ///
     /// Each candidate is archived one-at-a-time via the existing
-    /// `SessionLifecycleService::archive` path so sequence-counter cleanup and
-    /// broadcast semantics stay identical to single-session archive.
+    /// `SessionLifecycleService::archive` path so cache cleanup and broadcast
+    /// semantics stay identical to single-session archive.
     ///
     /// Returns `{ archivedCount, archivedSessionIds, skipped, cutoff }`.
     /// `skipped` captures any candidates that failed mid-batch so the caller

@@ -18,8 +18,15 @@ import Foundation
 /// stream.send(myEvent)
 /// ```
 final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
-    /// Internal continuation management with thread-safe access
-    private var continuations: [UUID: AsyncStream<T>.Continuation] = [:]
+    private struct Subscription {
+        let continuation: AsyncStream<T>.Continuation
+        let predicate: (@Sendable (T) -> Bool)?
+    }
+
+    /// Internal subscription management with thread-safe access.
+    /// Filtering lives here so every consumer has exactly one bounded buffer.
+    private var subscriptions: [UUID: Subscription] = [:]
+    private var isFinished = false
     private let lock = NSLock()
     private let bufferingPolicy: AsyncStream<T>.Continuation.BufferingPolicy
 
@@ -27,21 +34,48 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
         self.bufferingPolicy = bufferingPolicy
     }
 
-    /// Send a value to all active subscribers.
+    /// Send a value to all matching active subscribers.
     /// Thread-safe and can be called from any context.
-    func send(_ value: T) {
+    ///
+    /// - Returns: The number of subscriber buffers that evicted an older value.
+    ///   Callers that acknowledge an upstream cursor must treat a nonzero result
+    ///   as a continuity break and request source-owned reconstruction.
+    @discardableResult
+    func send(_ value: T) -> Int {
         lock.lock()
-        let currentContinuations = Array(continuations.values)
+        guard !isFinished else {
+            lock.unlock()
+            return 0
+        }
+        let currentSubscriptions = Array(subscriptions.values)
         lock.unlock()
 
-        for continuation in currentContinuations {
-            continuation.yield(value)
+        var droppedDeliveryCount = 0
+        for subscription in currentSubscriptions {
+            if let predicate = subscription.predicate, !predicate(value) {
+                continue
+            }
+            if case .dropped = subscription.continuation.yield(value) {
+                droppedDeliveryCount += 1
+            }
         }
+        return droppedDeliveryCount
     }
 
     /// Get an async stream of events.
     /// Each call creates a new subscription.
     var events: AsyncStream<T> {
+        makeStream(predicate: nil)
+    }
+
+    /// Get a filtered async stream of events.
+    /// - Parameter predicate: Filter predicate to apply
+    /// - Returns: Filtered async stream
+    func filtered(where predicate: @escaping @Sendable (T) -> Bool) -> AsyncStream<T> {
+        makeStream(predicate: predicate)
+    }
+
+    private func makeStream(predicate: (@Sendable (T) -> Bool)?) -> AsyncStream<T> {
         let id = UUID()
         return AsyncStream(bufferingPolicy: bufferingPolicy) { [weak self] continuation in
             guard let self else {
@@ -50,39 +84,22 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
             }
 
             self.lock.lock()
-            self.continuations[id] = continuation
+            guard !self.isFinished else {
+                self.lock.unlock()
+                continuation.finish()
+                return
+            }
+            self.subscriptions[id] = Subscription(
+                continuation: continuation,
+                predicate: predicate
+            )
             self.lock.unlock()
 
             continuation.onTermination = { [weak self] _ in
                 guard let self else { return }
                 self.lock.lock()
-                self.continuations.removeValue(forKey: id)
+                self.subscriptions.removeValue(forKey: id)
                 self.lock.unlock()
-            }
-        }
-    }
-
-    /// Get a filtered async stream of events.
-    /// - Parameter predicate: Filter predicate to apply
-    /// - Returns: Filtered async stream
-    func filtered(where predicate: @escaping @Sendable (T) -> Bool) -> AsyncStream<T> {
-        AsyncStream(bufferingPolicy: bufferingPolicy) { [weak self] continuation in
-            guard let upstreamEvents = self?.events else {
-                continuation.finish()
-                return
-            }
-
-            let task = Task {
-                for await event in upstreamEvents {
-                    if predicate(event) {
-                        continuation.yield(event)
-                    }
-                }
-                continuation.finish()
-            }
-
-            continuation.onTermination = { _ in
-                task.cancel()
             }
         }
     }
@@ -90,8 +107,13 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
     /// Complete all streams (for cleanup).
     func finish() {
         lock.lock()
-        let currentContinuations = Array(continuations.values)
-        continuations.removeAll()
+        guard !isFinished else {
+            lock.unlock()
+            return
+        }
+        isFinished = true
+        let currentContinuations = subscriptions.values.map(\.continuation)
+        subscriptions.removeAll()
         lock.unlock()
 
         for continuation in currentContinuations {

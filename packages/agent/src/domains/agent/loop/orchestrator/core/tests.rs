@@ -1,5 +1,6 @@
 use super::*;
 use crate::domains::session::event_store::EventStore;
+use crate::shared::protocol::events::BaseEvent;
 use serde_json::json;
 
 fn make_orchestrator() -> Orchestrator {
@@ -76,6 +77,67 @@ fn dropping_run_clears_active() {
     drop(run);
     assert!(!orch.has_active_run("s1"));
     assert_eq!(orch.active_run_count(), 0);
+    assert!(orch.active_reconstruction_snapshot("s1").is_none());
+}
+
+#[test]
+fn terminal_callback_serializes_replacement_admission() {
+    let orchestrator = Arc::new(make_orchestrator());
+    let mut run = orchestrator.begin_run("s1", "run-1").unwrap();
+    let (start_tx, start_rx) = std::sync::mpsc::channel();
+    let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let replacement_orchestrator = orchestrator.clone();
+    let replacement = std::thread::spawn(move || {
+        start_rx.recv().unwrap();
+        attempted_tx.send(()).unwrap();
+        let admitted = replacement_orchestrator.begin_run("s1", "run-2").is_ok();
+        result_tx.send(admitted).unwrap();
+    });
+
+    assert!(run.finish_with(|| {
+        start_tx.send(()).unwrap();
+        attempted_rx.recv().unwrap();
+        assert!(
+            result_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "replacement admission must wait while terminal events are published"
+        );
+    }));
+
+    assert!(
+        result_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap(),
+        "replacement admission must succeed immediately after terminal release"
+    );
+    replacement.join().unwrap();
+}
+
+#[test]
+fn replacement_run_never_inherits_stale_reconstruction_projection() {
+    let orch = make_orchestrator();
+    let run_one = orch.begin_run("s1", "run-1").unwrap();
+    let _ = orch.broadcast().emit(TronEvent::TurnStart {
+        base: BaseEvent::now("s1").with_sequence(1),
+        turn: 1,
+    });
+    assert_eq!(
+        orch.active_reconstruction_snapshot("s1")
+            .unwrap()
+            .1
+            .unwrap()
+            .last_sequence,
+        Some(1)
+    );
+
+    drop(run_one);
+    let _run_two = orch.begin_run("s1", "run-2").unwrap();
+    let (run_id, snapshot) = orch.active_reconstruction_snapshot("s1").unwrap();
+
+    assert_eq!(run_id, "run-2");
+    assert_eq!(snapshot.unwrap().last_sequence, None);
 }
 
 #[test]
@@ -89,6 +151,43 @@ fn get_run_id_returns_correct_id() {
 fn get_run_id_unknown_returns_none() {
     let orch = make_orchestrator();
     assert!(orch.get_run_id("unknown").is_none());
+}
+
+#[test]
+fn status_snapshot_never_pairs_registry_run_with_replacement_projection() {
+    let orch = make_orchestrator();
+    let _run = orch.begin_run("s1", "run-1").unwrap();
+
+    // Model the only dangerous interleaving directly: a replacement projection
+    // becomes visible while the old registry identity is still being read.
+    orch.turn_accumulators.begin_run("s1", "run-2");
+    let _ = orch.broadcast().emit(TronEvent::TurnStart {
+        base: BaseEvent::now("s1"),
+        turn: 1,
+    });
+    let _ = orch
+        .broadcast()
+        .emit(TronEvent::CapabilityInvocationGenerating {
+            base: BaseEvent::now("s1"),
+            invocation_id: "cap-2".into(),
+            model_primitive_name: "execute".into(),
+            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
+            ),
+        });
+    let _ = orch
+        .broadcast()
+        .emit(TronEvent::CapabilityInvocationStarted {
+            base: BaseEvent::now("s1"),
+            invocation_id: "cap-2".into(),
+            model_primitive_name: "execute".into(),
+            arguments: None,
+            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
+            ),
+        });
+
+    let (run_id, capability) = orch.agent_status_snapshot("s1");
+    assert_eq!(run_id.as_deref(), Some("run-1"));
+    assert!(capability.is_none());
 }
 
 // --- Abort tests ---
@@ -491,5 +590,18 @@ async fn shutdown_clears_orphaned_runs() {
         orch.active_run_count(),
         0,
         "active_runs must be cleared after shutdown"
+    );
+    assert!(orch.active_reconstruction_snapshot("s1").is_none());
+    assert!(orch.active_reconstruction_snapshot("s2").is_none());
+
+    let _ = orch.broadcast().emit(TronEvent::TurnStart {
+        base: BaseEvent::now("s1"),
+        turn: 99,
+    });
+    assert!(
+        orch.turn_accumulators
+            .reconstruction_snapshot("s1", "")
+            .is_none(),
+        "late shutdown events must not recreate an ownerless projection"
     );
 }

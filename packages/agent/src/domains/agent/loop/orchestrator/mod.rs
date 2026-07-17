@@ -78,6 +78,11 @@
 //!   and counters are reconciled against durable event-store truth before
 //!   runtime persistence; row-backed turn starts, ends, and failures allocate
 //!   after any earlier transient runtime event.
+//! - The event emitter synchronously updates the active-turn reconstruction
+//!   projection before broadcast and serializes sequence allocation with that
+//!   update. Reconstruction caps its durable window to this state/sequence cut,
+//!   never raw allocator state, so reconnect deduplication cannot skip an event
+//!   that the snapshot does not represent.
 //! - Requested capability starts commit as one batch before execution. A
 //!   phase's executed and skipped completions likewise commit as one ordered
 //!   batch before broadcast. A lifecycle persistence failure stops the turn

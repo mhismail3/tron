@@ -330,6 +330,22 @@ final class EventRegistryDispatchTests: XCTestCase {
 
     // MARK: - Edge Case Tests
 
+    func testDispatch_streamRecoveryRequired_callsContinuityHandler() {
+        let result = StreamRecoveryRequiredPlugin.Result(
+            reason: "client_buffer_overflow",
+            droppedEventCount: 2
+        )
+
+        registry.dispatch(
+            type: StreamRecoveryRequiredPlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.handleStreamRecoveryRequiredCalledWith?.reason, "client_buffer_overflow")
+        XCTAssertEqual(mockContext.handleStreamRecoveryRequiredCalledWith?.droppedEventCount, 2)
+    }
+
     func testDispatch_registeredNilTransformIsNoOpWithoutWarning() {
         // Given: A registered plugin whose transform returns nil
         let nilTransform: @Sendable () -> (any EventResult)? = { nil }
@@ -529,6 +545,11 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleServerRestartingCalledWith: ServerRestartingPlugin.Result?
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
         handleServerRestartingCalledWith = result
+    }
+
+    var handleStreamRecoveryRequiredCalledWith: StreamRecoveryRequiredPlugin.Result?
+    func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result) {
+        handleStreamRecoveryRequiredCalledWith = result
     }
 
     // Display streaming

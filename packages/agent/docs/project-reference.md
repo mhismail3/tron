@@ -2152,6 +2152,26 @@ records. Stateless stream polling and non-session catch-up remain explicit curso
 operations. Stream polling applies engine visibility before pagination, so a
 session subscriber is never blocked behind older stream rows owned by unrelated
 sessions.
+The runtime-to-engine projection queue is bounded. If it ever overruns, the
+pump stores a system-scoped `stream.recovery_required` control event directly
+in `events.session` before processing later source events. That control event
+crosses session/workspace narrowing (while still respecting an explicit event
+type filter), and mounted clients reconstruct their current session. If the
+control record itself cannot be stored, projection stops rather than presenting
+a discontinuous stream as complete.
+The reconstruction `lastSequence` cursor is representation-backed. During an
+active run, the event emitter snapshots turn state and its source sequence in
+the same ordered dispatch critical section, before broadcast; the top-level DB
+window is capped to that cut before its result limit is applied. Run/turn
+transitions retry the read, raw allocator state cannot advance it, and parent
+sequences in a forked ancestor chain never advance the child's live cursor. iOS
+applies this cut only on top-level reconnect, then drains buffered child-session
+continuations above it. Older pagination responses do not redefine the live
+watermark. The same projection owns terminal processing phase, active compaction,
+and current capability progress/run status, so reconnect cannot acknowledge a
+frame while losing the UI state it established. Dropping the matching run guard
+removes that projection without affecting a replacement run; post-run engine
+resource publication occurs after the active run is released.
 `session::reconstruct` paginates with `beforeEventId` / `oldestEventId` event
 IDs, not session-local sequence cursors. Forked sessions reconstruct from the
 ordered ancestor chain ending at the child head so inherited parent history and

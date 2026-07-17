@@ -335,7 +335,28 @@ View-local async work is owned by `ChatViewTaskCoordinator`: every
 delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets
 a session-generation ticket and is cancelled on disappearance so stale work
 cannot mutate a replaced chat view. Initial and later connected edges both use
-the single `connectAndReconstruct` session-reconstruction entry point.
+the single `connectAndReconstruct` session-reconstruction entry point. Explicit
+`stream.recovery_required` markers from server-source lag or a local subscriber
+buffer overflow coalesce on that same keyed task slot. Connected-edge replacements
+join their cancelled predecessor before running. The connection coordinator
+commits the server sequence cut before cancellable projection work and drains
+buffered events only after the snapshot succeeds. Failure and cancellation keep
+the reconstruction gate and live suffix intact for the replacement task, which
+uses capped backoff while the socket remains connected. Recovery bursts coalesce
+to one pending follow-up behind the active repair. The event handler only
+advances an observable request generation and never owns a reconnect task.
+The global event owner independently routes the marker through its existing
+coalesced session-list refresh. The reconstruction entry point's
+server-authored high-water mark covers only target-session state represented by
+the durable/in-flight snapshot; buffered events above that cut are sorted and
+dispatched. The snapshot also restores terminal processing phase, the active
+compaction gate/pill, and capability progress/run status before frames at the
+watermark are discarded. Fork reconstruction preserves the server's root-to-head chain by
+event-ID overlap, and gap detection compares only the mounted child session's
+sequence domain; fork-ancestor and older-page sequences never redefine the
+child's live cursor. If bounded gap backfill cannot close a discontinuity, the
+view model replaces the stale disjoint cache with the latest contiguous server
+window and retains that window's paging cursor for later recovery.
 Transcript mutations go through the
 `MessageMutating` helpers in `Session/Chat/Navigation/MessageIndex.swift`; in
 place updates must use `updateMessage(at:)` so message-id and capability-id
@@ -592,7 +613,10 @@ store and cancel long-lived `Task` handles. The source-guarded
 `KeyboardObserver` exception owns its fixed weak-capturing notification task
 set until process exit. SwiftUI
 `.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
-callback bridges use bounded stream buffering or owner queues. An observation
+callback bridges use bounded stream buffering or owner queues. Filtered event
+subscribers register at the shared stream owner and therefore have one visible
+bounded queue; an eviction emits an explicit reconstruction marker before the
+upstream cursor is acknowledged. An observation
 task must not retain its lifecycle owner through a suspended wait, and stored
 observation waits must resume on cancellation. The shared bridge in
 `Support/Foundation/Concurrency` enforces that contract for chat bindings and

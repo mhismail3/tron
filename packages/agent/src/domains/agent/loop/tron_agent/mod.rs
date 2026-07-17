@@ -17,6 +17,7 @@ use crate::domains::agent::r#loop::types::{AgentConfig, RunContext, RunResult};
 use crate::domains::model::responder::ModelResponder;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::protocol::messages::{Message, TokenUsage, UserMessageContent};
+#[cfg(test)]
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
@@ -281,15 +282,6 @@ impl TronAgent {
             "agent run completed"
         );
 
-        self.emit_run_event(TronEvent::AgentEnd {
-            base: run_base(&self.session_id),
-            error: error.clone(),
-        });
-        self.emit_run_event(TronEvent::SessionProcessingChanged {
-            base: run_base(&self.session_id),
-            is_processing: false,
-        });
-
         RunResult {
             turns_executed: run_turn,
             total_token_usage: total_usage,
@@ -332,11 +324,21 @@ impl TronAgent {
         self.sequence_counter = Some(counter);
     }
 
+    /// Route this run's events through the orchestrator-owned emitter.
+    ///
+    /// Production installs the canonical emitter before each run so live
+    /// broadcast and the synchronous reconstruction projection observe the
+    /// exact same event stream without a lossy forwarding channel.
+    pub(crate) fn set_emitter(&mut self, emitter: Arc<EventEmitter>) {
+        self.emitter = emitter;
+    }
+
     /// Seed the session-global turn ordinal immediately preceding this run.
     pub fn set_turn_offset(&mut self, offset: u32) {
         self.turn_offset.store(offset, Ordering::Relaxed);
     }
 
+    #[cfg(test)]
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {
         self.emitter.subscribe()
     }

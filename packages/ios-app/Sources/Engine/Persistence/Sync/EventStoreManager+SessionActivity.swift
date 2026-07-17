@@ -82,6 +82,10 @@ extension EventStoreManager {
     /// Every persistence effect is awaited before the subscription advances.
     func handleGlobalEventV2(_ event: ParsedEventV2) async {
         switch event.eventType {
+        case StreamRecoveryRequiredPlugin.eventType:
+            logger.warning("Global live event continuity lost; requesting session-list refresh", category: .events)
+            requestSessionRefresh(reason: .serverHint)
+
         case SessionProcessingChangedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? SessionProcessingChangedPlugin.Result,
