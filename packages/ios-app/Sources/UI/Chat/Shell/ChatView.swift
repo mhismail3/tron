@@ -53,6 +53,9 @@ struct ChatView: View {
     /// initial load. The transcript is not revealed until this reaches the
     /// bottom tolerance, which prevents resumed sessions from opening mid-log.
     @State var initDistanceFromBottom: CGFloat = .greatestFiniteMagnitude
+    /// Bottom scroll target position in the named viewport. Initial reveal uses
+    /// this source-owned target instead of padded scroll-content extent.
+    @State var initBottomAnchorMaxY: CGFloat = .greatestFiniteMagnitude
     /// Visible message frames in the scroll viewport coordinate space.
     /// Used only to preserve the user's reading position when older history is prepended.
     @State var messageViewportFrames: [UUID: CGRect] = [:]

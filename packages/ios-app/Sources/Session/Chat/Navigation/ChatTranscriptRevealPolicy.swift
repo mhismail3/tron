@@ -31,6 +31,17 @@ enum ChatTranscriptRevealPolicy {
         return max(0, rawDistance)
     }
 
+    /// Initial reveal follows the actual scroll target, not the padded content
+    /// extent whose safe-area and tail spacing can remain below that target.
+    static func bottomAnchorDistance(
+        viewportHeight: CGFloat,
+        anchorMaxY: CGFloat
+    ) -> CGFloat {
+        let distance = anchorMaxY - viewportHeight
+        guard distance.isFinite else { return .greatestFiniteMagnitude }
+        return max(0, distance)
+    }
+
     static func isNearBottomForAutoscroll(distanceFromBottom: CGFloat) -> Bool {
         distanceFromBottom < 100
     }

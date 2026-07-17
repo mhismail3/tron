@@ -129,6 +129,7 @@ extension ChatView {
                         // Bottom anchor for scrolling
                         Color.clear
                             .frame(height: 1)
+                            .background(BottomAnchorViewportProbe())
                             .id("bottom")
                     }
                     .padding()
@@ -142,6 +143,11 @@ extension ChatView {
                 .scrollPosition($transcriptScrollPosition)
                 .onPreferenceChange(MessageViewportFramePreferenceKey.self) { frames in
                     messageViewportFrames = frames
+                }
+                .onPreferenceChange(BottomAnchorViewportMaxYPreferenceKey.self) { anchorMaxY in
+                    guard !initialLoadComplete else { return }
+                    initBottomAnchorMaxY = anchorMaxY
+                    updateInitialBottomDistanceFromAnchor()
                 }
                 .scrollDismissesKeyboard(.interactively)
                 // Track physical interaction and settling. Native ScrollPosition
@@ -218,7 +224,11 @@ extension ChatView {
                     messageViewportHeight = metrics.viewportHeight
 
                     guard initialLoadComplete else {
-                        initDistanceFromBottom = metrics.distanceFromBottom
+                        if initBottomAnchorMaxY.isFinite {
+                            updateInitialBottomDistanceFromAnchor()
+                        } else {
+                            initDistanceFromBottom = metrics.distanceFromBottom
+                        }
                         return
                     }
 
@@ -593,6 +603,25 @@ private struct MessageViewportProbe: View {
                 value: [id: proxy.frame(in: .named(ChatMessageScrollCoordinateSpace.name))]
             )
         }
+    }
+}
+
+private struct BottomAnchorViewportProbe: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: BottomAnchorViewportMaxYPreferenceKey.self,
+                value: proxy.frame(in: .named(ChatMessageScrollCoordinateSpace.name)).maxY
+            )
+        }
+    }
+}
+
+private struct BottomAnchorViewportMaxYPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

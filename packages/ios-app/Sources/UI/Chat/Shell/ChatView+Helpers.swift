@@ -184,6 +184,14 @@ extension ChatView {
         return taskCoordinator.isCurrent(ticket)
     }
 
+    func updateInitialBottomDistanceFromAnchor() {
+        guard messageViewportHeight > 0, initBottomAnchorMaxY.isFinite else { return }
+        initDistanceFromBottom = ChatTranscriptRevealPolicy.bottomAnchorDistance(
+            viewportHeight: messageViewportHeight,
+            anchorMaxY: initBottomAnchorMaxY
+        )
+    }
+
     func scrollToBottom(
         animated: Bool = false,
         animation: Animation = .easeOut(duration: 0.2)

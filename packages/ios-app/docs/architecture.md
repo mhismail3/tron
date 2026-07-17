@@ -373,7 +373,10 @@ The chat timeline owns only truthful local/session presentation state:
   state is limited to a small `ProgressView` with an accessibility label. A
   newly opened existing session keeps the transcript hidden while server
   reconstruction, scroll-proxy readiness, stable lazy-stack height, and
-  measured bottom-distance convergence complete. During that window the
+  viewport-relative bottom-target convergence complete. Initial reveal measures
+  the actual `bottom` scroll target rather than the padded content extent, so
+  intentional tail spacing and safe-area layout do not trigger futile settle
+  retries. During that window the
   composer placeholder shows an inline progress spinner and reads "Loading
   latest messages", then transitions back to "Type here" as the latest
   transcript fades in from the settled bottom position. A single viewport-relative
