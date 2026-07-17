@@ -10,8 +10,9 @@ import SwiftUI
 /// 1. **Phase signal** (`scrollPhaseChanged`) — tracks whether the user is physically
 ///    touching/flicking the scroll view and whether the scroll view is still
 ///    settling. Phases `.interacting`, `.tracking`, and `.decelerating` count as
-///    user interaction; `.animating` is not user intent, but it still suppresses
-///    new programmatic bottom scrolls until the rebound/programmatic animation ends.
+///    user interaction. An `.animating` phase entered from user interaction is a
+///    rebound and suppresses bottom scrolling until it ends; a programmatic bottom
+///    animation remains eligible so live content can keep following the moving edge.
 ///
 /// 2. **Geometry signal** (`geometryChanged`) — tracks whether the viewport is near
 ///    the bottom of the content. The threshold is computed in the view layer and
@@ -25,10 +26,13 @@ import SwiftUI
 /// close enough to matter, then captures the current viewport anchor immediately
 /// before prepending.
 ///
-/// The key invariant: **auto-scroll is suppressed whenever the user is interacting,
-/// the scroll view is settling, history is being prepended, OR the user has scrolled
-/// away.** This prevents programmatic `scrollTo` calls from fighting live gestures,
-/// rubber-band rebound, lazy-stack anchor restoration, or streaming updates.
+/// The key invariant: **bottom auto-scroll is suppressed whenever the user is
+/// interacting, a user-driven rebound is settling, history is being prepended, OR
+/// the user has scrolled away.** Programmatic settling alone must not disable a
+/// pinned transcript because a suspended animation may never report a later idle
+/// phase. Earlier-history autoload still waits for every settling animation.
+/// Foreground activation clears only transient phase attribution; durable scroll-away,
+/// unseen-content, prepend, and target-navigation state remain authoritative.
 ///
 /// A `hadUserInteraction` flag covers the callback ordering race — `onScrollPhaseChange`
 /// can fire before `onScrollGeometryChange` in the same frame, so the flag ensures a
@@ -60,6 +64,10 @@ final class ScrollStateCoordinator {
     /// an unstable interval where additional bottom scrolls can cause jumps.
     private var isScrollSettling = false
 
+    /// True only when the current animation continues a user-driven phase. Unlike
+    /// programmatic bottom animation, this rebound must not fight a live gesture.
+    private var isUserDrivenSettling = false
+
     /// Bridges the phase→geometry callback ordering race. Set when interaction
     /// starts, consumed by the next geometry update after interaction ends.
     private var hadUserInteraction = false
@@ -80,6 +88,7 @@ final class ScrollStateCoordinator {
         let wasUserInteracting = isUserInteracting
         isUserInteracting = newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating
         isScrollSettling = newPhase == .animating
+        isUserDrivenSettling = isScrollSettling && Self.isUserDrivenPhase(oldPhase)
 
         if isUserInteracting && !wasUserInteracting {
             hadUserInteraction = true
@@ -91,6 +100,23 @@ final class ScrollStateCoordinator {
         // so onScrollGeometryChange never fires and geometryChanged is never called.
         if wasUserInteracting && !isUserInteracting && !isAtBottom {
             userScrolledAway = true
+        }
+    }
+
+    /// Clears phase state that cannot remain authoritative while the app is inactive.
+    /// Intentional viewport state and in-flight navigation/history ownership survive.
+    func sceneDidBecomeActive() {
+        isUserInteracting = false
+        isScrollSettling = false
+        isUserDrivenSettling = false
+        hadUserInteraction = false
+        if let snapshot = targetNavigationSnapshot {
+            targetNavigationSnapshot = TargetNavigationSnapshot(
+                userScrolledAway: snapshot.userScrolledAway,
+                hasUnseenContent: snapshot.hasUnseenContent,
+                hadUserInteraction: false,
+                isPrependingHistory: snapshot.isPrependingHistory
+            )
         }
     }
 
@@ -205,7 +231,7 @@ final class ScrollStateCoordinator {
     // MARK: - Query
 
     var shouldAutoScroll: Bool {
-        !userScrolledAway && !isUserInteracting && !isScrollSettling && !isPrependingHistory
+        !userScrolledAway && !isUserInteracting && !isUserDrivenSettling && !isPrependingHistory
     }
 
     var shouldShowNewContentPill: Bool {
@@ -235,6 +261,10 @@ final class ScrollStateCoordinator {
         userScrolledAway = false
         hasUnseenContent = false
         hadUserInteraction = false
+    }
+
+    private static func isUserDrivenPhase(_ phase: ScrollPhase) -> Bool {
+        phase == .interacting || phase == .tracking || phase == .decelerating
     }
 
     private struct TargetNavigationSnapshot {

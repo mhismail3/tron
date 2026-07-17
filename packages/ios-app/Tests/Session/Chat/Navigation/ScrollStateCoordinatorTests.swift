@@ -138,17 +138,30 @@ struct ScrollStateCoordinatorTests {
 
     // MARK: - Programmatic Scroll (animating phase)
 
-    @Test("Animating phase is not user interaction")
-    func testAnimatingPhaseNotUserInteraction() {
+    @Test("Pinned transcript remains eligible during a programmatic animation")
+    func testProgrammaticAnimationKeepsPinnedTranscriptEligible() {
         let coordinator = ScrollStateCoordinator()
 
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
         coordinator.geometryChanged(isNearBottom: false)
+        coordinator.contentDidArrive()
 
         #expect(!coordinator.userScrolledAway)
-        #expect(!coordinator.shouldAutoScroll)
+        #expect(!coordinator.hasUnseenContent)
+        #expect(coordinator.shouldAutoScroll)
+    }
 
-        coordinator.scrollPhaseChanged(from: .animating, to: .idle)
+    @Test("Stale interaction attribution does not turn a later animation into rebound")
+    func testLaterProgrammaticAnimationIgnoresStaleInteractionAttribution() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+        // No geometry callback consumes hadUserInteraction before a later,
+        // independently programmatic animation begins from idle.
+        coordinator.scrollPhaseChanged(from: .idle, to: .animating)
+
+        #expect(!coordinator.userScrolledAway)
         #expect(coordinator.shouldAutoScroll)
     }
 
@@ -169,6 +182,40 @@ struct ScrollStateCoordinatorTests {
         coordinator.scrollPhaseChanged(from: .animating, to: .idle)
         #expect(!coordinator.userScrolledAway)
         #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("Foreground activation clears a suspended rebound for a pinned transcript")
+    func testForegroundActivationClearsPinnedRebound() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: true)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .animating)
+        #expect(!coordinator.shouldAutoScroll)
+
+        coordinator.sceneDidBecomeActive()
+
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("Foreground activation preserves intentional scroll-away state")
+    func testForegroundActivationPreservesScrollAway() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.contentDidArrive()
+        coordinator.scrollPhaseChanged(from: .interacting, to: .animating)
+        coordinator.willPrependHistory(anchor: nil)
+
+        coordinator.sceneDidBecomeActive()
+
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnseenContent)
+        #expect(coordinator.isPrependingHistory)
+        #expect(coordinator.shouldShowNewContentPill)
+        #expect(!coordinator.shouldAutoScroll)
     }
 
     // MARK: - Auto-scroll pause during interaction
@@ -534,9 +581,10 @@ struct ScrollStateCoordinatorTests {
         // Programmatic scroll animates to bottom — mid-animation geometry might be false
         coordinator.scrollPhaseChanged(from: .idle, to: .animating)
         coordinator.geometryChanged(isNearBottom: false)
-        // animating is NOT user interaction, hadUserInteraction is false → no re-trigger
+        // Programmatic animation is not user interaction: it neither re-triggers
+        // scroll-away nor blocks the pinned transcript from following content.
         #expect(!coordinator.userScrolledAway)
-        #expect(!coordinator.shouldAutoScroll)
+        #expect(coordinator.shouldAutoScroll)
 
         // Animation completes at bottom
         coordinator.geometryChanged(isNearBottom: true)
@@ -599,13 +647,17 @@ struct ScrollStateCoordinatorTests {
         #expect(!coordinator.shouldAutoScroll)
     }
 
-    @Test("Failed target navigation restores prior bottom state")
+    @Test("Failed target navigation restores prior bottom state across foreground activation")
     func testFailedTargetNavigationRestoresPriorState() {
         let coordinator = ScrollStateCoordinator()
 
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
         coordinator.beginTargetNavigation()
         coordinator.contentDidArrive()
+        coordinator.sceneDidBecomeActive()
         coordinator.endTargetNavigation(foundTarget: false)
+        coordinator.geometryChanged(isNearBottom: false)
 
         #expect(!coordinator.userScrolledAway)
         #expect(!coordinator.hasUnseenContent)

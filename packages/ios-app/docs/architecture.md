@@ -391,9 +391,14 @@ The chat timeline owns only truthful local/session presentation state:
   Prepends preserve the first visible row identity by restoring it to `.top`;
   viewport-relative offsets are not replayed as SwiftUI target anchors because
   that can strand lazy content in empty space. Bottom autoscroll is centralized
-  through `ScrollStateCoordinator`: the view suppresses programmatic bottom
-  jumps while the user is interacting, the scroll view is rubber-band/programmatic
-  animating, or older history is being prepended. Reconnect reconstruction preserves
+  through `ScrollStateCoordinator`: a pinned transcript remains eligible while its
+  programmatic bottom animation settles so streamed growth and foreground catch-up
+  can keep following the moving edge. Bottom jumps remain suppressed during user
+  interaction, user-driven rubber-band rebound, explicit scroll-away, or older-history
+  prepend. When the scene becomes active, the coordinator discards only transient
+  gesture and settling attribution before the view requests a guarded bottom catch-up;
+  intentional scroll-away, unseen content, history prepend, and target navigation
+  remain intact. Reconnect reconstruction preserves
   the user's already-expanded visible history window, merges it with the new
   server-authoritative suffix, and performs bounded older-page backfill when the
   suffix would otherwise leave an event-sequence gap. Server reconstruction
