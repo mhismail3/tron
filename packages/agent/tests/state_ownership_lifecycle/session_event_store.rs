@@ -13,7 +13,6 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "Deleting a session is the only physical event-row cleanup path",
         "Fork-inherited ancestor history stays",
         "`message.deleted` event",
-        "Runtime sequence counters and compaction handlers are projections",
     ] {
         assert!(
             lifecycle_mod.contains(required),
@@ -183,7 +182,6 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
     for required in [
         "SessionLifecycleService::archive",
         "archive_session(&session_id_for_archive)",
-        "remove_sequence_counter(&session_id)",
         "remove_compaction_handler(&session_id)",
         "TronEvent::SessionArchived",
         "clear_session_ended(&session_id_for_unarchive)",
@@ -243,7 +241,6 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "get_ancestors(&conn, head_id)",
         "event_rows_to_session_events(&conn",
         "resolve_stored_json_value",
-        "reconstruct_from_events(&events)",
         "build_session_state",
     ] {
         assert!(

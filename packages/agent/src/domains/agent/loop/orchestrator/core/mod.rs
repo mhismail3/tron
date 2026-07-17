@@ -324,7 +324,10 @@ impl Orchestrator {
             .map(|entry| entry.value().load(Ordering::SeqCst))
     }
 
-    /// Remove the sequence counter for a session (cleanup on session end).
+    /// Remove the sequence counter after permanent session deletion.
+    ///
+    /// Reversible archive preserves this live ordering projection so an
+    /// unarchived session cannot reuse a provider-visible sequence.
     pub fn remove_sequence_counter(&self, session_id: &str) {
         if self.sequence_counters.remove(session_id).is_some() {
             trace!(session_id, "sequence counter removed");

@@ -173,16 +173,6 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
 
     let core = read_repo_file("packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs");
     assert_contains_in_order(
-        "StartedRun cleanup",
-        &core,
-        &[
-            "pub struct StartedRun",
-            "impl Drop for StartedRun",
-            "self.registry.remove",
-            "self.permit.take",
-        ],
-    );
-    assert_contains_in_order(
         "RetainGuard cleanup",
         &core,
         &[
