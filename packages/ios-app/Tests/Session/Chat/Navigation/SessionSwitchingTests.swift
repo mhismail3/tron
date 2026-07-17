@@ -88,7 +88,7 @@ final class SessionSwitchingTests: XCTestCase {
 
         // When: Modifying state on viewModel1
         viewModel1.inputText = "Hello from session A"
-        viewModel1.isProcessing = true
+        viewModel1.agentPhase = .processing
         viewModel1.messages.append(ChatMessage(id: UUID(), role: .user, content: .text("Test message")))
 
         // Then: viewModel2 state should be unaffected

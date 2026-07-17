@@ -177,8 +177,8 @@ final class ErrorEventProjectionTests: XCTestCase {
             "origin": AnyCodable("agent_runtime"),
             "details": AnyCodable([
                 "failure": [
-                    "code": "RUNTIME_CANCELLED",
-                    "category": "cancelled",
+                    "code": "RUNTIME_FAILURE",
+                    "category": "engine",
                     "message": "canonical turn failure",
                     "retryable": false,
                     "recoverable": true,
@@ -195,9 +195,39 @@ final class ErrorEventProjectionTests: XCTestCase {
             return
         }
         XCTAssertEqual(error, "canonical turn failure")
-        XCTAssertEqual(code, "RUNTIME_CANCELLED")
+        XCTAssertEqual(code, "RUNTIME_FAILURE")
         XCTAssertTrue(recoverable)
-        XCTAssertEqual(failure?.category, "cancelled")
+        XCTAssertEqual(failure?.category, "engine")
         XCTAssertEqual(failure?.traceId, "trace-1")
+    }
+
+    func test_cancelled_turn_failed_projects_interrupted_notification() {
+        let payload: [String: AnyCodable] = [
+            "turn": AnyCodable(5),
+            "error": AnyCodable("Interrupted by user"),
+            "code": AnyCodable("RUNTIME_CANCELLED"),
+            "category": AnyCodable("cancelled"),
+            "retryable": AnyCodable(false),
+            "recoverable": AnyCodable(true),
+            "origin": AnyCodable("agent_runtime"),
+            "details": AnyCodable([
+                "failure": [
+                    "code": "RUNTIME_CANCELLED",
+                    "category": "cancelled",
+                    "message": "Interrupted by user",
+                    "retryable": false,
+                    "recoverable": true,
+                    "origin": "agent_runtime",
+                ] as [String: Any],
+            ] as [String: Any]),
+        ]
+
+        let msg = ErrorEventProjection.transformTurnFailed(payload, timestamp: timestamp())
+
+        guard case .systemEvent(.interrupted) = msg?.content else {
+            XCTFail("expected interrupted notification")
+            return
+        }
+        XCTAssertEqual(msg?.role, .system)
     }
 }

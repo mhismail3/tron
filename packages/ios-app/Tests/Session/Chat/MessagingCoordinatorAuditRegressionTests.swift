@@ -230,4 +230,105 @@ final class MessagingCoordinatorAuditRegressionTests: XCTestCase {
         XCTAssertEqual(mockContext.inputText, "draft stays put")
         XCTAssertTrue(mockContext.appendedMessages.isEmpty)
     }
+
+    func testRapidStopRequestsIssueOneAbortAndAwaitTerminalLifecycle() async {
+        mockContext.agentPhase = .processing
+        mockContext.suspendAbort = true
+        let abortSuspended = expectation(description: "abort suspended")
+        mockContext.onAbortSuspended = { abortSuspended.fulfill() }
+
+        let firstStop = Task { @MainActor in
+            await self.coordinator.abortAgent(context: self.mockContext)
+        }
+        await fulfillment(of: [abortSuspended], timeout: 1.0)
+        await coordinator.abortAgent(context: mockContext)
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 1)
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+        XCTAssertNil(mockContext.lastSessionProcessingValue)
+
+        mockContext.resumeAllAborts()
+        await firstStop.value
+
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+    }
+
+    func testUnmatchedStopPreservesActiveTurnAndCanBeRetried() async {
+        mockContext.agentPhase = .processing
+        mockContext.abortResult = false
+
+        await coordinator.abortAgent(context: mockContext)
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 1)
+        XCTAssertEqual(mockContext.agentPhase, .processing)
+        XCTAssertNil(mockContext.lastSessionProcessingValue)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+
+        mockContext.abortResult = true
+        await coordinator.abortAgent(context: mockContext)
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 2)
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+    }
+
+    func testCancelledStopWaiterDoesNotStrandStoppingPhase() async {
+        mockContext.agentPhase = .processing
+        mockContext.suspendAbort = true
+        let abortSuspended = expectation(description: "abort suspended")
+        mockContext.onAbortSuspended = { abortSuspended.fulfill() }
+
+        let stop = Task { @MainActor in
+            await self.coordinator.abortAgent(context: self.mockContext)
+        }
+        await fulfillment(of: [abortSuspended], timeout: 1.0)
+        stop.cancel()
+        mockContext.resumeAllAborts()
+        await stop.value
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 1)
+        XCTAssertEqual(mockContext.agentPhase, .processing)
+    }
+
+    func testStopDuringPromptAdmissionRunsOnceAfterAcknowledgement() async {
+        mockContext.inputText = "prompt awaiting acknowledgement"
+        mockContext.suspendSendPrompt = true
+        let promptSuspended = expectation(description: "prompt suspended")
+        mockContext.onSendPromptSuspended = { promptSuspended.fulfill() }
+
+        let send = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [promptSuspended], timeout: 1.0)
+        await coordinator.abortAgent(context: mockContext)
+        await coordinator.abortAgent(context: mockContext)
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 0)
+        XCTAssertEqual(mockContext.agentPhase, .processing)
+
+        mockContext.resumeAllSendPrompts()
+        await send.value
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 1)
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+    }
+
+    func testQueuedStopIsDiscardedWhenPromptAdmissionFails() async {
+        mockContext.inputText = "prompt rejected before acceptance"
+        mockContext.suspendSendPrompt = true
+        mockContext.sendPromptShouldFail = true
+        let promptSuspended = expectation(description: "prompt suspended")
+        mockContext.onSendPromptSuspended = { promptSuspended.fulfill() }
+
+        let send = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [promptSuspended], timeout: 1.0)
+        await coordinator.abortAgent(context: mockContext)
+        mockContext.resumeAllSendPrompts()
+        await send.value
+
+        XCTAssertEqual(mockContext.abortAgentCallCount, 0)
+        XCTAssertEqual(mockContext.agentPhase, .idle)
+        XCTAssertTrue(mockContext.appendLocalErrorCalled)
+    }
 }

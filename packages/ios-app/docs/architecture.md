@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-14 (typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
+> Last verified: 2026-07-17 (prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
 
 ## Overview
 
@@ -165,6 +165,7 @@ icon catalog, or fork-row state model.
 
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Stop:    InputBar -> MessagingCoordinator -> agent::abort intent -> agent.turn_failed + agent.complete terminal truth
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  model.list attachmentPolicy -> camera/photo/file data -> AttachmentImagePreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup + fixed five-minute auto-stop -> ComposerMicCaptureEngine permission gate + bounded RMS meter -> cancellable transcription::audio -> InputBar
@@ -210,6 +211,21 @@ frame budget, and `EngineConnection` checks the final encoded JSON byte count
 before sending so an oversized attachment cannot force a disconnect or erase a
 retryable prompt. `InputBarState.hasContent` is the single composer-content
 predicate shared by send availability and draft retention.
+
+Stop participates in the same admission boundary. If tapped while
+`agent::prompt` is awaiting acknowledgement, `MessagingCoordinator` coalesces
+one cancellation intent and sends it only after acceptance; a rejected prompt
+discards that intent. For an admitted run, the client enters `.stopping` and
+suppresses repeated writes. The `agent::abort` Boolean means only that an
+active run matched the cancellation request—it never finalizes text, clears
+session processing, or appends interruption UI. Canonical cancelled
+`agent.turn_failed` owns the interruption notification, and `agent.complete`
+owns final queue/stream cleanup and the return to idle. Stop is a session-owned
+request rather than mounted-view work, so transient view disappearance does not
+cancel it. A disconnected client never synthesizes Stop; reconnect projection
+and the connection observer preserve `.stopping` while the server outcome is
+unknown. Active reconstruction keeps that stricter phase; terminal reconstruction
+accepts the server's completed state.
 
 `ContextControlSheet` presents Session Briefing as a mobile-first progressive
 disclosure surface. The top level is narrative plus compact metric strips; the

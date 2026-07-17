@@ -21,6 +21,7 @@ import Foundation
     func handleTurnStart(_ result: TurnStartPlugin.Result)
     func handleResponseComplete(_ result: AgentResponseCompletePlugin.Result)
     func handleTurnEnd(_ result: TurnEndPlugin.Result)
+    func handleTurnFailed(_ result: TurnFailedPlugin.Result)
     func handleComplete()
     func handleAgentReady()
     func handleAgentError(_ message: String)

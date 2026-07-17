@@ -9,7 +9,7 @@ import SwiftUI
 @MainActor
 protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenting {
     var sessionId: String { get }
-    var isProcessing: Bool { get set }
+    var agentPhase: AgentPhase { get set }
 
     /// The current input text
     var inputText: String { get set }
@@ -35,12 +35,12 @@ protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenti
     /// event stream before a prompt starts producing output.
     func ensureLiveEventSubscription() async throws
 
-    /// Abort the agent on the server
-    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws
+    /// Ask the server to cancel the active run. A `true` result means a run
+    /// matched; terminal lifecycle events still own the final outcome.
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws -> Bool
 
     func setSessionProcessing(_ isProcessing: Bool)
     func resetStreamingManager()
-    func finalizeStreamingMessage()
     func updateSessionActivitySummary(lastUserPrompt: String?, lastAssistantResponse: String?)
 
     /// Append a message to the chat
@@ -49,20 +49,6 @@ protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenti
     func removeMessage(id: UUID)
     /// Clear temporary local notifications after a new user action supersedes them.
     func clearLocalNotifications()
-
-    /// Append the interrupted message
-    func appendInterruptedMessage()
-
-    /// Handle agent error
-    func handleAgentError(_ message: String)
-
-    /// Finalize thinking message (mark as no longer streaming)
-    /// Called on abort to stop the pulsing thinking icon
-    func finalizeThinkingMessage()
-
-    /// Clear the thinking caption state
-    /// Called on abort to remove the thinking caption
-    func clearThinkingCaption()
 
     /// Draft store for clearing persisted drafts after send
     var draftStore: DraftStore? { get }
@@ -74,7 +60,7 @@ protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenti
 /// - Sending messages with text, attachments, and reasoning levels
 /// - Admitting only one prompt submission before server acceptance
 /// - Creating appropriate user message UI
-/// - Managing agent abort with proper state cleanup
+/// - Coalescing Stop intent while server lifecycle events own terminal cleanup
 /// - Attachment add/remove operations
 /// - Coordinating state updates (agentPhase, session list, streaming)
 ///
@@ -85,8 +71,14 @@ final class MessagingCoordinator {
 
     /// Short-lived reservation between a local send/retry action and server
     /// acceptance. Accepted/running lifecycle state remains owned by
-    /// `MessagingContext.isProcessing`.
+    /// `MessagingContext.agentPhase`.
     private var promptSubmissionInFlight = false
+    /// Stop tapped after the UI entered processing but before the prompt RPC
+    /// acknowledged an active run. The intent is issued once after acceptance.
+    private var abortQueuedForPromptAcceptance = false
+    /// Short-lived network reservation. The longer-lived `.stopping` phase
+    /// suppresses more Stop requests until the server terminalizes the run.
+    private var abortRequestInFlight = false
 
     // MARK: - Initialization
 
@@ -164,7 +156,9 @@ final class MessagingCoordinator {
             if !text.isEmpty {
                 onPromptSent?(text)
             }
+            await issueQueuedAbortIfNeeded(context: context)
         } catch {
+            abortQueuedForPromptAcceptance = false
             context.logError("Failed to send prompt: \(error.localizedDescription)")
             context.removeMessage(id: optimisticMessage.id)
             if incrementsTurn {
@@ -216,7 +210,9 @@ final class MessagingCoordinator {
                 reasoningLevel: nil,
                 idempotencyKey: .userAction("agent.prompt.retry")
             )
+            await issueQueuedAbortIfNeeded(context: context)
         } catch {
+            abortQueuedForPromptAcceptance = false
             context.logError("Retry failed: \(error.localizedDescription)")
             handlePreAcceptPromptFailure(
                 context: context,
@@ -229,11 +225,12 @@ final class MessagingCoordinator {
     }
 
     private func reservePromptSubmission(context: MessagingContext) -> Bool {
-        guard !promptSubmissionInFlight, !context.isProcessing else {
+        guard !promptSubmissionInFlight, !context.agentPhase.isActive else {
             context.logDebug("Ignoring prompt submission while another turn is being admitted or processed")
             return false
         }
         promptSubmissionInFlight = true
+        abortQueuedForPromptAcceptance = false
         return true
     }
 
@@ -250,7 +247,7 @@ final class MessagingCoordinator {
             return false
         }
 
-        context.isProcessing = true
+        context.agentPhase = .processing
         context.setSessionProcessing(true)
         if let lastUserPrompt {
             context.updateSessionActivitySummary(lastUserPrompt: lastUserPrompt, lastAssistantResponse: nil)
@@ -266,7 +263,7 @@ final class MessagingCoordinator {
         message: String,
         suggestion: String?
     ) {
-        context.isProcessing = false
+        context.agentPhase = .idle
         context.setSessionProcessing(false)
         context.appendLocalError(
             dedupKey: dedupKey,
@@ -278,26 +275,78 @@ final class MessagingCoordinator {
 
     // MARK: - Abort Agent
 
-    /// Abort the currently running agent.
+    /// Request cancellation of the currently running agent.
+    ///
+    /// A successful RPC only proves that the server matched an active run. The
+    /// canonical `agent.turn_failed` / `agent.complete` sequence owns interruption
+    /// presentation, streaming finalization, and the transition back to idle.
     ///
     /// - Parameter context: The context providing access to state and dependencies
     func abortAgent(context: MessagingContext) async {
-        context.logInfo("Aborting agent...")
+        guard context.agentPhase.isActive else {
+            context.logDebug("Ignoring Stop because no agent run is active")
+            return
+        }
+        guard context.agentPhase != .stopping, !abortRequestInFlight else {
+            context.logDebug("Ignoring duplicate Stop while cancellation is pending")
+            return
+        }
+
+        if promptSubmissionInFlight {
+            abortQueuedForPromptAcceptance = true
+            context.logInfo("Queued Stop until prompt admission completes")
+            return
+        }
+
+        await requestAbort(context: context)
+    }
+
+    private func issueQueuedAbortIfNeeded(context: MessagingContext) async {
+        guard abortQueuedForPromptAcceptance else { return }
+        abortQueuedForPromptAcceptance = false
+        await requestAbort(context: context)
+    }
+
+    private func requestAbort(context: MessagingContext) async {
+        guard context.agentPhase.isActive,
+              context.agentPhase != .stopping,
+              !abortRequestInFlight else { return }
+
+        abortRequestInFlight = true
+        context.agentPhase = .stopping
+        defer {
+            abortRequestInFlight = false
+            if Task.isCancelled {
+                // Cancellation of the local waiter is not proof that the
+                // server accepted Stop. Keep the turn active until reconnect
+                // or canonical terminal events establish the outcome.
+                restoreProcessingAfterUnmatchedAbort(context: context)
+            }
+        }
+        context.logInfo("Requesting agent cancellation...")
 
         do {
-            try await context.abortAgentOnServer(idempotencyKey: .userAction("agent.abort"))
-            context.isProcessing = false
-            context.setSessionProcessing(false)
-            context.updateSessionActivitySummary(lastUserPrompt: nil, lastAssistantResponse: "Interrupted")
-            context.finalizeStreamingMessage()
-            context.finalizeThinkingMessage()
-            context.clearThinkingCaption()
-            context.appendInterruptedMessage()
-            context.logInfo("Agent aborted successfully")
+            let matched = try await context.abortAgentOnServer(
+                idempotencyKey: .userAction("agent.abort")
+            )
+            guard !Task.isCancelled else { return }
+            if matched {
+                context.logInfo("Agent cancellation matched an active run; awaiting terminal events")
+            } else {
+                restoreProcessingAfterUnmatchedAbort(context: context)
+                context.logInfo("Agent cancellation matched no active run")
+            }
         } catch {
+            guard !Task.isCancelled else { return }
+            restoreProcessingAfterUnmatchedAbort(context: context)
             context.logError("Failed to abort agent: \(error.localizedDescription)")
             context.showError(error.localizedDescription)
         }
+    }
+
+    private func restoreProcessingAfterUnmatchedAbort(context: MessagingContext) {
+        guard context.agentPhase == .stopping else { return }
+        context.agentPhase = .processing
     }
 
     // MARK: - Attachment Management

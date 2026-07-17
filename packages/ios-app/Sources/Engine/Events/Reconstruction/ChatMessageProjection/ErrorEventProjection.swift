@@ -93,6 +93,14 @@ enum ErrorEventProjection {
     ) -> ChatMessage? {
         guard let parsed = TurnFailedPayload(from: payload) else { return nil }
 
+        if parsed.isCancellation {
+            return ChatMessage(
+                role: .system,
+                content: .interrupted,
+                timestamp: timestamp
+            )
+        }
+
         return ChatMessage(
             role: .system,
             content: .systemEvent(.turnFailed(

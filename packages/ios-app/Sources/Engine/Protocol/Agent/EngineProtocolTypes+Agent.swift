@@ -49,6 +49,10 @@ struct AgentAbortParams: Encodable {
     let sessionId: String
 }
 
+struct AgentAbortResult: Decodable {
+    let aborted: Bool
+}
+
 struct AgentAbortInvocationParams: Encodable {
     let sessionId: String
     let invocationId: String

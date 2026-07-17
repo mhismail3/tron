@@ -514,7 +514,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     func test_complete_setsProcessingFalse() {
         // Given
-        viewModel.isProcessing = true
+        viewModel.agentPhase = .processing
 
         // When
         viewModel.handleComplete()
@@ -540,7 +540,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     func test_fullTurnFlow_startToComplete() {
         // Given - initial state
         let initialMessageCount = viewModel.messages.count
-        viewModel.isProcessing = true
+        viewModel.agentPhase = .processing
 
         // When - simulate a full turn
 

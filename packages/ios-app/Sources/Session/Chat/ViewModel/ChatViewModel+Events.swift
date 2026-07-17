@@ -173,8 +173,10 @@ extension ChatViewModel {
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
-        // A turn starting means the agent is actively processing.
-        agentPhase = .processing
+        // A late turn-start must not erase an already accepted Stop request.
+        if agentPhase != .stopping {
+            agentPhase = .processing
+        }
         runningCapabilityInvocationCount = 0
 
         if isCompacting {
@@ -204,10 +206,15 @@ extension ChatViewModel {
         turnLifecycleCoordinator.handleResponseComplete(pluginResult, context: self)
     }
 
+    func handleTurnFailed(_ result: TurnFailedPlugin.Result) {
+        guard result.isCancellation else { return }
+        appendToMessages(.interrupted())
+        logInfo("Turn cancellation received; awaiting agent completion cleanup")
+    }
+
     func handleComplete() {
-        // Only transition from .processing -> .idle.
-        // After abort, agentPhase is already .idle — skip to prevent flicker.
-        guard agentPhase == .processing else { return }
+        // Both normal completion and a server-terminalized Stop converge here.
+        guard agentPhase.isActive else { return }
 
         // Capture streaming text before finalization clears it
         let finalStreamingText = streamingManager.streamingText

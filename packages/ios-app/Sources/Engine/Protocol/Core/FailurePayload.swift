@@ -122,4 +122,10 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
         if let sourceEventId { payload["sourceEventId"] = AnyCodable(sourceEventId) }
         return payload
     }
+
+    /// The server's canonical terminal classification for a cancelled turn.
+    /// Code is authoritative; category preserves compatibility with older rows.
+    static func isTurnCancellation(code: String?, category: String?) -> Bool {
+        code == "RUNTIME_CANCELLED" || category == "cancelled"
+    }
 }

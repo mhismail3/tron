@@ -43,7 +43,7 @@ struct AgentClientTests {
                 return AgentPromptResult(acknowledged: true)
             case "agent::abort":
                 #expect((payload as? AgentAbortParams)?.sessionId == sessionId)
-                return EmptyParams()
+                return AgentAbortResult(aborted: true)
             case "agent::abort_invocation":
                 #expect((payload as? AgentAbortInvocationParams)?.sessionId == sessionId)
                 return AgentAbortInvocationResult(aborted: true)
@@ -58,13 +58,14 @@ struct AgentClientTests {
             reasoningLevel: "medium",
             idempotencyKey: .userAction("agent.prompt.test")
         )
-        try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
+        let aborted = try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortCapabilityInvocation(
             invocationId: "capability-1",
             idempotencyKey: .userAction("agent.abortCapabilityInvocation.test")
         )
 
         #expect(transport.ensureSessionEventSubscriptionCallCount >= 1)
+        #expect(aborted)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
             "write:agent::prompt",
@@ -74,6 +75,35 @@ struct AgentClientTests {
             "agent::abort",
             "agent::abort_invocation",
         ])
+    }
+
+    @Test("Abort preserves a negative server match result")
+    func abortPreservesNegativeServerResult() async throws {
+        let transport = makeConnectedTransport()
+        let client = AgentClient(transport: transport)
+        transport.writeHandler = { functionId, _, _, _ in
+            #expect(functionId.rawValue == "agent::abort")
+            return AgentAbortResult(aborted: false)
+        }
+
+        let aborted = try await client.abort(
+            idempotencyKey: .userAction("agent.abort.negative-test")
+        )
+
+        #expect(!aborted)
+    }
+
+    @Test("Abort without a selected live session reports no match")
+    func abortWithoutLiveSessionReportsNoMatch() async throws {
+        let transport = MockEngineTransport()
+        let client = AgentClient(transport: transport)
+
+        let aborted = try await client.abort(
+            idempotencyKey: .userAction("agent.abort.no-session-test")
+        )
+
+        #expect(!aborted)
+        #expect(transport.lastWriteFunctionId == nil)
     }
 
     @Test("Prompt does not invoke agent when live session stream cannot subscribe")

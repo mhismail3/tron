@@ -89,6 +89,17 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastSessionProcessingValue, false)
     }
 
+    func testConnectAndReconstructPreservesStoppingWhileServerRunIsActive() async {
+        mockContext.isConnected = true
+        mockContext.agentPhase = .stopping
+        mockContext.reconstructResultIsRunning = true
+
+        _ = await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+        XCTAssertEqual(mockContext.lastSessionProcessingValue, true)
+    }
+
     func testConnectAndReconstructSetsHighWaterMark() async {
         mockContext.isConnected = true
         mockContext.reconstructResultLastSequence = 42
@@ -250,10 +261,7 @@ final class MockConnectionContext: ConnectionContext {
     // MARK: - State
     var sessionId: String = "test-session"
     var agentPhase: AgentPhase = .idle
-    var isProcessing: Bool {
-        get { agentPhase.isProcessing }
-        set { agentPhase = newValue ? .processing : .idle }
-    }
+    var isProcessing: Bool { agentPhase.isProcessing }
     var shouldDismiss: Bool = false
     var isConnected: Bool = false
     var isReconstructing: Bool = false
@@ -320,6 +328,7 @@ final class MockConnectionContext: ConnectionContext {
             "inFlight": null,
             "lastSequence": \(reconstructResultLastSequence),
             "isRunning": \(reconstructResultIsRunning),
+            "agentPhase": "\(reconstructResultIsRunning ? "processing" : "idle")",
             "metadata": {
                 "model": "test-model",
                 "turnCount": 0,
@@ -340,6 +349,11 @@ final class MockConnectionContext: ConnectionContext {
     func processReconstructionResult(_ result: SessionReconstructResult) async {
         processReconstructionResultCalled = true
         sequenceHighWaterMarkDuringProcessing = sequenceHighWaterMark
+        switch result.agentPhase {
+        case "processing" where agentPhase == .stopping: break
+        case "processing": agentPhase = .processing
+        default: agentPhase = .idle
+        }
         await processReconstructionResultHandler?()
     }
 

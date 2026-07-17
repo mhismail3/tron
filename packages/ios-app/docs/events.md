@@ -108,6 +108,13 @@ still logs at the parser boundary. `SourceGuardTests+EventSurface` compares the
 Rust stream labels with `EventRegistry.registerAll()` so new server events
 cannot silently become unknown in the app.
 
+The marker `agent.interrupted` remains diagnostics-only. A cancelled turn's
+authoritative UI evidence is the durable `agent.turn_failed` event classified
+as `RUNTIME_CANCELLED` / `cancelled`. Its live plugin appends the existing
+Session interrupted notification, and stored reconstruction projects the same
+notification instead of a retryable failure pill. The later `agent.complete`
+event alone finalizes streaming state and returns the mounted chat to idle.
+
 `agent.response_complete` is dispatched lifecycle evidence rather than a
 marker. Its server-owned capability count identifies the conservative subset
 of responses that are final clean text: zero-capability responses may be
@@ -151,7 +158,9 @@ placeholder codes, messages, turns, or recoverability. If the current server
 payload omits required failure fields, the plugin transform drops the malformed
 event. Persisted `error.*` and `turn.failed` projections, provider error pills,
 session summaries, expanded event content, and capability error rows prefer the
-server envelope whenever it is present.
+server envelope whenever it is present. Cancellation presentation is selected
+only from the canonical cancellation code/category, never from an abort RPC or
+client-authored error string.
 
 Local reachability and pairing failures may still be classified locally when no
 server response exists. Server-authored categories, retryability,

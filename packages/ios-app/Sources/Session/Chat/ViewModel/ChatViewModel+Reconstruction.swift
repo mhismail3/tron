@@ -57,8 +57,11 @@ extension ChatViewModel {
             currentTurn = turnCount
         }
 
-        // 4a. Set agent phase from server-authoritative value
+        // 4a. Set agent phase from server-authoritative value. A local Stop
+        // request is a stricter active substate and remains until the server's
+        // terminal lifecycle arrives.
         switch result.agentPhase {
+        case "processing" where agentPhase == .stopping: break
         case "processing": agentPhase = .processing
         default: agentPhase = .idle
         }

@@ -3,6 +3,26 @@ import XCTest
 @testable import TronMobile
 
 extension ChatViewModelPaginationTests {
+    func testReconnectPreservesStoppingWhileServerStillReportsActiveRun() async {
+        let (viewModel, _) = makeViewModel()
+        viewModel.agentPhase = .stopping
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [],
+                hasMoreEvents: false,
+                oldestEventId: nil,
+                inFlight: InFlightState(
+                    capabilityInvocations: [],
+                    contentSequence: [],
+                    streaming: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(viewModel.agentPhase, .stopping)
+    }
+
     func testReconnectReconstructionPreservesGeneratingCapabilityChip() async {
         let (viewModel, _) = makeViewModel()
 

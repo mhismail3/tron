@@ -166,7 +166,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     func testSendWhileProcessingDoesNotMutateOrSubscribe() async {
         mockContext.inputText = "Keep this draft"
-        mockContext.isProcessing = true
+        mockContext.agentPhase = .processing
 
         await coordinator.sendMessage(context: mockContext)
 
@@ -393,59 +393,29 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     // MARK: - Abort Agent Tests
 
-    func testAbortAgentCallsServerAbort() async {
-        // When: Aborting agent
+    func testAbortAgentIgnoresIdleContext() async {
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: Server abort should be called
-        XCTAssertTrue(mockContext.abortAgentCalled)
+        XCTAssertEqual(mockContext.abortAgentCallCount, 0)
     }
 
-    func testAbortAgentSetsIsProcessingFalse() async {
-        // Given: Currently processing
-        mockContext.isProcessing = true
+    func testAbortAgentWaitsForTerminalEventsAfterServerMatch() async {
+        mockContext.agentPhase = .processing
 
-        // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: isProcessing should be false
-        XCTAssertFalse(mockContext.isProcessing)
-    }
-
-    func testAbortAgentFinalizesStreamingMessage() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Streaming message should be finalized
-        XCTAssertTrue(mockContext.finalizeStreamingMessageCalled)
-    }
-
-    func testAbortAgentAppendsInterruptedMessage() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Interrupted message should be appended
-        XCTAssertTrue(mockContext.appendedInterruptedMessage)
-    }
-
-    func testAbortAgentUpdatesSessionActivityState() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: session activity summary should show interrupted
-        XCTAssertTrue(mockContext.setSessionProcessingCalled)
-        XCTAssertFalse(mockContext.lastSessionProcessingValue ?? true)
-        XCTAssertEqual(mockContext.lastSessionActivityResponse, "Interrupted")
+        XCTAssertEqual(mockContext.abortAgentCallCount, 1)
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+        XCTAssertNil(mockContext.lastSessionProcessingValue)
     }
 
     func testAbortAgentHandlesServerError() async {
-        // Given: Server abort will fail
+        mockContext.agentPhase = .processing
         mockContext.abortShouldFail = true
 
-        // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: Error should be shown
+        XCTAssertEqual(mockContext.agentPhase, .processing)
         XCTAssertTrue(mockContext.showErrorCalled)
     }
 
@@ -512,10 +482,7 @@ final class MockMessagingContext: MessagingContext {
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
     var agentPhase: AgentPhase = .idle
-    var isProcessing: Bool {
-        get { agentPhase.isProcessing }
-        set { agentPhase = newValue ? .processing : .idle }
-    }
+    var isProcessing: Bool { agentPhase.isProcessing }
     var draftStore: DraftStore?
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
@@ -527,7 +494,6 @@ final class MockMessagingContext: MessagingContext {
     var lastSentReasoningLevel: String?
     var appendedMessages: [ChatMessage] = []
     var removedMessageIds: [UUID] = []
-    var appendedInterruptedMessage = false
     var streamingManagerResetCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
@@ -538,9 +504,7 @@ final class MockMessagingContext: MessagingContext {
     var lastLocalErrorDedupKey: String?
     var lastLocalErrorTitle: String?
     var localErrorDedupKeys: Set<String> = []
-    var abortAgentCalled = false
-    var finalizeStreamingMessageCalled = false
-    var cancelActiveDeviceRequestsCalled = false
+    var abortAgentCallCount = 0
     var showErrorCalled = false
     var ensureLiveEventSubscriptionCalled = false
     var ensureLiveEventSubscriptionCallCount = 0
@@ -550,10 +514,17 @@ final class MockMessagingContext: MessagingContext {
     var onLiveEventSubscriptionSuspended: (() -> Void)?
     var clearLocalNotificationsCalled = false
     var callOrder: [String] = []
+    var suspendSendPrompt = false
+    var sendPromptContinuations: [CheckedContinuation<Void, Never>] = []
+    var onSendPromptSuspended: (() -> Void)?
+    var suspendAbort = false
+    var abortContinuations: [CheckedContinuation<Void, Never>] = []
+    var onAbortSuspended: (() -> Void)?
 
     // MARK: - Test Configuration
     var sendPromptShouldFail = false
     var abortShouldFail = false
+    var abortResult = true
 
     // MARK: - Protocol Methods
 
@@ -570,6 +541,12 @@ final class MockMessagingContext: MessagingContext {
         lastSentAttachments = attachments
         lastSentReasoningLevel = reasoningLevel
 
+        if suspendSendPrompt {
+            await withCheckedContinuation { continuation in
+                sendPromptContinuations.append(continuation)
+                onSendPromptSuspended?()
+            }
+        }
         if sendPromptShouldFail {
             throw MessagingTestError.serverError
         }
@@ -597,11 +574,32 @@ final class MockMessagingContext: MessagingContext {
         continuations.forEach { $0.resume() }
     }
 
-    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
-        abortAgentCalled = true
+    func resumeAllSendPrompts() {
+        suspendSendPrompt = false
+        let continuations = sendPromptContinuations
+        sendPromptContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
+        abortAgentCallCount += 1
+        if suspendAbort {
+            await withCheckedContinuation { continuation in
+                abortContinuations.append(continuation)
+                onAbortSuspended?()
+            }
+        }
         if abortShouldFail {
             throw MessagingTestError.serverError
         }
+        return abortResult
+    }
+
+    func resumeAllAborts() {
+        suspendAbort = false
+        let continuations = abortContinuations
+        abortContinuations.removeAll()
+        continuations.forEach { $0.resume() }
     }
 
     func appendMessage(_ message: ChatMessage) {
@@ -618,32 +616,12 @@ final class MockMessagingContext: MessagingContext {
         localErrorDedupKeys.removeAll()
     }
 
-    func appendInterruptedMessage() {
-        appendedInterruptedMessage = true
-    }
-
-    func finalizeThinkingMessage() {
-        // No-op for tests
-    }
-
-    func clearThinkingCaption() {
-        // No-op for tests
-    }
-
     func flushPendingTextUpdates() {
         // No-op for tests
     }
 
     func resetStreamingManager() {
         streamingManagerResetCalled = true
-    }
-
-    func finalizeStreamingMessage() {
-        finalizeStreamingMessageCalled = true
-    }
-
-    func cancelActiveDeviceRequests() {
-        cancelActiveDeviceRequestsCalled = true
     }
 
     func setSessionProcessing(_ isProcessing: Bool) {

@@ -151,6 +151,38 @@ final class EventRegistryDispatchTests: XCTestCase {
         XCTAssertEqual(mockContext.handleTurnEndCalledWith?.turnNumber, 1)
     }
 
+    func testDispatch_turnFailed_callsHandleTurnFailed() {
+        let failure = CanonicalFailurePayload(
+            code: "RUNTIME_CANCELLED",
+            category: "cancelled",
+            message: "Interrupted by user",
+            retryable: false,
+            recoverable: true,
+            origin: "agent_runtime"
+        )
+        let result = TurnFailedPlugin.Result(
+            turn: 1,
+            error: failure.message,
+            code: failure.code,
+            category: failure.category,
+            retryable: failure.retryable,
+            recoverable: failure.recoverable,
+            origin: failure.origin,
+            details: ["failure": AnyCodable(failure.asDetails.mapValues(\.value))],
+            failure: failure,
+            partialContent: "partial response"
+        )
+
+        registry.dispatch(
+            type: TurnFailedPlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.handleTurnFailedCalledWith?.turn, 1)
+        XCTAssertTrue(mockContext.handleTurnFailedCalledWith?.isCancellation == true)
+    }
+
     func testDispatch_responseComplete_callsHandleResponseComplete() {
         let result = AgentResponseCompletePlugin.Result(
             turnNumber: 2,
@@ -443,6 +475,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleTurnStartCalledWith: TurnStartPlugin.Result?
     var handleResponseCompleteCalledWith: AgentResponseCompletePlugin.Result?
     var handleTurnEndCalledWith: TurnEndPlugin.Result?
+    var handleTurnFailedCalledWith: TurnFailedPlugin.Result?
     var handleCompleteCalled = false
     var handleAgentErrorCalledWith: String?
     var handleProviderErrorCalledWith: ErrorPlugin.Result?
@@ -505,6 +538,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleTurnEnd(_ result: TurnEndPlugin.Result) {
         handleTurnEndCalledWith = result
+    }
+
+    func handleTurnFailed(_ result: TurnFailedPlugin.Result) {
+        handleTurnFailedCalledWith = result
     }
 
     func handleComplete() {

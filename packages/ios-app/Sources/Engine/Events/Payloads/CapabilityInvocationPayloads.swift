@@ -285,6 +285,10 @@ struct TurnFailedPayload {
     let failure: CanonicalFailurePayload?
     let partialContent: String?
 
+    var isCancellation: Bool {
+        CanonicalFailurePayload.isTurnCancellation(code: code, category: category)
+    }
+
     init?(from payload: [String: AnyCodable]) {
         let details = payload.anyCodableDict("details")
         let failure = CanonicalFailurePayload.fromDetails(details)

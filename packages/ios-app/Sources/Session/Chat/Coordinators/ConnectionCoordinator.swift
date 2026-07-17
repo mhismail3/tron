@@ -7,7 +7,6 @@ import Foundation
 @MainActor
 protocol ConnectionContext: ChatCoordinatorContext, LocalChatNotificationPresenting {
     var sessionId: String { get }
-    var isProcessing: Bool { get set }
 
     /// Whether the view should dismiss (e.g., session not found)
     var shouldDismiss: Bool { get set }
@@ -155,10 +154,9 @@ final class ConnectionCoordinator {
                 return .cancelled
             }
 
-            // Reconciliation is server-authoritative: a completed reconstruction
-            // must clear local processing state just as firmly as a running one
-            // starts it. Live streams carry only future events.
-            context.isProcessing = result.isRunning
+            // The reconstruction projection owns the detailed agent phase,
+            // including preservation of a pending local Stop. The session list
+            // keeps only the server's coarse running bit.
             context.setSessionProcessing(result.isRunning)
 
             context.logInfo("[RECONSTRUCT] Complete: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), highWaterMark=\(context.sequenceHighWaterMark)")

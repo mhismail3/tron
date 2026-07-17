@@ -13,10 +13,7 @@ final class ChatViewModel {
     var messages: [ChatMessage] = []
     /// Agent lifecycle phase for the primitive chat loop.
     var agentPhase: AgentPhase = .idle
-    var isProcessing: Bool {
-        get { agentPhase.isProcessing }
-        set { agentPhase = newValue ? .processing : .idle }
-    }
+    var isProcessing: Bool { agentPhase.isProcessing }
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
@@ -291,7 +288,10 @@ final class ChatViewModel {
             guard let self else { return }
 
             if case .disconnected = state {
-                if agentPhase != .idle {
+                // A matched Stop remains pending across transport loss. Only
+                // canonical terminal events or reconstruction can decide its
+                // outcome; clearing it here would re-enable duplicate Stop.
+                if agentPhase == .processing {
                     agentPhase = .idle
                 }
                 streamingManager.reset()

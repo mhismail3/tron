@@ -1824,6 +1824,11 @@ Public registered functions are limited to `agent::prompt`, `agent::abort`,
 provider loop and keep session truth consistent. Their success contracts carry
 a run id and only `acknowledged: true`; validation failures and busy sessions
 return canonical child errors rather than negative success acknowledgements.
+`agent::abort` returns `aborted: true` only when it signals a currently
+registered run, or `false` when no run matches. That acknowledgement is not a
+terminal outcome: durable `turn.failed` cancellation evidence and the later
+agent completion/ready lifecycle remain authoritative, including for reconnect
+and replay.
 On completion, the durable
 `agent_result` resource derives its final answer and source event reference from
 the flushed event-store reconstruction, so replay uses the same canonical text

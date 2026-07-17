@@ -40,20 +40,8 @@ extension ChatViewModel: MessagingContext {
         try await services.events.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
     }
 
-    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
         try await services.agent.abort(idempotencyKey: idempotencyKey)
-    }
-
-    func appendInterruptedMessage() {
-        appendToMessages(.interrupted())
-    }
-
-    func finalizeThinkingMessage() {
-        markThinkingMessageCompleteIfNeeded()
-    }
-
-    func clearThinkingCaption() {
-        thinkingState.clearCurrentStreaming()
     }
 
     // Note: The following methods are already defined in other extensions:
@@ -90,8 +78,14 @@ extension ChatViewModel {
     }
 
     /// Abort the currently running agent.
+    ///
+    /// Stop is a session mutation, not mounted-view work. Its short-lived
+    /// request therefore survives transient view disappearance; canonical
+    /// terminal events or reconstruction still own the final phase.
     func abortAgent() {
-        Task { await messagingCoordinator.abortAgent(context: self) }
+        Task {
+            await messagingCoordinator.abortAgent(context: self)
+        }
     }
 
     /// Cooperatively abort a single in-flight capability invocation without stopping the turn.

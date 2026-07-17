@@ -33,7 +33,7 @@ final class ChatViewModelTerminalEventRoutingTests: XCTestCase {
     }
 
     func test_agentError_stopsProcessing() {
-        viewModel.isProcessing = true
+        viewModel.agentPhase = .processing
 
         viewModel.handleAgentError("Error occurred")
 
@@ -77,6 +77,53 @@ final class ChatViewModelTerminalEventRoutingTests: XCTestCase {
         viewModel.handleAgentReady()
 
         XCTAssertEqual(viewModel.agentPhase, .idle)
+    }
+
+    func test_cancelledTurnWaitsForCompleteBeforeFinalizingOnce() {
+        viewModel.agentPhase = .stopping
+        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing"))
+        XCTAssertEqual(viewModel.agentPhase, .stopping)
+        viewModel.handleTextDelta("Partial response before cancellation")
+
+        viewModel.handleTurnFailed(makeCancelledTurnResult())
+
+        XCTAssertEqual(viewModel.agentPhase, .stopping)
+        XCTAssertEqual(
+            viewModel.messages.filter {
+                if case .systemEvent(.interrupted) = $0.content { return true }
+                return false
+            }.count,
+            1
+        )
+
+        viewModel.handleComplete()
+
+        XCTAssertEqual(viewModel.agentPhase, .idle)
+        XCTAssertFalse(viewModel.messages.contains(where: \.isStreaming))
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
+    }
+
+    private func makeCancelledTurnResult() -> TurnFailedPlugin.Result {
+        let failure = CanonicalFailurePayload(
+            code: "RUNTIME_CANCELLED",
+            category: "cancelled",
+            message: "Interrupted by user",
+            retryable: false,
+            recoverable: true,
+            origin: "agent_runtime"
+        )
+        return TurnFailedPlugin.Result(
+            turn: 1,
+            error: failure.message,
+            code: failure.code,
+            category: failure.category,
+            retryable: failure.retryable,
+            recoverable: failure.recoverable,
+            origin: failure.origin,
+            details: nil,
+            failure: failure,
+            partialContent: "Partial response before cancellation"
+        )
     }
 
     private func makeCompactionResult(
