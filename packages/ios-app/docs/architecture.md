@@ -537,6 +537,15 @@ miscellaneous facade. They must not encode product policy. Any fixed
 workflow-specific client must stay removed unless a source-owned product
 contract proves it is required boot infrastructure.
 
+Request dispatch installs correlation and timeout ownership before handing the
+frame to `URLSessionWebSocketTask` in the same actor turn. The transport handoff
+must not wait behind a newly scheduled MainActor task; only asynchronous send
+completion bookkeeping returns to MainActor. This preserves immediate-response
+correlation without allowing UI/layout work to consume a request's timeout
+budget before the frame has entered the transport. Recovery from a send failure
+also requires the failed task to still be the active socket, so a delayed
+completion from a retired task cannot disconnect its replacement.
+
 Every WebSocket connect or manual-retry attempt builds the completed upgrade
 request and consults its injected `EngineSessionAttemptDirective` before
 constructing `URLSessionConfiguration`, a delegate, a `URLSession`, or a task.

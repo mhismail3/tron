@@ -446,6 +446,38 @@ fn assert_contains_in_order(name: &str, source: &str, needles: &[&str]) {
 }
 
 #[test]
+fn ios_websocket_request_dispatch_is_registered_before_inline_handoff() {
+    let source = mask_swift_comments_and_strings(&read_repo_file(
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift",
+    ));
+    let timeout_registration = "timeoutTasks[requestId] = timeoutTask";
+    let transport_handoff = "task.send(socketMessage) {";
+
+    assert_contains_in_order(
+        "iOS WebSocket request dispatch",
+        &source,
+        &[
+            "pendingRequests[requestId] = continuation",
+            timeout_registration,
+            transport_handoff,
+        ],
+    );
+
+    let timeout_offset = source
+        .find(timeout_registration)
+        .expect("timeout registration should exist");
+    let handoff_offset = source[timeout_offset..]
+        .find(transport_handoff)
+        .map(|offset| timeout_offset + offset)
+        .expect("transport handoff should follow timeout registration");
+    let scheduling_gap = &source[timeout_offset..handoff_offset];
+    assert!(
+        !scheduling_gap.contains("Task {") && !scheduling_gap.contains("await"),
+        "iOS WebSocket transport handoff must occur inline after request registration"
+    );
+}
+
+#[test]
 fn ios_terminal_task_owners_cancel_and_await_exact_handles() {
     let manager =
         read_repo_file("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift");

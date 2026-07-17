@@ -232,3 +232,63 @@ struct WebSocketAuthTests {
         #expect(ws.connectionState == .unauthorized(reason: "Server rejected authentication (no token)"))
     }
 }
+
+@Suite("EngineConnection request transport")
+@MainActor
+struct WebSocketRequestTransportTests {
+
+    private func makeTask() -> URLSessionWebSocketTask {
+        URLSession.shared.webSocketTask(
+            with: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+    }
+
+    @Test("send failure from a retired socket cannot disconnect its replacement")
+    func staleSendFailureLeavesReplacementConnected() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let retiredTask = makeTask()
+        let replacementTask = makeTask()
+        defer {
+            retiredTask.cancel()
+            replacementTask.cancel()
+        }
+        connection.engineConnectionTask = replacementTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+
+        await connection.handleSendTransportFailure(
+            URLError(.networkConnectionLost),
+            operation: "agent::prompt",
+            failedTask: retiredTask
+        )
+
+        #expect(connection.engineConnectionTask === replacementTask)
+        #expect(connection.isConnectedFlag)
+        #expect(connection.connectionState == .connected)
+    }
+
+    @Test("send failure from the current socket performs terminal cleanup")
+    func currentSendFailureDisconnectsCurrentSocket() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        defer { currentTask.cancel() }
+        connection.engineConnectionTask = currentTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleSendTransportFailure(
+            URLError(.networkConnectionLost),
+            operation: "agent::prompt",
+            failedTask: currentTask
+        )
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
+    }
+}

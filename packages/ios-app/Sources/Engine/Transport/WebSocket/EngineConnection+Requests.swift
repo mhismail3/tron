@@ -211,21 +211,27 @@ extension EngineConnection {
             // Register correlation before sending so an immediate server
             // response can never arrive ahead of its continuation.
             let socketMessage = Self.engineTextMessage(from: data)
-            Task { @MainActor [self] in
-                do {
-                    try await task.send(socketMessage)
-                    logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
-                    logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
-                } catch {
+            task.send(socketMessage) { [self] error in
+                Task { @MainActor [self] in
+                    guard let error else {
+                        logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
+                        logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
+                        return
+                    }
+
                     logger.error("Failed to send message for \(operation): \(error.localizedDescription)", category: .websocket)
                     if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
-                        self.failPendingRequest(
+                        failPendingRequest(
                             id: requestId,
                             error: EngineConnectionError.connectionFailed(error.localizedDescription)
                         )
-                        await self.handleSendTransportFailure(error, operation: operation)
+                        await handleSendTransportFailure(
+                            error,
+                            operation: operation,
+                            failedTask: task
+                        )
                     } else {
-                        self.failPendingRequest(id: requestId, error: error)
+                        failPendingRequest(id: requestId, error: error)
                     }
                 }
             }

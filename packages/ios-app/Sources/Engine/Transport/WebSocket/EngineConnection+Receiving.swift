@@ -4,8 +4,12 @@ import Foundation
 extension EngineConnection {
     // MARK: - Receive Loop
 
-    func handleSendTransportFailure(_ error: Error, operation: String) async {
-        guard isConnectedFlag else { return }
+    func handleSendTransportFailure(
+        _ error: Error,
+        operation: String,
+        failedTask: URLSessionWebSocketTask
+    ) async {
+        guard isConnectedFlag, engineConnectionTask === failedTask else { return }
         logger.warning("Send failure indicates connection loss for \(operation): \(error.localizedDescription)", category: .websocket)
         await handleDisconnect()
     }
