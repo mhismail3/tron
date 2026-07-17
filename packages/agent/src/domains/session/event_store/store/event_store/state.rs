@@ -26,7 +26,7 @@ impl EventStore {
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
         let events = event_rows_to_session_events(&conn, &ancestors)?;
-        Ok(reconstruct_from_events(&events))
+        validated_reconstruction(&events)
     }
 
     /// Reconstruct messages at a specific event.
@@ -40,7 +40,7 @@ impl EventStore {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
         let events = event_rows_to_session_events(&conn, &ancestors)?;
-        Ok(reconstruct_from_events(&events))
+        validated_reconstruction(&events)
     }
 
     /// Build full session state at the head event.
@@ -56,7 +56,7 @@ impl EventStore {
             .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
         let events = event_rows_to_session_events(&conn, &ancestors)?;
-        let reconstruction = reconstruct_from_events(&events);
+        let reconstruction = validated_reconstruction(&events)?;
         Ok(build_session_state(&session, head_id, reconstruction))
     }
 
@@ -70,7 +70,7 @@ impl EventStore {
             return Err(EventStoreError::EventNotFound(event_id.to_string()));
         }
         let events = event_rows_to_session_events(&conn, &ancestors)?;
-        let reconstruction = reconstruct_from_events(&events);
+        let reconstruction = validated_reconstruction(&events)?;
         Ok(build_session_state(&session, event_id, reconstruction))
     }
 }
@@ -103,7 +103,9 @@ pub(super) fn event_rows_to_session_events(
                         row.id
                     ))
                 })?;
-            validate_provider_history_payload(&row.id, event_type, &payload)?;
+            if event_type == EventType::CapabilityInvocationCompleted {
+                validate_provider_history_payload(&row.id, event_type, &payload)?;
+            }
             Ok(SessionEvent {
                 id: row.id.clone(),
                 parent_id: row.parent_id.clone(),
@@ -119,6 +121,38 @@ pub(super) fn event_rows_to_session_events(
         .collect()
 }
 
+/// Reconstruct provider history and validate only events that survive its
+/// durable visibility rules.
+///
+/// `message.deleted`, `compact.boundary`, and `context.cleared` can make older
+/// message rows intentionally non-contributing. Message structural validation
+/// therefore runs after reconstruction identifies surviving source event IDs,
+/// but still validates every source row independently so same-role merging
+/// cannot hide a malformed contributor. Capability completions retain their
+/// unconditional row-conversion guard because malformed identity can itself
+/// make a result appear unmatched and disappear from reconstruction.
+fn validated_reconstruction(events: &[SessionEvent]) -> Result<ReconstructionResult> {
+    let reconstruction = reconstruct_from_events(events);
+    let contributing_event_ids = reconstruction
+        .messages_with_event_ids
+        .iter()
+        .flat_map(|message| message.event_ids.iter().flatten())
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+
+    for event in events {
+        if matches!(
+            event.event_type,
+            EventType::MessageUser | EventType::MessageAssistant
+        ) && contributing_event_ids.contains(event.id.as_str())
+        {
+            validate_provider_history_payload(&event.id, event.event_type, &event.payload)?;
+        }
+    }
+
+    Ok(reconstruction)
+}
+
 /// Reject malformed payloads that can contribute to a future provider request.
 ///
 /// Full runtime-message decoding remains owned by the agent projection after
@@ -131,8 +165,15 @@ fn validate_provider_history_payload(
     event_type: EventType,
     payload: &serde_json::Value,
 ) -> Result<()> {
-    if event_type != EventType::CapabilityInvocationCompleted {
-        return Ok(());
+    match event_type {
+        EventType::MessageUser => {
+            return validate_message_payload(event_id, "user", payload);
+        }
+        EventType::MessageAssistant => {
+            return validate_message_payload(event_id, "assistant", payload);
+        }
+        EventType::CapabilityInvocationCompleted => {}
+        _ => return Ok(()),
     }
 
     if payload
@@ -178,6 +219,24 @@ fn validate_provider_history_payload(
     }
 
     Ok(())
+}
+
+fn validate_message_payload(
+    event_id: &str,
+    role: &'static str,
+    payload: &serde_json::Value,
+) -> Result<()> {
+    let message = serde_json::json!({
+        "role": role,
+        "content": payload.get("content").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    serde_json::from_value::<crate::shared::protocol::messages::Message>(message)
+        .map(|_| ())
+        .map_err(|error| {
+            EventStoreError::InvalidOperation(format!(
+                "event {event_id} has invalid message.{role} provider-history payload: {error}"
+            ))
+        })
 }
 
 pub(super) fn build_session_state(

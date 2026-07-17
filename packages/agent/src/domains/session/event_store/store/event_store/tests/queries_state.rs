@@ -791,7 +791,7 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
 }
 
 #[test]
-fn event_rows_to_session_events_rejects_malformed_capability_completion() {
+fn event_rows_to_session_events_rejects_unmatched_malformed_capability_completion() {
     let row = EventRow {
         id: "evt_bad_completion".to_string(),
         session_id: "sess_1".to_string(),
@@ -823,7 +823,7 @@ fn event_rows_to_session_events_rejects_malformed_capability_completion() {
     let store = setup();
     let conn = store.conn().unwrap();
     let error = super::super::state::event_rows_to_session_events(&conn, &[row])
-        .expect_err("malformed capability history must fail reconstruction");
+        .expect_err("malformed completion identity must fail before it can appear unmatched");
     let message = error.to_string();
     assert!(message.contains("evt_bad_completion"));
     assert!(message.contains("invocationId"));
