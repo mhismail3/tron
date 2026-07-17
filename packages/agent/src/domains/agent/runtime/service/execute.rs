@@ -70,7 +70,14 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let _shutdown_forwarder = ShutdownCancelForwarder::new(shutdown_token, cancel_token.clone());
     let title_responder_factory = responder_factory.clone();
 
-    let state = match resume_prompt_session(session_manager.clone(), session_id.clone()).await {
+    let state = match resume_prompt_session(
+        session_manager.clone(),
+        event_store.clone(),
+        broadcast.clone(),
+        session_id.clone(),
+    )
+    .await
+    {
         Ok(state) => state,
         Err(error) => {
             warn!(

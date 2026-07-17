@@ -29,6 +29,7 @@ use tracing::{error, info, instrument, trace, warn};
 use self::capability_invocations::CapabilityInvocationPhaseParams;
 use self::failure::{emit_turn_failure, terminalize_interrupted_turn};
 pub use self::params::TurnParams;
+pub(crate) use self::persistence::emit_persisted_capability_invocation_completed;
 use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload,
     build_failed_message_payload, build_interrupted_message_payload, build_token_record_json,

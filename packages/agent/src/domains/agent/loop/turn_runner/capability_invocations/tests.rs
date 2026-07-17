@@ -811,12 +811,13 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
 }
 
 #[tokio::test]
-async fn completion_batch_failure_rolls_back_every_terminal_without_broadcasting_any() {
+async fn completion_batch_failure_atomically_terminalizes_every_durable_start() {
     let mut h = phase_persistence_harness_with_trigger(Some(
         "CREATE TRIGGER fail_second_capability_completion
          BEFORE INSERT ON events
          WHEN NEW.type = 'capability.invocation.completed'
           AND NEW.invocation_id = 'call-fast'
+          AND json_extract(NEW.payload, '$.details.status') IS NULL
          BEGIN
            SELECT RAISE(FAIL, 'forced second capability completion failure');
          END;",
@@ -877,14 +878,55 @@ async fn completion_batch_failure_rolls_back_every_terminal_without_broadcasting
         2,
         "the already-committed start batch remains durable"
     );
+    let completions = persisted_rows(
+        &h.store,
+        &h.session_id,
+        EventType::CapabilityInvocationCompleted.as_str(),
+    );
+    assert_eq!(
+        completions.len(),
+        2,
+        "the fail-closed repair must terminalize the full requested set"
+    );
+    let completion_payloads = h
+        .store
+        .resolve_event_payloads(&completions)
+        .expect("resolve repaired completions");
+    assert_eq!(
+        completion_payloads
+            .iter()
+            .map(|payload| payload["invocationId"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["call-slow", "call-fast"],
+        "repair rows preserve provider request order"
+    );
     assert!(
-        persisted_rows(
-            &h.store,
-            &h.session_id,
-            EventType::CapabilityInvocationCompleted.as_str(),
-        )
-        .is_empty(),
-        "the completion transaction must roll back its first insert"
+        completion_payloads.iter().all(|payload| {
+            payload["details"]["status"] == json!("persistence_failed")
+                && payload["details"]["code"] == json!("CAPABILITY_COMPLETION_PERSISTENCE_FAILED")
+                && payload["details"]["executed"] == json!(true)
+                && payload["isError"] == json!(true)
+                && !payload["content"]
+                    .as_str()
+                    .is_some_and(|content| content.starts_with("done-"))
+        }),
+        "the failed normal batch must leave no partial success completion"
+    );
+    let started_ids = persisted_rows(
+        &h.store,
+        &h.session_id,
+        EventType::CapabilityInvocationStarted.as_str(),
+    )
+    .into_iter()
+    .map(|row| row.invocation_id.expect("start invocation id"))
+    .collect::<Vec<_>>();
+    let completed_ids = completions
+        .iter()
+        .map(|row| row.invocation_id.clone().expect("completion invocation id"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        completed_ids, started_ids,
+        "no durable start may remain without an immediate terminal row"
     );
 
     let mut live_completions = Vec::new();
@@ -893,8 +935,9 @@ async fn completion_batch_failure_rolls_back_every_terminal_without_broadcasting
             live_completions.push(invocation_id);
         }
     }
-    assert!(
-        live_completions.is_empty(),
-        "no completion may broadcast before the terminal batch commits"
+    assert_eq!(
+        live_completions,
+        vec!["call-slow", "call-fast"],
+        "only the committed fail-closed terminal batch broadcasts"
     );
 }

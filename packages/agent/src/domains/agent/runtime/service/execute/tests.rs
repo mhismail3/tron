@@ -221,6 +221,143 @@ async fn session_reconstruction_failure_never_substitutes_empty_history() {
 }
 
 #[tokio::test]
+async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits() {
+    let harness = PromptFailureHarness::new();
+    for (event_type, payload) in [
+        (EventType::StreamTurnStart, serde_json::json!({"turn": 1})),
+        (
+            EventType::MessageAssistant,
+            serde_json::json!({
+                "turn": 1,
+                "content": [{
+                    "type": "capability_invocation",
+                    "id": "call-unresolved",
+                    "name": "execute",
+                    "arguments": {"operation": "observe"}
+                }],
+                "model": "mock",
+                "stopReason": "capability_invocation"
+            }),
+        ),
+        (
+            EventType::CapabilityInvocationStarted,
+            serde_json::json!({
+                "turn": 1,
+                "invocationId": "call-unresolved",
+                "name": "execute",
+                "arguments": {"operation": "observe"}
+            }),
+        ),
+        (
+            EventType::TurnFailed,
+            serde_json::json!({
+                "turn": 1,
+                "error": "capability terminal persistence failed"
+            }),
+        ),
+    ] {
+        harness
+            .event_store
+            .append(&AppendOptions {
+                session_id: &harness.session_id,
+                event_type,
+                payload,
+                parent_id: None,
+                sequence: None,
+            })
+            .expect("seed failed capability turn");
+    }
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute_batch(
+            "CREATE TRIGGER reject_capability_repair
+             BEFORE INSERT ON events
+             WHEN NEW.type = 'capability.invocation.completed'
+             BEGIN
+               SELECT RAISE(FAIL, 'forced capability repair rejection');
+             END;",
+        )
+        .expect("repair rejection trigger");
+    }
+
+    let mut blocked = harness.execute("run-blocked-by-prior-capability").await;
+
+    harness.assert_stopped_before_provider(&blocked);
+    let blocked_rows = harness
+        .event_store
+        .get_events_by_session(&harness.session_id, &ListEventsOptions::default())
+        .expect("blocked session events");
+    assert!(
+        blocked_rows
+            .iter()
+            .all(|row| row.event_type != EventType::MessageUser.as_str()),
+        "blocked admission must not persist the new user prompt"
+    );
+    assert!(
+        blocked_rows
+            .iter()
+            .all(|row| { row.event_type != EventType::CapabilityInvocationCompleted.as_str() }),
+        "failed repair must leave no partial terminal row"
+    );
+    assert_eq!(
+        terminal_error_code(&mut blocked.events),
+        RUNTIME_PERSISTENCE_ERROR
+    );
+
+    {
+        let conn = harness.pool.get().expect("event connection");
+        conn.execute_batch("DROP TRIGGER reject_capability_repair;")
+            .expect("remove repair rejection");
+    }
+    let mut admitted = harness.execute("run-after-capability-repair").await;
+
+    assert_eq!(
+        harness.create_calls.load(Ordering::SeqCst),
+        1,
+        "provider construction starts only after repair commits"
+    );
+    assert!(!admitted.orchestrator.has_active_run(&harness.session_id));
+    let repaired_rows = harness
+        .event_store
+        .get_events_by_session(&harness.session_id, &ListEventsOptions::default())
+        .expect("repaired session events");
+    assert_eq!(
+        repaired_rows
+            .iter()
+            .filter(|row| row.event_type == EventType::MessageUser.as_str())
+            .count(),
+        1,
+        "only the admitted retry persists its user prompt"
+    );
+    let repaired = repaired_rows
+        .iter()
+        .find(|row| {
+            row.event_type == EventType::CapabilityInvocationCompleted.as_str()
+                && row.invocation_id.as_deref() == Some("call-unresolved")
+        })
+        .expect("durable repaired capability completion");
+    let live_repair = std::iter::from_fn(|| admitted.events.try_recv().ok())
+        .find_map(|event| match event {
+            TronEvent::CapabilityInvocationCompleted {
+                base,
+                invocation_id,
+                result,
+                ..
+            } if invocation_id == "call-unresolved" => Some((base, result)),
+            _ => None,
+        })
+        .expect("live row-backed repair completion");
+    assert_eq!(live_repair.0.sequence, Some(repaired.sequence));
+    let live_details = live_repair
+        .1
+        .and_then(|result| result.details)
+        .expect("repair safety details");
+    assert_eq!(live_details["executionState"], "unknown");
+    assert_eq!(live_details["mayHaveExecuted"], true);
+    assert_eq!(live_details["retrySafe"], false);
+}
+
+#[tokio::test]
 async fn sequence_high_water_failure_stops_before_provider_construction() {
     let harness = PromptFailureHarness::new();
     {

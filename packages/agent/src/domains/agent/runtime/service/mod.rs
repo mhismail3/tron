@@ -11,10 +11,13 @@
 //! its event reference after the turn's synchronous persistence calls have
 //! committed, then emits the runtime-owned durable session-update projection;
 //! it does not rebuild that wire event or retain session-cache ownership.
-//! Durable prior-history reconstruction and the new `message.user` append are
-//! prerequisites for provider construction and model execution;
-//! either persistence failure releases the run without opening a provider
-//! stream. Prompt-run composition derives broadcast access from its authoritative
+//! Before durable history is reconstructed, prompt admission atomically closes
+//! any terminal prior turn's unmatched capability starts and broadcasts those
+//! row-backed repairs to live clients. A repair failure rejects the prompt
+//! before `message.user` persistence or provider construction. Durable
+//! prior-history reconstruction and the new `message.user` append are likewise
+//! prerequisites for model execution; either persistence failure releases the
+//! run without opening a provider stream. Prompt-run composition derives broadcast access from its authoritative
 //! orchestrator and owns its event persister; the session cache retains only
 //! reconstructed event-store state and no parallel runtime service. Completion
 //! does not maintain a second final-answer state. Run-turn admission snapshots

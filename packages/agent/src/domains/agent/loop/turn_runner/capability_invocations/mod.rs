@@ -12,7 +12,10 @@
 //! closed by a terminal non-executed completion row.
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
-//! rows are all broadcast before any child execution future is polled.
+//! rows are all broadcast before any child execution future is polled. Result
+//! completions commit as one provider-ordered batch. If that batch fails after
+//! starts are durable, a second atomic error-completion batch closes every
+//! start before the phase error propagates to the turn's canonical failure.
 //! Executed and skipped completion payloads are collected in provider-request
 //! order and commit as one terminal batch; no completion is broadcast when any
 //! row in that batch fails.
@@ -477,6 +480,18 @@ pub(super) async fn execute_capability_invocation_phase(
     }
 
     if let Err(error) = persist_completion_batch(&params, completion_payloads) {
+        warn!(
+            session_id = params.session_id,
+            turn = params.turn,
+            error = %error,
+            "capability completion batch failed; terminalizing durable starts"
+        );
+        let error = match persist_failed_completion_batch(&params, &results) {
+            Ok(()) => error,
+            Err(repair_error) => RuntimeError::Persistence(format!(
+                "capability completion batch failed ({error}); durable terminal repair also failed ({repair_error})"
+            )),
+        };
         return CapabilityInvocationPhaseOutcome {
             interrupted,
             error: Some(error),
@@ -594,9 +609,9 @@ fn persist_completion_batch(
     params: &CapabilityInvocationPhaseParams<'_>,
     completion_payloads: Vec<Option<Value>>,
 ) -> Result<(), RuntimeError> {
-    let Some(persister) = params.persister else {
+    if params.persister.is_none() {
         return Ok(());
-    };
+    }
     let expected_count = completion_payloads.len();
     let payloads = completion_payloads
         .into_iter()
@@ -608,6 +623,66 @@ fn persist_completion_batch(
             )
         })?;
     debug_assert_eq!(payloads.len(), expected_count);
+    persist_and_broadcast_completion_payloads(params, &payloads)
+}
+
+fn persist_failed_completion_batch(
+    params: &CapabilityInvocationPhaseParams<'_>,
+    results: &[Option<ExecutedCapabilityInvocation>],
+) -> Result<(), RuntimeError> {
+    let Some(_) = params.persister else {
+        return Ok(());
+    };
+    let payloads = params
+        .stream_result
+        .capability_invocations
+        .iter()
+        .enumerate()
+        .map(|(idx, invocation)| {
+            let executed = results[idx].as_ref();
+            let mut payload = json!({
+                "invocationId": invocation.id,
+                "name": invocation.name,
+                "content": "Capability invocation terminal state could not be saved; the active turn failed.",
+                "isError": true,
+                "duration": executed.map_or(0, |result| result.result.duration_ms),
+                "details": {
+                    "status": "persistence_failed",
+                    "executed": executed.is_some(),
+                    "failureReason": "completion_persistence_failed",
+                    "code": "CAPABILITY_COMPLETION_PERSISTENCE_FAILED",
+                    "providerContextResultWritten": false
+                },
+                "runId": params.run_id,
+                "traceId": params.trace_id.map(|id| id.as_str()),
+                "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+            });
+            if let (Some(payload), Some(identity)) = (
+                payload.as_object_mut(),
+                primitive_identity_json(
+                    &invocation.name,
+                    &invocation.arguments,
+                    params.trace_id,
+                    params.parent_invocation_id,
+                )
+                .as_object()
+                .cloned(),
+            ) {
+                payload.extend(identity);
+            }
+            payload
+        })
+        .collect::<Vec<_>>();
+    persist_and_broadcast_completion_payloads(params, &payloads)
+}
+
+fn persist_and_broadcast_completion_payloads(
+    params: &CapabilityInvocationPhaseParams<'_>,
+    payloads: &[Value],
+) -> Result<(), RuntimeError> {
+    let Some(persister) = params.persister else {
+        return Ok(());
+    };
     let events = payloads
         .iter()
         .cloned()
@@ -618,7 +693,7 @@ fn persist_completion_batch(
         &events,
         params.sequence_counter,
     )?;
-    for (row, payload) in rows.iter().zip(&payloads) {
+    for (row, payload) in rows.iter().zip(payloads) {
         super::persistence::emit_persisted_capability_invocation_completed(
             params.emitter,
             row,

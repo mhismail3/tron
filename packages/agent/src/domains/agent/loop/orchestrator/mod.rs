@@ -12,7 +12,7 @@
 //! | `event_persister` | Reconciles live sequence counters before direct transactional event-store writes |
 //! | `turn_accumulator` | In-memory per-session scratchpad of in-flight turn content for `session.reconstruct` |
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of ordered partial LLM output |
-//! | `recovery` | Startup crash recovery — persists orphaned journal content |
+//! | `recovery` | Startup crash recovery and session-scoped prompt-admission lifecycle repair |
 //! | `capability_invocation_tracker` | Tracks in-flight capability invocations for cancellation |
 //! | `invocation_abort_registry` | Authoritative per-invocation `CancellationToken` registry for `agent.abortCapabilityInvocation` |
 //!
@@ -29,6 +29,9 @@
 //! - [`recovery::recover_incomplete_turns`] replays orphaned streaming journals
 //!   and closes durable starts that lack a later terminal row
 //!   during startup.
+//! - Prompt admission uses the same recovery-owned capability projection to
+//!   close terminal prior turns before reconstruction; an uncommittable repair
+//!   vetoes the prompt before its user event or provider exists.
 //!
 //! ## Dependency Direction
 //!
@@ -79,6 +82,8 @@
 //!   phase's executed and skipped completions likewise commit as one ordered
 //!   batch before broadcast. A lifecycle persistence failure stops the turn
 //!   rather than continuing with provider context that cannot be reconstructed.
+//!   If its immediate terminal repair also fails, the next prompt retries one
+//!   atomic session-scoped repair and cannot proceed while starts remain open.
 //! - Journal appends fail closed. Provider-stream errors atomically persist any
 //!   accumulated assistant content with `turn.failed` before journal cleanup.
 //! - The event store, not an agent-owned queue, serializes per-session writes

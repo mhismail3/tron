@@ -151,7 +151,7 @@ pub(super) fn emit_persisted_capability_invocation_started(
 /// INVARIANT: the executor returns a result only. The turn runner owns durable
 /// completion persistence and broadcasts this row-backed event only after the
 /// write succeeds, keeping live lifecycle order identical to reconstruction.
-pub(super) fn emit_persisted_capability_invocation_completed(
+pub(crate) fn emit_persisted_capability_invocation_completed(
     emitter: &Arc<EventEmitter>,
     row: &EventRow,
     payload: &Value,

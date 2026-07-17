@@ -2,8 +2,11 @@
 //!
 //! On server startup (before accepting client connections), `recover_incomplete_turns`
 //! scans both orphaned journal files and durable turn starts that have no later
-//! terminal row. The database sweep covers crashes and terminal-write failures
-//! that happen before a streaming journal exists. For each orphaned journal:
+//! terminal row. Prompt admission also repairs terminal prior turns whose
+//! capability starts still lack completions; if that atomic repair cannot
+//! commit, the new prompt is rejected before its user event or provider exists.
+//! The database sweep covers crashes and terminal-write failures that happen
+//! before a streaming journal exists. For each orphaned journal:
 //!
 //! 1. Scope durable assistant/end/failure rows to the latest start for that
 //!    ordinal. Legacy rows without a start are still recognized because older
@@ -25,7 +28,7 @@
 //! repairs only a still-missing capability completion, and removes the journal
 //! without replaying the assistant.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::sync::Arc;
 
@@ -37,6 +40,61 @@ use crate::domains::agent::r#loop::pipeline::persistence;
 use crate::domains::session::event_store::{
     AppendBatchItem, EventRow, EventStore, EventType, ListEventsOptions,
 };
+
+#[derive(Clone, Copy)]
+enum CapabilityRecoveryCause {
+    ServerRestart,
+    PromptAdmission,
+}
+
+impl CapabilityRecoveryCause {
+    fn content(self) -> &'static str {
+        match self {
+            Self::ServerRestart => "Capability invocation was interrupted by a server restart.",
+            Self::PromptAdmission => {
+                "Capability completion could not be persisted. The operation may have executed; inspect its effects before retrying."
+            }
+        }
+    }
+
+    fn skip_reason(self) -> &'static str {
+        match self {
+            Self::ServerRestart => "server_restart",
+            Self::PromptAdmission => "completion_persistence_failed",
+        }
+    }
+
+    fn code(self) -> &'static str {
+        match self {
+            Self::ServerRestart => "CAPABILITY_INVOCATION_CRASH_RECOVERED",
+            Self::PromptAdmission => "CAPABILITY_COMPLETION_PERSISTENCE_RECOVERED",
+        }
+    }
+
+    fn details(self) -> serde_json::Value {
+        match self {
+            Self::ServerRestart => json!({
+                "status": "interrupted",
+                "executed": false,
+                "skipReason": self.skip_reason(),
+                "code": self.code(),
+                "providerContextResultWritten": false,
+                "recovered": true,
+            }),
+            Self::PromptAdmission => json!({
+                "status": "persistence_failed",
+                "executionState": "unknown",
+                "mayHaveExecuted": true,
+                "retrySafe": false,
+                "recoveryReason": "prompt_admission_repair",
+                "failureReason": self.skip_reason(),
+                "code": self.code(),
+                "providerContextResultWritten": false,
+                "recovered": true,
+            }),
+        }
+    }
+}
 
 /// Recover incomplete turns from orphaned streaming journals.
 ///
@@ -98,6 +156,112 @@ pub fn recover_incomplete_turns(event_store: &Arc<EventStore>) -> Vec<String> {
     }
 
     recovered_sessions
+}
+
+/// Repair terminal prior turns for one serialized session before a new prompt.
+///
+/// All missing capability completions across the session commit in one batch.
+/// Returning an error is an admission veto: callers must not append the new
+/// user message or construct a provider. The returned row/payload pairs are
+/// the exact durable completions that a live client must receive.
+pub(crate) fn recover_incomplete_turns_for_session(
+    event_store: &Arc<EventStore>,
+    session_id: &str,
+) -> Result<Vec<(EventRow, serde_json::Value)>, String> {
+    let rows = event_store
+        .get_events_by_session(session_id, &ListEventsOptions::default())
+        .map_err(|error| error.to_string())?;
+    let mut completed_high_water = HashMap::new();
+    for row in rows
+        .iter()
+        .filter(|row| row.event_type == EventType::CapabilityInvocationCompleted.as_str())
+    {
+        if let Some(invocation_id) = row.invocation_id.as_deref() {
+            completed_high_water
+                .entry(invocation_id)
+                .and_modify(|sequence: &mut i64| *sequence = (*sequence).max(row.sequence))
+                .or_insert(row.sequence);
+        }
+    }
+    let mut candidate_turns = BTreeSet::new();
+    for row in rows
+        .iter()
+        .filter(|row| row.event_type == EventType::CapabilityInvocationStarted.as_str())
+    {
+        let invocation_id = row
+            .invocation_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| format!("capability start {} has no invocation id", row.id))?;
+        if completed_high_water
+            .get(invocation_id)
+            .is_some_and(|sequence| *sequence > row.sequence)
+        {
+            continue;
+        }
+        let turn = row
+            .turn
+            .ok_or_else(|| format!("capability start {} has no durable turn ordinal", row.id))?;
+        candidate_turns.insert(
+            u32::try_from(turn)
+                .map_err(|_| format!("session {session_id} has invalid prior turn {turn}"))?,
+        );
+    }
+
+    let mut items = Vec::new();
+    let mut payloads = Vec::new();
+    let mut repaired_turns = BTreeSet::new();
+    for turn in candidate_turns {
+        let state =
+            durable_turn_state(event_store, session_id, turn).map_err(|error| error.to_string())?;
+        let incomplete = incomplete_capability_starts(
+            event_store,
+            session_id,
+            turn,
+            state.latest_start_sequence,
+        )
+        .map_err(|error| error.to_string())?;
+        if incomplete.is_empty() {
+            continue;
+        }
+        if !state.has_terminal {
+            return Err(format!(
+                "prior turn {turn} in session {session_id} is not durably terminal"
+            ));
+        }
+        for start in &incomplete {
+            let item = capability_recovery_item(start, CapabilityRecoveryCause::PromptAdmission)
+                .map_err(|error| error.to_string())?;
+            payloads.push(item.payload.clone());
+            items.push(item);
+        }
+        repaired_turns.insert(turn);
+    }
+
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let persisted = event_store
+        .append_batch(session_id, &items)
+        .map_err(|error| error.to_string())?;
+
+    for turn in repaired_turns {
+        let journal_path = StreamingJournal::journal_path(session_id, turn);
+        if journal_path.exists() {
+            if let Err(error) = fs::remove_file(&journal_path) {
+                warn!(
+                    session_id,
+                    turn,
+                    error = %error,
+                    "failed to remove repaired prompt-admission journal"
+                );
+            } else {
+                cleanup_empty_session_dir(&journal_path);
+            }
+        }
+    }
+
+    Ok(persisted.into_iter().zip(payloads).collect())
 }
 
 /// Close durable turn starts that have no later terminal row, including turns
@@ -369,29 +533,10 @@ fn persist_recovery_batch(
         });
     }
     for start in incomplete_capabilities {
-        let invocation_id = start
-            .invocation_id
-            .as_deref()
-            .ok_or_else(|| format!("capability start {} has no invocation id", start.id))?;
-        items.push(AppendBatchItem {
-            event_type: EventType::CapabilityInvocationCompleted,
-            payload: json!({
-                "invocationId": invocation_id,
-                "name": start.model_primitive_name.as_deref().unwrap_or("execute"),
-                "content": "Capability invocation was interrupted by a server restart.",
-                "isError": true,
-                "duration": 0,
-                "details": {
-                    "status": "interrupted",
-                    "executed": false,
-                    "skipReason": "server_restart",
-                    "code": "CAPABILITY_INVOCATION_CRASH_RECOVERED",
-                    "providerContextResultWritten": false,
-                    "recovered": true,
-                },
-            }),
-            sequence: None,
-        });
+        items.push(capability_recovery_item(
+            start,
+            CapabilityRecoveryCause::ServerRestart,
+        )?);
     }
     if append_turn_end {
         items.push(AppendBatchItem {
@@ -411,6 +556,28 @@ fn persist_recovery_batch(
     }
     let _ = event_store.append_batch(session_id, &items)?;
     Ok(())
+}
+
+fn capability_recovery_item(
+    start: &EventRow,
+    cause: CapabilityRecoveryCause,
+) -> Result<AppendBatchItem, Box<dyn std::error::Error>> {
+    let invocation_id = start
+        .invocation_id
+        .as_deref()
+        .ok_or_else(|| format!("capability start {} has no invocation id", start.id))?;
+    Ok(AppendBatchItem {
+        event_type: EventType::CapabilityInvocationCompleted,
+        payload: json!({
+            "invocationId": invocation_id,
+            "name": start.model_primitive_name.as_deref().unwrap_or("execute"),
+            "content": cause.content(),
+            "isError": true,
+            "duration": 0,
+            "details": cause.details(),
+        }),
+        sequence: None,
+    })
 }
 
 /// Remove the parent directory if it's empty after journal deletion.
@@ -796,6 +963,144 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn prompt_admission_retries_atomic_terminal_capability_repair() {
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool.clone()));
+        let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
+        for (event_type, payload) in [
+            (EventType::StreamTurnStart, json!({"turn": 6})),
+            (
+                EventType::CapabilityInvocationStarted,
+                json!({
+                    "turn": 6,
+                    "invocationId": "call-a",
+                    "name": "execute",
+                    "arguments": {"operation": "observe"}
+                }),
+            ),
+            (
+                EventType::CapabilityInvocationStarted,
+                json!({
+                    "turn": 6,
+                    "invocationId": "call-b",
+                    "name": "execute",
+                    "arguments": {"operation": "observe"}
+                }),
+            ),
+            (
+                EventType::TurnFailed,
+                json!({"turn": 6, "error": "completion persistence failed"}),
+            ),
+        ] {
+            store
+                .append(&AppendOptions {
+                    session_id: &session.session.id,
+                    event_type,
+                    payload,
+                    sequence: None,
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+        {
+            let conn = pool.get().unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_prompt_repair
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'capability.invocation.completed'
+                  AND NEW.invocation_id = 'call-b'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced prompt repair failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        let error = recover_incomplete_turns_for_session(&store, &session.session.id)
+            .expect_err("completion rejection must veto prompt admission");
+        assert!(error.contains("forced prompt repair failure"));
+        assert!(
+            store
+                .get_events_by_session(&session.session.id, &ListEventsOptions::default(),)
+                .unwrap()
+                .iter()
+                .all(|row| { row.event_type != EventType::CapabilityInvocationCompleted.as_str() }),
+            "the first repair row must roll back with the rejected second row"
+        );
+
+        {
+            let conn = pool.get().unwrap();
+            conn.execute_batch("DROP TRIGGER fail_prompt_repair;")
+                .unwrap();
+        }
+        let repaired = recover_incomplete_turns_for_session(&store, &session.session.id)
+            .expect("retry repairs prior lifecycle");
+        assert_eq!(repaired.len(), 2);
+        assert_eq!(
+            repaired
+                .iter()
+                .map(|(_, payload)| payload["invocationId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["call-a", "call-b"]
+        );
+        assert!(repaired.iter().all(|(_, payload)| {
+            payload["details"]["status"] == json!("persistence_failed")
+                && payload["details"]["executionState"] == json!("unknown")
+                && payload["details"]["mayHaveExecuted"] == json!(true)
+                && payload["details"]["retrySafe"] == json!(false)
+                && payload["details"]["recoveryReason"] == json!("prompt_admission_repair")
+                && payload["details"]["code"]
+                    == json!("CAPABILITY_COMPLETION_PERSISTENCE_RECOVERED")
+                && !payload["content"]
+                    .as_str()
+                    .unwrap()
+                    .contains("server restart")
+        }));
+        assert!(
+            recover_incomplete_turns_for_session(&store, &session.session.id)
+                .expect("repair is idempotent")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prompt_admission_rejects_unidentifiable_capability_start() {
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
+        for (event_type, payload) in [
+            (EventType::StreamTurnStart, json!({"turn": 2})),
+            (
+                EventType::CapabilityInvocationStarted,
+                json!({"turn": 2, "name": "execute", "arguments": {}}),
+            ),
+            (EventType::TurnFailed, json!({"turn": 2, "error": "failed"})),
+        ] {
+            store
+                .append(&AppendOptions {
+                    session_id: &session.session.id,
+                    event_type,
+                    payload,
+                    sequence: None,
+                    parent_id: None,
+                })
+                .unwrap();
+        }
+
+        let error = recover_incomplete_turns_for_session(&store, &session.session.id)
+            .expect_err("an uncloseable start must veto prompt admission");
+        assert!(error.contains("has no invocation id"));
     }
 
     #[test]
