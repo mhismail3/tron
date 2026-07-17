@@ -73,9 +73,8 @@ struct EngineResponseEnvelope<R: Decodable>: Decodable {
 /// the WS upgrade and routes the failure to `EngineConnection.markUnauthorized`.
 ///
 /// URLSession retains its delegate; `EngineConnection` holds a strong
-/// reference here so the delegate's lifetime tracks the session — and
-/// `urlSession(_:didBecomeInvalidWithError:)` clears that reference when the
-/// session is torn down (manual disconnect, retry, unauthorized).
+/// reference here so the delegate's lifetime tracks the session. Every
+/// connection teardown clears that reference after invalidating its session.
 final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     /// Stored as `weak` to avoid the URLSession ↔ delegate ↔ service retain
     /// cycle. `@unchecked Sendable` because Swift can't reason about the
@@ -144,10 +143,11 @@ final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelega
             }
             record(response: response)
         }
-        guard let error else { return }
         Task { @MainActor in
-            owner()?.logWebSocketTaskCompletionError(error)
-            owner()?.markWebSocketOpenFailed(task, error: error)
+            if let error {
+                owner()?.logWebSocketTaskCompletionError(error)
+            }
+            await owner()?.handleWebSocketTaskCompletion(task, error: error)
         }
     }
 

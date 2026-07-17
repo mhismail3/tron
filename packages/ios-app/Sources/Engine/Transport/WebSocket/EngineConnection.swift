@@ -36,6 +36,15 @@ final class EngineConnection {
     nonisolated static let heartbeatInterval: TimeInterval = 5.0
     nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
 
+    /// WebSocket liveness belongs to the heartbeat, not a fixed resource
+    /// deadline that expires an otherwise healthy long-lived connection.
+    nonisolated static func makeSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = .infinity
+        return configuration
+    }
+
     var reconnectTask: Task<Void, Never>?
     var openedWebSocketTask: URLSessionWebSocketTask?
     var openContinuation: SingleResumeContinuationBox?
@@ -163,10 +172,8 @@ final class EngineConnection {
             return
         }
 
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 300
-        logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
+        let configuration = Self.makeSessionConfiguration()
+        logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=unbounded", category: .websocket)
 
         let delegate = EngineConnectionSessionDelegate(owner: self)
         sessionDelegate = delegate
@@ -244,17 +251,28 @@ final class EngineConnection {
         await handleDisconnect()
     }
 
-    func markWebSocketOpenFailed(_ task: URLSessionTask, error: Error) {
+    /// Own completion for both an opening and an established WebSocket.
+    /// Completion from a retired task must never tear down its replacement.
+    func handleWebSocketTaskCompletion(_ task: URLSessionTask, error: Error?) async {
         guard let socketTask = task as? URLSessionWebSocketTask,
-              engineConnectionTask === socketTask,
-              openContinuation != nil else {
+              engineConnectionTask === socketTask else {
             return
         }
-        logger.warning("WebSocket open failed: \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
-        openTimeoutTask?.cancel()
-        openTimeoutTask = nil
-        openContinuation?.resume(throwing: error)
-        openContinuation = nil
+
+        let completionError = error ?? EngineConnectionError.notConnected
+
+        if openContinuation != nil {
+            logger.warning("WebSocket open failed: \(NetworkDiagnosticsFormatter.errorSummary(completionError))", category: .websocket)
+            openTimeoutTask?.cancel()
+            openTimeoutTask = nil
+            openContinuation?.resume(throwing: completionError)
+            openContinuation = nil
+            return
+        }
+
+        guard isConnectedFlag else { return }
+        logger.warning("Established WebSocket task completed: \(NetworkDiagnosticsFormatter.errorSummary(completionError))", category: .websocket)
+        await handleDisconnect()
     }
 
     func markWebSocketOpenTimedOut(timeout: TimeInterval) {
@@ -301,6 +319,7 @@ final class EngineConnection {
         engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
+        sessionDelegate = nil
 
         failPendingRequests(error: EngineConnectionError.notConnected)
 
@@ -415,7 +434,7 @@ final class EngineConnection {
         openTimeoutTask = nil
         openContinuation?.resume(throwing: error)
         openContinuation = nil
-        engineConnectionTask?.cancel(with: .abnormalClosure, reason: nil)
+        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
         engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil

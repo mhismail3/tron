@@ -575,6 +575,10 @@ correlation without allowing UI/layout work to consume a request's timeout
 budget before the frame has entered the transport. Recovery from a send failure
 also requires the failed task to still be the active socket, so a delayed
 completion from a retired task cannot disconnect its replacement.
+The heartbeat owns long-lived socket liveness; URLSession does not impose a
+fixed resource-expiry deadline. Completion of the current established task uses
+the same identity-guarded teardown, which cancels its receive and heartbeat
+loops before reconnecting, while completion from a retired task is ignored.
 
 Every WebSocket connect or manual-retry attempt builds the completed upgrade
 request and consults its injected `EngineSessionAttemptDirective` before

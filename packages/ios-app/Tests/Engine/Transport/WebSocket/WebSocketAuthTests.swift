@@ -291,4 +291,88 @@ struct WebSocketRequestTransportTests {
         #expect(!connection.isConnectedFlag)
         #expect(connection.connectionState == .disconnected)
     }
+
+    @Test("completion from the current established socket retires its transport loops")
+    func currentTaskCompletionRetiresTransportLoops() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        let pingTask = Task<Void, Never> {
+            try? await Task.sleep(for: .seconds(60))
+        }
+        let receiveTask = Task<Void, Never> {
+            try? await Task.sleep(for: .seconds(60))
+        }
+        defer {
+            currentTask.cancel()
+            pingTask.cancel()
+            receiveTask.cancel()
+        }
+        connection.engineConnectionTask = currentTask
+        connection.pingTask = pingTask
+        connection.receiveTask = receiveTask
+        connection.sessionDelegate = EngineConnectionSessionDelegate(owner: connection)
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleWebSocketTaskCompletion(
+            currentTask,
+            error: URLError(.networkConnectionLost)
+        )
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(connection.pingTask == nil)
+        #expect(connection.receiveTask == nil)
+        #expect(connection.sessionDelegate == nil)
+        #expect(pingTask.isCancelled)
+        #expect(receiveTask.isCancelled)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
+    }
+
+    @Test("completion from a retired socket cannot disconnect its replacement")
+    func retiredTaskCompletionLeavesReplacementConnected() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let retiredTask = makeTask()
+        let replacementTask = makeTask()
+        defer {
+            retiredTask.cancel()
+            replacementTask.cancel()
+        }
+        connection.engineConnectionTask = replacementTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+
+        await connection.handleWebSocketTaskCompletion(
+            retiredTask,
+            error: URLError(.networkConnectionLost)
+        )
+
+        #expect(connection.engineConnectionTask === replacementTask)
+        #expect(connection.isConnectedFlag)
+        #expect(connection.connectionState == .connected)
+    }
+
+    @Test("completion without an error still retires the current established socket")
+    func cleanTaskCompletionRetiresCurrentSocket() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        defer { currentTask.cancel() }
+        connection.engineConnectionTask = currentTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleWebSocketTaskCompletion(currentTask, error: nil)
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
+    }
 }
