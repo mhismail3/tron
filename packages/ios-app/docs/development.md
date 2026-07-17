@@ -120,9 +120,10 @@ them to `Tron Fast` and `ProdDebug`.
 | Beta | Tron Beta | Development (debug, beta bundle ID) |
 | ProdDebug | Tron Fast | Local production-app iteration (debug, production bundle ID) |
 | Prod | Tron | App Store/TestFlight (release, production bundle ID) |
+| Test | Every test action | Hosted unit/UI validation (debug, isolated test identities) |
 
-`Debug.xcconfig` owns the compiler and test settings shared by Beta and
-ProdDebug; each leaf configuration owns only its compilation conditions and
+`Debug.xcconfig` owns the compiler and test settings shared by Beta, ProdDebug,
+and Test; each leaf configuration owns only its compilation conditions and
 product identity. `Base.xcconfig` remains common to every configuration.
 
 Use `Tron Fast` when you want Xcode's debug-speed rebuilds to install over the
@@ -152,7 +153,15 @@ scripts/tron-ios-simulator install
 Pairing is scoped to both the simulator UUID and bundle ID. Avoid name-only
 destinations when multiple iOS runtimes contain an identically named device,
 and do not uninstall, erase, or switch to the production bundle for simulator
-testing.
+testing. Hosted unit and UI-validation test actions use the separate
+`com.tron.mobile.testhost` identity, so they cannot replace the paired Beta or
+production app. The `start` and `status` actions also verify the installed code
+identifier as a fail-closed defense: if an older or manual XCTest invocation
+left a linker-signed host at the Beta identity, `start` directs you to `install`,
+which restores normal Keychain access without erasing the pairing. Run hosted
+tests only on the disposable simulator described below. When the remembered
+device is shut down, `status` reports validation as unavailable instead of
+misclassifying the preserved app as absent; `start` boots and validates it.
 
 ## Running Tests
 
@@ -218,8 +227,11 @@ Application Support, App Group, and production-pairing sentinels, start a
 loopback connection recorder for that seeded pairing, and capture these
 separate baselines:
 
-1. Run the focused `AppDelegateTests` through the Beta test host. Require the
-   hosted callbacks to leave every injected lifecycle effect at zero and the
+1. Run the focused `AppDelegateTests` through the dedicated hosted-test app.
+   Its app, extension, and test-bundle identifiers are distinct from both Beta
+   and production identities; the app and extension carry none of the Beta or
+   production entitlement files. Require the hosted callbacks to leave every
+   injected lifecycle effect at zero and the
    application callbacks to preserve their live semantics.
 2. Read only sorted TCC rows for the exact built app and extension bundle IDs,
    comparing service, client, client type, authorization value, and reason.

@@ -21,9 +21,9 @@ Usage:
   scripts/tron-ios-simulator remember [SIMULATOR_ID]
 
 Commands:
-  start      Boot the remembered simulator and launch its existing Tron Beta app.
+  start      Boot the remembered simulator and launch its verified Tron Beta app.
   install    Build/install Tron Beta without erasing its paired app container.
-  status     Show the remembered simulator and whether Tron Beta is installed.
+  status     Show the remembered simulator and validate its installed Tron Beta app.
   remember   Save an explicit simulator ID, or the Simulator app's current device.
 
 Environment overrides:
@@ -35,7 +35,9 @@ Environment overrides:
 This helper intentionally uses the beta bundle ID and never uninstalls or erases
 the app. Pairing is stored in that bundle's data container on the remembered
 simulator, so changing simulator UUIDs, bundle IDs, or erasing data requires a
-new pairing.
+new pairing. Hosted test actions use a separate app identity and must use a
+disposable simulator for isolation; the launch guard also catches older or
+manual invocations that replaced Beta with a linker-signed XCTest host.
 USAGE
 }
 
@@ -106,8 +108,23 @@ boot_simulator() {
 
 launch_beta() {
     local simulator_id="$1"
+    local installed_identifier
+    installed_identifier="$(installed_beta_code_identifier "$simulator_id" || true)"
+
+    [ "$installed_identifier" = "$BUNDLE_ID" ] \
+        || die "installed Tron Beta artifact has code identifier '${installed_identifier:-missing}' (an XCTest host may have replaced it); run scripts/tron-ios-simulator install"
+
     xcrun simctl launch "$simulator_id" "$BUNDLE_ID" >/dev/null \
         || die "Tron Beta is not installed; run scripts/tron-ios-simulator install"
+}
+
+installed_beta_code_identifier() {
+    local simulator_id="$1"
+    local app
+    app="$(xcrun simctl get_app_container "$simulator_id" "$BUNDLE_ID" app 2>/dev/null)" \
+        || return 1
+    codesign -dvv "$app" 2>&1 \
+        | awk -F= '/^Identifier=/{ print $2; exit }'
 }
 
 install_beta() {
@@ -133,10 +150,22 @@ install_beta() {
 
 show_status() {
     local simulator_id="$1"
-    echo "Remembered simulator: $(available_device_line "$simulator_id")"
+    local device_line
+    local installed_identifier
+    device_line="$(available_device_line "$simulator_id")"
+    echo "Remembered simulator: $device_line"
     echo "State file: $STATE_FILE"
+    if [[ "$device_line" != *"(Booted)"* ]]; then
+        echo "Tron Beta: validation unavailable while simulator is not booted (run start)"
+        return
+    fi
     if xcrun simctl get_app_container "$simulator_id" "$BUNDLE_ID" data >/dev/null 2>&1; then
-        echo "Tron Beta: installed (pairing container preserved)"
+        installed_identifier="$(installed_beta_code_identifier "$simulator_id" || true)"
+        if [ "$installed_identifier" = "$BUNDLE_ID" ]; then
+            echo "Tron Beta: installed and verified (pairing container preserved)"
+        else
+            echo "Tron Beta: invalid installed artifact (${installed_identifier:-missing}; pairing container preserved — run install)"
+        fi
     else
         echo "Tron Beta: not installed"
     fi
