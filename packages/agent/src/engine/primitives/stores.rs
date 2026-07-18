@@ -96,6 +96,13 @@ impl StreamStoreBackend {
         }
     }
 
+    pub(in crate::engine) fn active_subscription_ids(&self) -> Result<Vec<String>> {
+        match self {
+            Self::InMemory(store) => Ok(store.active_subscription_ids()),
+            Self::Sqlite(store) => store.active_subscription_ids(),
+        }
+    }
+
     pub(in crate::engine) fn acknowledge(
         &mut self,
         subscription_id: &str,
@@ -117,6 +124,19 @@ impl StreamStoreBackend {
         match self {
             Self::InMemory(store) => store.poll(subscription_id, after, limit, actor),
             Self::Sqlite(store) => store.poll(subscription_id, after, limit, actor),
+        }
+    }
+
+    pub(in crate::engine) fn poll_topic(
+        &self,
+        topic: &str,
+        after: StreamCursor,
+        limit: usize,
+        actor: &StreamActorScope,
+    ) -> Result<EngineStreamPage> {
+        match self {
+            Self::InMemory(store) => store.poll_topic(topic, after, limit, actor),
+            Self::Sqlite(store) => store.poll_topic(topic, after, limit, actor),
         }
     }
 

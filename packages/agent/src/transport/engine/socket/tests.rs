@@ -42,6 +42,75 @@ fn client_lease_owns_exact_registry_lifetime() {
     assert_eq!(clients.connection_count(), 0);
 }
 
+#[tokio::test]
+async fn legacy_socket_reconciliation_is_exact_and_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tron.sqlite");
+    let host = EngineHostHandle::open_sqlite(&path).unwrap();
+    let client_id = uuid::Uuid::now_v7().to_string();
+    let instance_id = uuid::Uuid::now_v7().to_string();
+    let stateless_client_id = uuid::Uuid::now_v7().to_string();
+    let stateless_instance_id = uuid::Uuid::now_v7().to_string();
+    let legacy = format!("engine-ws:{client_id}:{instance_id}");
+    let legacy_stateless =
+        format!("engine-ws-stateless:{stateless_client_id}:{stateless_instance_id}");
+    let retained = [
+        "caller-durable-subscription".to_owned(),
+        format!("engine-wsx:{client_id}:{instance_id}"),
+        format!("{legacy}:extra"),
+        format!("engine-ws:{}:{instance_id}", client_id.to_uppercase()),
+        format!("engine-ws:{}:{instance_id}", client_id.replace('-', "")),
+        "engine-ws:550e8400-e29b-41d4-a716-446655440000:550e8400-e29b-41d4-a716-446655440001"
+            .to_owned(),
+    ];
+
+    for (index, subscription_id) in std::iter::once(legacy.clone())
+        .chain(std::iter::once(legacy_stateless.clone()))
+        .chain(retained.iter().cloned())
+        .enumerate()
+    {
+        host.subscribe_stream(
+            subscription_id,
+            "events.session".to_owned(),
+            StreamCursor(index as u64 + 10),
+            VisibilityScope::System,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(retire_legacy_socket_subscriptions(&host).await.unwrap(), 2);
+    assert_eq!(retire_legacy_socket_subscriptions(&host).await.unwrap(), 0);
+
+    let actor = StreamActorScope::admin();
+    for subscription_id in [&legacy, &legacy_stateless] {
+        assert!(matches!(
+            host.poll_stream(subscription_id, None, 1, &actor).await,
+            Err(EngineError::PolicyViolation(message)) if message.contains("inactive")
+        ));
+    }
+    for subscription_id in &retained {
+        host.poll_stream(subscription_id, None, 1, &actor)
+            .await
+            .unwrap();
+    }
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    for (subscription_id, expected_cursor) in [(&legacy, 10_i64), (&legacy_stateless, 11_i64)] {
+        let (active, cursor): (i64, i64) = conn
+            .query_row(
+                "SELECT active, cursor FROM engine_stream_subscriptions WHERE subscription_id = ?1",
+                [subscription_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(active, 0);
+        assert_eq!(cursor, expected_cursor);
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn child_task_drain_aborts_a_stalled_socket_task() {
     let mut child_tasks = JoinSet::new();
@@ -232,7 +301,7 @@ fn recovery_marker_crosses_session_filter_but_respects_event_type_filter() {
 
 #[tokio::test]
 async fn stream_poll_returns_neutral_events() {
-    let (mut session, _rx) = test_session();
+    let (mut session, mut rx) = test_session();
     session.hello = Some(HelloState {
         session_id: Some("s1".to_owned()),
         workspace_id: None,
@@ -262,31 +331,106 @@ async fn stream_poll_returns_neutral_events() {
 
     assert!(
         session
-            .handle_text(r#"{"type":"subscribe","id":"s","topic":"events.session"}"#)
+            .handle_text(r#"{"type":"subscribe","id":"s","topic":"events.session","cursor":0}"#)
             .await
     );
-    let subscription_id = session
-        .subscriptions
-        .lock()
-        .await
-        .keys()
-        .next()
+    let subscribe_response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    let subscription_id = subscribe_response["result"]["subscriptionId"]
+        .as_str()
         .unwrap()
-        .clone();
-    let page = session
+        .to_owned();
+    assert!(matches!(
+        session
+            .ctx
+            .engine_host
+            .poll_stream(
+                &subscription_id,
+                Some(StreamCursor(0)),
+                100,
+                &StreamActorScope::scoped(Some("s1".to_owned()), None),
+            )
+            .await,
+        Err(EngineError::NotFound { .. })
+    ));
+
+    assert!(
+        session
+            .handle_text(
+                &json!({
+                    "type": "poll",
+                    "id": "p",
+                    "subscriptionId": subscription_id,
+                    "cursor": 0
+                })
+                .to_string()
+            )
+            .await
+    );
+    let poll_response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(
+        poll_response
+            .pointer("/result/events/0/event/type")
+            .and_then(Value::as_str),
+        Some("agent.ready")
+    );
+    assert_eq!(
+        poll_response
+            .pointer("/result/events/0/event/streamCursor")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn topic_poll_reads_without_creating_subscription_state() {
+    let (mut session, mut rx) = test_session();
+    session.hello = Some(HelloState {
+        session_id: Some("s1".to_owned()),
+        workspace_id: None,
+    });
+    session
         .ctx
         .engine_host
-        .poll_stream(
-            &subscription_id,
-            Some(StreamCursor(0)),
-            100,
-            &StreamActorScope::scoped(Some("s1".to_owned()), None),
-        )
+        .publish_stream_event(PublishStreamEvent {
+            topic: "events.session".to_owned(),
+            payload: json!({
+                "serverEvent": ServerEventPayload::new(
+                    "agent.ready",
+                    Some("s1".to_owned()),
+                    Some(json!({"ready": true}))
+                )
+            }),
+            visibility: VisibilityScope::Session,
+            session_id: Some("s1".to_owned()),
+            workspace_id: None,
+            producer: "test".to_owned(),
+            trace_id: None,
+            parent_invocation_id: None,
+        })
         .await
         .unwrap();
-    let event = server_payload_from_stream_event(&page.events[0]);
-    assert_eq!(event.event_type, "agent.ready");
-    assert_eq!(event.stream_cursor, Some(1));
+    assert!(
+        session
+            .handle_text(r#"{"type":"poll","id":"p","topic":"events.session","cursor":0}"#)
+            .await
+    );
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(
+        response
+            .pointer("/result/events/0/event/type")
+            .and_then(Value::as_str),
+        Some("agent.ready")
+    );
+    assert!(session.subscriptions.lock().await.is_empty());
+    assert!(
+        session
+            .ctx
+            .engine_host
+            .active_stream_subscription_ids()
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -445,17 +589,6 @@ async fn send_error_with_trace_preserves_embedded_engine_failure_on_outer_error(
 #[tokio::test]
 async fn ack_response_applies_backpressure_instead_of_closing_socket() {
     let ctx = Arc::new(make_test_context());
-    ctx.engine_host
-        .subscribe_stream(
-            "sub-ack".to_owned(),
-            "events.session".to_owned(),
-            StreamCursor(0),
-            VisibilityScope::Session,
-            Some("s1".to_owned()),
-            None,
-        )
-        .await
-        .unwrap();
     let (tx, mut rx) = mpsc::channel(1);
     tx.try_send("occupied".to_owned()).unwrap();
     let mut session = EngineWsSession::new(
@@ -550,17 +683,6 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
         .unwrap();
 
     let subscription_id = "sub-target".to_owned();
-    ctx.engine_host
-        .subscribe_stream(
-            subscription_id.clone(),
-            "events.session".to_owned(),
-            StreamCursor(0),
-            VisibilityScope::Session,
-            Some(target_session.to_owned()),
-            None,
-        )
-        .await
-        .unwrap();
     let subscriptions = Arc::new(tokio::sync::Mutex::new(BTreeMap::from([(
         subscription_id.clone(),
         SubscriptionState {
@@ -653,17 +775,6 @@ async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
     }
 
     let subscription_id = "sub-burst".to_owned();
-    ctx.engine_host
-        .subscribe_stream(
-            subscription_id.clone(),
-            "events.session".to_owned(),
-            StreamCursor(0),
-            VisibilityScope::Session,
-            Some(target_session.to_owned()),
-            None,
-        )
-        .await
-        .unwrap();
     let subscriptions = Arc::new(tokio::sync::Mutex::new(BTreeMap::from([(
         subscription_id,
         SubscriptionState {

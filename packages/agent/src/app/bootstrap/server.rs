@@ -214,24 +214,41 @@ async fn engine_upgrade_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let client_id = uuid::Uuid::now_v7().to_string();
+    let shutdown = state.shutdown;
+    let shutdown_token = shutdown.token();
     let ctx = state.runtime_context;
     let clients = state.engine_clients;
     let max_message_size = state.config.max_message_size;
     let heartbeat_interval = Duration::from_millis(state.config.heartbeat_interval_ms);
     let heartbeat_timeout = Duration::from_millis(state.config.heartbeat_timeout_ms);
+    let (socket_tx, socket_rx) = tokio::sync::oneshot::channel();
+    let session_shutdown = shutdown_token.clone();
+    let session_task = tokio::spawn(async move {
+        tokio::select! {
+            biased;
+            () = shutdown_token.cancelled() => {}
+            socket = socket_rx => {
+                if let Ok(socket) = socket {
+                    run_engine_ws_session(
+                        socket,
+                        client_id,
+                        ctx,
+                        clients,
+                        session_shutdown,
+                        max_message_size,
+                        heartbeat_interval,
+                        heartbeat_timeout,
+                    )
+                    .await;
+                }
+            }
+        }
+    });
+    shutdown.register_task(session_task);
     Ok(ws
         .max_message_size(max_message_size)
         .on_upgrade(move |socket| async move {
-            run_engine_ws_session(
-                socket,
-                client_id,
-                ctx,
-                clients,
-                max_message_size,
-                heartbeat_interval,
-                heartbeat_timeout,
-            )
-            .await;
+            let _ = socket_tx.send(socket);
         }))
 }
 

@@ -13,7 +13,7 @@
 //!
 //! A peer remains live while it returns Pong or any other inbound activity.
 //! Missing activity after a sent Ping retires the socket; teardown cancels its
-//! pumps, unsubscribes connection-owned streams, and bounds child-task drain.
+//! pumps, drops connection-local stream cursors, and bounds child-task drain.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -29,6 +29,7 @@ use tokio::task::JoinSet;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
+use crate::engine::EngineHostHandle;
 #[cfg(test)]
 use crate::engine::{StreamActorScope, StreamCursor};
 use crate::shared::server::context::ServerRuntimeContext;
@@ -48,6 +49,7 @@ const STREAM_MAX_LIMIT: usize = 500;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 const CONTROL_QUEUE_CAPACITY: usize = 1;
 const CHILD_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const LEGACY_SOCKET_SUBSCRIPTION_PREFIXES: [&str; 2] = ["engine-ws:", "engine-ws-stateless:"];
 
 mod outbound;
 mod stream_projection;
@@ -56,12 +58,53 @@ mod wire;
 
 use outbound::{send_engine_ws_value, send_engine_ws_value_async};
 #[cfg(test)]
-use stream_projection::{server_payload_from_stream_event, stream_event_matches_filters};
+use stream_projection::stream_event_matches_filters;
 use subscriptions::{SubscriptionState, push_subscription_events};
 use wire::{
     HeartbeatMessage, HelloMessage, InvokeMessage, PromoteMessage, RequestMessage, WireContext,
     now_timestamp, optional_id, protocol_error,
 };
+
+/// Retire durable rows created by older `/engine` versions before socket
+/// subscriptions became connection-local. Exact UUIDv7 shapes avoid claiming
+/// caller-owned durable ids that only happen to share a textual prefix.
+pub(crate) async fn retire_legacy_socket_subscriptions(
+    engine_host: &EngineHostHandle,
+) -> crate::engine::Result<usize> {
+    let subscription_ids = engine_host.active_stream_subscription_ids().await?;
+    let mut retired = 0;
+    for subscription_id in subscription_ids
+        .iter()
+        .filter(|subscription_id| is_legacy_socket_subscription_id(subscription_id))
+    {
+        if engine_host.unsubscribe_stream(subscription_id).await? {
+            retired += 1;
+        }
+    }
+    Ok(retired)
+}
+
+fn is_legacy_socket_subscription_id(subscription_id: &str) -> bool {
+    let Some(suffix) = LEGACY_SOCKET_SUBSCRIPTION_PREFIXES
+        .iter()
+        .find_map(|prefix| subscription_id.strip_prefix(prefix))
+    else {
+        return false;
+    };
+    let mut segments = suffix.split(':');
+    let (Some(client_id), Some(instance_id), None) =
+        (segments.next(), segments.next(), segments.next())
+    else {
+        return false;
+    };
+    [client_id, instance_id].into_iter().all(|value| {
+        uuid::Uuid::parse_str(value).is_ok_and(|id| {
+            id.get_version() == Some(uuid::Version::SortRand)
+                && id.get_variant() == uuid::Variant::RFC4122
+                && id.to_string() == value
+        })
+    })
+}
 
 /// Tracks connected `/engine` clients.
 #[derive(Default)]
@@ -122,6 +165,7 @@ pub async fn run_engine_ws_session(
     client_id: String,
     ctx: Arc<ServerRuntimeContext>,
     clients: Arc<EngineClientRegistry>,
+    shutdown: CancellationToken,
     max_frame_bytes: usize,
     heartbeat_interval: Duration,
     heartbeat_timeout: Duration,
@@ -172,6 +216,7 @@ pub async fn run_engine_ws_session(
     loop {
         tokio::select! {
             biased;
+            () = shutdown.cancelled() => break,
             () = cancel.cancelled() => break,
             frame = ws_rx.next() => {
                 let Some(frame) = frame else { break };
@@ -598,14 +643,7 @@ impl EngineWsSession {
 
     async fn cleanup(&mut self) {
         self.cancel.cancel();
-        let subscriptions = std::mem::take(&mut *self.subscriptions.lock().await);
-        for subscription_id in subscriptions.keys() {
-            let _ = self
-                .ctx
-                .engine_host
-                .unsubscribe_stream(subscription_id)
-                .await;
-        }
+        self.subscriptions.lock().await.clear();
     }
 }
 

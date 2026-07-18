@@ -360,6 +360,23 @@ impl EngineHostHandle {
             .poll(subscription_id, after, limit, actor)
     }
 
+    /// Poll an engine stream topic from an explicit cursor without creating a
+    /// durable subscription. Transport owners use this for connection-local
+    /// cursors while durable engine consumers keep using [`Self::poll_stream`].
+    pub(crate) async fn poll_stream_topic(
+        &self,
+        topic: &str,
+        after: StreamCursor,
+        limit: usize,
+        actor: &StreamActorScope,
+    ) -> Result<EngineStreamPage> {
+        let store = self.inner.lock().await.primitives.streams.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .poll_topic(topic, after, limit, actor)
+    }
+
     /// Acknowledge delivered stream events and persist the subscription cursor.
     pub async fn acknowledge_stream(
         &self,
@@ -380,6 +397,16 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
             .unsubscribe(subscription_id)
+    }
+
+    /// List active subscription ids for runtime-owned legacy reconciliation.
+    /// The transport owner decides which exact ids belong to its namespace.
+    pub(crate) async fn active_stream_subscription_ids(&self) -> Result<Vec<String>> {
+        let store = self.inner.lock().await.primitives.streams.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .active_subscription_ids()
     }
 
     /// Enqueue directly into the engine queue store.

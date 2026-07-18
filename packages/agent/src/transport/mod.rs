@@ -8,7 +8,9 @@
 //! `domains::*` and engine primitives.
 //! Live stream subscriptions that omit a cursor start at the topic tail;
 //! replay/catch-up and stateless stream polling require explicit stored
-//! cursors. The engine applies visibility before stream pagination so a
+//! cursors. `/engine` keeps subscription ids and acknowledged cursors local to
+//! the owning socket; it does not project transient connection state into the
+//! durable subscription store. The engine applies visibility before stream pagination so a
 //! session-specific `/engine` subscriber cannot starve behind older events from
 //! other sessions.
 //!
@@ -44,9 +46,10 @@
 //!   hello, and correlated validation errors retain the request id. Outbound
 //!   queues and worker sends remain bounded by their owning loops.
 //! - The same server configuration owns `/engine` heartbeat timing. Each socket
-//!   has one registry lease and one bounded child-task owner; stale peers are
-//!   reaped, connection-owned subscriptions are retired, and the active gauge
-//!   cannot remain stranded after task cancellation.
+//!   is registered with graceful shutdown before upgrade completion, has one
+//!   registry lease and one bounded child-task owner, and keeps stream state
+//!   connection-local. Stale peers are reaped, and the active gauge cannot
+//!   remain stranded after task cancellation.
 //! - Transport must not implement domain behavior or call handler-shaped
 //!   shortcuts; it dispatches canonical engine requests only.
 //! - `/engine/workers` is loopback/local external-worker transport; registration

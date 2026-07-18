@@ -187,10 +187,15 @@ async fn assert_stream_poll_reaches_visible_event_after_invisible_prefix(handle:
     let actor = StreamActorScope::scoped(Some(target_session.to_owned()), None);
     let mut after = StreamCursor(0);
     for _ in 0..4 {
-        let page = handle
+        let durable_page = handle
             .poll_stream("sub-visible", Some(after), 2, &actor)
             .await
             .unwrap();
+        let page = handle
+            .poll_stream_topic("events.session", after, 2, &actor)
+            .await
+            .unwrap();
+        assert_eq!(page, durable_page);
         if let Some(event) = page.events.first() {
             assert_eq!(event.cursor, target_cursor);
             assert_eq!(event.payload, json!({"visible": true}));

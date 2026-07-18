@@ -106,6 +106,16 @@ impl InMemoryEngineStreamStore {
         Ok(was_active)
     }
 
+    /// List ids for active subscriptions so their owning runtime can reconcile
+    /// its own ephemeral namespace without teaching the store owner semantics.
+    pub(crate) fn active_subscription_ids(&self) -> Vec<String> {
+        self.subscriptions
+            .iter()
+            .filter(|(_, subscription)| subscription.active)
+            .map(|(subscription_id, _)| subscription_id.clone())
+            .collect()
+    }
+
     /// Advance a subscription cursor after client delivery.
     pub fn acknowledge(
         &mut self,
@@ -165,11 +175,32 @@ impl InMemoryEngineStreamStore {
             )));
         }
         let after = after.unwrap_or(subscription.cursor);
+        self.poll_topic(&subscription.topic, after, limit, actor)
+    }
+
+    /// Poll a topic directly from an explicit cursor without durable subscriber state.
+    pub(crate) fn poll_topic(
+        &self,
+        topic: &str,
+        after: StreamCursor,
+        limit: usize,
+        actor: &StreamActorScope,
+    ) -> Result<EngineStreamPage> {
+        if topic.trim().is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "stream topic must not be empty".to_owned(),
+            ));
+        }
+        if limit == 0 {
+            return Err(EngineError::PolicyViolation(
+                "stream poll limit must be greater than zero".to_owned(),
+            ));
+        }
         let limit = limit.min(500);
         let mut visible = self
             .events
             .iter()
-            .filter(|event| event.topic == subscription.topic)
+            .filter(|event| event.topic == topic)
             .filter(|event| event.cursor > after)
             .filter(|event| {
                 stream_scope_visible(

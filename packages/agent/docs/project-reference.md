@@ -82,9 +82,12 @@ this reference and its owning source documentation in the same commit.
 The `/engine` socket owner sends server-driven Ping frames using the configured
 heartbeat interval and retires peers that return no activity before the
 configured timeout. Each upgraded socket owns one registry lease plus bounded
-writer/subscription tasks, so disconnect, timeout, panic unwind, and task
-cancellation cannot strand the health connection count or child tasks. Normal
-disconnect and heartbeat timeout also retire connection-owned subscriptions.
+writer/subscription tasks. A shutdown-owned upgrade bridge is registered before
+the upgrade response completes, so disconnect, timeout, panic unwind, task
+cancellation, and graceful shutdown cannot strand the health connection count
+or child tasks. Subscription ids and cursors are connection-local rather than
+durable rows; startup narrowly deactivates exact legacy UUIDv7 socket rows left
+by older builds without touching caller-owned stream subscriptions.
 
 ---
 
@@ -2164,7 +2167,11 @@ Live `/engine` subscriptions are not history loaders. Session screens reconstruc
 persisted history through `session::reconstruct`; their `events.session`
 subscription then starts at the current topic tail and carries only future
 records. Stateless stream polling and non-session catch-up remain explicit cursor
-operations. Stream polling applies engine visibility before pagination, so a
+operations. The socket map is the sole owner of live subscription ids, filters,
+scope, and cursors; direct topic polling reuses the engine's visibility and
+pagination logic without creating durable subscription rows. Durable
+`stream::subscribe` rows remain available to engine consumers that intentionally
+own resumable state. Stream polling applies engine visibility before pagination, so a
 session subscriber is never blocked behind older stream rows owned by unrelated
 sessions.
 The runtime-to-engine projection queue is bounded. If it ever overruns, the

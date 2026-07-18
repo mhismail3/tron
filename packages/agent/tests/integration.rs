@@ -31,6 +31,7 @@ struct TestServer {
     url: String,
     auth_path: PathBuf,
     server: Arc<TronServer>,
+    server_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 fn unique_home(root: &Path) -> PathBuf {
@@ -93,13 +94,14 @@ async fn boot_server_with_config(config: ServerConfig) -> TestServer {
         .handle();
     let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
     tron::transport::runtime::EngineRuntimeServices::start(&server);
-    let (addr, _handle) = server.listen().await.unwrap();
+    let (addr, server_handle) = server.listen().await.unwrap();
 
     TestServer {
         _temp: temp,
         url: format!("ws://{addr}/engine"),
         auth_path,
         server,
+        server_handle: Some(server_handle),
     }
 }
 
@@ -175,6 +177,16 @@ async fn wait_for_connection_count(server: &TronServer, expected: usize) {
     })
     .await
     .unwrap_or_else(|_| panic!("engine connection count did not reach {expected}"));
+}
+
+async fn wait_for_tracked_task_count(server: &TronServer, expected: usize) {
+    timeout(TIMEOUT, async {
+        while server.shutdown().tracked_task_count() != expected {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("shutdown task count did not reach {expected}"));
 }
 
 fn heartbeat_test_config() -> ServerConfig {
@@ -259,6 +271,50 @@ async fn engine_keeps_a_responsive_websocket_client_alive() {
     ws.close(None).await.unwrap();
     wait_for_connection_count(&runtime.server, 0).await;
     runtime.server.shutdown().shutdown();
+}
+
+#[tokio::test]
+async fn engine_shutdown_drains_an_upgraded_subscribed_client() {
+    let mut runtime = boot_server().await;
+    let baseline_tasks = runtime.server.shutdown().tracked_task_count();
+    let mut ws = connect(&runtime.url, &runtime.auth_path).await;
+    wait_for_connection_count(&runtime.server, 1).await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+
+    ws.send(Message::text(
+        json!({
+            "type": "subscribe",
+            "id": "shutdown-subscribe",
+            "topic": "events.session",
+            "cursor": 0
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let response = read_json(&mut ws).await;
+    assert_eq!(response["id"], "shutdown-subscribe");
+    assert_eq!(response["ok"], true);
+
+    let server_handle = runtime.server_handle.take().unwrap();
+    runtime
+        .server
+        .shutdown()
+        .graceful_shutdown(vec![server_handle], Some(Duration::from_secs(2)))
+        .await;
+    assert_eq!(runtime.server.engine_clients().connection_count(), 0);
+    assert_eq!(runtime.server.shutdown().tracked_task_count(), 0);
+
+    timeout(TIMEOUT, async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await
+    .expect("shutdown-owned websocket did not close");
 }
 
 #[tokio::test]

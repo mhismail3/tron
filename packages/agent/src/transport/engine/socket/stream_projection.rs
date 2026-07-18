@@ -2,22 +2,10 @@
 
 use serde_json::Value;
 
-use crate::engine::VisibilityScope;
 use crate::shared::server::events::ServerEventPayload;
-use crate::transport::engine::EngineTransportContext;
 use crate::transport::runtime::streams::STREAM_RECOVERY_REQUIRED_EVENT_TYPE;
 
 use super::wire::ProtocolEvent;
-
-pub(super) fn visibility_for_context(context: &EngineTransportContext) -> VisibilityScope {
-    if context.session_id.is_some() {
-        VisibilityScope::Session
-    } else if context.workspace_id.is_some() {
-        VisibilityScope::Workspace
-    } else {
-        VisibilityScope::System
-    }
-}
 
 pub(super) fn protocol_event_value(
     event: &crate::engine::EngineStreamEvent,
