@@ -33,7 +33,6 @@ struct CompactionDetailSheet: View {
                 .padding(.vertical)
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Context Compacted", color: .cyan)

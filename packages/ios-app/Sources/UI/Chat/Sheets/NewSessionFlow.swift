@@ -75,7 +75,6 @@ struct NewSessionFlow: View {
                 .padding(.bottom, 24)
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     SheetCloseButton(color: .tronEmerald)

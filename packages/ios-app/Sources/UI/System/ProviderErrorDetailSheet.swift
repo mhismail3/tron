@@ -23,7 +23,6 @@ struct ProviderErrorDetailSheet: View {
                 .padding(.vertical)
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: ErrorCategoryDisplay.label(for: data.category, provider: data.provider), color: .red)

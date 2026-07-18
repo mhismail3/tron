@@ -113,7 +113,6 @@ struct OnboardingFlowView: View {
             }
             .animation(.snappy(duration: 0.28), value: state.currentStep)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     if allowsDismiss {

@@ -91,7 +91,6 @@ struct ModelPickerSheet: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if supportsReasoning {

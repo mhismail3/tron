@@ -163,7 +163,6 @@ struct SessionSidebar: View {
         }
         .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
                 .toolbar(removing: .sidebarToggle)
         .toolbar {
             ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)

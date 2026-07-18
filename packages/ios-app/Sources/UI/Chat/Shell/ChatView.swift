@@ -301,7 +301,6 @@ struct ChatView: View {
 
     private var chatNavigationContent: some View {
         chatCoreContent
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
         .toolbar {

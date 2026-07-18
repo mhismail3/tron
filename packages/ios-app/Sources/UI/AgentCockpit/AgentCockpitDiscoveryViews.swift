@@ -295,7 +295,6 @@ struct CapabilityGroupDetailSheet: View {
             .scrollContentBackground(.hidden)
             .accessibilityIdentifier("capability-group-detail-\(group.id)")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: group.title, color: .tronEmerald)

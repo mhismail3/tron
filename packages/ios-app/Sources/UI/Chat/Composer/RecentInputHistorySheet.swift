@@ -54,7 +54,6 @@ struct RecentInputHistorySheet: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: RecentInputHistoryPresentation.title, color: .tronEmerald)

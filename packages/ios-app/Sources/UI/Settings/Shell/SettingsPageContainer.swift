@@ -46,7 +46,6 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 if Leading.self != EmptyView.self {
                     ToolbarItem(placement: .topBarLeading) {

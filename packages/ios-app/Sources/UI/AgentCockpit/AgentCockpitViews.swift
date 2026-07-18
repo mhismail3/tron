@@ -23,7 +23,6 @@ struct AgentCockpitSheet: View {
             }
             .scrollContentBackground(.hidden)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Dashboard", color: .tronEmerald)

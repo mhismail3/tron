@@ -24,7 +24,6 @@ struct CapabilityOperationDetailSheet: View {
             }
             .scrollContentBackground(.hidden)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Operation Detail", color: .tronEmerald)
@@ -352,7 +351,6 @@ struct OperationDetailSheet: View {
             }
             .scrollContentBackground(.hidden)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Operation Detail", color: .tronEmerald)

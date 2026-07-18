@@ -46,15 +46,13 @@ extension SourceGuardTests {
         )
     }
 
-    @Test("application, chat, and sheet scroll edges use the explicit soft style")
+    @Test("application and sheet scroll edges use soft style with automatic chrome")
     func testApplicationScrollEdgesUseExplicitSoftStyle() throws {
         let iosRoot = iosAppRoot()
         let sourcesRoot = iosRoot.appendingPathComponent("Sources")
         let swiftUISoftStyleOwners = [
             "Sources/App/Lifecycle/ProductionAppRoot.swift":
                 "ProductionAppRoot must own one app-wide soft SwiftUI scroll-edge preference",
-            "Sources/UI/Chat/Shell/ChatView+MessageList.swift":
-                "The chat transcript must own one local soft edge so its native top fade and blur remain visible",
             "Sources/Support/Foundation/SwiftUI/View+Extensions.swift":
                 "The adaptive presentation helper must own one soft edge for every app-owned sheet root",
         ]
@@ -79,19 +77,10 @@ extension SourceGuardTests {
                 "\(message)"
             )
         }
-        let chatTranscript = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+MessageList.swift"),
-            encoding: .utf8
-        )
-        #expect(
-            chatTranscript.components(separatedBy: ".scrollEdgeEffectHidden(false, for: .top)").count - 1 == 1,
-            "The chat transcript must explicitly keep its native top fade and blur visible"
-        )
-        #expect(!chatTranscript.contains(".scrollEdgeEffectHidden(true, for: .top)"))
-
         var webViewOwners: Set<String> = []
         var automaticConfigurations: [String] = []
         var hardConfigurations: [String] = []
+        var hiddenNavigationBarBackgrounds: [String] = []
         for url in try swiftFiles(in: sourcesRoot) {
             let source = try String(contentsOf: url, encoding: .utf8)
             let relativePath = url.path.replacingOccurrences(of: iosRoot.path + "/", with: "")
@@ -110,6 +99,9 @@ extension SourceGuardTests {
             if compactSource.contains(".scrollEdgeEffectStyle(.hard,for:")
                 || compactSource.contains("EdgeEffect.style=.hard") {
                 hardConfigurations.append(relativePath)
+            }
+            if compactSource.contains(".toolbarBackgroundVisibility(.hidden,for:.navigationBar)") {
+                hiddenNavigationBarBackgrounds.append(relativePath)
             }
         }
 
@@ -137,6 +129,10 @@ extension SourceGuardTests {
         #expect(
             hardConfigurations.isEmpty,
             "First-party sources must not configure hard scroll edges: \(hardConfigurations.sorted())"
+        )
+        #expect(
+            hiddenNavigationBarBackgrounds.isEmpty,
+            "App navigation bars must leave visibility automatic so scroll edge effects appear only during overlap: \(hiddenNavigationBarBackgrounds.sorted())"
         )
     }
 

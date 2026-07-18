@@ -266,7 +266,6 @@ struct ContentView: View {
             }
             .geometryGroup()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: toggleSidebar) {
@@ -417,7 +416,6 @@ struct WelcomePage: View {
             }
             .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ShellToolbarContent(
                     title: "Tron",
