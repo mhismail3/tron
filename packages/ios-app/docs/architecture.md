@@ -303,11 +303,16 @@ guard.
 
 The shell mounts `ContentView` even before onboarding is complete.
 `ProductionAppRoot` owns one onboarding presenter for first-run setup, Engine → Servers
-pairing, and pairing URLs. It also applies the explicit soft scroll-edge style
-once at the application root for all descendant native SwiftUI scroll surfaces;
-the two app-owned `WKWebView` wrappers mirror that policy on every edge of their
-independent UIKit scroll views. System-owned controller hierarchies remain
-untouched. `OnboardingSheetPresentation` starts that flow on a
+pairing, and pairing URLs. It applies the explicit soft scroll-edge style at the
+application root. The chat transcript repeats that policy at its native
+`ScrollView` owner and explicitly keeps its top edge effect visible so content
+retains the system fade and blur beneath the hidden navigation-bar background.
+SwiftUI sheets establish separate presentation
+roots on iOS 27, so `adaptivePresentationDetents` applies the same soft style to
+every app-owned sheet; new app sheets must use that canonical presentation
+path. The two app-owned `WKWebView` wrappers mirror the policy on every edge of
+their independent UIKit scroll views. System-owned controller hierarchies
+remain untouched. `OnboardingSheetPresentation` starts that flow on a
 medium detent, allows expansion to large when content needs more room, and uses
 compact iPad sizing so the connect form, QR-first pairing card, and setup pages
 share one geometry. On iPhone, onboarding pages do not scroll at the medium

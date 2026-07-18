@@ -46,11 +46,18 @@ extension SourceGuardTests {
         )
     }
 
-    @Test("application scroll edges use the explicit soft style")
+    @Test("application, chat, and sheet scroll edges use the explicit soft style")
     func testApplicationScrollEdgesUseExplicitSoftStyle() throws {
         let iosRoot = iosAppRoot()
         let sourcesRoot = iosRoot.appendingPathComponent("Sources")
-        let productionRootPath = "Sources/App/Lifecycle/ProductionAppRoot.swift"
+        let swiftUISoftStyleOwners = [
+            "Sources/App/Lifecycle/ProductionAppRoot.swift":
+                "ProductionAppRoot must own one app-wide soft SwiftUI scroll-edge preference",
+            "Sources/UI/Chat/Shell/ChatView+MessageList.swift":
+                "The chat transcript must own one local soft edge so its native top fade and blur remain visible",
+            "Sources/Support/Foundation/SwiftUI/View+Extensions.swift":
+                "The adaptive presentation helper must own one soft edge for every app-owned sheet root",
+        ]
         let expectedWebViewOwners = Set([
             "Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift",
             "Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift",
@@ -62,14 +69,25 @@ extension SourceGuardTests {
             "webView.scrollView.rightEdgeEffect.style = .soft",
         ]
 
-        let productionRoot = try String(
-            contentsOf: iosRoot.appendingPathComponent(productionRootPath),
+        for (owner, message) in swiftUISoftStyleOwners {
+            let source = try String(
+                contentsOf: iosRoot.appendingPathComponent(owner),
+                encoding: .utf8
+            )
+            #expect(
+                source.components(separatedBy: ".scrollEdgeEffectStyle(.soft, for: .all)").count - 1 == 1,
+                "\(message)"
+            )
+        }
+        let chatTranscript = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+MessageList.swift"),
             encoding: .utf8
         )
         #expect(
-            productionRoot.components(separatedBy: ".scrollEdgeEffectStyle(.soft, for: .all)").count - 1 == 1,
-            "ProductionAppRoot must own exactly one app-wide soft SwiftUI scroll-edge preference"
+            chatTranscript.components(separatedBy: ".scrollEdgeEffectHidden(false, for: .top)").count - 1 == 1,
+            "The chat transcript must explicitly keep its native top fade and blur visible"
         )
+        #expect(!chatTranscript.contains(".scrollEdgeEffectHidden(true, for: .top)"))
 
         var webViewOwners: Set<String> = []
         var automaticConfigurations: [String] = []

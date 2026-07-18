@@ -138,6 +138,10 @@ extension ChatView {
                     }
                     .padding()
                 }
+                // Own the native iOS scroll-edge treatment at the transcript
+                // itself so the top fade/blur survives presentation boundaries.
+                .scrollEdgeEffectStyle(.soft, for: .all)
+                .scrollEdgeEffectHidden(false, for: .top)
                 .accessibilityIdentifier("chat-message-scroll-view")
                 // NOTE: We intentionally do NOT use .defaultScrollAnchor(.bottom) here.
                 // It causes content to jump off-screen when keyboard appears with long content,
