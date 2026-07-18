@@ -5,10 +5,10 @@
 //! by `/engine` subscriptions over the stream primitive.
 //! Runtime stream projection writes retained agent, auth/settings, session,
 //! queue, and catalog changes into engine streams. The heartbeat service cleans
-//! local external-worker capabilities so the live catalog reflects what can
-//! actually run. External-worker WebSocket writers use bounded outbound queues;
-//! callers see transport failures instead of unbounded buffering when a worker
-//! stops draining messages.
+//! local external-worker capabilities and cancels their owning sockets so the
+//! live catalog reflects what can actually run. External-worker WebSocket
+//! writers use bounded outbound queues; callers see transport failures instead
+//! of unbounded buffering when a worker stops draining messages.
 
 use std::time::Duration;
 

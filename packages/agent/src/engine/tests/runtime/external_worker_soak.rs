@@ -18,6 +18,8 @@ impl external::ExternalWorkerInvoker for ExternalWorkerSoakInvoker {
             error: None,
         })
     }
+
+    fn retire(&self) {}
 }
 
 #[tokio::test]

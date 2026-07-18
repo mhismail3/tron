@@ -22,7 +22,8 @@ use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file
 use tron::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass, EngineError,
     FunctionDefinition, FunctionId, Invocation, Provenance, RegisterFunction, TraceId,
-    VisibilityScope, WorkerDefinition, WorkerHello, WorkerId, WorkerKind, WorkerProtocolMessage,
+    VisibilityScope, WorkerDefinition, WorkerDisconnect, WorkerHello, WorkerId, WorkerKind,
+    WorkerProtocolMessage,
 };
 use tron::shared::server::context::ServerRuntimeContext;
 
@@ -292,6 +293,19 @@ async fn wait_for_tracked_task_count(server: &TronServer, expected: usize) {
     .unwrap_or_else(|_| panic!("shutdown task count did not reach {expected}"));
 }
 
+async fn wait_for_socket_close(ws: &mut WsStream, context: &str) {
+    timeout(TIMEOUT, async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context} websocket did not close"));
+}
+
 fn heartbeat_test_config() -> ServerConfig {
     ServerConfig {
         host: "127.0.0.1".to_owned(),
@@ -505,16 +519,167 @@ async fn engine_worker_shutdown_drains_a_pending_invocation() {
     ));
     assert_eq!(runtime.server.shutdown().tracked_task_count(), 0);
 
-    timeout(TIMEOUT, async {
-        loop {
-            match ws.next().await {
-                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                Some(Ok(_)) => {}
-            }
-        }
-    })
-    .await
-    .expect("shutdown-owned worker websocket did not close");
+    wait_for_socket_close(&mut ws, "shutdown-owned worker").await;
+}
+
+#[tokio::test]
+async fn engine_worker_heartbeat_retirement_closes_socket_and_drains_pending_invocation() {
+    let mut runtime = boot_server().await;
+    let baseline_tasks = runtime.server.shutdown().tracked_task_count();
+    let session_id = "worker-heartbeat-retirement-session";
+    let worker_id = WorkerId::new("worker-heartbeat-retirement").unwrap();
+    let mut ws = accept_worker(
+        &runtime,
+        &worker_id,
+        "worker_heartbeat_retirement",
+        session_id,
+    )
+    .await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+
+    let function_id = FunctionId::new("worker_heartbeat_retirement::wait").unwrap();
+    send_worker_message(
+        &mut ws,
+        WorkerProtocolMessage::RegisterFunction(Box::new(RegisterFunction {
+            definition: worker_function(&worker_id, &function_id, session_id),
+            default_visibility: VisibilityScope::Session,
+        })),
+    )
+    .await;
+    assert!(matches!(
+        read_worker_message(&mut ws).await,
+        WorkerProtocolMessage::CatalogChange(_)
+    ));
+
+    let host = runtime.server.runtime_context().engine_host.clone();
+    let actor = ActorContext::new(
+        ActorId::new("worker-heartbeat-retirement-agent").unwrap(),
+        ActorKind::Agent,
+        AuthorityGrantId::new("agent-runtime").unwrap(),
+    )
+    .with_session_id(session_id);
+    let invocation = Invocation::new_sync(
+        function_id.clone(),
+        json!({"wait": true}),
+        CausalContext::new(
+            actor.actor_id.clone(),
+            actor.actor_kind.clone(),
+            actor.authority_grant_id.clone(),
+            TraceId::generate(),
+        )
+        .with_session_id(session_id),
+    );
+    let pending_invocation = tokio::spawn({
+        let host = host.clone();
+        async move { host.invoke(invocation).await }
+    });
+    assert!(matches!(
+        read_worker_message(&mut ws).await,
+        WorkerProtocolMessage::Invoke(_)
+    ));
+
+    let expired = runtime
+        .server
+        .external_workers()
+        .lock()
+        .await
+        .disconnect_timed_out(Duration::ZERO)
+        .await
+        .expect("heartbeat retirement succeeds");
+    assert_eq!(expired, vec![worker_id.clone()]);
+
+    let result = timeout(TIMEOUT, pending_invocation)
+        .await
+        .expect("heartbeat retirement did not drain pending invocation")
+        .expect("pending worker invocation task panicked");
+    assert!(matches!(
+        result.error,
+        Some(EngineError::WorkerTransportFailure { ref code, .. })
+            if code == "WORKER_DISCONNECTED"
+    ));
+    wait_for_socket_close(&mut ws, "heartbeat-retired worker").await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks).await;
+    assert!(
+        runtime
+            .server
+            .external_workers()
+            .lock()
+            .await
+            .connections()
+            .is_empty()
+    );
+    assert!(matches!(
+        host.inspect_function(&function_id, Some(&actor)).await,
+        Err(EngineError::NotFound { .. })
+    ));
+    assert!(matches!(
+        host.inspect_worker(&worker_id).await,
+        Err(EngineError::NotFound { .. })
+    ));
+
+    let server_handle = runtime.server_handle.take().unwrap();
+    runtime
+        .server
+        .shutdown()
+        .graceful_shutdown(vec![server_handle], Some(Duration::from_secs(2)))
+        .await;
+    assert_eq!(runtime.server.shutdown().tracked_task_count(), 0);
+}
+
+#[tokio::test]
+async fn engine_worker_runtime_retirement_closes_owning_socket() {
+    let mut runtime = boot_server().await;
+    let baseline_tasks = runtime.server.shutdown().tracked_task_count();
+    let worker_id = WorkerId::new("worker-runtime-retirement").unwrap();
+    let mut ws = accept_worker(
+        &runtime,
+        &worker_id,
+        "worker_runtime_retirement",
+        "worker-runtime-retirement-session",
+    )
+    .await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+
+    runtime
+        .server
+        .external_workers()
+        .lock()
+        .await
+        .disconnect(WorkerDisconnect {
+            worker_id: worker_id.clone(),
+            reason: "runtime retirement test".to_owned(),
+        })
+        .await
+        .expect("runtime retirement succeeds");
+
+    wait_for_socket_close(&mut ws, "runtime-retired worker").await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks).await;
+    assert!(
+        runtime
+            .server
+            .external_workers()
+            .lock()
+            .await
+            .connections()
+            .is_empty()
+    );
+    assert!(matches!(
+        runtime
+            .server
+            .runtime_context()
+            .engine_host
+            .inspect_worker(&worker_id)
+            .await,
+        Err(EngineError::NotFound { .. })
+    ));
+
+    let server_handle = runtime.server_handle.take().unwrap();
+    runtime
+        .server
+        .shutdown()
+        .graceful_shutdown(vec![server_handle], Some(Duration::from_secs(2)))
+        .await;
+    assert_eq!(runtime.server.shutdown().tracked_task_count(), 0);
 }
 
 #[tokio::test]

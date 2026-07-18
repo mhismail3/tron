@@ -1936,7 +1936,11 @@ local worker entries stay in the catalog but are marked unhealthy when the
 worker disconnects, so invocation fails closed until the worker reconnects and
 re-registers. On SQLite-backed server restart, durable external worker/function
 definitions hydrate as stopped/unhealthy with no handler, so an unclean socket
-loss cannot become an optimistic callable function. Worker
+loss cannot become an optimistic callable function. Runtime retirement first
+closes outbound admission for the socket and every captured invocation proxy,
+wakes pending calls with `WORKER_DISCONNECTED`, and closes the owning socket;
+no call waits for the per-invocation timeout after heartbeat or explicit runtime
+retirement. Worker
 connect/register/disconnect/heartbeat-timeout events are stored on
 `worker.lifecycle` through the stream primitive and are visible through retained
 ledger/log records. Invocation

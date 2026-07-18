@@ -14,8 +14,10 @@
 //! runnable. Every accepted connection receives one runtime-owned generation
 //! lease. Inbound socket messages and teardown must match that lease, so
 //! invalid, foreign, duplicate, or stale sockets cannot mutate a different
-//! connection. Submodules own lifecycle state, registration/stream publication,
-//! validation, and invocation proxying.
+//! connection. Retirement closes the connection's invocation transport before
+//! catalog cleanup, so captured proxy handlers cannot admit work after a
+//! heartbeat or runtime disconnect. Submodules own lifecycle state,
+//! registration/stream publication, validation, and invocation proxying.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -55,6 +57,9 @@ const WORKER_LIFECYCLE_TOPIC: &str = "worker.lifecycle";
 pub(crate) trait ExternalWorkerInvoker: Send + Sync {
     /// Send one invocation to the worker and wait for its result.
     async fn invoke(&self, invoke: WorkerInvoke) -> Result<WorkerInvocationResult>;
+
+    /// Close outbound admission and wake calls when the runtime retires the connection.
+    fn retire(&self);
 }
 
 /// Runtime state for one connected local external worker.

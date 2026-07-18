@@ -182,10 +182,13 @@ impl EngineExternalWorkerRuntime {
 
     /// Disconnect a worker and unregister its volatile registrations.
     pub async fn disconnect(&mut self, disconnect: WorkerDisconnect) -> Result<()> {
-        let Some(connection) = self.connections.remove(&disconnect.worker_id) else {
+        let Some(connection) = self.connections.get(&disconnect.worker_id).cloned() else {
             return Ok(());
         };
-        self.invokers.remove(&disconnect.worker_id);
+        if let Some(invoker) = self.invokers.remove(&disconnect.worker_id) {
+            invoker.retire();
+        }
+        self.connections.remove(&disconnect.worker_id);
         if connection.registration_mode == WorkerRegistrationMode::Volatile {
             self.host
                 .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())

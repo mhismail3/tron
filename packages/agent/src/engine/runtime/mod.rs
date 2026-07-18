@@ -30,6 +30,8 @@
 //!   Active duplicate identities are rejected; every later inbound protocol
 //!   operation and teardown must match that generation, so stale sockets cannot
 //!   retire or mutate a replacement connection.
+//! - Runtime retirement closes outbound admission and wakes pending invocations
+//!   before volatile cleanup or durable health transition.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.
