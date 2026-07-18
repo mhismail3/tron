@@ -19,6 +19,11 @@ use tron::app::bootstrap::config::ServerConfig;
 use tron::app::bootstrap::server::TronServer;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
+use tron::engine::{
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass, EngineError,
+    FunctionDefinition, FunctionId, Invocation, Provenance, RegisterFunction, TraceId,
+    VisibilityScope, WorkerDefinition, WorkerHello, WorkerId, WorkerKind, WorkerProtocolMessage,
+};
 use tron::shared::server::context::ServerRuntimeContext;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -126,6 +131,27 @@ async fn read_json(ws: &mut WsStream) -> Value {
             return serde_json::from_str(&text).unwrap();
         }
     }
+}
+
+async fn read_worker_message(ws: &mut WsStream) -> WorkerProtocolMessage {
+    loop {
+        let message = timeout(TIMEOUT, ws.next())
+            .await
+            .expect("timeout waiting for worker message")
+            .expect("worker stream closed")
+            .expect("worker websocket error");
+        if let Message::Text(text) = message {
+            return serde_json::from_str(&text).expect("valid worker protocol message");
+        }
+    }
+}
+
+async fn send_worker_message(ws: &mut WsStream, message: WorkerProtocolMessage) {
+    ws.send(Message::text(
+        serde_json::to_string(&message).expect("serializable worker protocol message"),
+    ))
+    .await
+    .expect("worker message send succeeds");
 }
 
 async fn invoke(ws: &mut WsStream, id: &str, function_id: &str, payload: Value) -> Value {
@@ -315,6 +341,145 @@ async fn engine_shutdown_drains_an_upgraded_subscribed_client() {
     })
     .await
     .expect("shutdown-owned websocket did not close");
+}
+
+#[tokio::test]
+async fn engine_worker_shutdown_drains_a_pending_invocation() {
+    let mut runtime = boot_server().await;
+    let baseline_tasks = runtime.server.shutdown().tracked_task_count();
+    let worker_url = format!("{}/workers", runtime.url);
+    let mut ws = connect(&worker_url, &runtime.auth_path).await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+
+    let session_id = "worker-shutdown-session";
+    let worker_id = WorkerId::new("worker-shutdown").unwrap();
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        ActorId::new("worker-shutdown-owner").unwrap(),
+        AuthorityGrantId::new("worker-runtime").unwrap(),
+    )
+    .with_namespace_claim("worker_shutdown");
+    send_worker_message(
+        &mut ws,
+        WorkerProtocolMessage::Hello(Box::new(
+            WorkerHello::loopback(worker).with_session_scope(session_id),
+        )),
+    )
+    .await;
+    assert!(matches!(
+        read_worker_message(&mut ws).await,
+        WorkerProtocolMessage::CatalogSnapshot(_)
+    ));
+
+    let function_id = FunctionId::new("worker_shutdown::wait").unwrap();
+    let mut function = FunctionDefinition::new(
+        function_id.clone(),
+        worker_id.clone(),
+        "wait for a worker response during graceful shutdown",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    )
+    .with_request_schema(json!({"type": "object", "additionalProperties": true}))
+    .with_response_schema(json!({"type": "object", "additionalProperties": true}))
+    .with_provenance(Provenance::system().with_session_id(session_id));
+    function.metadata = json!({
+        "contractId": function_id.as_str(),
+        "implementationId": "session_generated.worker_shutdown.wait",
+        "pluginId": "session_generated.worker-shutdown",
+        "trustTier": "session_generated",
+        "contextPrimerLevel": "catalog",
+        "runtimeRequirements": {
+            "workerKind": "external",
+            "deliveryModes": ["Sync"]
+        },
+        "examples": []
+    });
+    send_worker_message(
+        &mut ws,
+        WorkerProtocolMessage::RegisterFunction(Box::new(RegisterFunction {
+            definition: function,
+            default_visibility: VisibilityScope::Session,
+        })),
+    )
+    .await;
+    assert!(matches!(
+        read_worker_message(&mut ws).await,
+        WorkerProtocolMessage::CatalogChange(_)
+    ));
+
+    let host = runtime.server.runtime_context().engine_host.clone();
+    let actor = ActorContext::new(
+        ActorId::new("worker-shutdown-agent").unwrap(),
+        ActorKind::Agent,
+        AuthorityGrantId::new("agent-runtime").unwrap(),
+    )
+    .with_session_id(session_id);
+    let invocation = Invocation::new_sync(
+        function_id.clone(),
+        json!({"wait": true}),
+        CausalContext::new(
+            actor.actor_id.clone(),
+            actor.actor_kind.clone(),
+            actor.authority_grant_id.clone(),
+            TraceId::generate(),
+        )
+        .with_session_id(session_id),
+    );
+    let pending_invocation = tokio::spawn({
+        let host = host.clone();
+        async move { host.invoke(invocation).await }
+    });
+    assert!(matches!(
+        read_worker_message(&mut ws).await,
+        WorkerProtocolMessage::Invoke(_)
+    ));
+
+    let server_handle = runtime.server_handle.take().unwrap();
+    runtime
+        .server
+        .shutdown()
+        .graceful_shutdown(vec![server_handle], Some(Duration::from_secs(2)))
+        .await;
+
+    let result = timeout(TIMEOUT, pending_invocation)
+        .await
+        .expect("pending worker invocation did not drain")
+        .expect("pending worker invocation task panicked");
+    assert!(matches!(
+        result.error,
+        Some(EngineError::WorkerTransportFailure { ref code, .. })
+            if code == "WORKER_DISCONNECTED"
+    ));
+    assert!(
+        runtime
+            .server
+            .external_workers()
+            .lock()
+            .await
+            .connections()
+            .is_empty()
+    );
+    assert!(matches!(
+        host.inspect_function(&function_id, Some(&actor)).await,
+        Err(EngineError::NotFound { .. })
+    ));
+    assert!(matches!(
+        host.inspect_worker(&worker_id).await,
+        Err(EngineError::NotFound { .. })
+    ));
+    assert_eq!(runtime.server.shutdown().tracked_task_count(), 0);
+
+    timeout(TIMEOUT, async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await
+    .expect("shutdown-owned worker websocket did not close");
 }
 
 #[tokio::test]

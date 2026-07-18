@@ -1939,7 +1939,11 @@ connect/register/disconnect/heartbeat-timeout events are stored on
 ledger/log records. Invocation
 results are owned by the socket connection's pending invocation map; disconnects
 and outbound backpressure drain or fail pending calls as worker transport
-failures.
+failures. Every upgraded worker socket is registered with graceful shutdown
+before the HTTP upgrade completes. Server shutdown interrupts socket reads and
+bounded outbound sends, closes outbound admission, immediately fails pending
+calls with `WORKER_DISCONNECTED`, applies the normal volatile/durable disconnect
+policy, and joins the writer before reporting the socket session drained.
 
 Agents do not receive a server-authored helper-launch loop. The retained
 `/engine/workers` protocol is host infrastructure for already-running external

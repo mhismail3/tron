@@ -259,9 +259,25 @@ async fn engine_worker_upgrade_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     ensure_worker_peer_is_loopback(addr)?;
+    let shutdown = state.shutdown;
+    let shutdown_token = shutdown.token();
     let runtime = state.external_workers;
+    let (socket_tx, socket_rx) = tokio::sync::oneshot::channel();
+    let session_shutdown = shutdown_token.clone();
+    let session_task = tokio::spawn(async move {
+        tokio::select! {
+            biased;
+            () = shutdown_token.cancelled() => {}
+            socket = socket_rx => {
+                if let Ok(socket) = socket {
+                    run_external_worker_socket(socket, runtime, session_shutdown).await;
+                }
+            }
+        }
+    });
+    shutdown.register_task(session_task);
     Ok(ws.on_upgrade(move |socket| async move {
-        run_external_worker_socket(socket, runtime).await;
+        let _ = socket_tx.send(socket);
     }))
 }
 

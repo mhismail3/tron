@@ -14,7 +14,10 @@
 //! pending invocation map owned by that socket connection; they are not routed
 //! through the runtime message handler as standalone commands. Inbound worker
 //! frames are size-capped before JSON parsing, and outbound writes use a
-//! bounded channel plus send timeout.
+//! bounded channel plus send timeout. Every upgraded socket is registered with
+//! graceful shutdown before the HTTP upgrade completes. Shutdown interrupts
+//! reads and bounded sends, closes outbound admission, drains pending calls,
+//! retires runtime state, and joins the socket writer before the session exits.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +26,7 @@ use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use crate::engine::{
     EngineError, EngineExternalWorkerRuntime, InvocationId, WorkerDisconnect, WorkerHello,
@@ -37,7 +41,11 @@ pub(crate) const MAX_EXTERNAL_WORKER_FRAME_BYTES: usize = 1024 * 1024;
 pub type SharedExternalWorkerRuntime = Arc<Mutex<EngineExternalWorkerRuntime>>;
 
 /// Run one authenticated loopback worker WebSocket session.
-pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExternalWorkerRuntime) {
+pub(crate) async fn run_external_worker_socket(
+    socket: WebSocket,
+    runtime: SharedExternalWorkerRuntime,
+    shutdown: CancellationToken,
+) {
     let (mut sender, mut receiver) = socket.split();
     let (outgoing_tx, mut outgoing_rx) =
         mpsc::channel::<Message>(EXTERNAL_WORKER_OUTBOUND_CAPACITY);
@@ -45,24 +53,47 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
         String,
         oneshot::Sender<WorkerInvocationResult>,
     >::new()));
+    let writer_closed = CancellationToken::new();
+    let writer_closed_signal = writer_closed.clone();
     let writer = tokio::spawn(async move {
         while let Some(message) = outgoing_rx.recv().await {
             if sender.send(message).await.is_err() {
                 break;
             }
         }
+        writer_closed_signal.cancel();
     });
     let invoker = Arc::new(SocketWorkerInvoker {
         outgoing: outgoing_tx.clone(),
         pending: pending.clone(),
     });
     let mut worker_id = None;
-    while let Some(message) = receiver.next().await {
+    loop {
+        let message = tokio::select! {
+            biased;
+            () = shutdown.cancelled() => break,
+            () = writer_closed.cancelled() => break,
+            message = receiver.next() => {
+                let Some(message) = message else {
+                    break;
+                };
+                message
+            }
+        };
         let message = match message {
             Ok(Message::Text(text)) => text,
             Ok(Message::Close(_)) => break,
             Ok(Message::Ping(bytes)) => {
-                let _ = outgoing_tx.send(Message::Pong(bytes)).await;
+                if !send_outbound(
+                    &outgoing_tx,
+                    Message::Pong(bytes),
+                    &shutdown,
+                    &writer_closed,
+                )
+                .await
+                {
+                    break;
+                }
                 continue;
             }
             Ok(Message::Pong(_)) | Ok(Message::Binary(_)) => continue,
@@ -72,8 +103,9 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
             }
         };
         if message.len() > MAX_EXTERNAL_WORKER_FRAME_BYTES {
-            let _ = outgoing_tx
-                .send(Message::Text(
+            let _ = send_outbound(
+                &outgoing_tx,
+                Message::Text(
                     serde_json::json!({
                         "type": "error",
                         "message": format!(
@@ -84,23 +116,33 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
                     })
                     .to_string()
                     .into(),
-                ))
-                .await;
+                ),
+                &shutdown,
+                &writer_closed,
+            )
+            .await;
             break;
         }
         let parsed = match serde_json::from_str::<WorkerProtocolMessage>(&message) {
             Ok(parsed) => parsed,
             Err(error) => {
-                let _ = outgoing_tx
-                    .send(Message::Text(
+                if !send_outbound(
+                    &outgoing_tx,
+                    Message::Text(
                         serde_json::json!({
                             "type": "error",
                             "message": format!("invalid worker protocol message: {error}")
                         })
                         .to_string()
                         .into(),
-                    ))
-                    .await;
+                    ),
+                    &shutdown,
+                    &writer_closed,
+                )
+                .await
+                {
+                    break;
+                }
                 continue;
             }
         };
@@ -127,35 +169,72 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
         match response {
             Ok(Some(response)) => {
                 if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = outgoing_tx.send(Message::Text(text.into())).await;
+                    if !send_outbound(
+                        &outgoing_tx,
+                        Message::Text(text.into()),
+                        &shutdown,
+                        &writer_closed,
+                    )
+                    .await
+                    {
+                        break;
+                    }
                 }
             }
             Ok(None) => {}
             Err(error) => {
-                let _ = outgoing_tx
-                    .send(Message::Text(
+                if !send_outbound(
+                    &outgoing_tx,
+                    Message::Text(
                         serde_json::json!({
                             "type": "error",
                             "message": error.to_string()
                         })
                         .to_string()
                         .into(),
-                    ))
-                    .await;
+                    ),
+                    &shutdown,
+                    &writer_closed,
+                )
+                .await
+                {
+                    break;
+                }
             }
         }
     }
+    writer.abort();
+    let _ = writer.await;
+    fail_pending_invocations(&pending, "external worker websocket disconnected").await;
     if let Some(worker_id) = worker_id {
         let mut runtime = runtime.lock().await;
-        let _ = runtime
+        if let Err(error) = runtime
             .disconnect(WorkerDisconnect {
                 worker_id,
                 reason: "websocket disconnected".to_owned(),
             })
-            .await;
+            .await
+        {
+            tracing::warn!(%error, "external worker websocket cleanup failed");
+        }
     }
-    fail_pending_invocations(&pending, "external worker websocket disconnected").await;
-    writer.abort();
+}
+
+async fn send_outbound(
+    outgoing: &mpsc::Sender<Message>,
+    message: Message,
+    shutdown: &CancellationToken,
+    writer_closed: &CancellationToken,
+) -> bool {
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => false,
+        () = writer_closed.cancelled() => false,
+        result = tokio::time::timeout(
+            EXTERNAL_WORKER_OUTBOUND_SEND_TIMEOUT,
+            outgoing.send(message),
+        ) => matches!(result, Ok(Ok(()))),
+    }
 }
 
 async fn fail_pending_invocations(

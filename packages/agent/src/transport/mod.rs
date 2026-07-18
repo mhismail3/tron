@@ -53,7 +53,10 @@
 //! - Transport must not implement domain behavior or call handler-shaped
 //!   shortcuts; it dispatches canonical engine requests only.
 //! - `/engine/workers` is loopback/local external-worker transport; registration
-//!   and invocation authority still live in the engine runtime.
+//!   and invocation authority still live in the engine runtime. Every upgraded
+//!   worker socket is shutdown-owned before upgrade completion; shutdown closes
+//!   outbound admission, drains pending calls, retires runtime state, and joins
+//!   the writer before reporting the session complete.
 //! - Live subscriptions without explicit cursors start at the topic tail; stored
 //!   replay requires explicit cursors.
 //!
