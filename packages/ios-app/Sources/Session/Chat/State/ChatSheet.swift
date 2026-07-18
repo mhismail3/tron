@@ -1,21 +1,13 @@
 import Foundation
 
-/// Data for compaction detail sheet
+/// Durable identity for the generated compaction detail sheet. All displayed
+/// values are reconstructed by `session.compaction_detail` from this event;
+/// the sheet state deliberately carries no duplicate compaction projection.
 struct CompactionDetailData: Equatable {
-    let tokensBefore: Int
-    let tokensAfter: Int
-    let reason: String
-    let summary: String?
-    let preservedTurns: Int?
-    let summarizedTurns: Int?
+    let eventId: String
 
-    init(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) {
-        self.tokensBefore = tokensBefore
-        self.tokensAfter = tokensAfter
-        self.reason = reason
-        self.summary = summary
-        self.preservedTurns = preservedTurns
-        self.summarizedTurns = summarizedTurns
+    init(eventId: String) {
+        self.eventId = eventId
     }
 }
 
@@ -100,8 +92,8 @@ enum ChatSheet: Identifiable, Equatable {
         switch self {
         case .settings:
             return "settings"
-        case .compactionDetail:
-            return "compaction"
+        case .compactionDetail(let data):
+            return "compaction-\(data.eventId)"
         case .thinkingDetail:
             return "thinking"
         case .capabilityInvocationDetail(let data):

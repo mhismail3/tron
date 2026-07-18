@@ -11,6 +11,7 @@ enum CompactionPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
+        let sourceEventId: String?
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
@@ -42,6 +43,7 @@ enum CompactionPlugin: DispatchableEventPlugin {
         let summarizedTurns: Int?
         let contextControlActionResourceId: String?
         let contextControlSnapshotResourceId: String?
+        let eventId: String?
 
         var tokensSaved: Int { tokensBefore - tokensAfter }
 
@@ -56,7 +58,8 @@ enum CompactionPlugin: DispatchableEventPlugin {
             preservedTurns: Int?,
             summarizedTurns: Int?,
             contextControlActionResourceId: String? = nil,
-            contextControlSnapshotResourceId: String? = nil
+            contextControlSnapshotResourceId: String? = nil,
+            eventId: String? = nil
         ) {
             self.success = success
             self.tokensBefore = tokensBefore
@@ -69,6 +72,7 @@ enum CompactionPlugin: DispatchableEventPlugin {
             self.summarizedTurns = summarizedTurns
             self.contextControlActionResourceId = contextControlActionResourceId
             self.contextControlSnapshotResourceId = contextControlSnapshotResourceId
+            self.eventId = eventId
         }
     }
 
@@ -88,7 +92,8 @@ enum CompactionPlugin: DispatchableEventPlugin {
             preservedTurns: event.data.preservedTurns,
             summarizedTurns: event.data.summarizedTurns,
             contextControlActionResourceId: event.data.contextControlActionResourceId,
-            contextControlSnapshotResourceId: event.data.contextControlSnapshotResourceId
+            contextControlSnapshotResourceId: event.data.contextControlSnapshotResourceId,
+            eventId: event.sourceEventId
         )
     }
 

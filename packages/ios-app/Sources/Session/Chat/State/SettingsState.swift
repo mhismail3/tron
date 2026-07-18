@@ -1,6 +1,18 @@
 import Foundation
 
-/// Observable state for server-authoritative settings.
+/// The only settings projection retained outside native UI. Onboarding and
+/// new-session flows need these defaults even when no native UI surface is open.
+struct SessionDefaultsSnapshot: Equatable, Sendable {
+    var defaultWorkspace: String
+    var defaultModel: String
+
+    static let empty = SessionDefaultsSnapshot(
+        defaultWorkspace: AppConstants.defaultWorkspace,
+        defaultModel: ""
+    )
+}
+
+/// Observable loading state for the minimal external session-defaults projection.
 ///
 /// Loads values via the settings repository on first appearance and sends updates back to the server
 /// when the user changes a setting. SettingsView retains this object and passes
@@ -9,20 +21,17 @@ import Foundation
 @MainActor
 final class SettingsState {
 
-    // MARK: - Server-Authoritative Settings
+    var sessionDefaults: SessionDefaultsSnapshot = .empty
 
-    var defaultModel: String = ""
-    var quickSessionWorkspace: String = AppConstants.defaultWorkspace
-    var tailscaleIp: String?
-    var preserveRecentCount: Int = 5
-    var triggerTokenThreshold: Double = 0.70
+    var defaultModel: String {
+        get { sessionDefaults.defaultModel }
+        set { sessionDefaults.defaultModel = newValue }
+    }
 
-    // MARK: - Engine Policy
-
-    var transcriptionEnabled: Bool = false
-
-    @ObservationIgnored
-    private var lastLoadedSettings: ServerSettingsSnapshot?
+    var quickSessionWorkspace: String {
+        get { sessionDefaults.defaultWorkspace }
+        set { sessionDefaults.defaultWorkspace = newValue }
+    }
 
     // MARK: - Load State
 
@@ -77,31 +86,18 @@ final class SettingsState {
     func clearServerSnapshot() {
         isLoaded = false
         loadError = nil
-        lastLoadedSettings = nil
-        tailscaleIp = nil
-    }
-
-    func rollbackToLastLoadedSettings(message: String) {
-        if let lastLoadedSettings {
-            applyServerSettings(lastLoadedSettings)
-            isLoaded = true
-        }
-        loadError = message
+        sessionDefaults = .empty
     }
 
     /// Apply a server settings snapshot to local state (shared by load and reset).
     ///
-    /// Every field is overwritten from the active server's effective settings.
-    /// That keeps the iOS UI honest when switching between Macs: a value that
-    /// was present on server A cannot linger after server B reports its own
-    /// default or a missing optional field.
+    /// Only external defaults are copied. Every other server-owned setting is
+    /// bound directly into the native UI settings surface and has no duplicate
+    /// observable ownership in iOS.
     func applyServerSettings(_ settings: ServerSettingsSnapshot) {
-        lastLoadedSettings = settings
-        defaultModel = settings.defaultModel
-        tailscaleIp = settings.tailscaleIp
-        preserveRecentCount = settings.compactionPreserveRecentCount
-        triggerTokenThreshold = settings.compactionTriggerTokenThreshold
-        quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        transcriptionEnabled = settings.transcriptionEnabled
+        sessionDefaults = SessionDefaultsSnapshot(
+            defaultWorkspace: settings.defaultWorkspace ?? AppConstants.defaultWorkspace,
+            defaultModel: settings.defaultModel
+        )
     }
 }

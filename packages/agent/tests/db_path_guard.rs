@@ -236,6 +236,7 @@ fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
         "packages/agent/src/engine/authority/grants/mod.rs",
         "packages/agent/src/engine/authority/leases.rs",
         "packages/agent/src/engine/authority/compensation.rs",
+        "packages/agent/src/domains/native_ui/store.rs",
     ];
     let source_tables = schema_sources
         .into_iter()

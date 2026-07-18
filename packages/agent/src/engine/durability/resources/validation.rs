@@ -4,9 +4,8 @@ use serde_json::Value;
 
 use super::types::{
     CreateResource, EngineResourceLocation, EngineResourceTypeDefinition, LinkResources,
-    ListResources, RegisterResourceType, UI_SURFACE_KIND, UpdateResource,
+    ListResources, RegisterResourceType, UpdateResource,
 };
-use super::ui_surface::validate_ui_surface_payload;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::FunctionId;
 use crate::engine::kernel::schema;
@@ -148,9 +147,6 @@ pub(crate) fn validate_resource_payload(
         &definition.schema,
         payload,
     )?;
-    if definition.kind == UI_SURFACE_KIND {
-        validate_ui_surface_payload(payload)?;
-    }
     Ok(())
 }
 

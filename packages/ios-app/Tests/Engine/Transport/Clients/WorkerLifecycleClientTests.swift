@@ -161,23 +161,6 @@ struct WorkerLifecycleClientTests {
         #expect(seenFunctionIds == ["resource::list", "resource::inspect"])
     }
 
-    @Test("Runtime surface resources use generic resource primitives")
-    func runtimeSurfaceResourcesUseGenericResourcePrimitives() async throws {
-        let transport = connectedTransport()
-        let client = WorkerLifecycleClient(transport: transport)
-
-        transport.readHandler = { functionId, payload, _ in
-            #expect(functionId.rawValue == "resource::list")
-            let request = try #require(payload as? ResourceListRequestDTO)
-            #expect(request.kind == "ui_surface")
-            #expect(request.lifecycle == "active")
-            #expect(request.limit == 25)
-            return ResourceListResultDTO(resources: [])
-        }
-
-        _ = try await client.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
-    }
-
     @Test("Capability cockpit overview invokes capability binding read with context")
     func capabilityCockpitOverviewInvokesCapabilityBindingReadWithContext() async throws {
         let transport = connectedTransport()

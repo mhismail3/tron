@@ -2,8 +2,9 @@
 //!
 //! `resource::*` is the canonical capability surface for durable engine
 //! resources. Higher-level modules such as artifacts, goals, claims, evidence,
-//! decisions, generated UI, harness docs, and module package records should
+//! decisions, harness docs, and module package records should
 //! compose these functions instead of creating separate persistence planes.
+//! Native UI is deliberately domain-owned and is not a generic resource kind.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;

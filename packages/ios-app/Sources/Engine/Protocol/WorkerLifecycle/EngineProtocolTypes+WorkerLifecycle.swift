@@ -385,7 +385,6 @@ enum WorkerLifecycleResourceKind: String, CaseIterable, Sendable {
     case conformanceReport = "worker_package_conformance_report"
     case launchAttempt = "worker_launch_attempt"
     case catalogDiscoveryReport = "catalog_discovery_report"
-    case uiSurface = "ui_surface"
 }
 
 struct ResourceListRequestDTO: Codable, Equatable, Sendable {

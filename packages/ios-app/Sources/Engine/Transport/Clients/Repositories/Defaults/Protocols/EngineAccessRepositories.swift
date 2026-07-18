@@ -81,6 +81,40 @@ protocol SettingsRepository: AnyObject {
     func resetToDefaults(idempotencyKey: EngineIdempotencyKey) async throws -> ServerSettingsSnapshot
 }
 
+// MARK: - Native UI Repository
+
+/// Production boundary for deterministic A2UI definitions and their durable
+/// stream. SwiftUI never invokes engine capabilities directly.
+@MainActor
+protocol NativeUIRepository: AnyObject {
+    var surfaceEvents: AsyncStream<NativeUIStreamDelivery> { get }
+
+    func prepareClient(_ catalog: NativeUIClientCatalogDTO) async throws
+    func getSurface(_ request: NativeUISurfaceRequest) async throws -> NativeUISurfaceSnapshotDTO
+    func reconstructSurface(_ request: NativeUISurfaceRequest) async throws -> NativeUISurfaceSnapshotDTO
+    func validate(_ definition: NativeUIDefinitionDTO) async throws -> NativeUIClient.ValidationResponse
+    func preview(_ definition: NativeUIDefinitionDTO) async throws -> NativeUIClient.RevisionResponse
+    func activate(
+        _ definition: NativeUIDefinitionDTO,
+        expectedActiveRevision: UInt64?
+    ) async throws -> NativeUIClient.RevisionResponse
+    func history(definitionId: String) async throws -> [NativeUIDefinitionRevisionDTO]
+    func rollback(
+        definitionId: String,
+        targetRevision: UInt64,
+        expectedActiveRevision: UInt64?
+    ) async throws -> NativeUIClient.RevisionResponse
+    func dismiss(surfaceId: String, sessionId: String?) async throws
+    func dispatchAction(
+        definitionId: String,
+        surfaceId: String,
+        functionId: String,
+        arguments: [String: NativeUIJSONValue],
+        idempotencyKey: String,
+        sessionId: String?
+    ) async throws -> NativeUIJSONValue
+}
+
 // MARK: - Auth Repository
 
 struct AuthSnapshot: Equatable {

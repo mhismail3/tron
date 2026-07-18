@@ -71,15 +71,6 @@ struct SettingsView: View {
         return "hourglass"
     }
 
-    private var selectedModelDisplayName: String {
-        if let model = dependencies.modelRepository.cachedModels.first(where: {
-            $0.id == settingsState.defaultModel
-        }) {
-            return model.formattedModelName
-        }
-        return settingsState.defaultModel.shortModelName
-    }
-
     var body: some View {
         settingsView
     }
@@ -184,9 +175,6 @@ struct SettingsView: View {
         switch page {
         case .engine:
             EngineSettingsPage(
-                settingsState: settingsState,
-                selectedModelDisplayName: selectedModelDisplayName,
-                updateServerSetting: updateServerSetting,
                 startServerOnboarding: { startOnboarding(prefill: $0) }
             )
         case .providers:
@@ -258,6 +246,7 @@ struct SettingsView: View {
                    dependencies.pairedServerStore.activeServer?.id == activeServerId,
                    dependencies.activeServerSelectionVersion == selectionVersion {
                     dependencies.applyServerSettingsSnapshot(fresh, for: activeServerId)
+                    dependencies.invalidateNativeUISurfaces()
                 }
             } catch {
                 if dependencies.pairedServerStore.activeServer?.id == activeServerId,
@@ -319,38 +308,4 @@ struct SettingsView: View {
         }
     }
 
-    private func updateServerSetting(_ mutation: SettingsMutation) {
-        let settingsRepository = dependencies.settingsRepository
-        let activeServerId = dependencies.pairedServerStore.activeServer?.id
-        let selectionVersion = dependencies.activeServerSelectionVersion
-        Task {
-            do {
-                try await settingsRepository.update(
-                    mutation,
-                    idempotencyKey: .userAction("settings.update")
-                )
-                let fresh = try await settingsRepository.get()
-                await MainActor.run {
-                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.activeServerSelectionVersion == selectionVersion
-                    else { return }
-                    settingsState.applyServerSettings(fresh)
-                    settingsState.isLoaded = true
-                    settingsState.loadError = nil
-                    if let activeServerId {
-                        dependencies.applyServerSettingsSnapshot(fresh, for: activeServerId)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.activeServerSelectionVersion == selectionVersion
-                    else { return }
-                    settingsState.rollbackToLastLoadedSettings(
-                        message: "Could not save server setting: \(error.localizedDescription)"
-                    )
-                }
-            }
-        }
-    }
 }

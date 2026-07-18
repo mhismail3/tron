@@ -145,6 +145,7 @@ pub mod module_lifecycle;
 pub mod module_registry;
 pub mod module_runtime;
 pub mod module_validation;
+pub mod native_ui;
 pub mod notifications;
 pub mod procedural;
 pub mod program_execution;

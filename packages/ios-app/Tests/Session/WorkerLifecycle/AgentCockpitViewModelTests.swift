@@ -18,15 +18,11 @@ struct AgentCockpitViewModelTests {
         repository.resourcesByKind[.package] = [
             Self.resource(id: "worker_package:local.echo:1.0.0", kind: .package, lifecycle: "installed")
         ]
-        repository.resourcesByKind[.uiSurface] = [
-            Self.resource(id: "ui_surface:surface-1", kind: .uiSurface, lifecycle: "active")
-        ]
         repository.resourcesByKind[.catalogDiscoveryReport] = [
             Self.resource(id: "catalog_discovery_report:7:invocation-1", kind: .catalogDiscoveryReport, lifecycle: "passed")
         ]
         repository.capabilityVisibility = Self.capabilityCockpitOverview()
         repository.moduleActivity = Self.moduleActivityOverview()
-        repository.inspections["ui_surface:surface-1"] = Self.surfaceInspection()
         let viewModel = AgentCockpitViewModel()
 
         await viewModel.refresh(
@@ -38,13 +34,10 @@ struct AgentCockpitViewModelTests {
 
         #expect(repository.overviewCallCount == 1)
         #expect(repository.listedKinds.contains(.package))
-        #expect(repository.listedKinds.contains(.uiSurface))
         #expect(repository.listedKinds.contains(.catalogDiscoveryReport))
         #expect(viewModel.overview.currentRevision == 7)
         #expect(viewModel.overview.packages.first?.packageId == "local.echo")
         #expect(viewModel.overview.discovery.reports.first?.resourceId == "catalog_discovery_report:7:invocation-1")
-        #expect(viewModel.overview.runtimeSurfaces.first?.surface.title == "Runtime")
-        #expect(viewModel.overview.runtimeSurfaces.first?.resourceRef.kind == "ui_surface")
         #expect(repository.moduleActivityOverviewCallCount == 1)
         #expect(repository.lastModuleActivitySessionId == "test-session")
         #expect(repository.lastModuleActivityWorkspaceId == "test-workspace")

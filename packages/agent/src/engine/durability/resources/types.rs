@@ -7,12 +7,6 @@ use serde_json::Value;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, InvocationId, TraceId, WorkerId};
 
-/// Built-in generated UI resource kind.
-pub const UI_SURFACE_KIND: &str = "ui_surface";
-/// Built-in generated UI resource schema id.
-pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
-/// Runtime UI surface schema version rendered by the client shell.
-pub const UI_SURFACE_SCHEMA_VERSION: u64 = 1;
 /// Built-in catalog discovery report resource kind.
 pub const CATALOG_DISCOVERY_REPORT_KIND: &str = "catalog_discovery_report";
 /// Built-in catalog discovery report resource schema id.

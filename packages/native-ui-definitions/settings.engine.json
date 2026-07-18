@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "tron.native-ui.definition.v1",
+  "definitionId": "settings.engine",
+  "catalogId": "https://tron.local/native-ui/catalogs/sheet/v1",
+  "catalogRevision": 1,
+  "lifecycle": "persistent",
+  "presentation": {
+    "title": "Engine",
+    "detents": ["large"],
+    "showsDismiss": false
+  },
+  "messages": [
+    {
+      "version": "v0.9.1",
+      "createSurface": {
+        "surfaceId": "settings.engine",
+        "catalogId": "https://tron.local/native-ui/catalogs/sheet/v1"
+      }
+    },
+    {
+      "version": "v0.9.1",
+      "updateComponents": {
+        "surfaceId": "settings.engine",
+        "components": [
+          {"id":"root","component":"Surface","child":"settings-scroll","modifiers":[{"name":"frame","maxWidth":"infinity","alignment":"leading"}]},
+          {"id":"settings-scroll","component":"Scroll","child":"settings-content","axis":"vertical"},
+          {"id":"settings-content","component":"AdaptiveColumns","children":["defaults-section","context-section","transcription-section","tailscale-section"],"minimumColumnWidth":320,"modifiers":[{"name":"padding","edges":"all","value":16}]},
+          {"id":"defaults-section","component":"Section","title":"Defaults","children":["defaults-card","defaults-caption"]},
+          {"id":"defaults-card","component":"GlassCard","children":["workspace-button","defaults-divider","model-button"]},
+          {"id":"workspace-button","component":"Button","label":"Workspace","value":{"path":"/defaultWorkspaceDisplay"},"icon":"folder","action":{"clientFunction":{"name":"resourcePicker","revision":1,"arguments":{"kind":"workspace","selected":{"path":"/defaultWorkspace"}}},"resultAction":{"serverCapability":{"functionId":"settings::update","argumentTemplate":{"expectedSpecHash":{"path":"/specHash"},"settings":{"server":{"defaultWorkspace":{"$result":"value"}}}}}}}},
+          {"id":"defaults-divider","component":"Divider"},
+          {"id":"model-button","component":"Button","label":"Model","value":{"path":"/defaultModelDisplay"},"icon":"cpu","action":{"clientFunction":{"name":"resourcePicker","revision":1,"arguments":{"kind":"model","selected":{"path":"/defaultModel"}}},"resultAction":{"serverCapability":{"functionId":"settings::update","argumentTemplate":{"expectedSpecHash":{"path":"/specHash"},"settings":{"server":{"defaultModel":{"$result":"value"}}}}}}}},
+          {"id":"defaults-caption","component":"Text","text":"These defaults are owned by the active server and used for new sessions.","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"context-section","component":"Section","title":"Context","children":["threshold-card","threshold-caption","preserve-card","preserve-caption"]},
+          {"id":"threshold-card","component":"GlassCard","children":["threshold-slider"]},
+          {"id":"threshold-slider","component":"Slider","label":"Compaction threshold","icon":"gauge.with.dots.needle.67percent","value":{"path":"/compactionThreshold"},"minimum":0.10,"maximum":0.85,"step":0.05,"format":"percent","commit":"interactionEnd","action":{"serverCapability":{"functionId":"settings::update","argumentTemplate":{"expectedSpecHash":{"path":"/specHash"},"settings":{"context":{"compactor":{"triggerTokenThreshold":{"$event":"value"}}}}}}}},
+          {"id":"threshold-caption","component":"Text","text":"Compacts the session before the model context window fills.","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"preserve-card","component":"GlassCard","children":["preserve-stepper"]},
+          {"id":"preserve-stepper","component":"Stepper","label":"Recent turns to preserve","icon":"arrow.counterclockwise.circle","value":{"path":"/preserveRecentCount"},"minimum":0,"maximum":10,"step":1,"action":{"serverCapability":{"functionId":"settings::update","argumentTemplate":{"expectedSpecHash":{"path":"/specHash"},"settings":{"context":{"compactor":{"preserveRecentCount":{"$event":"value"}}}}}}}},
+          {"id":"preserve-caption","component":"Text","text":"Keeps this many recent turns verbatim during compaction.","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"transcription-section","component":"Section","title":"Transcription","children":["transcription-card","transcription-caption"]},
+          {"id":"transcription-card","component":"GlassCard","children":["transcription-toggle"]},
+          {"id":"transcription-toggle","component":"Toggle","label":"Local transcription","icon":"mic","value":{"path":"/transcriptionEnabled"},"action":{"serverCapability":{"functionId":"settings::update","argumentTemplate":{"expectedSpecHash":{"path":"/specHash"},"settings":{"server":{"transcription":{"enabled":{"$event":"value"}}}}}}}},
+          {"id":"transcription-caption","component":"Text","text":"Loads local speech recognition when the active server restarts.","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"tailscale-section","component":"Section","title":"Tailscale","visible":{"path":"/hasTailscaleAddress"},"children":["tailscale-card","tailscale-caption"]},
+          {"id":"tailscale-card","component":"GlassCard","children":["tailscale-value"]},
+          {"id":"tailscale-value","component":"Text","text":{"path":"/tailscaleAddress"},"label":"Tailscale address","icon":"network","selectable":true,"style":"code"},
+          {"id":"tailscale-caption","component":"Text","text":"Reported by your Mac. This address is read-only on iPhone.","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]}
+        ]
+      }
+    }
+  ]
+}

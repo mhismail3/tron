@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::engine::{
     CATALOG_DISCOVERY_REPORT_KIND, EffectClass, EngineHostHandle, EngineResource,
     FunctionDefinition, ListResources, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
-    UI_SURFACE_KIND, WorkerDefinition,
+    WorkerDefinition,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -246,23 +246,10 @@ pub(super) async fn resource_evidence(
         })
         .await
         .map_err(engine_error)?;
-    let surfaces = engine_host
-        .list_resources(ListResources {
-            kind: Some(UI_SURFACE_KIND.to_owned()),
-            scope: None,
-            lifecycle: Some("active".to_owned()),
-            limit: 25,
-        })
-        .await
-        .map_err(engine_error)?;
     Ok(json!({
         "catalogDiscoveryReports": {
             "recentCount": reports.len(),
             "latest": reports.iter().max_by_key(|resource| resource.updated_at).map(resource_summary)
-        },
-        "runtimeSurfaces": {
-            "activeCount": surfaces.len(),
-            "latest": surfaces.iter().max_by_key(|resource| resource.updated_at).map(resource_summary)
         }
     }))
 }

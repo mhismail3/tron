@@ -389,7 +389,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/EventTypeRegistryTests \
   -only-testing:TronMobileTests/ErrorEventProjectionTests \
   -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
-  -only-testing:TronMobileTests/GeneratedUIRendererTests
+  -only-testing:TronMobileTests/NativeUIRuntimeTests
 ```
 
 ### Simulator Deep-Link Smoke Test
@@ -657,12 +657,13 @@ and move straight to group assignment.
 3. Add navigation in the parent view or coordinator.
 4. Add deep link route if applicable
 
-### Adding Runtime Presentation
+### Adding Native UI Presentation
 
-1. Emit operation, trace ids, and runtime-owned presentation hints from the server or generated runtime data.
-2. Reuse the generic capability chip, detail sheet, result renderer, and `GeneratedRuntimeSurfaceView`.
-3. Add a reusable renderer under `UI/Capabilities/` or `UI/RuntimeSurfaces/` only when primitive trace/result rendering is not expressive enough.
-4. Add focused tests for the primitive payload/result shape and the generic sheet route.
+1. Extend the revisioned catalog only for a real product surface requirement.
+2. Add the component/property/modifier contract to both server and iOS validators and the precompiled `NativeUISurfaceView` renderer.
+3. Validate and preview the canonical A2UI definition, then activate it with compare-and-swap; do not add a second layout AST or publication path.
+4. Use Surface Lab's invalid catalog/modifier/client-function/capability fixtures and its in-app transactional stream proof before promoting a catalog revision. The proof invokes the production tree and batch assembler for insertion, update, visible removal, reorder, atomic commit, gap rejection, reconnect, and reconstruction.
+4. Add server golden/adversarial tests plus iPhone/iPad renderer, stream-recovery, and accessibility coverage in `NativeUIRuntimeTests`.
 
 ### Updating Event Handling
 

@@ -202,15 +202,6 @@ struct AgentCockpitActivityItem: Equatable, Identifiable, Sendable {
     var runtimeAuthorizationStatus: ModuleActivityGateStatusDTO?
 }
 
-struct AgentCockpitRuntimeSurface: Equatable, Identifiable, Sendable {
-    var surface: UiSurfaceDTO
-    var resourceRef: UiSurfaceRefDTO
-    var lifecycle: String
-    var updatedAt: String?
-
-    var id: String { resourceRef.resourceId }
-}
-
 enum AgentCockpitActionKind: String, Equatable, Sendable {
     case installProposal
     case enablePackage
@@ -252,7 +243,6 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var triggerTypes: [TriggerTypeCatalogDefinitionDTO]
     var catalogDecodeIssues: [CatalogDefinitionDecodeIssue]
     var packages: [AgentCockpitPackageRow]
-    var runtimeSurfaces: [AgentCockpitRuntimeSurface]
     var discovery: AgentCockpitDiscoveryOverview
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
     var routeStories: [AgentCockpitRouteStoryRow]
@@ -279,7 +269,6 @@ struct AgentCockpitOverview: Equatable, Sendable {
             triggerTypes: [],
             catalogDecodeIssues: [],
             packages: [],
-            runtimeSurfaces: [],
             discovery: .empty,
             capabilityVisibility: nil,
             routeStories: [],
@@ -296,7 +285,6 @@ enum AgentCockpitProjection {
     static func project(
         snapshot: CatalogWatchSnapshotDTO,
         resources: [EngineResourceDTO],
-        runtimeSurfaces: [AgentCockpitRuntimeSurface] = [],
         discoveryReports: [EngineResourceDTO] = [],
         capabilityVisibility: CapabilityCockpitOverviewDTO? = nil,
         moduleActivity: ModuleActivityOverviewDTO? = nil,
@@ -369,7 +357,6 @@ enum AgentCockpitProjection {
             triggerTypes: triggerTypes,
             catalogDecodeIssues: catalogDecodeIssues,
             packages: packages,
-            runtimeSurfaces: runtimeSurfaces.sorted { $0.surface.title < $1.surface.title },
             discovery: discovery,
             capabilityVisibility: capabilityVisibility,
             routeStories: capabilityVisibility?.routeStories?.map(routeStoryRow) ?? [],
@@ -582,8 +569,6 @@ enum AgentCockpitProjection {
         case .catalogDiscoveryReport:
             return []
         case .conformanceReport:
-            return []
-        case .uiSurface:
             return []
         }
     }
@@ -818,7 +803,6 @@ enum AgentCockpitProjection {
 
     private static func packageRow(_ resource: EngineResourceDTO) -> AgentCockpitPackageRow? {
         guard let kind = WorkerLifecycleResourceKind(rawValue: resource.kind) else { return nil }
-        guard kind != .uiSurface else { return nil }
         guard [.package, .installation, .proposal, .conformanceReport, .launchAttempt].contains(kind) else {
             return nil
         }

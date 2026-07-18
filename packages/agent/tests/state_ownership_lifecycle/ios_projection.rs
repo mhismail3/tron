@@ -279,18 +279,24 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     let settings_state =
         read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift");
     for required in [
-        "Observable state for server-authoritative settings",
+        "only settings projection retained outside native UI",
+        "struct SessionDefaultsSnapshot",
+        "minimal external session-defaults projection",
         "settingsRepository.get()",
         "settingsRepository.resetToDefaults",
         "clearServerSnapshot()",
-        "rollbackToLastLoadedSettings",
         "applyServerSettings",
-        "lastLoadedSettings = settings",
-        "Every field is overwritten from the active server's effective settings.",
+        "Only external defaults are copied",
     ] {
         assert!(
             settings_state.contains(required),
             "SettingsState server snapshot lifecycle missing `{required}`"
+        );
+    }
+    for retired in ["rollbackToLastLoadedSettings", "lastLoadedSettings"] {
+        assert!(
+            !settings_state.contains(retired),
+            "SettingsState must not retain duplicate generated-setting ownership `{retired}`"
         );
     }
 

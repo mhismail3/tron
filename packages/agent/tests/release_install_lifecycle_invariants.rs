@@ -735,7 +735,13 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     );
 
     let bundle = read_repo_file("scripts/tron.d/bundle.sh");
-    assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
+    assert!(bundle.contains("icon_source=\"$CONTRIBUTOR_DIR/AppIcon.icns\""));
+    assert!(
+        bundle.contains(
+            "icon_source=\"$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns\""
+        )
+    );
+    assert!(bundle.contains("cp \"$icon_source\""));
     assert!(!bundle.contains("$script_dir/AppIcon.icns"));
     assert!(bundle.contains("\"$SCRIPT_DIR/tron-version\" print"));
     assert!(bundle.contains("TRON_APPLE_MARKETING_VERSION)"));

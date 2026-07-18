@@ -136,6 +136,67 @@ fn logs_cli_owns_bounded_quoted_filters() {
     assert!(!service_script.contains("cmd_errors()") && !service_script.contains("FROM logs"));
 }
 
+#[test]
+fn native_ui_cli_handshakes_and_correlates_engine_responses() {
+    let probe = tempfile::tempdir().expect("native UI CLI probe should exist");
+    let bin = probe.path().join("bin");
+    std::fs::create_dir(&bin).expect("mock binary directory should exist");
+    let mock_websocat = bin.join("websocat");
+    std::fs::write(
+        &mock_websocat,
+        r#"#!/bin/bash
+set -e
+IFS= read -r hello
+hello_id="$(jq -er 'select(.type == "hello" and .protocolVersion == 1) | .id' <<<"$hello")"
+jq -cn --arg id "$hello_id" '{type:"hello.ok",id:$id,protocolVersion:1}'
+IFS= read -r request
+request_id="$(jq -er 'select(.type == "invoke" and .functionId == "native_ui::validate_definition") | .id' <<<"$request")"
+jq -cn '{type:"event",topic:"unrelated"}'
+jq -cn --arg id "$request_id" '{type:"response",id:$id,ok:true,result:{child:{error:null,value:{valid:true}}}}'
+"#,
+    )
+    .expect("mock websocat should be writable");
+    let mut permissions = std::fs::metadata(&mock_websocat)
+        .expect("mock websocat metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&mock_websocat, permissions)
+        .expect("mock websocat should be executable");
+    let auth = probe.path().join("auth.json");
+    std::fs::write(&auth, r#"{"bearerToken":"probe-token"}"#)
+        .expect("probe auth should be writable");
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").expect("test PATH should exist")
+    );
+    let command = format!(
+        r#"print_error() {{ printf '%s\n' "$*" >&2; }}
+source '{}'
+ui_invoke native_ui::validate_definition '{{}}'
+"#,
+        repo_path("scripts/tron.d/ui.sh").display()
+    );
+    let output = Command::new("/bin/bash")
+        .args(["-c", &command])
+        .env("PATH", path)
+        .env("AUTH_FILE", auth)
+        .env("PROD_PORT", "9847")
+        .current_dir(repo_root())
+        .output()
+        .expect("native UI CLI probe should start");
+    assert!(
+        output.status.success(),
+        "native UI CLI handshake failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "{\n  \"valid\": true\n}"
+    );
+}
+
 fn git_output(args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)

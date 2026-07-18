@@ -80,7 +80,7 @@ struct MessageBubble: View {
             }
 
         case .systemEvent(let event):
-            SystemEventView(event: event, onTap: onTap)
+            SystemEventView(event: event, eventId: message.eventId, onTap: onTap)
 
         }
     }

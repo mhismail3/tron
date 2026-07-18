@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-17 (prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
+> Last verified: 2026-07-18 (A2UI v0.9.1 native UI runtime, generated Engine Settings and Compaction Detail pilots, Surface Lab, transactional stream recovery, and retired `ui_surface` renderer removal).
 
 ## Overview
 
@@ -10,8 +10,8 @@ The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
 keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
-messages, persists a local event cache for reconstruction, and renders generic
-runtime surfaces emitted by the engine. The session dashboard keeps its
+messages, persists a local event cache for reconstruction, and renders
+domain-owned native UI definitions through precompiled SwiftUI. The session dashboard keeps its
 workspace-grouped chat list and adds one compact Dashboard band backed by
 server-owned projections. The Dashboard sheet opens from the session list
 and starts with core engine visibility before progressively exposing module-plane
@@ -19,7 +19,7 @@ diagnostics. It surfaces capabilities grouped into user-facing areas,
 schema/health gaps, durable verification history, redacted
 `capability_binding::cockpit_overview` operation ownership/replacement facts,
 package lifecycle status, confirmation-backed lifecycle actions, activity, and
-active `ui_surface` resources without adding fixed product panels. The Activity
+the production Surface Lab without restoring the retired generic engine UI resource. The Activity
 tab renders the server-owned, invocation-scoped `module_activity::overview`
 projection instead of fabricating module activity locally, and the
 Capabilities tab renders operation modularity from server-owned cockpit
@@ -110,7 +110,7 @@ historical deleted-path campaigns remain available through Git history.
   server-owned module activity, capability binding cockpit visibility, and
   dynamic runtime surfaces. The primary chat conversation shell does not mount
   passive worker-runtime diagnostics.
-- Generic capability invocation chips and generic generated runtime surfaces.
+- Generic capability invocation chips and native runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
 
@@ -123,8 +123,8 @@ product-boundary tests are the regression gates for this boundary; retired
 product names do not remain as active app structure.
 Protocol code must also avoid broad product DTO buckets, product event payload
 files, public product clients, and product table models. Accepted DTOs live
-under server-domain owners such as worker lifecycle, module activity, and
-generated UI resources.
+under server-domain owners such as worker lifecycle, module activity, and the
+revision-pinned `native_ui` protocol.
 
 ## Directory Structure
 
@@ -173,7 +173,7 @@ Push:    AppDelegate token -> observable PushNotificationService -> system devic
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
-Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
+Surface: native_ui snapshot/stream -> validated staged tree -> NativeUISurfaceView
 Context: ContextBriefingButton/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
 Dashboard: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
@@ -710,7 +710,7 @@ UI delays use cancellation-aware Swift concurrency tasks.
 The retained runtime cockpit DTOs are accepted only where a server-owned module
 or resource surface exists: worker lifecycle catalog/resources,
 `module_activity::overview`, `capability_binding::cockpit_overview`, and
-generic `ui_surface` schemas. Unknown fields may be ignored for wire
+domain-owned `native_ui` schemas. Unknown fields may be ignored for wire
 forward evolution, but iOS must not preserve product-shaped optional fields as
 client-owned truth.
 Dynamic `AnyCodable` payload accessors preserve both JSON-decoded arrays and
@@ -898,116 +898,46 @@ See `events.md` for the current plugin categories and reconstruction boundary.
 
 ## Dynamic Runtime Surfaces
 
-`UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
-generic renderer for server/agent-authored runtime data. It uses native SwiftUI
-layout primitives and submits only generic action coordinates or encoded action
-payloads supplied by the runtime surface. Pure icon, formatting, array, and row
-preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
-It must not map fixed feature names into custom sheets.
+`UI/RuntimeSurfaces/NativeUI` is the sole generated-layout runtime. It decodes
+canonical A2UI v0.9.1 messages, validates Tron sheet catalog revision 1, stages
+transactional updates, and renders precompiled SwiftUI. It has no WebView,
+HTML/CSS/JavaScript, downloaded Swift, or unsigned-code path. Unsupported
+catalogs, components, properties, bindings, modifier combinations, and client
+functions fail closed before a tree becomes visible.
 
-The Dashboard opens from the session list, not Settings.
-`AgentCockpitPresentation.dashboardSummary(for:)` is the single presentation
-boundary for its compact band and large sheet summary card. The compact band
-uses the session-row icon width, icon-to-text spacing, and horizontal content
-inset so its icon, title, and description share the same visual columns as
-session rows. The sheet starts with one larger aggregate
-summary card derived from that presentation model. One neutral, untinted glass
-surface uses dividers instead of nested tinted cards, with one status header and
-concise Capabilities, Engine, and Recent activity rows. Quiet state is expressed
-once as “All Systems Quiet”; the activity row says “No recent work” and omits
-zero-valued activity facts. The status header and all three rows share one icon
-column and one text column. The rows cover qualified action/interface counts,
-workers, triggers, verification, and activity while the header owns the global
-issue count. The capability check action sits beside the complete fact stack,
-not inside its title line, so the button cannot inflate title-to-value spacing.
-Bounded action projections render returned counts as lower bounds,
-and missing projections render action counts as unavailable instead of
-relabeling catalog interfaces. The previous duplicate capability-verification
-summary, top-level worker/trigger explainer, nested green fills, and area-count
-metrics remain absent. The sheet
-orders Capabilities, Engine, then Activity, grouping agent-facing actions into
-user-facing areas before drilling into
-server-supplied operation owner,
-metadata/projection source labels, total/returned operation completeness,
-bounded resource-scan state, locked/built-in/module status, redacted
-replacement target, server-owned capability-pool role, runtime-routable versus
-producer-extensible versus kernel-evolution-only replacement class,
-readiness/next-action labels,
-replacement/shadow/extension eligibility, binding and shadow-trial attempts,
-active route state, route events, routed invocations,
-failed-closed/disabled/rolled-back route state, rollback/disable/abort
-availability, effect/risk, schema-health, worker, trigger, tags,
-request/response schema bodies, and safe verification details. Top-level
-Capabilities cards contain one title, one concise description, and only their
-meaningful Actions and Ownership facts, all aligned in the title text column;
-Engine cards may additionally show qualified engine-interface and worker facts.
-Healthy cards do not repeat status badges or worker boilerplate. Operation rows and
-detail summaries lead with server-owned friendly names and concise behavior
-descriptions while retaining canonical identifiers as secondary technical
-detail, with the canonical operation ID on its own final technical row. User-facing
-Dashboard copy calls provider/model-facing `capability::execute` operations
-“Actions” and calls lower-level typed catalog functions “Engine interfaces.”
-The latter are contracts used by Tron and its clients and are not presented as
-an additive agent-capability count; canonical Operation ID and Function ID
-labels remain in technical drill-down. The shared issue count covers degraded workers,
-deduplicated blocked or degraded module activity, malformed operation
-classification, failed-closed routes, incomplete operation/evidence
-projections, failed verification evidence, and Dashboard refresh failures. It
-appears in the Dashboard summary, while Activity renders a concise review card
-instead of repeating healthy badges on every capability area.
-Capability map version and recent `catalog_discovery_report` resources are
-rendered only inside cockpit evidence/detail surfaces, not as top-level
-telemetry.
-Capability modularity rows come from `capability_binding::cockpit_overview`,
-which is a server-owned redacted projection over registry metadata plus scoped
-binding/shadow-trial/route records. iOS may shape display labels and grouping,
-but it must not infer ownership class, replacement policy, readiness, route
-state, attempt state, or rollback availability locally. `capability_binding` is
-a projection source, not an operation owner. Catalog snapshot DTOs accept both
-camelCase client fixtures and the engine's snake_case catalog definitions at
-the protocol boundary so schema, owner, risk, and authority evidence are not
-misclassified as missing by presentation code. The top-level cockpit must stay
-high-signal; binding, shadow-trial, route, readiness, scan completeness, and
-rollback details belong in group and operation drill-down. Agent-facing group
-summaries describe modular replacement/extension ownership without mixing in
-engine-locked counts. Activity owns recent verification reports alongside
-runtime work. Engine owns the Engine Core summary and inspectable
-kernel/governance groups, keeping the trust substrate visible without
-presenting it as ordinary session capability inventory.
-Dashboard, capability group, and operation cards use the whole glass container
-as the disclosure target instead of decorative chevron glyphs; drill-down is
-communicated by the surface hierarchy and tap target, while functional
-navigation and expansion controls keep their own directional icons.
-The verify action can request a new
-`catalog_discovery::conformance_report`; that action writes durable
-report/stream evidence only and does not execute discovered functions. Deeper
-worker/package/surface tabs appear only when there is server evidence to inspect. The
-Surfaces tab lists active `ui_surface` resources through the same generic
-`resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
-payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
-Its Activity tab renders invocation-scoped `module_activity::overview`
-summaries plus bounded catalog-verification history from the server:
-active/waiting/blocked/degraded status, generic timeline entries, authority
-labels, touched-resource summaries, and
-rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
-module resource payloads, invent activity states, own redaction policy, or
-mount fixed source-control, memory, process, subagent, notification, skill,
-approval, work, or work-dashboard panels. These generic surfaces also do not
-reintroduce broad product DTOs, product event variants, or product table-backed
-state.
-`Session/WorkerLifecycle/AgentCockpitPresentation.swift` is the sole
-presentation boundary for the Activity tab's narrative grouping. It maps each
-server-reported item exactly once into Needs review, Needs you, Active work, or
-Recent activity from the explicit server status; unknown or completed states
-remain truthful recent activity rather than being inferred from visual
-position. The separate duplicate module-activity summary card and projection
-path are absent. `UI/AgentCockpit/AgentCockpitTabViews.swift` owns tab
-selection and Capabilities, Activity, Engine, worker, package, and generated
-surface composition so `AgentCockpitViews.swift` remains sheet orchestration.
-The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
-and shared `TronSegmentedControl` tabs rather than a native segmented picker.
-Empty state is allowed when no runtime surface is published; a hardcoded sample
-surface is not.
+`NativeUISurfaceController` installs a bundled or cached last-known-good tree,
+negotiates the exact client-function catalog, then loads server truth. The
+`native_ui.surface` consumer uses the durable engine cursor and acknowledges
+records while `NativeUIBatchAssembler` enforces bounded batches, monotonic
+cursors, atomic commit, and reconstruction on a gap, duplicate conflict,
+invalid message, missing commit, or backpressure. Server switches rebuild the
+repository/client, cancel the old subscription, and namespace local caches by
+server identity. Every reconstructed snapshot carries the highest per-surface
+sequence it represents. Records at or below that barrier are stale and ignored;
+only the next sequence may mutate the candidate. Stream commits are immediately
+compacted into a bounded local last-known-good snapshot, then reconciled with a
+server snapshot so presentation metadata and the sequence barrier remain exact.
+
+The component catalog covers presentation, layout, display, controls, and a
+narrow `NativeSlot`. Modifiers are ordered because SwiftUI modifier order is
+semantic; validation checks applicability and numeric bounds. Compact/regular
+overrides are resolved from the actual horizontal size class, and reduced
+motion disables schema animation. Actions resolve bound values only into
+registered server capabilities or the revisioned advertised native bridge
+(`dismiss`, navigation, copy, URL opening, resource/file selection, and camera).
+OS permission prompts remain authoritative.
+
+Engine Settings keeps pairing, server switching, and repair in the hardcoded
+offline-capable shell, then mounts `settings.engine`. Only default workspace and
+model are retained in `SessionDefaultsSnapshot` for onboarding/new-session
+consumers; the other generated fields have no duplicate `SettingsState`
+ownership. Compaction Detail mounts `session.compaction_detail` from the durable
+compaction event, persists the last validated transient snapshot, restores it
+for the same server/session after reconnect or relaunch, and records an offline
+dismissal tombstone. Surface Lab is always available from the Dashboard and
+uses the same production decoder, validator, renderer, stream, action,
+preview/activation, history, fallback, and rollback paths—there is no test-only
+renderer or validation bypass.
 
 ## Settings And Theme Boundaries
 

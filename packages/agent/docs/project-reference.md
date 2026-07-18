@@ -125,7 +125,7 @@ Use these owners:
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
-generated UI resources. Owner-private files or tables are acceptable only as
+domain-owned native UI revisions. Owner-private files or tables are acceptable only as
 documented cache or substrate boundaries with source-owned static guards; they
 are not policy, lineage, or product truth.
 
@@ -537,7 +537,7 @@ migrations, or repo-managed skills.
 Accepted Phase 3 Slice 24J records broad product DTO resurrection as an
 accepted rejected-shape containment baseline. Accepted iOS DTO breadth remains
 module/resource-owned (`module_activity`, worker lifecycle resource DTOs, and
-generic `ui_surface` schemas), source guards reject broad product DTO buckets,
+the revision-pinned `native_ui` protocol), source guards reject broad product DTO buckets,
 product protocol namespaces, product event payloads, and product table names,
 and the primitive loop event catalog remains the source of event truth.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
@@ -2568,11 +2568,68 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, accepted `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, accepted `capability_binding_request`, `capability_binding_decision`, `capability_binding_policy`, `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, `capability_shadow_trial_evidence`, `capability_replacement_candidate`, `capability_route_binding`, `capability_route_activation`, `capability_route_event`, and `capability_route_rollback` governance records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, source-provenance, governance, memory, schedule, device/notification, import/repository/update/program-execution, prompt-artifact, and agent-result records; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state. Native UI is intentionally not a generic engine resource kind. |
+| `native_ui_definition_revisions`, `native_ui_active_definitions`, `native_ui_transient_surfaces` | Domain-owned immutable A2UI definition revisions, compare-and-swap active pointers, and session/event-scoped transient snapshots with active/dismissed/expired lifecycle. |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 
 The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Fresh storage contains no branches, push-token tables, cron tables, constitution audit tables, session profiles, worktree overrides, prompt queue events, config mutation events, rules/skills/hooks events, or deleted product catalog tables.
+
+---
+
+## Native UI Definitions
+
+`domains/native_ui` is a feature domain outside the universal engine core. It
+is pinned to the canonical [A2UI v0.9.1 protocol](https://github.com/a2ui-project/a2ui/blob/main/specification/v0_9_1/docs/a2ui_protocol.md)
+message sequences and Tron sheet catalog revision 1. The upstream placeholder
+Swift core and renderer are not dependencies: iOS decodes the
+protocol directly and maps only catalog-approved components and ordered,
+applicable modifiers to precompiled SwiftUI. A2UI v1 requires a separately
+validated compatibility and catalog revision change.
+
+Definitions move through one publication seam: validate, create an isolated
+preview, explicitly activate with an expected-active-revision compare-and-swap,
+then inspect history or roll back. Invalid definitions, stale capability/client
+function contracts, corrupt active revisions, unsupported catalogs, and failed
+stream batches never replace the last known-good tree. Bundled definitions for
+`settings.engine`, `session.compaction_detail`, and `lab.catalog` are the
+emergency fallback. The developer CLI invokes the same live capabilities:
+
+```bash
+scripts/tron ui validate definition.json
+scripts/tron ui preview definition.json
+scripts/tron ui activate definition.json
+scripts/tron ui history settings.engine
+scripts/tron ui rollback settings.engine 1
+```
+
+The `native_ui.surface` topic uses the engine's existing durable cursors,
+polling, acknowledgement, and gap recovery. iOS stages complete transactional
+batches under explicit count, size, and queue limits; only a validated commit
+swaps the visible tree. Gaps, malformed records, interrupted batches, and slow
+consumers request reconstruction. Switching servers cancels subscriptions and
+namespaces or clears server-owned caches and staged state. Snapshot projection
+and stream publication share one serialized domain boundary, so the returned
+`surfaceSequence` is an exact barrier: the snapshot contains every update at or
+below it, and iOS accepts only the next per-surface sequence.
+
+Server actions can name only registered capability contracts and execute
+through normal engine invocation authority and idempotency. Client actions can
+name only exact functions in the paired iOS client's revisioned advertised
+catalog. The paired server is trusted to call those advertised functions;
+native OS permission prompts remain authoritative. This same publication seam
+is the future agent-authoring boundary—model generation adds no bypass around
+validation, preview, approval, activation, or rollback.
+
+Engine Settings projects exactly workspace, model, compaction threshold,
+preserve-recent count, transcription enabled, and an optional read-only
+Tailscale address. iOS retains only `SessionDefaultsSnapshot` for workspace and
+model consumers outside the surface. Compaction Detail derives from the durable
+`compact.boundary` event, persists active/dismissed transient lifecycle by
+server/session/event identity, restores an active local last-known-good sheet,
+and expires when that source event is no longer valid. Surface Lab uses the
+same decoder, validator, renderer, stream, action, preview, activation, history,
+fallback, and rollback paths as both product pilots.
 
 ---
 
@@ -2664,14 +2721,14 @@ packages/ios-app/Sources/
   binding-policy, shadow-trial, and dynamic route facts into route-story cards,
   operation summaries, and drill-down details without exposing raw operation
   internals, grants, authority ids, or resource handles at top level.
-  Deeper worker/package/surface tabs appear only when server evidence exists.
+  Deeper worker/package tabs appear only when server evidence exists. Surface
+  Lab is always available as the production native-UI conformance harness.
   The sheet renders live worker lifecycle rows, capability schema/health gaps,
   package lifecycle status,
   redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, server-owned `module_activity::overview`
-  active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context, and active
-  `ui_surface` resources through generic engine data using the standard
-  liquid-glass sheet chrome and shared segmented tab control. The Activity tab
+  active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context,
+  plus Surface Lab through the domain-owned native UI runtime. The Activity tab
   groups every explicit server status exactly once into Needs review, Needs you,
   Active work, or Recent activity. It does not issue a parallel summary request,
   retain a duplicate projection model, or fabricate catalog/package activity locally,
@@ -2685,10 +2742,11 @@ packages/ios-app/Sources/
   from projected counts. The primary chat shell does not mount a passive
   worker-runtime banner.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`. `DependencyContainerRuntimeIO` selects immutable transport-attempt, pairing-probe, and paired-token backends once at that boundary and forwards the attempt directive into both the initial `EngineClient` and every active-server rebuild. Production remains live URL-session transport plus `URLSessionPairingProbe` and the production Keychain backend; hosted unit tests inject handled attempts, a test-target inert pairing probe, and a task-owned in-memory token backend without environment checks inside those owners.
-- **Generic runtime rendering**: server-owned runtime data, including data
-  written through agent operations, renders through
-  `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into
-  custom sheets.
+- **Native runtime rendering**: `native_ui` owns A2UI decoding, catalog
+  validation, revisions, publication, transient lifecycle, and reconstruction.
+  iOS renders only the revision-pinned precompiled SwiftUI catalog through
+  `NativeUISurfaceView`; no HTML, JavaScript, downloaded Swift, or dynamic code
+  participates.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while the production `PairedServerTokenStore.Backend` preserves the exact `KeychainItem(service: "com.tron.mobile.bearer", account: serverId)` contract. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`. Hosted token backends are injected, memory-only, and emit balanced secret-free `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` identity records; they never call Keychain.
 - **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor. `EventStoreManager` predecessor-chains client replacement and load ownership, awaits database/completion effects for every accepted event, and uses one idempotent terminal drain: cancel/join the global lane, await `SessionRefreshService.shutdown()`, then cancel/join the load chain before an outer fixture closes its database. Shutdown does not finish the shared event bus or invent a process-termination hook.
@@ -2705,8 +2763,8 @@ Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> Ch
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
-Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
-Dashboard: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
+Surface: native_ui snapshot/stream -> staged validation -> atomic NativeUISurfaceView tree swap
+Dashboard: SessionSidebar -> WorkerLifecycleRepository/native_ui -> cockpit facts + Surface Lab
 ```
 
 The camera child sheet mounts before AVFoundation warm-up and uses the viewport

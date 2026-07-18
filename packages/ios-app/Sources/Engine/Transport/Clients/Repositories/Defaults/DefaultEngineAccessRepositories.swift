@@ -90,6 +90,104 @@ private extension SettingsMutation {
     }
 }
 
+// MARK: - Default Native UI Repository
+
+@MainActor
+final class DefaultNativeUIRepository: NativeUIRepository {
+    private let engineClient: EngineClient
+
+    init(engineClient: EngineClient) {
+        self.engineClient = engineClient
+    }
+
+    var surfaceEvents: AsyncStream<NativeUIStreamDelivery> {
+        engineClient.nativeUISurfaceEvents
+    }
+
+    func prepareClient(_ catalog: NativeUIClientCatalogDTO) async throws {
+        _ = try await engineClient.ensureNativeUISurfaceSubscription()
+        _ = try await engineClient.nativeUI.registerClientCatalog(
+            catalog,
+            idempotencyKey: .userAction("native-ui-register-catalog")
+        )
+    }
+
+    func getSurface(_ request: NativeUISurfaceRequest) async throws -> NativeUISurfaceSnapshotDTO {
+        try await engineClient.nativeUI.getSurface(request)
+    }
+
+    func reconstructSurface(_ request: NativeUISurfaceRequest) async throws -> NativeUISurfaceSnapshotDTO {
+        try await engineClient.nativeUI.reconstructSurface(request)
+    }
+
+    func validate(_ definition: NativeUIDefinitionDTO) async throws -> NativeUIClient.ValidationResponse {
+        try await engineClient.nativeUI.validate(definition)
+    }
+
+    func preview(_ definition: NativeUIDefinitionDTO) async throws -> NativeUIClient.RevisionResponse {
+        try await engineClient.nativeUI.createPreview(
+            definition,
+            idempotencyKey: .userAction("native-ui-preview")
+        )
+    }
+
+    func activate(
+        _ definition: NativeUIDefinitionDTO,
+        expectedActiveRevision: UInt64?
+    ) async throws -> NativeUIClient.RevisionResponse {
+        try await engineClient.nativeUI.activate(
+            definition,
+            expectedActiveRevision: expectedActiveRevision,
+            idempotencyKey: .userAction("native-ui-activate")
+        )
+    }
+
+    func history(definitionId: String) async throws -> [NativeUIDefinitionRevisionDTO] {
+        try await engineClient.nativeUI.history(definitionId: definitionId)
+    }
+
+    func rollback(
+        definitionId: String,
+        targetRevision: UInt64,
+        expectedActiveRevision: UInt64?
+    ) async throws -> NativeUIClient.RevisionResponse {
+        try await engineClient.nativeUI.rollback(
+            definitionId: definitionId,
+            targetRevision: targetRevision,
+            expectedActiveRevision: expectedActiveRevision,
+            idempotencyKey: .userAction("native-ui-rollback")
+        )
+    }
+
+    func dismiss(surfaceId: String, sessionId: String?) async throws {
+        _ = try await engineClient.nativeUI.dismissSurface(
+            surfaceId: surfaceId,
+            sessionId: sessionId,
+            idempotencyKey: .userAction("native-ui-dismiss")
+        )
+    }
+
+    func dispatchAction(
+        definitionId: String,
+        surfaceId: String,
+        functionId: String,
+        arguments: [String: NativeUIJSONValue],
+        idempotencyKey: String,
+        sessionId: String?
+    ) async throws -> NativeUIJSONValue {
+        let response = try await engineClient.nativeUI.dispatchAction(
+            definitionId: definitionId,
+            surfaceId: surfaceId,
+            functionId: functionId,
+            arguments: arguments,
+            actionIdempotencyKey: idempotencyKey,
+            sessionId: sessionId,
+            invocationIdempotencyKey: .userAction("native-ui-dispatch")
+        )
+        return response.result
+    }
+}
+
 // MARK: - Default Auth Repository
 
 @MainActor

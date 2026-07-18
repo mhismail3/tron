@@ -5,8 +5,9 @@ extension SourceGuardTests {
     @Test("Local transcription remains Engine settings policy")
     func testLocalTranscriptionRemainsEngineSettingsPolicy() throws {
         let iosRoot = iosAppRoot()
-        let engineSource = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineSettingsPage.swift"),
+        let engineDefinition = try String(
+            contentsOf: iosRoot.deletingLastPathComponent()
+                .appendingPathComponent("native-ui-definitions/settings.engine.json"),
             encoding: .utf8
         )
         let voiceSettingsPath = iosRoot.appendingPathComponent(
@@ -14,11 +15,11 @@ extension SourceGuardTests {
         )
 
         #expect(!FileManager.default.fileExists(atPath: voiceSettingsPath.path))
-        #expect(engineSource.contains("label: \"Local transcription\""))
-        #expect(engineSource.contains("updateServerSetting(.transcriptionEnabled(enabled))"))
-        #expect(!engineSource.contains("label: \"Log level\""))
-        #expect(!engineSource.contains("label: \"Retention\""))
-        #expect(!engineSource.contains("label: \"Storage cap\""))
+        #expect(engineDefinition.contains("Local transcription"))
+        #expect(engineDefinition.contains("/transcriptionEnabled"))
+        #expect(engineDefinition.contains("settings::update"))
+        #expect(!engineDefinition.contains("Log level"))
+        #expect(!engineDefinition.contains("Storage cap"))
     }
 
     @Test("Voice recording cancels when leaving chat")

@@ -218,6 +218,11 @@ fn repo_managed_skills_and_skill_copy_wiring_remain_absent() {
     for path in tracked_files
         .iter()
         .filter(|path| path.starts_with("packages/agent/src/") && path.ends_with(".rs"))
+        // `git ls-files` includes tracked paths deleted in the working tree.
+        // Policy still checks those path names above, while source scanning
+        // must skip a deletion so broad pre-commit CI can validate clean-break
+        // removals before they are staged.
+        .filter(|path| repo_root.join(path).is_file())
         .filter(|path| {
             !path.ends_with("_tests.rs")
                 && !path.ends_with("/tests.rs")

@@ -1,16 +1,13 @@
 //! Privileged primitive query runtime.
 //!
-//! Catalog, worker, storage, and generated-UI primitives need access
+//! Catalog, worker, and storage primitives need access
 //! to host-owned catalog and ledger state. The response contracts live here so
 //! `EngineHost` stays a coordinator rather than a primitive response bucket.
 
 use serde_json::{Value, json};
 
-use super::{catalog, storage, ui, worker};
+use super::{catalog, storage, worker};
 use crate::engine::catalog::discovery::{ActorContext, FunctionQuery};
-use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, UpdateResource,
-};
 use crate::engine::invocation::model::{CausalContext, Invocation};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::WorkerId;
@@ -29,9 +26,6 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition>;
     fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool>;
     fn unregister_worker(&mut self, id: &WorkerId, owner_actor: &str) -> Result<()>;
-    fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
-    fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
-    fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport>;
     fn storage_checkpoint(&self) -> Result<crate::shared::storage::StorageCheckpointReport>;
     fn storage_export_snapshot(
@@ -56,13 +50,6 @@ pub(in crate::engine) fn dispatch(
         worker::GET_FUNCTION => worker_get(host, invocation),
         worker::HEALTH_FUNCTION => worker_health(host, invocation),
         worker::DISCONNECT_FUNCTION => worker_disconnect(host, invocation),
-        ui::CREATE_SURFACE_FUNCTION
-        | ui::UPDATE_SURFACE_FUNCTION
-        | ui::INSPECT_SURFACE_FUNCTION
-        | ui::VALIDATE_SURFACE_FUNCTION
-        | ui::EXPIRE_SURFACE_FUNCTION
-        | ui::DISCARD_SURFACE_FUNCTION
-        | ui::SUBMIT_ACTION_FUNCTION => ui::dispatch(host, invocation),
         storage::STATS_FUNCTION => storage_stats(host),
         storage::CHECKPOINT_FUNCTION => storage_checkpoint(host),
         storage::EXPORT_SNAPSHOT_FUNCTION => storage_export_snapshot(host, invocation),

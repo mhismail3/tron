@@ -25,39 +25,23 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testEngineSettingsUsesIPadLandscapeTwoColumnLayout() throws {
+    func testEngineSettingsUsesSharedNativeUIRuntime() throws {
         let content = try settingsPageSource(named: "EngineSettingsPage.swift")
 
-        XCTAssertTrue(
-            content.contains("SettingsAdaptiveLayout.usesIPadLandscapeLayout"),
-            "Engine settings should use the shared iPad-landscape branch"
-        )
-        XCTAssertTrue(
-            content.contains("private var landscapeContent: some View"),
-            "Engine settings needs a dedicated landscape projection"
-        )
-
-        let landscapeStart = try XCTUnwrap(
-            content.range(of: "private var landscapeContent: some View")?.lowerBound
-        )
-        let landscapeContent = content[landscapeStart..<content.endIndex]
-        XCTAssertNotNil(landscapeContent.range(of: "serversSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "transcriptionSection"))
-        XCTAssertNil(landscapeContent.range(of: "evidencePolicySection"))
-        XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
-        XCTAssertFalse(
-            landscapeContent.contains("protected" + "Branches" + "Section"),
-            "Protected branch policy is not a primitive settings card"
-        )
+        XCTAssertTrue(content.contains("NativeUISurfaceView("))
+        XCTAssertTrue(content.contains("definitionId: \"settings.engine\""))
+        XCTAssertTrue(content.contains("nativeUISurfaceRefreshVersion"))
+        XCTAssertTrue(content.contains("onTreeChange: applySessionDefaults"))
+        XCTAssertTrue(content.contains("applySessionDefaultsSnapshot"))
+        XCTAssertTrue(content.contains("EngineServersSection("))
+        XCTAssertFalse(content.contains("SettingsAdaptiveLayout"))
     }
 
     func testEngineSettingsDeletesProductPolicySections() throws {
         let content = try settingsPageSource(named: "EngineSettingsPage.swift")
 
-        XCTAssertTrue(content.contains("defaultsSection"))
-        XCTAssertTrue(content.contains("contextSection"))
+        XCTAssertFalse(content.contains("defaultsSection"))
+        XCTAssertFalse(content.contains("contextSection"))
         XCTAssertFalse(content.contains("evidencePolicySection"))
         XCTAssertFalse(content.contains("Log level"))
         XCTAssertFalse(content.contains("Verbose days"))
@@ -79,17 +63,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
     func testEngineSettingsPrimitiveCardsRenderForVisualQA() throws {
         let testState = IsolatedTestState(label: "engine-settings-render")
         testState.registerTeardown(with: self)
-        let settingsState = SettingsState()
-        settingsState.isLoaded = true
-        settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("tron-visual-qa")
-            .path
-        settingsState.defaultModel = "gpt-5.5"
-        let content = EngineSettingsPage(
-            settingsState: settingsState,
-            selectedModelDisplayName: "GPT-5.5",
-            updateServerSetting: { _ in }
-        )
+        let content = EngineSettingsPage()
         .environment(\.dependencies, testState.makeContainer())
         .frame(width: 430, height: 1_320)
         .background(Color(uiColor: .systemBackground))
@@ -174,15 +148,13 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertFalse(support.contains("ProvidersSettingsSummary"))
     }
 
-    func testEngineSettingsSurfacesActionableServerOwnedControlsInsideEnginePageOnly() throws {
+    func testEngineSettingsKeepsServerOwnedControlsOutOfHardcodedPage() throws {
         let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
 
-        XCTAssertTrue(engine.contains("label: \"Model\""))
-        XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.transcriptionEnabled(enabled))"))
-        XCTAssertTrue(engine.contains("EngineSettingsSection.transcription.rawValue"))
+        XCTAssertTrue(engine.contains("NativeUISurfaceView("))
+        XCTAssertFalse(engine.contains("updateServerSetting"))
+        XCTAssertFalse(engine.contains("label: \"Model\""))
         XCTAssertTrue(settingsMain.contains("MainSettingsGridDestination.order"))
         XCTAssertFalse(settingsMain.contains("Server-Owned"))
         XCTAssertFalse(settingsMain.contains("This iPhone"))

@@ -254,7 +254,7 @@ async fn resource_read_primitives_are_visible_to_engine_client_without_write_acc
     let listed = handle
         .invoke(host_invocation(
             "engine::invoke",
-            json!({"functionId": "resource::list", "payload": {"kind": "ui_surface", "limit": 25}}),
+            json!({"functionId": "resource::list", "payload": {"kind": "artifact", "limit": 25}}),
             client_context(),
         ))
         .await;
@@ -272,7 +272,7 @@ async fn resource_read_primitives_are_visible_to_engine_client_without_write_acc
             json!({
                 "functionId": "resource::create",
                 "payload": {
-                    "kind": "ui_surface",
+                    "kind": "artifact",
                     "scope": "session",
                     "payload": {"title": "client mutation must not run"}
                 },

@@ -29,7 +29,6 @@ final class AgentCockpitViewModel {
             let proposals = try await repository.listResources(kind: .proposal, lifecycle: nil, limit: 100)
             let conformanceReports = try await repository.listResources(kind: .conformanceReport, lifecycle: nil, limit: 100)
             let launchAttempts = try await repository.listResources(kind: .launchAttempt, lifecycle: nil, limit: 100)
-            let runtimeSurfaceResources = try await repository.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
             let discoveryReports = try await repository.listResources(kind: .catalogDiscoveryReport, lifecycle: nil, limit: 25)
             let capabilityVisibility = try await repository.capabilityCockpitOverview(
                 limit: 200,
@@ -41,11 +40,6 @@ final class AgentCockpitViewModel {
                 sessionId: sessionId,
                 workspaceId: workspaceId
             )
-            let runtimeSurfaces = try await inspectRuntimeSurfaces(
-                runtimeSurfaceResources.resources,
-                repository: repository
-            )
-
             let resourceResults = [
                 packages.resources,
                 installations.resources,
@@ -57,7 +51,6 @@ final class AgentCockpitViewModel {
             overview = AgentCockpitProjection.project(
                 snapshot: catalog,
                 resources: resourceResults,
-                runtimeSurfaces: runtimeSurfaces,
                 discoveryReports: discoveryReports.resources,
                 capabilityVisibility: capabilityVisibility,
                 moduleActivity: moduleActivity,
@@ -235,62 +228,12 @@ final class AgentCockpitViewModel {
         return manifest.mapValues { AnyCodable($0) }
     }
 
-    private func inspectRuntimeSurfaces(
-        _ resources: [EngineResourceDTO],
-        repository: any WorkerLifecycleRepository
-    ) async throws -> [AgentCockpitRuntimeSurface] {
-        var surfaces: [AgentCockpitRuntimeSurface] = []
-        for resource in resources {
-            guard let inspection = try await repository.inspectResource(resource.resourceId).inspection,
-                  let version = currentVersion(from: inspection),
-                  let surface = decodeSurface(from: version.payload)
-            else {
-                continue
-            }
-            surfaces.append(
-                AgentCockpitRuntimeSurface(
-                    surface: surface,
-                    resourceRef: UiSurfaceRefDTO(
-                        resourceId: inspection.resource.resourceId,
-                        versionId: version.versionId,
-                        kind: inspection.resource.kind,
-                        lifecycle: inspection.resource.lifecycle,
-                        surfaceId: surface.surfaceId,
-                        title: surface.title,
-                        purpose: surface.purpose,
-                        schemaVersion: surface.schemaVersion,
-                        expiresAt: surface.expiresAt,
-                        actions: surface.actions.map {
-                            UiActionSummaryDTO(
-                                actionId: $0.actionId,
-                                label: $0.label,
-                                expiresAt: $0.expiresAt,
-                                presentation: $0.presentation
-                            )
-                        }
-                    ),
-                    lifecycle: inspection.resource.lifecycle,
-                    updatedAt: inspection.resource.updatedAt
-                )
-            )
-        }
-        return surfaces
-    }
-
     private func currentVersion(from inspection: EngineResourceInspectionDTO) -> EngineResourceVersionDTO? {
         inspection.versions.first { version in
             version.versionId == inspection.resource.currentVersionId
         } ?? inspection.versions.last
     }
 
-    private func decodeSurface(from payload: [String: AnyCodable]?) -> UiSurfaceDTO? {
-        guard let payload,
-              let data = try? JSONEncoder().encode(payload)
-        else {
-            return nil
-        }
-        return try? JSONDecoder().decode(UiSurfaceDTO.self, from: data)
-    }
 }
 
 enum AgentCockpitError: LocalizedError, Equatable {

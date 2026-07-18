@@ -628,10 +628,7 @@ pub(super) fn grant_id(value: &str) -> Result<AuthorityGrantId> {
 }
 
 pub(super) fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
-    matches!(
-        namespace,
-        "catalog" | "worker" | "control" | "storage" | "ui"
-    )
+    matches!(namespace, "catalog" | "worker" | "control" | "storage")
 }
 
 pub(super) fn is_host_dispatched_primitive_function(function_id: &FunctionId) -> bool {

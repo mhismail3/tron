@@ -28,7 +28,8 @@ without rebuilding. Launch is bounded by `TRON_IOS_LAUNCH_TIMEOUT_SECONDS`,
 defaulting to 20 seconds.
 
 `stop` finds running `TronMobile.app/TronMobile` processes on the selected
-device and terminates them by PID.
+device and terminates them by PID. `status` and `stop` accept CoreDevice's
+space-padded process rows while still requiring the exact app executable path.
 
 Codex app toolbar actions are split by generic device class:
 

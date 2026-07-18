@@ -61,22 +61,8 @@ final class SheetCoordinator {
     }
 
     /// Show compaction detail sheet
-    func showCompactionDetail(
-        tokensBefore: Int,
-        tokensAfter: Int,
-        reason: String,
-        summary: String?,
-        preservedTurns: Int? = nil,
-        summarizedTurns: Int? = nil
-    ) {
-        present(.compactionDetail(CompactionDetailData(
-            tokensBefore: tokensBefore,
-            tokensAfter: tokensAfter,
-            reason: reason,
-            summary: summary,
-            preservedTurns: preservedTurns,
-            summarizedTurns: summarizedTurns
-        )))
+    func showCompactionDetail(eventId: String) {
+        present(.compactionDetail(CompactionDetailData(eventId: eventId)))
     }
 
     /// Show provider error detail sheet

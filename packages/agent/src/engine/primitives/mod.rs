@@ -14,9 +14,8 @@
 //! operational reads or rewrites after discard while leaving inspection
 //! available. `trigger::*` dispatches registered triggers back through the
 //! same trigger runtime used by transports and schedules, so queued trigger
-//! delivery is not a harness-only path. `ui::*` stores runtime UI surface
-//! resources, validates the bounded schema, and records generic action
-//! submissions without server-authored target routing.
+//! delivery is not a harness-only path. Product UI is deliberately domain-owned
+//! and does not exist as an engine primitive.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
@@ -45,7 +44,6 @@ pub(crate) mod storage;
 mod stores;
 pub(crate) mod stream;
 pub(crate) mod trigger;
-pub(crate) mod ui;
 pub(crate) mod worker;
 mod workers;
 
@@ -64,7 +62,6 @@ pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
-pub(crate) const UI_WORKER_ID: &str = "ui";
 
 /// One primitive function registration.
 pub(crate) struct PrimitiveFunctionRegistration {

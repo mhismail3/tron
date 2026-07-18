@@ -1,8 +1,8 @@
 //! Generic engine resource kernel.
 //!
 //! Resources are the durable object model for the primitive engine. Artifacts,
-//! goals, claims, evidence, decisions, approval requests/decisions, UI
-//! surfaces, catalog-discovery reports, module manifests, harness docs, inert
+//! goals, claims, evidence, decisions, approval requests/decisions,
+//! catalog-discovery reports, module manifests, harness docs, inert
 //! procedural records, procedural activation request/decision evidence, media
 //! artifacts, repository/import/program-execution metadata records, and files
 //! become typed resources with versioned payloads, links, lifecycle state,
@@ -12,8 +12,7 @@
 //! Ownership is split by concern: `types` holds public substrate structs,
 //! `definitions` and the type-definition modules register engine-owned
 //! substrate kinds, `validation` enforces the generic resource contract,
-//! `versions` owns payload hashing/current-version helpers, `ui_surface`
-//! validates the runtime UI surface payload, and `store` contains the in-memory
+//! `versions` owns payload hashing/current-version helpers, and `store` contains the in-memory
 //! and SQLite persistence implementations. Feature composition can register
 //! feature-owned definitions and reconcile source-owned payloads through the
 //! host boundary; the engine neither enumerates feature records nor imports
@@ -45,7 +44,6 @@ mod store;
 mod subagent_definitions;
 mod tool_source_definitions;
 mod types;
-mod ui_surface;
 mod update_diagnostics_definitions;
 mod validation;
 mod versions;
@@ -85,7 +83,6 @@ pub(crate) use module_runtime_definitions::MODULE_RUNTIME_STATE_PAYLOAD_SCHEMA_V
 pub(crate) use module_validation_definitions::MODULE_VALIDATION_REPORT_PAYLOAD_SCHEMA_VERSION;
 pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore};
 pub use types::*;
-pub(crate) use ui_surface::validate_ui_surface_payload;
 pub(crate) use web_research_definitions::{
     WEB_RESEARCH_REQUEST_PAYLOAD_SCHEMA_VERSION, WEB_RESEARCH_REVIEW_PAYLOAD_SCHEMA_VERSION,
     WEB_RESEARCH_SOURCE_PAYLOAD_SCHEMA_VERSION,

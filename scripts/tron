@@ -73,6 +73,7 @@ cmd_help() {
     echo "  bench           Performance benchmarks (run, bless, compare)"
     echo "  version         Print/check/sync centralized release version mirrors"
     echo "  setup           First-time project setup"
+    echo "  ui              Validate, preview, activate, inspect, or roll back native UI definitions"
     echo ""
     echo -e "${BOLD}Manual Deployment (workspace only):${NC}"
     echo "  preflight       Pre-deploy infrastructure check"
@@ -104,5 +105,6 @@ case "$1" in
     manual-deploy) shift; cmd_manual_deploy "$@" ;;
     install)   shift; cmd_install "$@" ;;
     setup)     shift; cmd_setup "$@" ;;
+    ui)        shift; cmd_ui "$@" ;;
     *) dispatch_runtime_command "$@" ;;
 esac

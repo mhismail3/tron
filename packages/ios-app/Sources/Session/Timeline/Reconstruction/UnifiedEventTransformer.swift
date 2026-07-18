@@ -340,7 +340,8 @@ extension UnifiedEventTransformer {
                 }
 
             case .compactBoundary:
-                if let message = transformPersistedEvent(event) {
+                if var message = transformPersistedEvent(event) {
+                    message.eventId = event.id
                     state.messages.append(message)
                 }
                 if let parsed = CompactBoundaryPayload(from: event.payload) {

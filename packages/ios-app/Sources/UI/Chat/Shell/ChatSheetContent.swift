@@ -30,12 +30,8 @@ struct ChatSheetContent: View {
 
         case .compactionDetail(let data):
             CompactionDetailSheet(
-                tokensBefore: data.tokensBefore,
-                tokensAfter: data.tokensAfter,
-                reason: data.reason,
-                summary: data.summary,
-                preservedTurns: data.preservedTurns,
-                summarizedTurns: data.summarizedTurns
+                sessionId: sessionId,
+                eventId: data.eventId
             )
 
         case .thinkingDetail(let content):

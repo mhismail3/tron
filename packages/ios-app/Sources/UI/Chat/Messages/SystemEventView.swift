@@ -4,6 +4,7 @@ import SwiftUI
 /// Consolidates rendering for all SystemEvent cases
 struct SystemEventView: View {
     let event: SystemEvent
+    var eventId: String?
     var onTap: ((MessageBubbleTapAction) -> Void)?
 
     var body: some View {
@@ -20,7 +21,6 @@ struct SystemEventView: View {
         let tokensBefore = event.compactionTokensBefore
         let tokensAfter = event.compactionTokensAfter
         let reason = event.compactionReason
-        let summary = event.compactionSummary
         CompactionNotificationView(
             isInProgress: isInProgress,
             tokensBefore: tokensBefore,
@@ -30,7 +30,7 @@ struct SystemEventView: View {
                 if let resourceId = event.contextControlActionResourceId {
                     onTap?(.contextControlAction(resourceId: resourceId))
                 } else {
-                    onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: event.compactionPreservedTurns, summarizedTurns: event.compactionSummarizedTurns))
+                    onTap?(.compaction(eventId: eventId))
                 }
             }
         )

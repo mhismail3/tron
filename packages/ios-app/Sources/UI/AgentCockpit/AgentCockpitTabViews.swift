@@ -168,23 +168,10 @@ extension AgentCockpitSheet {
     }
 
     private var surfacesTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if viewModel.overview.runtimeSurfaces.isEmpty {
-                CockpitEmptyState(
-                    symbol: "rectangle.3.group",
-                    title: "No surfaces",
-                    detail: "Module-authored runtime surfaces will appear here."
-                )
-            } else {
-                ForEach(viewModel.overview.runtimeSurfaces) { runtimeSurface in
-                    GeneratedRuntimeSurfaceView(
-                        surface: runtimeSurface.surface,
-                        resourceRef: runtimeSurface.resourceRef,
-                        observedVersionId: runtimeSurface.resourceRef.versionId
-                    )
-                }
-            }
-        }
+        SurfaceLabView(
+            repository: dependencies.nativeUIRepository,
+            cacheNamespace: dependencies.pairedServerStore.activeServer?.id ?? "unpaired"
+        )
     }
 
     private func routeStorySelection(
@@ -216,7 +203,7 @@ enum AgentCockpitTab: String, CaseIterable, Identifiable {
         case .workers: return "Workers"
         case .packages: return "Packages"
         case .activity: return "Activity"
-        case .surfaces: return "Surfaces"
+        case .surfaces: return "Surface Lab"
         }
     }
 
@@ -235,7 +222,7 @@ enum AgentCockpitTab: String, CaseIterable, Identifiable {
         var tabs: [Self] = [.capabilities, .engine, .activity]
         if !overview.workers.isEmpty { tabs.append(.workers) }
         if !overview.packages.isEmpty { tabs.append(.packages) }
-        if !overview.runtimeSurfaces.isEmpty { tabs.append(.surfaces) }
+        tabs.append(.surfaces)
         return tabs
     }
 }

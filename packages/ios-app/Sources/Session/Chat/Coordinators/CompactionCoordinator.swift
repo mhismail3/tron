@@ -87,7 +87,9 @@ final class CompactionCoordinator {
             summarizedTurns: pluginResult.summarizedTurns,
             contextControlActionResourceId: pluginResult.contextControlActionResourceId
         )
-        replaceInProgressMessage(compactionMessage, context)
+        var identifiedMessage = compactionMessage
+        identifiedMessage.eventId = pluginResult.eventId
+        replaceInProgressMessage(identifiedMessage, context)
     }
 
     private func replaceInProgressMessage(
@@ -99,6 +101,7 @@ final class CompactionCoordinator {
             withAnimation(.smooth(duration: 0.35)) {
                 context.updateMessage(at: index) { message in
                     message.content = replacement.content
+                    message.eventId = replacement.eventId
                 }
             }
             context.compactionInProgressMessageId = nil

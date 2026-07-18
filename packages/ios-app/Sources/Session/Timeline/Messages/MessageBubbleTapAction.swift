@@ -4,7 +4,9 @@ import Foundation
 /// Replaces 15 individual closure properties with a single `onTap` handler.
 enum MessageBubbleTapAction {
     case thinking(String)
-    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
+    /// Opens the generated detail surface by durable event identity. The tap
+    /// action must not carry a second copy of the compaction projection.
+    case compaction(eventId: String?)
     case contextControlAction(resourceId: String)
     case capabilityInvocation(CapabilityInvocationData)
     case capabilityInvocationGroup(CapabilityInvocationGroupData)

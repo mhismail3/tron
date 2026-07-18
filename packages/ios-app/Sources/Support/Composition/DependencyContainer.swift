@@ -125,6 +125,9 @@ final class DependencyContainer {
     /// Settings repository for server-authoritative settings.
     private(set) var settingsRepository: any SettingsRepository
 
+    /// Validated deterministic native UI surfaces and transactional updates.
+    private(set) var nativeUIRepository: any NativeUIRepository
+
     /// Auth repository for provider credentials.
     private(set) var authRepository: any AuthRepository
 
@@ -152,6 +155,11 @@ final class DependencyContainer {
     /// Incremented when local paired-server selection changes. Settings observes
     /// this to clear any server-backed snapshot before loading the new server.
     private(set) var activeServerSelectionVersion: Int = 0
+
+    /// Incremented after an out-of-band settings mutation (for example the
+    /// always-native reset command) so mounted generated surfaces reconstruct
+    /// from server truth even though the active server identity did not change.
+    private(set) var nativeUISurfaceRefreshVersion: Int = 0
 
     /// Incremented when auth.json changes on the server. Providers page observes this.
     private(set) var authVersion: Int = 0
@@ -271,6 +279,7 @@ final class DependencyContainer {
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
         agentRepository = client.agent
         settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
+        nativeUIRepository = DefaultNativeUIRepository(engineClient: client)
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
         transcriptionRepository = DefaultTranscriptionRepository(client: client.transcription)
@@ -379,14 +388,25 @@ final class DependencyContainer {
 
     func applyServerSettingsSnapshot(_ settings: ServerSettingsSnapshot, for serverId: String) {
         guard pairedServerStore.activeServer?.id == serverId else { return }
-        quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        if !settings.defaultModel.isEmpty {
-            defaultModel = settings.defaultModel
-        }
+        applySessionDefaultsSnapshot(.init(
+            defaultWorkspace: settings.defaultWorkspace ?? AppConstants.defaultWorkspace,
+            defaultModel: settings.defaultModel
+        ))
         pairedServerStore.updateMetadata(for: serverId) { server in
             server.lastConnectedAt = Date()
             server.lastKnownStatus = "Connected"
         }
+    }
+
+    func applySessionDefaultsSnapshot(_ snapshot: SessionDefaultsSnapshot) {
+        quickSessionWorkspace = snapshot.defaultWorkspace
+        if !snapshot.defaultModel.isEmpty {
+            defaultModel = snapshot.defaultModel
+        }
+    }
+
+    func invalidateNativeUISurfaces() {
+        nativeUISurfaceRefreshVersion &+= 1
     }
 
     // MARK: - Private Helpers
@@ -492,6 +512,7 @@ final class DependencyContainer {
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
         agentRepository = newClient.agent
         settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
+        nativeUIRepository = DefaultNativeUIRepository(engineClient: newClient)
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
         transcriptionRepository = DefaultTranscriptionRepository(client: newClient.transcription)

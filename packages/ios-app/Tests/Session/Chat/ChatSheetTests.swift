@@ -18,15 +18,14 @@ struct ChatSheetTests {
 
     @Test("Compaction detail has consistent id")
     func testCompactionDetailId() {
-        let data1 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let data2 = CompactionDetailData(tokensBefore: 200, tokensAfter: 100, reason: "other", summary: "sum")
+        let data1 = CompactionDetailData(eventId: "event-1")
+        let data2 = CompactionDetailData(eventId: "event-2")
 
         let sheet1 = ChatSheet.compactionDetail(data1)
         let sheet2 = ChatSheet.compactionDetail(data2)
 
-        // All compaction sheets share same id (only one can show at a time)
-        #expect(sheet1.id == sheet2.id)
-        #expect(sheet1.id == "compaction")
+        #expect(sheet1.id != sheet2.id)
+        #expect(sheet1.id == "compaction-event-1")
     }
 
     @Test("Context control sheet distinguishes overview and action detail")
@@ -52,7 +51,7 @@ struct ChatSheetTests {
 
     @Test("All sheet cases have unique base ids")
     func testAllCasesHaveUniqueBaseIds() {
-        let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
+        let compactionData = CompactionDetailData(eventId: "event")
         let capabilityData = testCapabilityInvocation(id: "capability_call", status: .success)
         let providerErrorData = ProviderErrorDetailData(
             provider: "test",
@@ -89,38 +88,17 @@ struct ChatSheetTests {
 
     // MARK: - CompactionDetailData Tests
 
-    @Test("CompactionDetailData stores all fields")
+    @Test("CompactionDetailData stores only durable event identity")
     func testCompactionDetailDataFields() {
-        let data = CompactionDetailData(
-            tokensBefore: 100000,
-            tokensAfter: 50000,
-            reason: "Context limit reached",
-            summary: "Summary text"
-        )
-
-        #expect(data.tokensBefore == 100000)
-        #expect(data.tokensAfter == 50000)
-        #expect(data.reason == "Context limit reached")
-        #expect(data.summary == "Summary text")
-    }
-
-    @Test("CompactionDetailData with nil summary")
-    func testCompactionDetailDataNilSummary() {
-        let data = CompactionDetailData(
-            tokensBefore: 80000,
-            tokensAfter: 40000,
-            reason: "Manual",
-            summary: nil
-        )
-
-        #expect(data.summary == nil)
+        let data = CompactionDetailData(eventId: "event-complete")
+        #expect(data.eventId == "event-complete")
     }
 
     @Test("CompactionDetailData equatable")
     func testCompactionDetailDataEquatable() {
-        let data1 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let data2 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let data3 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "different", summary: nil)
+        let data1 = CompactionDetailData(eventId: "event")
+        let data2 = CompactionDetailData(eventId: "event")
+        let data3 = CompactionDetailData(eventId: "other-event")
 
         #expect(data1 == data2)
         #expect(data1 != data3)
@@ -293,22 +271,14 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .settings)
     }
 
-    @Test("showCompactionDetail creates compaction sheet with data")
+    @Test("showCompactionDetail creates compaction sheet with durable identity")
     func testShowCompactionDetailCreatesCorrectSheet() {
         let coordinator = SheetCoordinator()
 
-        coordinator.showCompactionDetail(
-            tokensBefore: 100000,
-            tokensAfter: 50000,
-            reason: "Context limit",
-            summary: "Summary"
-        )
+        coordinator.showCompactionDetail(eventId: "event-sheet")
 
         if case .compactionDetail(let data) = coordinator.activeSheet {
-            #expect(data.tokensBefore == 100000)
-            #expect(data.tokensAfter == 50000)
-            #expect(data.reason == "Context limit")
-            #expect(data.summary == "Summary")
+            #expect(data.eventId == "event-sheet")
         } else {
             Issue.record("Expected compactionDetail sheet")
         }

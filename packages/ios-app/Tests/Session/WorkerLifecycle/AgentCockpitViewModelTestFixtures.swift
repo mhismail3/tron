@@ -24,56 +24,6 @@ extension AgentCockpitViewModelTests {
         )
     }
 
-    nonisolated static func surfaceInspection() -> ResourceInspectResultDTO {
-        ResourceInspectResultDTO(
-            inspection: EngineResourceInspectionDTO(
-                resource: EngineResourceDTO(
-                    resourceId: "ui_surface:surface-1",
-                    kind: WorkerLifecycleResourceKind.uiSurface.rawValue,
-                    schemaId: nil,
-                    scope: AnyCodable("system"),
-                    ownerWorkerId: "ui::runtime",
-                    ownerActorId: "system",
-                    lifecycle: "active",
-                    policy: nil,
-                    currentVersionId: "surface-version-1",
-                    traceId: nil,
-                    createdByInvocationId: nil,
-                    createdAt: nil,
-                    updatedAt: "2100-01-01T00:00:00Z"
-                ),
-                versions: [
-                    EngineResourceVersionDTO(
-                        versionId: "surface-version-1",
-                        resourceId: "ui_surface:surface-1",
-                        parentVersionId: nil,
-                        contentHash: nil,
-                        state: "available",
-                        payload: [
-                            "surfaceId": AnyCodable("surface-1"),
-                            "title": AnyCodable("Runtime"),
-                            "purpose": AnyCodable("cockpit"),
-                            "schemaVersion": AnyCodable(1),
-                            "layout": AnyCodable([
-                                "type": "Text",
-                                "props": ["text": "Live runtime surface"]
-                            ]),
-                            "actions": AnyCodable([]),
-                            "expiresAt": AnyCodable("2100-01-01T00:00:00Z")
-                        ],
-                        locations: [],
-                        createdByInvocationId: nil,
-                        traceId: nil,
-                        createdAt: nil
-                    )
-                ],
-                outgoingLinks: [],
-                incomingLinks: [],
-                events: []
-            )
-        )
-    }
-
     nonisolated static func moduleActivityOverview() -> ModuleActivityOverviewDTO {
         ModuleActivityOverviewDTO(
             schemaVersion: "tron.module_activity.overview.v1",

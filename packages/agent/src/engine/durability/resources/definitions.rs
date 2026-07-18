@@ -30,9 +30,7 @@ use super::types::{
     APPROVAL_DECISION_KIND, APPROVAL_DECISION_SCHEMA_ID, APPROVAL_REQUEST_KIND,
     APPROVAL_REQUEST_SCHEMA_ID, CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
     EngineResourceTypeDefinition, EngineResourceVersioningMode, RegisterResourceType,
-    UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
 };
-use super::ui_surface::ui_surface_schema;
 use super::update_diagnostics_definitions::update_diagnostics_resource_type_definitions;
 use super::web_definitions::web_resource_type_definitions;
 use super::web_research_definitions::web_research_resource_type_definitions;
@@ -318,37 +316,6 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             json!({
                 "read": ["catalog_discovery.read", "resource.read"],
                 "write": ["catalog_discovery.write", "resource.write"]
-            }),
-        ),
-        builtin_type(
-            UI_SURFACE_KIND,
-            UI_SURFACE_SCHEMA_ID,
-            ui_surface_schema(),
-            vec![
-                "draft",
-                "active",
-                "superseded",
-                "expired",
-                "discarded",
-                "damaged",
-            ],
-            vec![
-                "input",
-                "produced",
-                "candidate_output",
-                "promoted_output",
-                "decided_by",
-                "supported_by",
-                "contradicted_by",
-                "supersedes",
-                "derived_from",
-                "renders",
-                "acts_on",
-            ],
-            json!({
-                "read": ["ui.read", "resource.read"],
-                "write": ["ui.write", "resource.write"],
-                "delete": ["ui.write", "resource.write"]
             }),
         ),
         builtin_type(

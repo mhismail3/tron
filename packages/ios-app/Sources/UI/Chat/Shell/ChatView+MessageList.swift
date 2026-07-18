@@ -2,6 +2,16 @@ import SwiftUI
 import UIKit
 
 extension ChatView {
+    func restoreActiveCompactionSurfaceIfNeeded() {
+        guard sheetCoordinator.activeSheet == nil else { return }
+        let cacheNamespace = dependencies.pairedServerStore.activeServer?.id ?? "unpaired"
+        guard let eventId = NativeUITransientRestoration.latestCompactionEventId(
+            cacheNamespace: cacheNamespace,
+            sessionId: sessionId
+        ) else { return }
+        sheetCoordinator.showCompactionDetail(eventId: eventId)
+    }
+
     // MARK: - Input Area Content (extracted for type-checker)
 
     var inputAreaContent: some View {
@@ -62,15 +72,16 @@ extension ChatView {
         switch action {
         case .thinking(let content):
             sheetCoordinator.showThinkingDetail(content)
-        case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
-            sheetCoordinator.showCompactionDetail(
-                tokensBefore: tokensBefore,
-                tokensAfter: tokensAfter,
-                reason: reason,
-                summary: summary,
-                preservedTurns: preservedTurns,
-                summarizedTurns: summarizedTurns
-            )
+        case .compaction(let eventId):
+            guard let eventId else {
+                viewModel.appendLocalError(
+                    dedupKey: "compaction.missing-event-id",
+                    title: "Compaction details unavailable",
+                    message: "The durable compaction event identity is missing. Refresh the session and try again."
+                )
+                return
+            }
+            sheetCoordinator.showCompactionDetail(eventId: eventId)
         case .contextControlAction(let resourceId):
             sheetCoordinator.showContextControl(actionResourceId: resourceId)
         case .capabilityInvocation(let data):

@@ -93,6 +93,7 @@ final class EngineClient: EngineTransport {
     private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription] = [:]
     private var streamAckCoalescer = EngineStreamAckCoalescer()
     private var streamAckTasks: [String: Task<Void, Never>] = [:]
+    private var wantsNativeUISurfaceSubscription = false
 
     // MARK: - Domain Clients
 
@@ -152,6 +153,10 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var transcription: TranscriptionClient = TranscriptionClient(transport: self)
 
+    /// Declarative native UI definition, lifecycle, and action operations.
+    @ObservationIgnored
+    lazy var nativeUI: NativeUIClient = NativeUIClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
@@ -163,6 +168,13 @@ final class EngineClient: EngineTransport {
     //
     @ObservationIgnored
     private let _eventStream = AsyncEventStream<ParsedEventV2>()
+
+    /// A separate bounded lane keeps canonical A2UI records out of the plugin
+    /// event registry and lets consumers reconstruct on local backpressure.
+    @ObservationIgnored
+    private let _nativeUISurfaceStream = AsyncEventStream<NativeUIStreamDelivery>(
+        bufferingPolicy: .bufferingNewest(64)
+    )
 
     private let serverURL: URL
 
@@ -215,6 +227,10 @@ final class EngineClient: EngineTransport {
         _eventStream.events(for: sessionId)
     }
 
+    var nativeUISurfaceEvents: AsyncStream<NativeUIStreamDelivery> {
+        _nativeUISurfaceStream.events
+    }
+
     // MARK: - Connection
 
     func connect() async {
@@ -247,8 +263,13 @@ final class EngineClient: EngineTransport {
         // Sync state immediately — the observation task may not have run yet,
         // so it can miss the .connecting → .connected transition.
         connectionState = ws.connectionState
-        if connectionState.isConnected, let currentSessionId {
-            _ = try? await ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
+        if connectionState.isConnected {
+            if let currentSessionId {
+                _ = try? await ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
+            }
+            if wantsNativeUISurfaceSubscription {
+                _ = try? await subscribeToNativeUISurfaces()
+            }
         }
     }
 
@@ -277,6 +298,7 @@ final class EngineClient: EngineTransport {
                 // This prevents missing the initial .connecting → .connected transition
                 // when ws.connect() completes before this Task starts executing.
                 var sessionToResubscribe: String?
+                var shouldResubscribeNativeUI = false
                 do {
                     guard !Task.isCancelled, let self else { return }
                     let previousState = connectionState
@@ -295,6 +317,9 @@ final class EngineClient: EngineTransport {
                     ) {
                         sessionToResubscribe = currentSessionId
                     }
+                    shouldResubscribeNativeUI = !previousState.isConnected
+                        && nextState.isConnected
+                        && wantsNativeUISurfaceSubscription
                 }
 
                 if let sessionToResubscribe {
@@ -305,7 +330,11 @@ final class EngineClient: EngineTransport {
                     )
                     // Re-read before installing the next observation so the
                     // final source state after subscription is reconciled.
-                    continue
+                }
+
+                if shouldResubscribeNativeUI {
+                    guard !Task.isCancelled else { return }
+                    _ = try? await self?.subscribeToNativeUISurfaces()
                 }
 
                 await waitForObservationChange {
@@ -374,6 +403,11 @@ final class EngineClient: EngineTransport {
             category: .events
         )
 
+        if delivery.topic == "native_ui.surface" {
+            handleNativeUISurfaceDelivery(delivery)
+            return
+        }
+
         // Parse event using plugin system (no re-parsing of JSON for type extraction)
         guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: delivery.eventData) else {
             logger.warning("Failed to parse event: \(eventType)", category: .events)
@@ -422,6 +456,29 @@ final class EngineClient: EngineTransport {
             _eventStream.send(recoveryEvent)
         }
 
+        recordAndAck(delivery)
+    }
+
+    private func handleNativeUISurfaceDelivery(_ delivery: EngineEventDelivery) {
+        guard let cursor = delivery.cursor,
+              let payload = delivery.event.data,
+              let data = try? JSONEncoder().encode(payload),
+              let record = try? JSONDecoder().decode(NativeUISurfaceStreamRecordDTO.self, from: data)
+        else {
+            logger.error("Rejected malformed native UI stream record", category: .events)
+            _nativeUISurfaceStream.send(.recoveryRequired(reason: "malformed_record"))
+            recordAndAck(delivery)
+            return
+        }
+
+        let dropped = _nativeUISurfaceStream.send(.record(record, cursor: cursor))
+        if dropped > 0 {
+            logger.error(
+                "Native UI stream buffer overflowed for \(dropped) subscriber(s)",
+                category: .events
+            )
+            _nativeUISurfaceStream.send(.recoveryRequired(reason: "client_buffer_overflow"))
+        }
         recordAndAck(delivery)
     }
 
@@ -481,6 +538,34 @@ final class EngineClient: EngineTransport {
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
         currentSessionId = sessionId
         return try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
+    }
+
+    @discardableResult
+    func ensureNativeUISurfaceSubscription() async throws -> EngineSubscription {
+        wantsNativeUISurfaceSubscription = true
+        return try await subscribeToNativeUISurfaces()
+    }
+
+    private func subscribeToNativeUISurfaces() async throws -> EngineSubscription {
+        guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
+        guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
+        let key = EngineStreamSubscriptionKey(
+            topic: "native_ui.surface",
+            sessionId: nil,
+            workspaceId: nil
+        )
+        if let existing = streamSubscriptions[key] {
+            return existing
+        }
+        // Snapshots reconstruct state; this connection-local lane follows only
+        // committed live updates and never replays a possibly partial batch.
+        let subscription = try await ws.subscribe(topic: key.topic, cursor: nil)
+        streamSubscriptions[key] = subscription
+        logger.info(
+            "Subscribed to native UI surface updates from live tail \(subscription.cursor)",
+            category: .events
+        )
+        return subscription
     }
 
     private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {

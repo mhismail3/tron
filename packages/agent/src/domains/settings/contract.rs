@@ -19,7 +19,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("settings::update", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("settings.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"settings":{"additionalProperties":true,"type":"object"},"workspaceId":{"type":"string"}},"required":["settings"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"expectedSpecHash":{"type":"string","minLength":1},"sessionId":{"type":"string"},"settings":{"additionalProperties":true,"type":"object"},"workspaceId":{"type":"string"}},"required":["settings"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))

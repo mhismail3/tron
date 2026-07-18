@@ -67,25 +67,16 @@ struct ServerSettingsPageTests {
         #expect(!serverSection.contains("Diagnostics"))
     }
 
-    @Test("engine settings exposes the cached Tailscale address as read-only")
-    func engineSettingsExposesCachedTailscaleAddressAsReadOnly() throws {
+    @Test("engine settings delegates product fields to the native UI runtime")
+    func engineSettingsDelegatesProductFieldsToNativeUI() throws {
         let page = try source(pathComponents: [
-            "Sources",
-            "UI",
-            "Settings",
-            "Pages",
-            "EngineSettingsPage.swift",
+            "Sources", "UI", "Settings", "Pages", "EngineSettingsPage.swift",
         ])
-        let tailscaleSection = try section(
-            in: page,
-            from: "private var tailscaleSection: some View {",
-            to: "private var enginePolicyContent: some View {"
-        )
 
-        #expect(tailscaleSection.contains("settingsState.tailscaleIp"))
-        #expect(tailscaleSection.contains("label: \"Tailscale IP\""))
-        #expect(tailscaleSection.contains(".textSelection(.enabled)"))
-        #expect(!tailscaleSection.contains("updateServerSetting"))
+        #expect(page.contains("NativeUISurfaceView("))
+        #expect(page.contains("definitionId: \"settings.engine\""))
+        #expect(!page.contains("tailscaleIp"))
+        #expect(!page.contains("updateServerSetting"))
     }
 
     @Test("paired server menu uses server-specific actions")

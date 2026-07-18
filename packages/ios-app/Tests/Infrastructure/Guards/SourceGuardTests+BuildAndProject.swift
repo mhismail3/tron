@@ -666,6 +666,7 @@ extension SourceGuardTests {
         #expect(!installScript.contains("install|start)"))
         #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))
         #expect(!installScript.contains(#"find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1"#))
+        #expect(installScript.contains(#"/TronMobile\.app\/TronMobile[[:space:]]*$/"#))
 
         #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Prod Fast Debug on iPhone"))
         #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Prod Release on iPhone"))

@@ -21,6 +21,22 @@ pub(crate) async fn settings_update_value(
     let settings_path = deps.settings_path.clone();
 
     let _operation_guard = crate::domains::settings::SettingsStore::operation_lock().await;
+    if let Some(expected) = params
+        .and_then(|value| value.get("expectedSpecHash"))
+        .and_then(Value::as_str)
+    {
+        let current = deps.profile_runtime.current();
+        if current.spec_hash() != expected {
+            return Err(CapabilityError::Custom {
+                code: "SETTINGS_REVISION_CONFLICT".to_owned(),
+                message: "Settings changed since this surface was projected".to_owned(),
+                details: Some(json!({
+                    "expectedSpecHash": expected,
+                    "currentSpecHash": current.spec_hash(),
+                })),
+            });
+        }
+    }
     let previous_sparse = read_sparse_settings_snapshot(deps).await?;
     run_blocking_task("settings::update", move || {
         crate::domains::settings::SettingsStore::new(settings_path)
@@ -133,6 +149,35 @@ mod tests {
                 .read_sparse_value()
                 .unwrap(),
             json!({})
+        );
+    }
+
+    #[tokio::test]
+    async fn update_rejects_a_stale_expected_spec_hash_before_writing() {
+        let context = crate::shared::server::test_support::make_test_context();
+        let deps = Deps {
+            profile_runtime: context.profile_runtime.clone(),
+            settings_path: context.settings_path.clone(),
+        };
+        let before = crate::domains::settings::SettingsStore::new(&deps.settings_path)
+            .read_sparse_value()
+            .unwrap();
+        let params = json!({
+            "expectedSpecHash": "stale",
+            "settings": {"agent": {"maxTurns": 123}}
+        });
+
+        let error = settings_update_value(Some(&params), &deps)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, CapabilityError::Custom { ref code, .. } if code == "SETTINGS_REVISION_CONFLICT")
+        );
+        assert_eq!(
+            crate::domains::settings::SettingsStore::new(&deps.settings_path)
+                .read_sparse_value()
+                .unwrap(),
+            before
         );
     }
 }

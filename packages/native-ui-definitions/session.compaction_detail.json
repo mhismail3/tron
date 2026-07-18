@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "tron.native-ui.definition.v1",
+  "definitionId": "session.compaction_detail",
+  "catalogId": "https://tron.local/native-ui/catalogs/sheet/v1",
+  "catalogRevision": 1,
+  "lifecycle": "transient",
+  "presentation": {
+    "title": "Compaction Details",
+    "detents": ["medium", "large"],
+    "showsDismiss": true
+  },
+  "messages": [
+    {
+      "version": "v0.9.1",
+      "createSurface": {
+        "surfaceId": "session.compaction_detail",
+        "catalogId": "https://tron.local/native-ui/catalogs/sheet/v1"
+      }
+    },
+    {
+      "version": "v0.9.1",
+      "updateComponents": {
+        "surfaceId": "session.compaction_detail",
+        "components": [
+          {"id":"root","component":"Surface","child":"compaction-scroll"},
+          {"id":"compaction-scroll","component":"Scroll","child":"compaction-content","axis":"vertical"},
+          {"id":"compaction-content","component":"Column","children":["metrics-grid","reason-card","summary-section","turns-section","copy-button"],"spacing":16,"modifiers":[{"name":"padding","edges":"all","value":16}]},
+          {"id":"metrics-grid","component":"Grid","columns":2,"children":["before-card","after-card","saved-card","reduction-card"],"spacing":12},
+          {"id":"before-card","component":"GlassCard","children":["before-label","before-value"]},
+          {"id":"before-label","component":"Text","text":"Before","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"before-value","component":"Text","text":{"path":"/tokensBeforeDisplay"},"style":"metric","modifiers":[{"name":"monospacedDigit"}]},
+          {"id":"after-card","component":"GlassCard","children":["after-label","after-value"]},
+          {"id":"after-label","component":"Text","text":"After","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"after-value","component":"Text","text":{"path":"/tokensAfterDisplay"},"style":"metric","modifiers":[{"name":"monospacedDigit"}]},
+          {"id":"saved-card","component":"GlassCard","children":["saved-label","saved-value"]},
+          {"id":"saved-label","component":"Text","text":"Saved","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"saved-value","component":"Text","text":{"path":"/tokensSavedDisplay"},"style":"metric","modifiers":[{"name":"foregroundStyle","value":"success"},{"name":"monospacedDigit"}]},
+          {"id":"reduction-card","component":"GlassCard","children":["reduction-label","reduction-value"]},
+          {"id":"reduction-label","component":"Text","text":"Reduction","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"reduction-value","component":"Text","text":{"path":"/compressionPercentDisplay"},"style":"metric","modifiers":[{"name":"foregroundStyle","value":"success"},{"name":"monospacedDigit"}]},
+          {"id":"reason-card","component":"GlassCard","children":["reason-label","reason-value"]},
+          {"id":"reason-label","component":"Text","text":"Reason","style":"caption","modifiers":[{"name":"foregroundStyle","value":"secondary"}]},
+          {"id":"reason-value","component":"Text","text":{"path":"/reasonDisplay"},"style":"body"},
+          {"id":"summary-section","component":"Section","title":"Summary","visible":{"path":"/hasSummary"},"children":["summary-card"]},
+          {"id":"summary-card","component":"GlassCard","children":["summary-text"]},
+          {"id":"summary-text","component":"Text","text":{"path":"/summary"},"style":"body","selectable":true},
+          {"id":"turns-section","component":"Section","title":"Turns","visible":{"path":"/hasTurnCounts"},"children":["turns-card"]},
+          {"id":"turns-card","component":"GlassCard","children":["preserved-row","summarized-row"]},
+          {"id":"preserved-row","component":"Text","label":"Preserved","text":{"path":"/preservedTurnsDisplay"},"icon":"arrow.counterclockwise.circle"},
+          {"id":"summarized-row","component":"Text","label":"Summarized","text":{"path":"/summarizedTurnsDisplay"},"icon":"text.badge.minus"},
+          {"id":"copy-button","component":"Button","label":"Copy details","icon":"doc.on.doc","role":"secondary","action":{"clientFunction":{"name":"copy","revision":1,"arguments":{"text":{"path":"/copyText"}}}}}
+        ]
+      }
+    }
+  ]
+}

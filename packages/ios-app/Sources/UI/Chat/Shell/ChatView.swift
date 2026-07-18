@@ -195,6 +195,7 @@ struct ChatView: View {
             // AFTER the cascade starts, to prevent a flash where all messages are visible
             await handleInitialMessageVisibility(guardedBy: ticket)
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            restoreActiveCompactionSurfaceIfNeeded()
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
             if initialReconstructionOutcome == .retryableFailure
                 || viewModel.streamRecoveryRequestGeneration != recoveryGenerationBeforeReconstruction {
@@ -205,6 +206,7 @@ struct ChatView: View {
             // React when connection transitions to connected
             if initialLoadComplete, newState.isConnected && !oldState.isConnected {
                 scheduleReconstructionRefresh()
+                restoreActiveCompactionSurfaceIfNeeded()
             }
             // Input-bar read-only mode is derived from `interactionPolicy` (500ms
             // reconnect debounce) — no per-view debounce state needed.

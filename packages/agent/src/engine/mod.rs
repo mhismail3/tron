@@ -16,7 +16,7 @@
 //! | `durability` | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
 //! | `invocation` | Host handle, invocation records, handler dispatch, and model-facing context |
 //! | `kernel` | Engine ids, definitions, shared types, and error model |
-//! | `primitives` | Engine-native primitive workers such as resource/grant/ui support |
+//! | `primitives` | Engine-native primitive workers such as resource/grant support |
 //! | `runtime` | Trigger dispatch, external-worker runtime, and worker protocol DTOs |
 //!
 //! ## Entry Points
@@ -63,7 +63,7 @@
 //!   idempotency, schema shape, resource leases, and compensation;
 //! - registered domain functions are loop infrastructure only; product surfaces
 //!   enter startup through source-backed domain contracts and inventory lineage;
-//! - stream, state, queue, catalog, grant, worker, trace records, generated UI,
+//! - stream, state, queue, catalog, grant, worker, trace records,
 //!   and the generic `resource` kernel are retained only where covered by the
 //!   primitive loop, source-owned contracts, and focused boundary tests;
 //! - resource leases and compensation contracts are first-class primitives for
@@ -72,13 +72,12 @@
 //!   auditable rollback/compensation state for direct and host-dispatched
 //!   functions, and avoid blocking the whole host or inventing per-handler locks;
 //! - typed resources are the durable object substrate: artifacts, goals, claims,
-//!   evidence, decisions, generated UI surfaces, trace records, and
+//!   evidence, decisions, trace records, and
 //!   materialized files are modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
-//! - runtime UI surfaces are schema-versioned `ui_surface` resources; the
-//!   engine stores and validates the declared component tree while
-//!   `ui::submit_action` records generic action submissions without
-//!   server-authored target routing;
+//! - product UI definitions, validation, rendering contracts, and revisions are
+//!   owned by the `native_ui` feature domain; the universal engine supplies only
+//!   its existing invocation and durable stream transport;
 //! - durable-output capabilities declare output contracts and finish validation
 //!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority
@@ -233,7 +232,7 @@ pub use durability::resources::{
     SCHEDULE_KIND, SCHEDULE_RUN_KIND, SCHEDULE_RUN_SCHEMA_ID, SCHEDULE_SCHEMA_ID,
     SUBAGENT_TASK_KIND, SUBAGENT_TASK_SCHEMA_ID, TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
     TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID, TOOL_SOURCE_PROPOSAL_KIND,
-    TOOL_SOURCE_PROPOSAL_SCHEMA_ID, UI_SURFACE_KIND, UPDATE_DIAGNOSTIC_RECORD_KIND,
+    TOOL_SOURCE_PROPOSAL_SCHEMA_ID, UPDATE_DIAGNOSTIC_RECORD_KIND,
     UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID, USER_QUESTION_KIND, USER_QUESTION_SCHEMA_ID,
     UpdateResource, WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID,
     WEB_RESEARCH_REVIEW_KIND, WEB_RESEARCH_REVIEW_SCHEMA_ID, WEB_RESEARCH_SOURCE_KIND,

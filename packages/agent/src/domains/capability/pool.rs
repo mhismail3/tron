@@ -651,7 +651,6 @@ fn catalog_family(namespace: &str) -> Cow<'_, str> {
         "system" => Cow::Borrowed("system_kernel"),
         "logs" => Cow::Borrowed("logs"),
         "transcription" => Cow::Borrowed("transcription"),
-        "ui" => Cow::Borrowed("generated_ui_kernel"),
         other => Cow::Borrowed(other),
     }
 }
@@ -668,7 +667,6 @@ fn catalog_owner(namespace: &str) -> Cow<'_, str> {
         "trigger" => Cow::Borrowed("engine::primitives::trigger"),
         "worker" => Cow::Borrowed("engine::primitives::worker"),
         "storage" => Cow::Borrowed("engine::primitives::storage"),
-        "ui" => Cow::Borrowed("engine::primitives::ui"),
         "engine" => Cow::Borrowed("engine::invocation::host"),
         "system" => Cow::Borrowed("domains::system"),
         other => Cow::Owned(format!("domains::{other}")),
@@ -696,7 +694,7 @@ fn catalog_audience(namespace: &str) -> CapabilityPoolAudience {
         | "procedural" => CapabilityPoolAudience::Governance,
         "resource" | "artifact" | "goal" | "claim" | "evidence" | "decision"
         | "materialized_file" | "patch" | "grant" | "queue" | "stream" | "state" | "trigger"
-        | "ui" | "engine" | "agent" => CapabilityPoolAudience::EngineInternal,
+        | "engine" | "agent" => CapabilityPoolAudience::EngineInternal,
         _ => CapabilityPoolAudience::EngineInternal,
     }
 }
@@ -725,7 +723,7 @@ fn catalog_visibility(namespace: &str, id: &str) -> CapabilityPoolVisibility {
         "catalog" | "worker" | "storage" | "system" => CapabilityPoolVisibility::InspectOnly,
         "resource" | "artifact" | "goal" | "claim" | "evidence" | "decision"
         | "materialized_file" | "patch" | "grant" | "queue" | "stream" | "state" | "trigger"
-        | "ui" | "engine" | "agent" => CapabilityPoolVisibility::HiddenUnlessEvolutionMode,
+        | "engine" | "agent" => CapabilityPoolVisibility::HiddenUnlessEvolutionMode,
         _ => CapabilityPoolVisibility::InspectOnly,
     }
 }
@@ -763,7 +761,6 @@ fn catalog_purpose(namespace: &str) -> &'static str {
         "agent" => "server_owned_agent_loop_runtime",
         "logs" => "filtered_log_ingest_and_recent_log_substrate",
         "transcription" => "local_transcription_input_substrate",
-        "ui" => "generated_ui_resource_substrate",
         _ => "domain_catalog_function_backing_engine_or_client_workflow",
     }
 }

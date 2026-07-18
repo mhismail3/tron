@@ -46,7 +46,7 @@ use crate::domains::{
     agent, approval, auth, blob, capability, capability_binding, catalog_discovery,
     context_control, device, filesystem, git, import_history, import_preview, jobs, logs, media,
     memory, message, model, module_activity, module_authoring, module_dependencies, module_install,
-    module_lifecycle, module_registry, module_runtime, module_validation, notifications,
+    module_lifecycle, module_registry, module_runtime, module_validation, native_ui, notifications,
     program_execution, prompt_artifacts, repository_tree, scheduler, session, settings, subagents,
     system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
 };
@@ -179,6 +179,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
         settings::worker_module(&deps)?,
+        native_ui::worker_module(&deps)?,
         transcription::worker_module(&deps)?,
         auth::worker_module(&deps)?,
         worker_lifecycle::worker_module(worker_lifecycle_deps.clone())?,

@@ -13,7 +13,6 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "decision",
         "claim",
         "evidence",
-        "ui_surface",
         "materialized_file",
         "patch_proposal",
         "execution_output",

@@ -31,7 +31,7 @@ extension SourceGuardTests {
             "UI/Chat/Shell/ChatView.swift",
             "UI/Chat/Composer/InputBar.swift",
             "UI/Settings/Shell/SettingsView.swift",
-            "UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "UI/RuntimeSurfaces/NativeUI/NativeUISurfaceView.swift",
         ]
         for relativePath in requiredShellFiles {
             #expect(
@@ -283,6 +283,7 @@ extension SourceGuardTests {
             "Sources/UI/Onboarding/Steps",
             "Sources/UI/RuntimeSurfaces",
             "Sources/UI/RuntimeSurfaces/Display",
+            "Sources/UI/RuntimeSurfaces/NativeUI",
             "Sources/UI/Settings/ModelPicker",
             "Sources/UI/Settings/Pages",
             "Sources/UI/Settings/Pages/ModelProviders",
@@ -293,10 +294,11 @@ extension SourceGuardTests {
         ]
         let bannedRoots = [
             "Sources/UI/Views",
+            "Sources/Engine/Protocol/GeneratedUI",
         ]
         let splitUIFiles = [
-            "Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
-            "Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift",
+            "Sources/UI/RuntimeSurfaces/NativeUI/NativeUISurfaceView.swift",
+            "Sources/UI/RuntimeSurfaces/NativeUI/NativeUISurfaceController.swift",
             "Sources/UI/Settings/Shell/SettingsView.swift",
             "Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift",
         ]

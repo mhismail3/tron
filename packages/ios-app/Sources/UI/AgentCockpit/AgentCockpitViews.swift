@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AgentCockpitSheet: View {
+    @Environment(\.dependencies) var dependencies
     @Bindable var viewModel: AgentCockpitViewModel
     let repository: any WorkerLifecycleRepository
     let sessionId: String?

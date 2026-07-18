@@ -43,7 +43,6 @@ async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload
 
     for (function_id, scope) in [
         ("worker::disconnect", "worker.write"),
-        ("ui::submit_action", "ui.write"),
         ("engine::promote", "engine.promote.workspace"),
         ("queue::enqueue", "queue.write"),
         ("resource::create", "resource.write"),
@@ -97,7 +96,6 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
 
     for required in [
         "worker::disconnect",
-        "ui::submit_action",
         "engine::promote",
         "queue::enqueue",
         "resource::create",
@@ -120,7 +118,6 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
 fn hmh_f1_surface(function_id: &str) -> bool {
     function_id == "engine::promote"
         || function_id.starts_with("worker::")
-        || function_id.starts_with("ui::")
         || function_id.starts_with("queue::")
         || function_id.starts_with("resource::")
         || function_id.starts_with("artifact::")

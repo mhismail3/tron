@@ -4,7 +4,7 @@
 create_app_bundle() {
     local bundle_path="$1"
     local binary_src="$2"
-    local version_fields canonical_version marketing_version build_version key value
+    local version_fields canonical_version marketing_version build_version key value icon_source
     version_fields="$("$SCRIPT_DIR/tron-version" print)" || {
         print_error "Cannot create app bundle without valid version metadata"
         return 1
@@ -65,7 +65,15 @@ create_app_bundle() {
 </plist>
 PLIST
 
-    cp "$CONTRIBUTOR_DIR/AppIcon.icns" \
+    icon_source="$CONTRIBUTOR_DIR/AppIcon.icns"
+    if [ ! -f "$icon_source" ] || [ -L "$icon_source" ]; then
+        icon_source="$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns"
+    fi
+    if [ ! -f "$icon_source" ] || [ -L "$icon_source" ]; then
+        print_error "Cannot create app bundle without a regular AppIcon.icns"
+        return 1
+    fi
+    cp "$icon_source" \
         "$bundle_path/Contents/Resources/AppIcon.icns"
 
     cp "$binary_src" "$bundle_path/Contents/MacOS/tron"
