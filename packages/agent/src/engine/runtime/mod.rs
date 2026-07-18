@@ -26,6 +26,10 @@
 //! - Visible external workers must bind session/workspace scope in the scoped
 //!   token, present an active grant at the token revision, and keep namespace,
 //!   trigger, stream, and result ownership inside the accepted connection.
+//! - The first valid Hello binds one socket to one opaque runtime generation.
+//!   Active duplicate identities are rejected; every later inbound protocol
+//!   operation and teardown must match that generation, so stale sockets cannot
+//!   retire or mutate a replacement connection.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.

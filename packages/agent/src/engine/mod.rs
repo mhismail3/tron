@@ -275,9 +275,8 @@ pub use kernel::types::{
     TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
     WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
-pub use runtime::external_workers::{
-    EngineExternalWorkerRuntime, ExternalWorkerConnection, ExternalWorkerInvoker,
-};
+pub use runtime::external_workers::EngineExternalWorkerRuntime;
+pub(crate) use runtime::external_workers::ExternalWorkerInvoker;
 pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use runtime::worker_protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,

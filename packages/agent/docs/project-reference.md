@@ -1922,11 +1922,14 @@ metadata as in-process domain workers. The hello must be loopback bearer
 authenticated, register `WorkerKind::External`, bind session/workspace-visible
 workers through the scoped token, and reference an active grant at the token
 revision and policy hash. Namespace checks use exact segment/prefix matching,
-not substring matching. Triggers must use the worker token grant and target
-functions owned by the same accepted worker. Workers publish events by asking
-the engine to invoke `stream::publish`; stream visibility, topic selectors, and
-session/workspace scope are checked against the accepted token and connection.
-There is no direct socket event bypass.
+not substring matching. The first valid hello binds the socket to one opaque
+runtime generation. Active duplicate identities are rejected; pre-hello
+operations, second hellos, foreign worker ids, and stale-socket teardown cannot
+mutate or disconnect another generation. Triggers must use the worker token
+grant and target functions owned by the same accepted worker. Workers publish
+events by asking the engine to invoke `stream::publish`; stream visibility,
+topic selectors, and session/workspace scope are checked against the accepted
+token and connection. There is no direct socket event bypass.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the

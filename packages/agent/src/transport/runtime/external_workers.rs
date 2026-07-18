@@ -13,11 +13,14 @@
 //! the per-invocation timeout. Worker result frames are consumed only by the
 //! pending invocation map owned by that socket connection; they are not routed
 //! through the runtime message handler as standalone commands. Inbound worker
-//! frames are size-capped before JSON parsing, and outbound writes use a
-//! bounded channel plus send timeout. Every upgraded socket is registered with
-//! graceful shutdown before the HTTP upgrade completes. Shutdown interrupts
-//! reads and bounded sends, closes outbound admission, drains pending calls,
-//! retires runtime state, and joins the socket writer before the session exits.
+//! frames are size-capped before JSON parsing. The first validated Hello binds
+//! an opaque runtime generation lease; pre-Hello operations, second Hellos,
+//! foreign worker ids, active duplicates, and stale cleanup fail closed without
+//! changing another connection. Outbound writes use a bounded channel plus send
+//! timeout. Every upgraded socket is registered with graceful shutdown before
+//! the HTTP upgrade completes. Shutdown interrupts reads and bounded sends,
+//! closes outbound admission, drains pending calls, retires only the owned
+//! runtime generation, and joins the socket writer before the session exits.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +32,7 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::{
-    EngineError, EngineExternalWorkerRuntime, InvocationId, WorkerDisconnect, WorkerHello,
+    EngineError, EngineExternalWorkerRuntime, ExternalWorkerInvoker, InvocationId,
     WorkerInvocationResult, WorkerInvoke, WorkerProtocolMessage,
 };
 
@@ -67,7 +70,7 @@ pub(crate) async fn run_external_worker_socket(
         outgoing: outgoing_tx.clone(),
         pending: pending.clone(),
     });
-    let mut worker_id = None;
+    let mut connection = None;
     loop {
         let message = tokio::select! {
             biased;
@@ -103,19 +106,12 @@ pub(crate) async fn run_external_worker_socket(
             }
         };
         if message.len() > MAX_EXTERNAL_WORKER_FRAME_BYTES {
-            let _ = send_outbound(
+            let _ = send_protocol_error(
                 &outgoing_tx,
-                Message::Text(
-                    serde_json::json!({
-                        "type": "error",
-                        "message": format!(
-                            "worker protocol frame exceeds maximum size ({} > {} bytes)",
-                            message.len(),
-                            MAX_EXTERNAL_WORKER_FRAME_BYTES
-                        )
-                    })
-                    .to_string()
-                    .into(),
+                format!(
+                    "worker protocol frame exceeds maximum size ({} > {} bytes)",
+                    message.len(),
+                    MAX_EXTERNAL_WORKER_FRAME_BYTES
                 ),
                 &shutdown,
                 &writer_closed,
@@ -126,16 +122,9 @@ pub(crate) async fn run_external_worker_socket(
         let parsed = match serde_json::from_str::<WorkerProtocolMessage>(&message) {
             Ok(parsed) => parsed,
             Err(error) => {
-                if !send_outbound(
+                if !send_protocol_error(
                     &outgoing_tx,
-                    Message::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "message": format!("invalid worker protocol message: {error}")
-                        })
-                        .to_string()
-                        .into(),
-                    ),
+                    format!("invalid worker protocol message: {error}"),
                     &shutdown,
                     &writer_closed,
                 )
@@ -146,25 +135,84 @@ pub(crate) async fn run_external_worker_socket(
                 continue;
             }
         };
-        if let WorkerProtocolMessage::Hello(hello) = &parsed {
-            let WorkerHello { worker, .. } = hello.as_ref();
-            worker_id = Some(worker.id.clone());
-        }
-        if let WorkerProtocolMessage::Result(result) = &parsed {
-            if let Some(sender) = pending.lock().await.remove(result.invocation_id.as_str()) {
-                let _ = sender.send(result.clone());
+        if connection.is_none() {
+            let WorkerProtocolMessage::Hello(hello) = parsed else {
+                if !send_protocol_error(
+                    &outgoing_tx,
+                    "external worker hello is required before operational messages",
+                    &shutdown,
+                    &writer_closed,
+                )
+                .await
+                {
+                    break;
+                }
+                continue;
+            };
+            let accepted = runtime
+                .lock()
+                .await
+                .accept_connection(*hello, invoker.clone())
+                .await;
+            match accepted {
+                Ok((lease, snapshot)) => {
+                    connection = Some(lease);
+                    let response = WorkerProtocolMessage::CatalogSnapshot(snapshot);
+                    if let Ok(text) = serde_json::to_string(&response)
+                        && !send_outbound(
+                            &outgoing_tx,
+                            Message::Text(text.into()),
+                            &shutdown,
+                            &writer_closed,
+                        )
+                        .await
+                    {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    if !send_protocol_error(
+                        &outgoing_tx,
+                        error.to_string(),
+                        &shutdown,
+                        &writer_closed,
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                }
             }
             continue;
         }
-        let response = {
-            let mut runtime = runtime.lock().await;
-            let response = runtime.handle_message(parsed).await;
-            if let Some(worker_id) = worker_id.clone()
-                && response.is_ok()
-            {
-                let _ = runtime.attach_invoker(worker_id, invoker.clone());
+        let lease = connection.as_ref().expect("bound connection checked above");
+        if let WorkerProtocolMessage::Result(result) = &parsed {
+            let runtime = runtime.lock().await;
+            if !runtime.is_current_connection(lease) {
+                drop(runtime);
+                let _ = send_protocol_error(
+                    &outgoing_tx,
+                    format!(
+                        "external worker connection lease is no longer current for {}",
+                        lease.worker_id()
+                    ),
+                    &shutdown,
+                    &writer_closed,
+                )
+                .await;
+                break;
             }
-            response
+            if let Some(sender) = pending.lock().await.remove(result.invocation_id.as_str()) {
+                let _ = sender.send(result.clone());
+            }
+            drop(runtime);
+            continue;
+        }
+        let (response, connection_current) = {
+            let mut runtime = runtime.lock().await;
+            let response = runtime.handle_connection_message(lease, parsed).await;
+            let current = runtime.is_current_connection(lease);
+            (response, current)
         };
         match response {
             Ok(Some(response)) => {
@@ -183,41 +231,51 @@ pub(crate) async fn run_external_worker_socket(
             }
             Ok(None) => {}
             Err(error) => {
-                if !send_outbound(
-                    &outgoing_tx,
-                    Message::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "message": error.to_string()
-                        })
-                        .to_string()
-                        .into(),
-                    ),
-                    &shutdown,
-                    &writer_closed,
-                )
-                .await
+                if !send_protocol_error(&outgoing_tx, error.to_string(), &shutdown, &writer_closed)
+                    .await
                 {
                     break;
                 }
             }
         }
+        if !connection_current {
+            break;
+        }
     }
     writer.abort();
     let _ = writer.await;
     fail_pending_invocations(&pending, "external worker websocket disconnected").await;
-    if let Some(worker_id) = worker_id {
+    if let Some(connection) = connection {
         let mut runtime = runtime.lock().await;
         if let Err(error) = runtime
-            .disconnect(WorkerDisconnect {
-                worker_id,
-                reason: "websocket disconnected".to_owned(),
-            })
+            .disconnect_connection(&connection, "websocket disconnected")
             .await
         {
             tracing::warn!(%error, "external worker websocket cleanup failed");
         }
     }
+}
+
+async fn send_protocol_error(
+    outgoing: &mpsc::Sender<Message>,
+    error: impl Into<String>,
+    shutdown: &CancellationToken,
+    writer_closed: &CancellationToken,
+) -> bool {
+    send_outbound(
+        outgoing,
+        Message::Text(
+            serde_json::json!({
+                "type": "error",
+                "message": error.into(),
+            })
+            .to_string()
+            .into(),
+        ),
+        shutdown,
+        writer_closed,
+    )
+    .await
 }
 
 async fn send_outbound(
@@ -264,7 +322,7 @@ struct SocketWorkerInvoker {
 }
 
 #[async_trait]
-impl crate::engine::ExternalWorkerInvoker for SocketWorkerInvoker {
+impl ExternalWorkerInvoker for SocketWorkerInvoker {
     async fn invoke(&self, invoke: WorkerInvoke) -> crate::engine::Result<WorkerInvocationResult> {
         let invocation_id = invoke.invocation_id.to_string();
         let (tx, rx) = oneshot::channel();

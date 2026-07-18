@@ -154,6 +154,83 @@ async fn send_worker_message(ws: &mut WsStream, message: WorkerProtocolMessage) 
     .expect("worker message send succeeds");
 }
 
+async fn read_worker_error(ws: &mut WsStream) -> String {
+    let error = read_json(ws).await;
+    assert_eq!(error["type"], "error", "expected worker protocol error");
+    error["message"]
+        .as_str()
+        .expect("worker protocol error message")
+        .to_owned()
+}
+
+fn worker_hello(worker_id: &WorkerId, namespace: &str, session_id: &str) -> WorkerHello {
+    WorkerHello::loopback(
+        WorkerDefinition::new(
+            worker_id.clone(),
+            WorkerKind::External,
+            ActorId::new(format!("{worker_id}-owner")).unwrap(),
+            AuthorityGrantId::new("worker-runtime").unwrap(),
+        )
+        .with_namespace_claim(namespace),
+    )
+    .with_session_scope(session_id)
+}
+
+fn worker_function(
+    worker_id: &WorkerId,
+    function_id: &FunctionId,
+    session_id: &str,
+) -> FunctionDefinition {
+    let namespace = function_id.namespace();
+    let local_name = function_id
+        .as_str()
+        .split_once("::")
+        .map(|(_, local)| local)
+        .unwrap_or(function_id.as_str());
+    let mut function = FunctionDefinition::new(
+        function_id.clone(),
+        worker_id.clone(),
+        "external worker integration function",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    )
+    .with_request_schema(json!({"type": "object", "additionalProperties": true}))
+    .with_response_schema(json!({"type": "object", "additionalProperties": true}))
+    .with_provenance(Provenance::system().with_session_id(session_id));
+    function.metadata = json!({
+        "contractId": function_id.as_str(),
+        "implementationId": format!("session_generated.{namespace}.{local_name}"),
+        "pluginId": format!("session_generated.{worker_id}"),
+        "trustTier": "session_generated",
+        "contextPrimerLevel": "catalog",
+        "runtimeRequirements": {
+            "workerKind": "external",
+            "deliveryModes": ["Sync"]
+        },
+        "examples": []
+    });
+    function
+}
+
+async fn accept_worker(
+    runtime: &TestServer,
+    worker_id: &WorkerId,
+    namespace: &str,
+    session_id: &str,
+) -> WsStream {
+    let mut ws = connect(&format!("{}/workers", runtime.url), &runtime.auth_path).await;
+    send_worker_message(
+        &mut ws,
+        WorkerProtocolMessage::Hello(Box::new(worker_hello(worker_id, namespace, session_id))),
+    )
+    .await;
+    assert!(matches!(
+        read_worker_message(&mut ws).await,
+        WorkerProtocolMessage::CatalogSnapshot(_)
+    ));
+    ws
+}
+
 async fn invoke(ws: &mut WsStream, id: &str, function_id: &str, payload: Value) -> Value {
     invoke_with_context(ws, id, function_id, payload, None).await
 }
@@ -347,58 +424,16 @@ async fn engine_shutdown_drains_an_upgraded_subscribed_client() {
 async fn engine_worker_shutdown_drains_a_pending_invocation() {
     let mut runtime = boot_server().await;
     let baseline_tasks = runtime.server.shutdown().tracked_task_count();
-    let worker_url = format!("{}/workers", runtime.url);
-    let mut ws = connect(&worker_url, &runtime.auth_path).await;
-    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
-
     let session_id = "worker-shutdown-session";
     let worker_id = WorkerId::new("worker-shutdown").unwrap();
-    let worker = WorkerDefinition::new(
-        worker_id.clone(),
-        WorkerKind::External,
-        ActorId::new("worker-shutdown-owner").unwrap(),
-        AuthorityGrantId::new("worker-runtime").unwrap(),
-    )
-    .with_namespace_claim("worker_shutdown");
-    send_worker_message(
-        &mut ws,
-        WorkerProtocolMessage::Hello(Box::new(
-            WorkerHello::loopback(worker).with_session_scope(session_id),
-        )),
-    )
-    .await;
-    assert!(matches!(
-        read_worker_message(&mut ws).await,
-        WorkerProtocolMessage::CatalogSnapshot(_)
-    ));
+    let mut ws = accept_worker(&runtime, &worker_id, "worker_shutdown", session_id).await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
 
     let function_id = FunctionId::new("worker_shutdown::wait").unwrap();
-    let mut function = FunctionDefinition::new(
-        function_id.clone(),
-        worker_id.clone(),
-        "wait for a worker response during graceful shutdown",
-        VisibilityScope::Session,
-        EffectClass::PureRead,
-    )
-    .with_request_schema(json!({"type": "object", "additionalProperties": true}))
-    .with_response_schema(json!({"type": "object", "additionalProperties": true}))
-    .with_provenance(Provenance::system().with_session_id(session_id));
-    function.metadata = json!({
-        "contractId": function_id.as_str(),
-        "implementationId": "session_generated.worker_shutdown.wait",
-        "pluginId": "session_generated.worker-shutdown",
-        "trustTier": "session_generated",
-        "contextPrimerLevel": "catalog",
-        "runtimeRequirements": {
-            "workerKind": "external",
-            "deliveryModes": ["Sync"]
-        },
-        "examples": []
-    });
     send_worker_message(
         &mut ws,
         WorkerProtocolMessage::RegisterFunction(Box::new(RegisterFunction {
-            definition: function,
+            definition: worker_function(&worker_id, &function_id, session_id),
             default_visibility: VisibilityScope::Session,
         })),
     )
@@ -480,6 +515,118 @@ async fn engine_worker_shutdown_drains_a_pending_invocation() {
     })
     .await
     .expect("shutdown-owned worker websocket did not close");
+}
+
+#[tokio::test]
+async fn engine_worker_socket_binds_one_validated_identity() {
+    let mut runtime = boot_server().await;
+    let baseline_tasks = runtime.server.shutdown().tracked_task_count();
+    let worker_url = format!("{}/workers", runtime.url);
+    let worker_a = WorkerId::new("identity-worker-a").unwrap();
+    let worker_b = WorkerId::new("identity-worker-b").unwrap();
+    let worker_c = WorkerId::new("identity-worker-c").unwrap();
+    let session_id = "identity-worker-session";
+
+    let mut socket_a = accept_worker(&runtime, &worker_a, "identity_a", session_id).await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+
+    let mut pre_hello = connect(&worker_url, &runtime.auth_path).await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 2).await;
+    send_worker_message(
+        &mut pre_hello,
+        WorkerProtocolMessage::Disconnect(tron::engine::WorkerDisconnect {
+            worker_id: worker_a.clone(),
+            reason: "foreign pre-hello disconnect".to_owned(),
+        }),
+    )
+    .await;
+    assert!(
+        read_worker_error(&mut pre_hello)
+            .await
+            .contains("hello is required")
+    );
+    pre_hello.close(None).await.unwrap();
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+
+    let mut socket_b = accept_worker(&runtime, &worker_b, "identity_b", session_id).await;
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 2).await;
+    send_worker_message(
+        &mut socket_a,
+        WorkerProtocolMessage::Disconnect(tron::engine::WorkerDisconnect {
+            worker_id: worker_b.clone(),
+            reason: "foreign bound disconnect".to_owned(),
+        }),
+    )
+    .await;
+    assert!(
+        read_worker_error(&mut socket_a)
+            .await
+            .contains("does not match socket worker")
+    );
+    assert_eq!(
+        runtime.server.external_workers().lock().await.connections(),
+        vec![worker_a.clone(), worker_b.clone()]
+    );
+
+    send_worker_message(
+        &mut socket_a,
+        WorkerProtocolMessage::Hello(Box::new(worker_hello(&worker_c, "identity_c", session_id))),
+    )
+    .await;
+    assert!(
+        read_worker_error(&mut socket_a)
+            .await
+            .contains("already accepted hello")
+    );
+    assert!(matches!(
+        runtime
+            .server
+            .runtime_context()
+            .engine_host
+            .inspect_worker(&worker_c)
+            .await,
+        Err(EngineError::NotFound { .. })
+    ));
+
+    let function_id = FunctionId::new("identity_a::read").unwrap();
+    send_worker_message(
+        &mut socket_a,
+        WorkerProtocolMessage::RegisterFunction(Box::new(RegisterFunction {
+            definition: worker_function(&worker_a, &function_id, session_id),
+            default_visibility: VisibilityScope::Session,
+        })),
+    )
+    .await;
+    assert!(matches!(
+        read_worker_message(&mut socket_a).await,
+        WorkerProtocolMessage::CatalogChange(_)
+    ));
+
+    socket_a.close(None).await.unwrap();
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks + 1).await;
+    assert_eq!(
+        runtime.server.external_workers().lock().await.connections(),
+        vec![worker_b]
+    );
+    socket_b.close(None).await.unwrap();
+    wait_for_tracked_task_count(&runtime.server, baseline_tasks).await;
+    assert!(
+        runtime
+            .server
+            .external_workers()
+            .lock()
+            .await
+            .connections()
+            .is_empty()
+    );
+
+    let server_handle = runtime.server_handle.take().unwrap();
+    runtime
+        .server
+        .shutdown()
+        .graceful_shutdown(vec![server_handle], Some(Duration::from_secs(2)))
+        .await;
+    assert_eq!(runtime.server.shutdown().tracked_task_count(), 0);
 }
 
 #[tokio::test]

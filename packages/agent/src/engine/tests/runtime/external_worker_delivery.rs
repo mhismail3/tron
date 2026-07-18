@@ -15,11 +15,11 @@ async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target
     )
     .with_namespace_claim("local_queue");
     runtime
-        .hello(session_hello(worker, "session-a"))
+        .accept_connection(
+            session_hello(worker, "session-a"),
+            Arc::new(DisconnectExternalInvoker),
+        )
         .await
-        .unwrap();
-    runtime
-        .attach_invoker(worker_id.clone(), Arc::new(DisconnectExternalInvoker))
         .unwrap();
     runtime
         .register_function(super::RegisterFunction {
@@ -147,9 +147,9 @@ async fn local_external_worker_durable_disconnect_marks_functions_unhealthy() {
     .with_namespace_claim("durable_local");
     let mut hello = session_hello(worker, "session-a");
     hello.registration_mode = super::WorkerRegistrationMode::Durable;
-    runtime.hello(hello).await.unwrap();
     runtime
-        .attach_invoker(worker_id.clone(), Arc::new(EchoExternalInvoker))
+        .accept_connection(hello, Arc::new(EchoExternalInvoker))
+        .await
         .unwrap();
     runtime
         .register_function(super::RegisterFunction {
@@ -224,10 +224,14 @@ async fn local_external_worker_publish_stream_routes_through_stream_primitive() 
     )
     .with_namespace_claim("stream_local");
     let hello = session_hello(worker, "session-a");
-    runtime.hello(hello).await.unwrap();
+    let (lease, _) = runtime
+        .accept_connection(hello, Arc::new(EchoExternalInvoker))
+        .await
+        .unwrap();
     let response = runtime
-        .handle_message(super::WorkerProtocolMessage::PublishStream(
-            super::WorkerStreamPublish {
+        .handle_connection_message(
+            &lease,
+            super::WorkerProtocolMessage::PublishStream(super::WorkerStreamPublish {
                 worker_id: worker_id.clone(),
                 topic: "stream_local.events".to_owned(),
                 payload: json!({"from": "worker"}),
@@ -237,8 +241,8 @@ async fn local_external_worker_publish_stream_routes_through_stream_primitive() 
                 trace_id: Some(trace("worker-stream-trace")),
                 parent_invocation_id: Some(InvocationId::generate()),
                 idempotency_key: "worker-stream-event-1".to_owned(),
-            },
-        ))
+            }),
+        )
         .await
         .unwrap();
     assert!(matches!(
