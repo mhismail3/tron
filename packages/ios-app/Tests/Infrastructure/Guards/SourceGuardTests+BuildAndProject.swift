@@ -610,6 +610,9 @@ extension SourceGuardTests {
         #expect(environment.contains(#"name = "Just Launch Installed iOS Prod on iPhone""#))
         #expect(!environment.contains(#"name = "Just Launch Installed iOS Prod Fast on iPhone""#))
         #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta launch"))
+        #expect(installScript.contains(#"/(:[0-9]+:[0-9]+)?: (error|warning|note):/"#))
+        #expect(installScript.contains("grep -E '(:[0-9]+:[0-9]+)?: (error|warning):'"))
+        #expect(installScript.contains("No Accounts|No signing certificate|requires a development team"))
 
         var actionNames: [String] = []
         var inAction = false

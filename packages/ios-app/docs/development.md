@@ -78,6 +78,11 @@ It builds the `Tron Beta` scheme for a physical iOS destination, writes a full
 log plus `.xcresult` bundle, installs the resulting app bundle with
 `xcrun devicectl`, and launches the resolved bundle ID with a bounded `devicectl`
 launch timeout.
+When Xcode fails before compilation, the helper preserves project-level
+diagnostics as well as file-and-line compiler errors. Signing failures such as a
+missing Apple account or development certificate are therefore shown directly
+in the action output; repair those in Xcode's Apple Accounts settings, then run
+the same rebuild action again.
 `Rebuild + Install + Launch iOS Prod Fast Debug on iPhone` uses the same helper
 with `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so
 it builds the fast production-bundle app and launches it on the selected iPhone.

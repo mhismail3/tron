@@ -156,7 +156,7 @@ pretty_xcode_output() {
         xcpretty --color
     else
         awk '
-            /[^ ].*:[0-9]+:[0-9]+: (error|warning|note):/ { print; next }
+            /(:[0-9]+:[0-9]+)?: (error|warning|note):/ { print; next }
             /^\*\* (BUILD|CLEAN|TEST) (SUCCEEDED|FAILED|CANCELED) \*\*/ { print; next }
             /^The following build commands failed:/ { print; in_fail=1; next }
             in_fail && /^\([0-9]+ failures?\)$/ { print; in_fail=0; next }
@@ -210,14 +210,15 @@ build_install_launch() {
         echo "Build failed."
         echo
         echo "-- Errors --"
-        grep -E ':[0-9]+:[0-9]+: (error|warning):' "$log" | awk '!seen[$0]++' | head -20 || true
+        grep -E '(:[0-9]+:[0-9]+)?: (error|warning):' "$log" | awk '!seen[$0]++' | head -20 || true
         echo
         echo "-- Failed commands --"
         sed -n '/^The following build commands failed:/,/^([0-9]\+ failures\?)$/p' "$log" | head -30 || true
         echo
         echo "-- Signing / linker hints --"
-        grep -E 'Undefined symbols|ld: error|Code Sign|provisioning profile|signing identity' "$log" \
-            | grep -iE 'error|failed|not found|does not' | head -10 || true
+        grep -Ei 'Undefined symbols|ld: error|Code Sign|provisioning profile|signing identity|No Accounts|No signing certificate|requires a development team' "$log" \
+            | grep -iE 'error|failed|not found|does not|no accounts|no signing certificate|requires a development team' \
+            | head -10 || true
         echo
         echo "Full log: $log"
         echo "xcresult: $xcresult"
