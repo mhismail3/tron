@@ -92,6 +92,7 @@ pub(super) async fn build_snapshot_record(
         estimated_tokens,
         turn_count: state.turn_count as u32,
         message_count,
+        head_event_id: &state.head_event_id,
         prompt_blocks,
         memory,
         resource_refs,

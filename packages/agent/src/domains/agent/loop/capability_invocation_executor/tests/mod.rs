@@ -111,6 +111,7 @@ fn capability_exec_ctx<'a>(
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     }
 }
 
@@ -204,6 +205,44 @@ async fn model_capability_invocation_invokes_execute_primitive_through_engine() 
     assert_eq!(
         result.result.details.as_ref().unwrap()["filesystem"]["file"]["content"],
         "hello from engine"
+    );
+}
+
+#[tokio::test]
+async fn delegated_read_only_policy_rejects_mutation_before_grant_derivation() {
+    let server = crate::shared::server::test_support::make_test_context();
+    let surface = resolve_provider_primitive_surface(&server.engine_host, "s1", None)
+        .await
+        .expect("provider capability surface");
+    let emitter = Arc::new(EventEmitter::new());
+    let cancel = CancellationToken::new();
+    let registry = Arc::new(InvocationAbortRegistry::new());
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &server.engine_host);
+    ctx.execution_policy = crate::domains::agent::r#loop::types::ExecutionPolicy::ReadOnly;
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "operation".to_owned(),
+        Value::String("filesystem_write".to_owned()),
+    );
+    args.insert("path".to_owned(), Value::String("forbidden.txt".to_owned()));
+    args.insert(
+        "content".to_owned(),
+        Value::String("must not write".to_owned()),
+    );
+
+    let result = execute_capability_invocation(
+        &CapabilityInvocationDraft::new("tc1", "execute", args),
+        "s1",
+        "/tmp",
+        &ctx,
+    )
+    .await;
+
+    assert!(result.result.is_error.unwrap_or(false));
+    assert_failure_code(&result.result, ENGINE_POLICY_VIOLATION);
+    assert_eq!(
+        result.result.details.as_ref().unwrap()["executionPolicy"],
+        "read_only"
     );
 }
 

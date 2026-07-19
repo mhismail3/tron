@@ -140,7 +140,7 @@ final class DependencyContainer {
     /// Worker lifecycle repository for the agent cockpit.
     private(set) var workerLifecycleRepository: any WorkerLifecycleRepository
 
-    /// Session context-control repository for Session Briefing.
+    /// Session context-control repository for Context Revision.
     private(set) var contextControlRepository: any ContextControlRepository
 
     var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {

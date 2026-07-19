@@ -15,7 +15,7 @@ define_events! {
         SessionStart => "session.start" => payloads::session::SessionStartPayload,
         /// Session ended.
         SessionEnd => "session.end" => payloads::session::SessionEndPayload,
-        /// Session forked from another.
+        /// Branch created from another session.
         SessionFork => "session.fork" => payloads::session::SessionForkPayload,
         /// User message.
         MessageUser => "message.user" => payloads::message::UserMessagePayload,

@@ -21,12 +21,14 @@ pub(crate) struct PromptSubmission {
     prompt: String,
     reasoning_level: Option<String>,
     attachments: Option<Vec<Value>>,
+    execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy,
 }
 
 pub(crate) async fn prompt_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    validate_execution_policy_access(invocation)?;
     let (submission, _, _) = validate_prompt_submission(Some(&invocation.payload), deps).await?;
     let run_id = uuid::Uuid::now_v7().to_string();
     let mut apply_payload = invocation.payload.clone();
@@ -53,6 +55,17 @@ pub(crate) async fn prompt_value(
         apply_payload,
     )
     .await
+}
+
+fn validate_execution_policy_access(invocation: &Invocation) -> Result<(), CapabilityError> {
+    if invocation.payload.get("executionPolicy").is_some()
+        && invocation.causal_context.actor_kind != crate::engine::ActorKind::System
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: "executionPolicy is reserved for trusted system workflows".into(),
+        });
+    }
+    Ok(())
 }
 
 pub(crate) async fn prompt_apply_value(
@@ -123,6 +136,7 @@ pub(crate) async fn run_turn_value(
             reasoning_level: submission.reasoning_level,
             attachments: submission.attachments,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
+            execution_policy: submission.execution_policy,
         },
     );
 
@@ -185,6 +199,17 @@ pub(crate) async fn validate_prompt_submission(
             prompt,
             reasoning_level: opt_string(params, "reasoningLevel"),
             attachments,
+            execution_policy: match opt_string(params, "executionPolicy").as_deref() {
+                Some("read_only") => {
+                    crate::domains::agent::r#loop::types::ExecutionPolicy::ReadOnly
+                }
+                Some(_) => {
+                    return Err(CapabilityError::InvalidParams {
+                        message: "executionPolicy must be read_only when provided".into(),
+                    });
+                }
+                None => crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
+            },
         },
         session,
         responder_factory,
@@ -391,6 +416,29 @@ mod tests {
                 .as_deref()
                 .is_some_and(|key| key.starts_with("agent::prompt_apply:"))
         );
+    }
+
+    #[test]
+    fn public_caller_cannot_select_server_owned_execution_policy() {
+        let invocation = Invocation::new_sync(
+            FunctionId::new("agent::prompt").unwrap(),
+            json!({"sessionId": "session-a", "prompt": "hello", "executionPolicy": "read_only"}),
+            CausalContext::new(
+                ActorId::new("engine-client").unwrap(),
+                ActorKind::Client,
+                AuthorityGrantId::new("engine-transport").unwrap(),
+                TraceId::new("policy-test").unwrap(),
+            )
+            .with_session_id("session-a"),
+        );
+        assert!(matches!(
+            validate_execution_policy_access(&invocation),
+            Err(CapabilityError::InvalidParams { .. })
+        ));
+
+        let mut trusted = invocation;
+        trusted.causal_context.actor_kind = ActorKind::System;
+        assert!(validate_execution_policy_access(&trusted).is_ok());
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub(super) struct SnapshotInput<'a> {
     pub(super) estimated_tokens: u64,
     pub(super) turn_count: u32,
     pub(super) message_count: usize,
+    pub(super) head_event_id: &'a str,
     pub(super) prompt_blocks: Value,
     pub(super) memory: Value,
     pub(super) resource_refs: Vec<Value>,
@@ -55,6 +56,7 @@ pub(super) fn snapshot_record(input: SnapshotInput<'_>) -> Value {
             "usagePercent": usage_percent,
             "turnCount": input.turn_count,
             "messageCount": input.message_count,
+            "headEventId": input.head_event_id,
             "currentEpoch": input.epoch_id
         },
         "composition": {

@@ -34,7 +34,8 @@
 //! `EventStore` is the high-level transactional facade for session/event truth.
 //! Its create, fork, and append methods own current identity generation,
 //! automatic parent/sequence allocation, and durable writes; explicit-identity
-//! variants preserve deterministic replay. `reconstruct_from_events` rebuilds
+//! variants preserve deterministic replay and make post-commit fork retries
+//! converge. `reconstruct_from_events` rebuilds
 //! provider-facing message context from the durable event stream.
 //!
 //! ## Dependency Direction
@@ -66,6 +67,8 @@
 //!   `EventStore`; no parallel factory or manual chain-head owner exists.
 //! - Replay/import paths use explicit identities instead of ambient time or
 //!   UUID generation when durable IDs/timestamps must be stable.
+//! - Replaying `fork_with_identity` returns an existing fork only when its
+//!   source and root lineage match exactly; identity collisions fail closed.
 //! - The event log is append-only for normal lifecycle operations. Archiving
 //!   sets session-row `ended_at`, message deletion appends `message.deleted`,
 //!   and physical event cleanup happens only when the owning session is

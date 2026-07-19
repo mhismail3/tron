@@ -36,6 +36,16 @@
 //! after those boundaries. Manual boundaries carry their internal invocation
 //! correlation so reconstruction also excludes the matching post-boundary
 //! capability result instead of producing an orphaned provider function output.
+//! Manual compaction reconstructs the durable provider messages and runs the
+//! same deterministic bounded, salience-aware summarizer used by the primitive
+//! loop. It preserves chronological edges and explicit middle-session
+//! constraints/decisions; raw history remains authoritative. A
+//! serialization, reconstruction, summarization, or empty-summary failure
+//! terminalizes the prepared action without writing a boundary; generic
+//! count-only text is never substituted. Snapshot records bind the exact
+//! session head used for reconstruction, and both compact and clear compare
+//! that head inside the event append transaction so concurrent context fails
+//! closed rather than being revised against a mismatched preflight.
 //! Every new boundary references an action version that was durably prepared
 //! first. Interrupted action/epoch finalization is repairable through the same
 //! idempotency key, while the invocation that committed or recovered the
@@ -52,6 +62,9 @@
 //! summarizer replacement must carry rollback/disable metadata and prove it
 //! consumed the current policy snapshot before binding policy may later consider
 //! routing.
+//! Every context-control lifecycle publication carries the stable
+//! `context_revision.changed` invalidation type; clients reconstruct canonical
+//! state instead of treating lifecycle payload details as UI truth.
 
 use std::sync::Arc;
 

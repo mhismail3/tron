@@ -80,6 +80,48 @@ fn append_updates_session_head() {
 }
 
 #[test]
+fn append_if_head_rejects_a_stale_context_cut_without_writing() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+    let captured_head = cr.root_event.id.clone();
+    let concurrent = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::MessageUser,
+            payload: serde_json::json!({"content": "arrived after preflight"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    let error = store
+        .append_if_head(
+            &AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::CompactBoundary,
+                payload: serde_json::json!({"summary": "stale"}),
+                parent_id: None,
+                sequence: None,
+            },
+            &captured_head,
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("session head changed"));
+    assert_eq!(
+        store
+            .get_session(&cr.session.id)
+            .unwrap()
+            .unwrap()
+            .head_event_id
+            .as_deref(),
+        Some(concurrent.id.as_str())
+    );
+}
+
+#[test]
 fn append_increments_counters() {
     let store = setup();
     let cr = store

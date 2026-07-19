@@ -95,13 +95,6 @@ pub(crate) enum ModuleProgramExecutionResourceSet {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SubagentResourceSet {
-    Launch,
-    Followup,
-    Catalog,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ResourceKindPolicy {
     None,
     Static(&'static [&'static str]),
@@ -127,7 +120,6 @@ pub(crate) enum ResourceKindPolicy {
     CapabilityRouteUnion,
     ModuleRuntime(ModuleRuntimeResourceSet),
     ModuleProgramExecution(ModuleProgramExecutionResourceSet),
-    Subagent(SubagentResourceSet),
 }
 
 impl ResourceKindPolicy {
@@ -159,11 +151,6 @@ impl ResourceKindPolicy {
                 ModuleProgramExecutionResourceSet::Start => MODULE_PROGRAM_START_KINDS,
                 ModuleProgramExecutionResourceSet::Followup => MODULE_PROGRAM_FOLLOWUP_KINDS,
             },
-            Self::Subagent(resources) => match resources {
-                SubagentResourceSet::Launch => SUBAGENT_LAUNCH_KINDS,
-                SubagentResourceSet::Followup => SUBAGENT_FOLLOWUP_KINDS,
-                SubagentResourceSet::Catalog => SUBAGENT_CATALOG_KINDS,
-            },
         }
     }
 }
@@ -185,12 +172,6 @@ pub(crate) enum SelectorAddition {
         lifecycle_field: &'static str,
         request_id_field: &'static str,
         idempotency_field: &'static str,
-    },
-    DerivedSubagentTask {
-        task_id_field: &'static str,
-    },
-    DelegatedSubagentResources {
-        task_resource_field: &'static str,
     },
 }
 
@@ -296,38 +277,13 @@ const WEB_READ: &[&str] = &["resource.read", "web.read"];
 const WEB_READ_WRITE: &[&str] = &["resource.read", "resource.write", "web.read", "web.write"];
 const WEB_ROBOTS_PROOF_SCOPES: &[&str] = &["resource.read", "web.read"];
 const DEVICE_PUSH_SCOPES: &[&str] = &["device.read"];
-const SUBAGENT_TASK_READ: &[&str] = &["subagents.read", "resource.read"];
-const SUBAGENT_FOLLOWUP_READ: &[&str] = &[
-    "jobs.read",
-    "module_runtime.read",
-    "program_execution.read",
-    "resource.read",
-    "subagents.read",
-];
-const SUBAGENT_LAUNCH: &[&str] = &[
-    "jobs.read",
-    "jobs.write",
-    "module_runtime.read",
-    "module_runtime.write",
-    "program_execution.read",
-    "program_execution.write",
+const DELEGATION_READ: &[&str] = &["delegation.read", "resource.read"];
+const DELEGATION_WRITE: &[&str] = &[
+    "delegation.read",
+    "delegation.write",
     "resource.read",
     "resource.write",
-    "subagents.read",
-    "subagents.write",
 ];
-const SUBAGENT_CANCEL: &[&str] = &[
-    "jobs.read",
-    "jobs.write",
-    "module_runtime.read",
-    "module_runtime.write",
-    "program_execution.read",
-    "resource.read",
-    "resource.write",
-    "subagents.read",
-    "subagents.write",
-];
-
 const SESSION: &[SelectorAddition] = &[SelectorAddition::Session];
 const WEB_ROBOTS_SELECTOR: &[SelectorAddition] = &[SelectorAddition::WebRobotsProof {
     resource_id_field: "webRobotsPolicyResourceId",
@@ -346,21 +302,6 @@ const MODULE_RUNTIME_REQUEST_SELECTOR: &[SelectorAddition] =
         request_id_field: "runtimeRequestId",
         idempotency_field: "idempotencyKey",
     }];
-const SUBAGENT_LAUNCH_SELECTORS: &[SelectorAddition] = &[
-    SelectorAddition::DerivedModuleRuntimeState {
-        lifecycle_field: "moduleLifecycleResourceId",
-        request_id_field: "runtimeRequestId",
-        idempotency_field: "idempotencyKey",
-    },
-    SelectorAddition::DerivedSubagentTask {
-        task_id_field: "taskId",
-    },
-];
-const SUBAGENT_FOLLOWUP_SELECTORS: &[SelectorAddition] =
-    &[SelectorAddition::DelegatedSubagentResources {
-        task_resource_field: "subagentTaskResourceId",
-    }];
-
 const CONTEXT_KINDS: &[&str] = &[
     "context_control_snapshot",
     "context_control_action",
@@ -437,23 +378,6 @@ const MODULE_PROGRAM_FOLLOWUP_KINDS: &[&str] = &[
     "job_process",
     "execution_output",
 ];
-const SUBAGENT_LAUNCH_KINDS: &[&str] = &[
-    "subagent_task",
-    "module_runtime_state",
-    "program_execution_record",
-    "job_process",
-    "execution_output",
-    "module_lifecycle_state",
-];
-const SUBAGENT_FOLLOWUP_KINDS: &[&str] = &[
-    "subagent_task",
-    "module_runtime_state",
-    "program_execution_record",
-    "job_process",
-    "execution_output",
-];
-const SUBAGENT_CATALOG_KINDS: &[&str] = &["subagent_task"];
-
 /// Return the one canonical static authority policy for a supported operation.
 ///
 /// Unknown names fail closed. The operation registry is intentionally not
@@ -623,10 +547,8 @@ fn base_scope_additions(operation: &str) -> Option<&'static [&'static str]> {
             "resource.read",
             "resource.write",
         ],
-        "subagent_launch" => SUBAGENT_LAUNCH,
-        "subagent_status" | "subagent_result" => SUBAGENT_FOLLOWUP_READ,
-        "subagent_cancel" => SUBAGENT_CANCEL,
-        "subagent_task_list" | "subagent_task_inspect" => SUBAGENT_TASK_READ,
+        "delegation_list" | "delegation_inspect" => DELEGATION_READ,
+        "delegation_start" | "delegation_cancel" | "delegation_accept_result" => DELEGATION_WRITE,
         "worker_package_list" | "worker_package_inspect" => {
             &["worker.lifecycle.read", "resource.read"]
         }
@@ -858,12 +780,12 @@ fn resource_kind_policy(operation: &str) -> ResourceKindPolicy {
             kind_field: "proceduralKind",
             resources: ProceduralResourceSet::ActivationDecision,
         },
-        "subagent_launch" => ResourceKindPolicy::Subagent(SubagentResourceSet::Launch),
-        "subagent_status" | "subagent_result" | "subagent_cancel" => {
-            ResourceKindPolicy::Subagent(SubagentResourceSet::Followup)
-        }
-        "subagent_task_list" | "subagent_task_inspect" => {
-            ResourceKindPolicy::Subagent(SubagentResourceSet::Catalog)
+        "delegation_list"
+        | "delegation_start"
+        | "delegation_inspect"
+        | "delegation_cancel"
+        | "delegation_accept_result" => {
+            ResourceKindPolicy::Static(&[crate::engine::DELEGATION_KIND])
         }
         "worker_package_list" => {
             ResourceKindPolicy::WorkerPackage(WorkerPackageKindSource::ListArgument {
@@ -1062,14 +984,16 @@ fn exact_resource_id_fields(operation: &str) -> &'static [&'static str] {
         "web_research_review_inspect" => &["webResearchReviewResourceId"],
         "web_research_source_inspect" => &["webResearchSourceResourceId"],
         "module_lifecycle_decision" | "module_lifecycle_inspect" => &["moduleLifecycleResourceId"],
-        "module_runtime_request" | "module_program_execution_start" | "subagent_launch" => {
+        "module_runtime_request" | "module_program_execution_start" => {
             &["moduleLifecycleResourceId"]
         }
         "module_runtime_inspect" | "module_runtime_cancel" => &["moduleRuntimeResourceId"],
         "module_program_execution_status"
         | "module_program_execution_cancel"
         | "module_program_execution_cleanup" => &["moduleRuntimeResourceId", "jobResourceId"],
-        "subagent_status" | "subagent_result" | "subagent_cancel" => &["subagentTaskResourceId"],
+        "delegation_inspect" | "delegation_cancel" | "delegation_accept_result" => {
+            &["delegationResourceId"]
+        }
         "procedural_state_inspect" | "procedural_activation_request_record" => {
             &["proceduralRecordResourceId"]
         }
@@ -1122,8 +1046,6 @@ fn selector_additions(operation: &str) -> &'static [SelectorAddition] {
         "module_runtime_request" | "module_program_execution_start" => {
             MODULE_RUNTIME_REQUEST_SELECTOR
         }
-        "subagent_launch" => SUBAGENT_LAUNCH_SELECTORS,
-        "subagent_status" | "subagent_result" | "subagent_cancel" => SUBAGENT_FOLLOWUP_SELECTORS,
         _ => &[],
     }
 }
@@ -1136,7 +1058,7 @@ mod tests {
 
     #[test]
     fn every_supported_operation_has_exactly_one_policy_and_unknowns_fail_closed() {
-        assert_eq!(OperationId::ALL_NAMES.len(), 188);
+        assert_eq!(OperationId::ALL_NAMES.len(), 187);
         let unique = OperationId::ALL_NAMES
             .iter()
             .copied()
@@ -1182,6 +1104,21 @@ mod tests {
             for kind in policy.resource_kind_policy().base_kinds() {
                 assert!(!kind.contains('*'));
                 assert_ne!(*kind, "agent_state");
+            }
+        }
+    }
+
+    #[test]
+    fn every_read_only_operation_has_no_network_authority() {
+        for operation in OperationId::ALL_NAMES {
+            if super::super::effect(operation) == Some(super::super::OperationEffect::ReadOnly) {
+                assert_eq!(
+                    policy(operation)
+                        .expect("covered operation")
+                        .network_policy(),
+                    NetworkPolicy::None,
+                    "read-only operation {operation} must not carry live network authority"
+                );
             }
         }
     }
@@ -1331,13 +1268,6 @@ mod tests {
             runtime.selector_additions(),
             MODULE_RUNTIME_REQUEST_SELECTOR
         );
-
-        let launch = policy("subagent_launch").expect("subagent launch");
-        assert_eq!(
-            launch.resource_kind_policy(),
-            ResourceKindPolicy::Subagent(SubagentResourceSet::Launch)
-        );
-        assert_eq!(launch.selector_additions(), SUBAGENT_LAUNCH_SELECTORS);
     }
 
     #[test]

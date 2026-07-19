@@ -6,6 +6,12 @@ enum SessionBriefingMutation {
     case clear
 }
 
+enum SessionBriefingMutationPolicy {
+    static func canMutate(isAgentRunning: Bool, isMutationActive: Bool) -> Bool {
+        !isAgentRunning && !isMutationActive
+    }
+}
+
 struct SessionBriefingSection<Content: View>: View {
     let title: String
     let icon: String

@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Small metadata icon shown immediately before a forked session's title.
+/// Small metadata icon shown immediately before a branch session's title.
 ///
 /// Shared by the chat toolbar and the sidebar row so both read from the same
 /// composition and remain visually identical.
 ///
 /// The icons are purely decorative — the surrounding row/toolbar supplies
-/// an accessibility label that announces the forked state ("…, forked").
+/// an accessibility label that announces the branch state ("…, branch").
 struct SessionTitleIcons: View {
     let isFork: Bool
 
@@ -22,7 +22,7 @@ struct SessionTitleIcons: View {
 
     static func accessibilityDescriptors(isFork: Bool) -> [String] {
         var descriptors: [String] = []
-        if isFork { descriptors.append("forked") }
+        if isFork { descriptors.append("branch") }
         return descriptors
     }
 

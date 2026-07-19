@@ -135,6 +135,15 @@ impl ModelResponderFactory for StrictMockFactory {
 
 /// Build an `ServerRuntimeContext` backed by an in-memory event store.
 pub fn make_test_context() -> ServerRuntimeContext {
+    make_test_context_with_responder_factory(None)
+}
+
+/// Build an isolated server context with an explicit responder factory already
+/// present when domains register. This exercises real prompt/run wiring instead
+/// of replacing durable outcomes after registration.
+pub fn make_test_context_with_responder_factory(
+    responder_factory: Option<Arc<dyn ModelResponderFactory>>,
+) -> ServerRuntimeContext {
     let pool = crate::domains::session::event_store::new_in_memory(
         &crate::domains::session::event_store::ConnectionConfig::default(),
     )
@@ -159,7 +168,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         settings_path,
         profile_runtime,
-        responder_factory: None,
+        responder_factory,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),

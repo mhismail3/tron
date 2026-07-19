@@ -6,9 +6,7 @@
 
 use serde_json::{Value, json};
 
-use super::{
-    bounded_integer_schema, idempotency_schema, network_policy_none_schema, string_schema,
-};
+use super::{bounded_integer_schema, idempotency_schema, string_schema};
 
 const MAX_LIST_ITEMS: u64 = 100;
 const MAX_REFS: u64 = 25;
@@ -130,54 +128,54 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
                 ),
             ],
         ),
-        "subagent_launch" => (
+        "delegation_start" => (
             vec![
                 "operation",
                 "objectiveSummary",
-                "promptSummary",
-                "modelPolicy",
-                "workerKind",
-                "modulePackId",
-                "moduleLifecycleResourceId",
-                "runtimeRequestId",
-                "command",
-                "runtimeId",
-                "languageId",
-                "programFingerprint",
-                "networkPolicy",
+                "successCriteria",
                 "idempotencyKey",
             ],
-            subagent_launch_fields(),
-        ),
-        "subagent_status" | "subagent_result" => (
-            vec!["operation", "subagentTaskResourceId"],
-            vec![(
-                "subagentTaskResourceId",
-                resource_id_schema("subagent task"),
-            )],
-        ),
-        "subagent_cancel" => (
-            vec!["operation", "subagentTaskResourceId", "idempotencyKey"],
             vec![
                 (
-                    "subagentTaskResourceId",
-                    resource_id_schema("subagent task"),
+                    "objectiveSummary",
+                    bounded_string(2_000, "Bounded delegated objective."),
                 ),
                 (
-                    "expectedSubagentTaskVersionId",
-                    version_id_schema("subagent task"),
+                    "successCriteria",
+                    json!({"type": "array", "minItems": 1, "maxItems": 12, "items": bounded_string(500, "One completion criterion.")}),
                 ),
-                ("reason", bounded_string(2_048, "Cancellation reason.")),
+                (
+                    "handoffRefs",
+                    json!({"type": "array", "maxItems": 32, "items": {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {
+                        "kind": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^*]+$"},
+                        "id": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^*]+$"},
+                        "versionId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^*]+$"}
+                    }}}),
+                ),
                 ("idempotencyKey", idempotency_schema()),
             ],
         ),
-        "subagent_task_list" => (vec!["operation"], subagent_task_list_fields()),
-        "subagent_task_inspect" => (
-            vec!["operation", "subagentTaskResourceId"],
-            vec![(
-                "subagentTaskResourceId",
-                resource_id_schema("subagent task"),
-            )],
+        "delegation_list" => (vec!["operation"], vec![]),
+        "delegation_inspect" => (
+            vec!["operation", "delegationResourceId"],
+            vec![("delegationResourceId", resource_id_schema("delegation"))],
+        ),
+        "delegation_cancel" | "delegation_accept_result" => (
+            vec![
+                "operation",
+                "delegationResourceId",
+                "expectedVersionId",
+                "idempotencyKey",
+            ],
+            vec![
+                ("delegationResourceId", resource_id_schema("delegation")),
+                ("expectedVersionId", version_id_schema("delegation")),
+                (
+                    "reason",
+                    bounded_string(500, "Cancellation or acceptance reason."),
+                ),
+                ("idempotencyKey", idempotency_schema()),
+            ],
         ),
         "worker_package_list" => (vec!["operation"], worker_package_list_fields()),
         "worker_package_inspect" => (
@@ -680,112 +678,6 @@ fn bounded_list_fields(with_state: bool) -> Vec<(&'static str, Value)> {
     if with_state {
         fields.push(("state", string_schema("Exact lifecycle state filter.")));
     }
-    fields
-}
-
-fn subagent_launch_fields() -> Vec<(&'static str, Value)> {
-    vec![
-        ("taskId", bounded_string(128, "Optional stable task id.")),
-        (
-            "objectiveSummary",
-            bounded_string(2_048, "Bounded objective summary."),
-        ),
-        (
-            "promptSummary",
-            bounded_string(2_048, "Bounded prompt summary."),
-        ),
-        (
-            "modelPolicy",
-            const_string("accepted_jobs_program_execution_v1"),
-        ),
-        ("workerKind", const_string("module_program_execution")),
-        ("modulePackId", const_string("jobs_program_execution")),
-        (
-            "moduleLifecycleResourceId",
-            resource_id_schema("enabled module lifecycle state"),
-        ),
-        (
-            "runtimeRequestId",
-            bounded_token_schema(256, "Runtime request id."),
-        ),
-        (
-            "runtimeKind",
-            bounded_token_schema(256, "Runtime kind label."),
-        ),
-        (
-            "runtimeLabel",
-            bounded_string(1_000, "Runtime display label."),
-        ),
-        (
-            "command",
-            string_schema("Delegated non-interactive command."),
-        ),
-        ("runtimeId", bounded_token_schema(256, "Runtime identity.")),
-        (
-            "languageId",
-            bounded_token_schema(256, "Language identity."),
-        ),
-        (
-            "programFingerprint",
-            bounded_token_schema(256, "Program fingerprint."),
-        ),
-        (
-            "programId",
-            bounded_token_schema(256, "Optional program id."),
-        ),
-        (
-            "programLabel",
-            bounded_string(1_000, "Optional program label."),
-        ),
-        (
-            "programSummary",
-            bounded_string(1_000, "Optional program summary."),
-        ),
-        (
-            "inputFingerprint",
-            bounded_token_schema(256, "Optional input fingerprint."),
-        ),
-        ("sourceRef", object_schema("Optional source ref.")),
-        ("inputRef", object_schema("Optional input ref.")),
-        ("inputRefs", refs_schema()),
-        ("sourceRefs", refs_schema()),
-        ("evidenceRefs", refs_schema()),
-        ("outputRefs", refs_schema()),
-        ("handoffRefs", refs_schema()),
-        ("traceRefs", refs_schema()),
-        ("replayRefs", refs_schema()),
-        (
-            "timeoutMs",
-            bounded_integer_schema(1, MAX_TIMEOUT_MS, "Maximum delegated runtime."),
-        ),
-        (
-            "maxOutputBytes",
-            bounded_integer_schema(1, MAX_OUTPUT_BYTES, "Maximum captured output bytes."),
-        ),
-        (
-            "cleanupAfterSeconds",
-            json!({"type": "integer", "minimum": 0}),
-        ),
-        ("networkPolicy", network_policy_none_schema()),
-        ("idempotencyKey", idempotency_schema()),
-    ]
-}
-
-fn subagent_task_list_fields() -> Vec<(&'static str, Value)> {
-    let mut fields = bounded_list_fields(true);
-    let state = fields
-        .iter_mut()
-        .find(|(name, _)| *name == "state")
-        .expect("state field exists");
-    state.1 = enum_string(&[
-        "requested",
-        "queued",
-        "running",
-        "succeeded",
-        "failed",
-        "cancelled",
-        "archived",
-    ]);
     fields
 }
 
@@ -1363,7 +1255,6 @@ mod tests {
             set(&["operation", "moduleRuntimeResourceId", "jobResourceId"])
         );
         assert!(!properties("module_list").contains("moduleManifestResourceId"));
-        assert!(!properties("subagent_status").contains("promptSummary"));
     }
 
     #[test]
@@ -1376,16 +1267,6 @@ mod tests {
         assert_eq!(
             schedule["properties"]["target"]["additionalProperties"],
             json!(false)
-        );
-
-        let subagent = input_schema("subagent_launch").expect("subagent schema");
-        assert_eq!(
-            subagent["properties"]["modelPolicy"]["const"],
-            json!("accepted_jobs_program_execution_v1")
-        );
-        assert_eq!(
-            subagent["properties"]["modulePackId"]["const"],
-            json!("jobs_program_execution")
         );
 
         let dependency =

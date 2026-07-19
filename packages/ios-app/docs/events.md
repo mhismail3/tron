@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-17 (registry-owned dispatch; source/client stream-loss recovery; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
+> Last verified: 2026-07-18 (registry-owned dispatch; source/client stream-loss and decode-failure recovery; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -14,6 +14,16 @@ history from durable event rows. Neither path owns repository workflow state,
 assistant-management state, curated prompt state, skill state, prompt-queue
 state, hook suggestion state, or fixed audit panels on the primitive teardown
 branch.
+
+`session::reconstruct` may also include the optional
+`tron.session_workflows.v1` read model. iOS decodes only its Context Revision,
+Branch lineage, and Delegation summaries. It is not a second workflow store;
+older servers may omit it and source domains remain canonical. Mounted chats
+also subscribe to the invalidation-only `delegation.lifecycle` and
+`context_control.lifecycle` topics. Typed `delegation.changed` and
+`context_revision.changed` events request normal source reconstruction for
+every terminal state, including skipped and failed Context Revisions; their
+payloads never directly mutate workflow UI.
 
 The transport and subscription details stay in the Engine layer. Session view
 models subscribe through `SessionEventRepository`, so event plugins receive
@@ -54,8 +64,13 @@ or omitted processing truth cannot erase them. Reconnect refresh stays behind
 Live continuity failures are explicit. If the server projection receiver lags,
 it publishes a global `stream.recovery_required` marker. If an iOS subscriber
 buffer evicts an older delivery, `EngineClient` queues the same marker before
-acknowledging the upstream cursor. A mounted chat turns the marker into a
-generation change observed by `ChatView`, which routes reconstruction through
+acknowledging the upstream cursor. Unknown future event types remain observable
+as inert placeholders and are acknowledged normally. If a registered event
+cannot decode—indicating incompatible server/client schema drift—the client
+queues `stream.recovery_required` and then acknowledges that delivery, avoiding
+a permanently pinned cursor while forcing source-owned reconstruction. A
+mounted chat turns the marker into a generation change observed by `ChatView`,
+which routes reconstruction through
 the existing connection-refresh task. Replacement cancels and joins its keyed
 predecessor before new state mutation. Only a committed server snapshot clears
 reconstruction mode and drains the buffered live suffix; retryable failures and

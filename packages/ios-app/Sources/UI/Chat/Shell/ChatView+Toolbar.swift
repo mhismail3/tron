@@ -57,7 +57,7 @@ extension ChatView {
         }
     }
 
-    /// Trailing toolbar item (browser button and menu)
+    /// Trailing toolbar item (live stream and first-class session workflows)
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -71,14 +71,69 @@ extension ChatView {
                         .foregroundStyle(.tronEmerald)
                 }
             }
-            Button {
-                NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue)
+            Menu {
+                Button {
+                    NotificationCenter.default.post(
+                        name: .chatMenuAction,
+                        object: ChatMenuRequest(action: .branch, sessionId: sessionId)
+                    )
+                } label: {
+                    Label("Branch session", systemImage: "arrow.triangle.branch")
+                }
+                .disabled(!BranchSessionMutationPolicy.canBranch(
+                    isConnected: interactionPolicy?.isConnected ?? false,
+                    isProcessing: viewModel.isProcessing,
+                    isCreatingBranch: isCreatingBranch
+                ))
+
+                Button {
+                    NotificationCenter.default.post(
+                        name: .chatMenuAction,
+                        object: ChatMenuRequest(action: .settings, sessionId: sessionId)
+                    )
+                } label: {
+                    Label("Chat settings", systemImage: "gearshape")
+                }
             } label: {
-                Image(systemName: "gearshape")
+                Image(systemName: isCreatingBranch ? "circle.dotted" : "ellipsis.circle")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(.tronEmerald)
             }
-            .accessibilityLabel("Chat settings")
+            .accessibilityLabel("Session actions")
         }
+    }
+
+    @MainActor
+    func createBranch() {
+        guard BranchSessionMutationPolicy.canBranch(
+            isConnected: interactionPolicy?.isConnected ?? false,
+            isProcessing: viewModel.isProcessing,
+            isCreatingBranch: isCreatingBranch
+        ) else { return }
+
+        isCreatingBranch = true
+        Task {
+            defer { isCreatingBranch = false }
+            do {
+                let newSessionId = try await eventStoreManager.forkSession(sessionId)
+                NotificationCenter.default.post(name: .switchToSession, object: newSessionId)
+            } catch {
+                sheetCoordinator.showLocalErrorDetail(
+                    title: "Branch could not be created",
+                    message: error.localizedDescription,
+                    suggestion: "Wait for the current response to finish, then try again."
+                )
+            }
+        }
+    }
+}
+
+enum BranchSessionMutationPolicy {
+    static func canBranch(
+        isConnected: Bool,
+        isProcessing: Bool,
+        isCreatingBranch: Bool
+    ) -> Bool {
+        isConnected && !isProcessing && !isCreatingBranch
     }
 }

@@ -365,10 +365,11 @@ pub(super) const fn profile(operation: OperationId) -> OutputProfile {
         | OperationId::JobList
         | OperationId::JobLog
         | OperationId::JobCancel
-        | OperationId::SubagentLaunch
-        | OperationId::SubagentStatus
-        | OperationId::SubagentResult
-        | OperationId::SubagentCancel
+        | OperationId::DelegationStart
+        | OperationId::DelegationList
+        | OperationId::DelegationInspect
+        | OperationId::DelegationCancel
+        | OperationId::DelegationAcceptResult
         | OperationId::ModuleProgramExecutionStart
         | OperationId::ModuleProgramExecutionStatus
         | OperationId::ModuleProgramExecutionCancel
@@ -442,9 +443,7 @@ pub(super) const fn profile(operation: OperationId) -> OutputProfile {
         | OperationId::ScheduleList
         | OperationId::ScheduleInspect
         | OperationId::ScheduleCancel
-        | OperationId::ScheduleFireDue
-        | OperationId::SubagentTaskList
-        | OperationId::SubagentTaskInspect => OutputProfile::Resource,
+        | OperationId::ScheduleFireDue => OutputProfile::Resource,
         OperationId::ProceduralDefinitionRecord
         | OperationId::ProceduralStateList
         | OperationId::ProceduralStateInspect

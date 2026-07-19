@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::domains::session::event_store::{
-    AppendOptions, EventStore, EventType, ListSessionsOptions,
+    AppendOptions, EventIdentity, EventStore, EventType, ListSessionsOptions,
+    SessionCreationIdentity, SessionIdentity, WorkspaceIdentity,
 };
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
@@ -93,6 +94,48 @@ impl SessionManager {
             .insert(session_id.clone(), CachedSession::new(state, false));
         debug!(session_id, "session created");
         Ok(session_id)
+    }
+
+    /// Create or replay one session with a caller-owned deterministic identity.
+    pub(crate) fn create_session_with_id(
+        &self,
+        session_id: &str,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+    ) -> Result<String, RuntimeError> {
+        if self
+            .event_store
+            .get_session(session_id)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?
+            .is_some()
+        {
+            return Ok(session_id.to_owned());
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let suffix = session_id.trim_start_matches("sess_");
+        self.event_store
+            .create_session_with_identity(
+                model,
+                workspace_path,
+                title,
+                None,
+                SessionCreationIdentity::new(
+                    WorkspaceIdentity::new(format!("ws_{suffix}"), now.clone()),
+                    SessionIdentity::new(session_id, now.clone()),
+                    EventIdentity::new(format!("evt_{suffix}"), now),
+                ),
+            )
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        let state = Arc::new(ReconstructedState {
+            model: model.to_owned(),
+            working_directory: Some(workspace_path.to_owned()),
+            ..Default::default()
+        });
+        let _ = self
+            .cached_sessions
+            .insert(session_id.to_owned(), CachedSession::new(state, false));
+        Ok(session_id.to_owned())
     }
 
     /// Resume an existing session by reconstructing from persisted events.

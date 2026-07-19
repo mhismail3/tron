@@ -395,7 +395,7 @@ extension AgentCockpitProjection {
                 question: "Can Tron supervise real work without hiding runtime risk?",
                 narrative: "Jobs, module runtime envelopes, worker lifecycle, generated surfaces, and bounded output refs.",
                 namespaces: ["jobs", "module_runtime", "worker_lifecycle", "ui_surface"],
-                operationFamilies: ["jobs", "module_runtime", "worker_packages", "program_execution", "subagents"]
+                operationFamilies: ["jobs", "module_runtime", "worker_packages", "program_execution", "delegation"]
             ),
             CapabilityGroupDefinition(
                 id: "diagnostics_audit",

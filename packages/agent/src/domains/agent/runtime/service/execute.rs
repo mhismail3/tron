@@ -41,6 +41,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         reasoning_level,
         attachments,
         engine_causality,
+        execution_policy,
     } = request;
     let inherited_trace_id = engine_causality
         .as_ref()
@@ -327,6 +328,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         build_user_content_override(&prompt, &model, attachments.as_deref());
 
     let run_context = RunContext {
+        execution_policy,
         reasoning_level: reasoning_level.and_then(|level| {
             crate::domains::agent::r#loop::types::ReasoningLevel::from_str_canonical(&level)
         }),

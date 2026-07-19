@@ -264,20 +264,15 @@ pub(super) fn metadata(operation: OperationId) -> OperationMetadata {
             "governance_locked",
             "worker_package_lifecycle_inspection_is_governance",
         ),
-        OperationId::SubagentTaskList | OperationId::SubagentTaskInspect => (
-            "subagents",
-            "domains::capability::operations::subagents + domains::subagents",
-            "record_plane",
-            "modules_may_produce_subagent_task_evidence_but_not_bypass_task_custody",
-        ),
-        OperationId::SubagentLaunch
-        | OperationId::SubagentStatus
-        | OperationId::SubagentResult
-        | OperationId::SubagentCancel => (
-            "subagents",
-            "domains::capability::operations::subagents + domains::subagents",
-            "adapter_replaceable",
-            "future_subagent_adapter_requires_task_runtime_authority_merge_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
+        OperationId::DelegationStart
+        | OperationId::DelegationList
+        | OperationId::DelegationInspect
+        | OperationId::DelegationCancel
+        | OperationId::DelegationAcceptResult => (
+            "delegation",
+            "domains::capability::operations::delegation + domains::delegation",
+            "kernel_locked",
+            "delegation_stays_a_narrow_real_child_agent_workflow_not_a_generic_task_engine",
         ),
         OperationId::ModuleProgramExecutionStart
         | OperationId::ModuleProgramExecutionStatus
@@ -468,7 +463,6 @@ mod tests {
             ("procedural_", "procedural", "governance_locked"),
             ("tool_source_", "tool_sources", "governance_locked"),
             ("worker_package_", "worker_packages", "governance_locked"),
-            ("subagent_task_", "subagents", "record_plane"),
             (
                 "module_program_execution_",
                 "module_program_execution",

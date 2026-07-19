@@ -38,6 +38,7 @@ struct ChatView: View {
     /// Controls the fade-in of the principal toolbar item after navigation transition settles.
     @State var toolbarTitleOpacity: Double = 0
     @State var toolbarTitleOffsetY: CGFloat = 4
+    @State var isCreatingBranch = false
 
     // MARK: - Scroll State (internal for extension access)
     var scrollProxy: ScrollViewProxy? {
@@ -87,10 +88,11 @@ struct ChatView: View {
         }
         // iOS 26 menu actions route through NotificationCenter before state mutation.
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
-            guard let raw = notification.object as? String,
-                  let action = ChatMenuAction(rawValue: raw) else { return }
-            switch action {
+            guard let request = notification.object as? ChatMenuRequest,
+                  request.sessionId == sessionId else { return }
+            switch request.action {
             case .settings: sheetCoordinator.showSettings()
+            case .branch: createBranch()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .modelPickerAction)) { notification in
@@ -339,6 +341,12 @@ struct ChatView: View {
 
 enum ChatMenuAction: String {
     case settings
+    case branch
+}
+
+struct ChatMenuRequest: Equatable {
+    let action: ChatMenuAction
+    let sessionId: String
 }
 
 extension Notification.Name {

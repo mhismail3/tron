@@ -65,12 +65,14 @@ struct SessionClientTests {
         let transport = makeConnectedTransport()
         let client = SessionClient(transport: transport)
 
-        transport.writeHandler = { functionId, _, _, options in
+        transport.writeHandler = { functionId, payload, _, options in
             #expect(options.context?.sessionId == "session-123")
             switch functionId.rawValue {
             case "session::archive", "session::unarchive":
                 return EmptyParams()
             case "session::fork":
+                let params = try #require(payload as? SessionForkParams)
+                #expect(params.expectedHeadEventId == "head-event-123")
                 return SessionForkResult(
                     newSessionId: "forked-session",
                     forkedFromEventId: nil,
@@ -85,6 +87,10 @@ struct SessionClientTests {
 
         try await client.archive("session-123", idempotencyKey: "archive-idem")
         try await client.unarchive("session-123", idempotencyKey: "unarchive-idem")
-        _ = try await client.fork("session-123", idempotencyKey: "fork-idem")
+        _ = try await client.fork(
+            "session-123",
+            expectedHeadEventId: "head-event-123",
+            idempotencyKey: "fork-idem"
+        )
     }
 }

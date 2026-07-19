@@ -1,5 +1,18 @@
 import Foundation
 
+struct PendingBranchRequest: Equatable {
+    let expectedHeadEventId: String
+    let idempotencyKey: EngineIdempotencyKey
+}
+
+enum BranchSessionError: LocalizedError {
+    case sourceHeadUnavailable
+
+    var errorDescription: String? {
+        "The latest completed session boundary is unavailable. Refresh the session and try again."
+    }
+}
+
 // MARK: - Session Operations (CRUD, Fork)
 
 extension EventStoreManager {
@@ -167,21 +180,44 @@ extension EventStoreManager {
         logger.info("[FORK] Starting fork: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
         let operationClient = engineClient
 
-        // Get current session state for logging
-        do {
-            if let session = try await eventDB.sessions.get(sessionId) {
-                logger.info("[FORK] Source session state: headEventId=\(session.headEventId ?? "nil"), eventCount=\(session.eventCount)", category: .session)
+        // One semantic user action is the source session plus the raw boundary
+        // selector. Keep its original expected head and identity together: a
+        // source sync after a committed-but-lost response must not turn retry
+        // into a new branch request.
+        let branchRequestKey = [sessionId, fromEventId ?? "HEAD"]
+            .joined(separator: "\u{1f}")
+        let pendingRequest: PendingBranchRequest
+        if let existing = pendingBranchRequests[branchRequestKey] {
+            pendingRequest = existing
+        } else {
+            guard let session = try await eventDB.sessions.get(sessionId),
+                  let expectedHeadEventId = session.headEventId else {
+                throw BranchSessionError.sourceHeadUnavailable
             }
-        } catch {
-            logger.warning("[FORK] Failed to read source session state: \(error)", category: .database)
+            logger.info("[FORK] Source session state: headEventId=\(expectedHeadEventId), eventCount=\(session.eventCount)", category: .session)
+            pendingRequest = PendingBranchRequest(
+                expectedHeadEventId: expectedHeadEventId,
+                idempotencyKey: .userAction("session.fork")
+            )
+            pendingBranchRequests[branchRequestKey] = pendingRequest
         }
-
-        // Call server with the specific event ID
-        let result = try await operationClient.session.fork(
-            sessionId,
-            fromEventId: fromEventId,
-            idempotencyKey: .userAction("session.fork")
-        )
+        let result: SessionForkResult
+        do {
+            result = try await operationClient.session.fork(
+                sessionId,
+                fromEventId: fromEventId,
+                expectedHeadEventId: pendingRequest.expectedHeadEventId,
+                idempotencyKey: pendingRequest.idempotencyKey
+            )
+        } catch {
+            // A transient transport failure may have hidden a committed
+            // response. A definitive local/server failure cannot have done so.
+            if !ConnectionErrorClassifier.isTransientTransport(error) {
+                pendingBranchRequests.removeValue(forKey: branchRequestKey)
+            }
+            throw error
+        }
+        pendingBranchRequests.removeValue(forKey: branchRequestKey)
         logger.info("[FORK] Server returned: newSessionId=\(result.newSessionId), rootEventId=\(result.rootEventId ?? "unknown")", category: .session)
 
         // CRITICAL: Fetch ancestor events to ensure parent history is in local DB

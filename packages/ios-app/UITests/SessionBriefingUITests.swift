@@ -10,11 +10,11 @@ final class SessionBriefingUITests: XCTestCase {
         openRecentSessionIfNeeded(in: app)
 
         let briefingButton = app.buttons["session-briefing-button"]
-        XCTAssertTrue(briefingButton.waitForExistence(timeout: 20), "Context progress ring should open Session Briefing")
+        XCTAssertTrue(briefingButton.waitForExistence(timeout: 20), "Context progress ring should open Context Revision")
         briefingButton.tap()
 
-        XCTAssertTrue(app.staticTexts["Session Briefing"].waitForExistence(timeout: 20), "Session Briefing sheet should open")
-        XCTAssertTrue(app.staticTexts["Briefing"].waitForExistence(timeout: 10), "Narrative session briefing section should be visible")
+        XCTAssertTrue(app.staticTexts["Context Revision"].waitForExistence(timeout: 20), "Context Revision sheet should open")
+        XCTAssertTrue(app.staticTexts["Current Context"].waitForExistence(timeout: 10), "Current Context section should be visible")
         XCTAssertTrue(app.staticTexts["Context and Model Controls"].waitForExistence(timeout: 10), "Context/model controls should be visible")
         XCTAssertTrue(app.staticTexts["Context Breakdown"].waitForExistence(timeout: 10), "Context Breakdown section should be visible")
         XCTAssertTrue(app.staticTexts["context used"].waitForExistence(timeout: 10), "Context summary should render")

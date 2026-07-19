@@ -305,7 +305,7 @@ xcodebuild test -scheme Tron \
 ```
 
 For the interactive prompt-composer glass, background-free proportional
-Session Briefing context ring, and voice-lifecycle slot/action ownership, run
+Context Revision context ring, and voice-lifecycle slot/action ownership, run
 the focused presentation/source contracts and visual render:
 
 ```bash

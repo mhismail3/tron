@@ -31,7 +31,7 @@ final class SessionTitleIconsTests: XCTestCase {
     func test_accessibilityDescriptors_forked() {
         XCTAssertEqual(
             SessionTitleIcons.accessibilityDescriptors(isFork: true),
-            ["forked"]
+            ["branch"]
         )
     }
 }

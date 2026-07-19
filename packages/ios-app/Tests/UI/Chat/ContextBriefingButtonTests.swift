@@ -134,7 +134,7 @@ struct ContextBriefingButtonTests {
         #expect(!buttonSource.contains(".fill("))
         #expect(buttonSource.contains(".contentShape(Circle())"))
         #expect(buttonSource.contains(".accessibilityIdentifier(\"session-briefing-button\")"))
-        #expect(buttonSource.contains(".accessibilityLabel(\"Session Briefing\")"))
+        #expect(buttonSource.contains(".accessibilityLabel(\"Context Revision\")"))
         #expect(attachmentSource.contains("Menu {"))
         #expect(attachmentSource.contains("Color.clear"))
         #expect(!attachmentSource.contains(".glassEffect("))

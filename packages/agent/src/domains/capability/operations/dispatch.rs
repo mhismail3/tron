@@ -4,6 +4,7 @@ use super::capability_binding::*;
 use super::catalog::*;
 use super::common::observe;
 use super::context_control::*;
+use super::delegation::*;
 use super::device::*;
 use super::filesystem::*;
 use super::git::*;
@@ -32,7 +33,6 @@ use super::replay::*;
 use super::repository_tree::*;
 use super::scheduler::*;
 use super::state::*;
-use super::subagents::*;
 use super::tool_sources::*;
 use super::trace::*;
 use super::update_diagnostics::*;
@@ -209,12 +209,11 @@ pub(super) async fn execute_operation(
         OperationId::ScheduleFireDue => schedule_fire_due(invocation, deps).await?,
         OperationId::ToolSourceList => tool_source_list(invocation, deps).await?,
         OperationId::ToolSourceInspect => tool_source_inspect(invocation, deps).await?,
-        OperationId::SubagentLaunch => subagent_launch(invocation, deps).await?,
-        OperationId::SubagentStatus => subagent_status(invocation, deps).await?,
-        OperationId::SubagentResult => subagent_result(invocation, deps).await?,
-        OperationId::SubagentCancel => subagent_cancel(invocation, deps).await?,
-        OperationId::SubagentTaskList => subagent_task_list(invocation, deps).await?,
-        OperationId::SubagentTaskInspect => subagent_task_inspect(invocation, deps).await?,
+        OperationId::DelegationStart => delegation_start(invocation, deps).await?,
+        OperationId::DelegationList => delegation_list(invocation, deps).await?,
+        OperationId::DelegationInspect => delegation_inspect(invocation, deps).await?,
+        OperationId::DelegationCancel => delegation_cancel(invocation, deps).await?,
+        OperationId::DelegationAcceptResult => delegation_accept_result(invocation, deps).await?,
         OperationId::WorkerPackageList => worker_package_list(invocation, deps).await?,
         OperationId::WorkerPackageInspect => worker_package_inspect(invocation, deps).await?,
         OperationId::ModuleList => module_list(invocation, deps).await?,

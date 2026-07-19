@@ -2409,7 +2409,7 @@ mod tests {
 
     #[test]
     fn all_operation_rows_project_server_owned_friendly_presentation() {
-        assert_eq!(supported_operation_names().len(), 188);
+        assert_eq!(supported_operation_names().len(), 187);
         for operation in supported_operation_names() {
             let metadata = operation_binding_metadata(operation)
                 .unwrap_or_else(|| panic!("missing binding metadata for {operation}"));

@@ -854,6 +854,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             provider_type: provider_name,
             trace_id: run_context.engine_trace_id.as_ref(),
             parent_invocation_id: run_context.parent_invocation_id.as_ref(),
+            execution_policy: run_context.execution_policy,
         },
     )
     .await;
@@ -925,6 +926,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         &model_name,
         provider_type,
         model_request_audit.reasoning_level.as_deref(),
+        run_context.run_id.as_deref(),
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),

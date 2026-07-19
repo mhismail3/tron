@@ -56,7 +56,12 @@ pub(super) const fn invocation_scope(operation: OperationId) -> InvocationScope 
         | OperationId::StateList
         | OperationId::StateSet => InvocationScope::None,
 
-        OperationId::ContextControlActionInspect
+        OperationId::DelegationStart
+        | OperationId::DelegationList
+        | OperationId::DelegationInspect
+        | OperationId::DelegationCancel
+        | OperationId::DelegationAcceptResult
+        | OperationId::ContextControlActionInspect
         | OperationId::ContextControlActionList
         | OperationId::ContextControlClear
         | OperationId::ContextControlCompact
@@ -116,12 +121,6 @@ pub(super) const fn invocation_scope(operation: OperationId) -> InvocationScope 
         | OperationId::ScheduleFireDue
         | OperationId::ScheduleInspect
         | OperationId::ScheduleList
-        | OperationId::SubagentCancel
-        | OperationId::SubagentLaunch
-        | OperationId::SubagentResult
-        | OperationId::SubagentStatus
-        | OperationId::SubagentTaskInspect
-        | OperationId::SubagentTaskList
         | OperationId::ToolSourceInspect
         | OperationId::ToolSourceList
         | OperationId::TraceGet
@@ -226,7 +225,9 @@ pub(super) const fn invocation_scope(operation: OperationId) -> InvocationScope 
 
 pub(super) const fn effect(operation: OperationId) -> OperationEffect {
     match operation {
-        OperationId::CapabilityBindingCockpitOverview
+        OperationId::DelegationList
+        | OperationId::DelegationInspect
+        | OperationId::CapabilityBindingCockpitOverview
         | OperationId::CapabilityBindingDecisionInspect
         | OperationId::CapabilityBindingDecisionList
         | OperationId::CapabilityBindingPolicyInspect
@@ -320,10 +321,6 @@ pub(super) const fn effect(operation: OperationId) -> OperationEffect {
         | OperationId::ScheduleList
         | OperationId::StateGet
         | OperationId::StateList
-        | OperationId::SubagentResult
-        | OperationId::SubagentStatus
-        | OperationId::SubagentTaskInspect
-        | OperationId::SubagentTaskList
         | OperationId::ToolSourceInspect
         | OperationId::ToolSourceList
         | OperationId::TraceGet
@@ -342,11 +339,11 @@ pub(super) const fn effect(operation: OperationId) -> OperationEffect {
         | OperationId::WorkerPackageList => OperationEffect::ReadOnly,
 
         OperationId::JobStart
+        | OperationId::DelegationStart
         | OperationId::ModuleProgramExecutionStart
         | OperationId::ModuleRuntimeRequest
         | OperationId::ProcessRun
-        | OperationId::ScheduleFireDue
-        | OperationId::SubagentLaunch => OperationEffect::StartsWork,
+        | OperationId::ScheduleFireDue => OperationEffect::StartsWork,
 
         OperationId::CapabilityBindingDecisionRecord
         | OperationId::CapabilityBindingPolicyActivate
@@ -363,6 +360,8 @@ pub(super) const fn effect(operation: OperationId) -> OperationEffect {
         | OperationId::ContextControlClear
         | OperationId::ContextControlCompact
         | OperationId::ContextControlSnapshot
+        | OperationId::DelegationAcceptResult
+        | OperationId::DelegationCancel
         | OperationId::ContextExclusionDisable
         | OperationId::ContextExclusionRecord
         | OperationId::ContextPolicySnapshot
@@ -413,7 +412,6 @@ pub(super) const fn effect(operation: OperationId) -> OperationEffect {
         | OperationId::RepositoryTreeSnapshot
         | OperationId::ScheduleCancel
         | OperationId::ScheduleCreate
-        | OperationId::SubagentCancel
         | OperationId::WebFetch
         | OperationId::WebRobotsCheck
         | OperationId::WebSourceArchive => OperationEffect::StateChange,

@@ -241,4 +241,95 @@ struct EngineClientObservationTests {
         #expect(recovery?.droppedEventCount == 2)
         withExtendedLifetime(secondStream) {}
     }
+
+    @Test("Undecodable registered event requires reconstruction without pinning live delivery")
+    func testUndecodableRegisteredEventRequiresReconstruction() async throws {
+        EventRegistry.shared.registerAll()
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65527/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let connection = try #require(rpc.engineConnection)
+        let stream = rpc.events
+        let payload = ServerEventPayload(
+            type: AgentReadyPlugin.eventType,
+            sessionId: "decode-failure-session",
+            workspaceId: nil,
+            timestamp: "2026-07-17T00:00:00Z",
+            data: nil,
+            runId: nil,
+            sequence: 41,
+            traceId: nil,
+            parentInvocationId: nil,
+            sourceEventId: nil,
+            sourceSequence: nil,
+            streamCursor: 91
+        )
+
+        connection.onEvent?(
+            EngineEventDelivery(
+                topic: "events.session",
+                subscriptionId: "sub-decode-failure",
+                cursor: EngineStreamCursor(rawValue: 91),
+                event: payload,
+                eventData: Data("{".utf8)
+            )
+        )
+
+        var iterator = stream.makeAsyncIterator()
+        let event = try #require(await iterator.next())
+        let recovery = try #require(event.getResult() as? StreamRecoveryRequiredPlugin.Result)
+        #expect(event.eventType == StreamRecoveryRequiredPlugin.eventType)
+        #expect(recovery.reason == "client_event_decode_failed")
+        #expect(recovery.droppedEventCount == 0)
+    }
+
+    @Test("Unknown future event remains observable and does not request recovery")
+    func testUnknownFutureEventRemainsObservable() async throws {
+        EventRegistry.shared.registerAll()
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65526/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let connection = try #require(rpc.engineConnection)
+        let stream = rpc.events
+        let payload = ServerEventPayload(
+            type: "future.workflow.changed",
+            sessionId: "future-session",
+            workspaceId: nil,
+            timestamp: "2026-07-17T00:00:00Z",
+            data: AnyCodable(["schemaVersion": 99]),
+            runId: nil,
+            sequence: 42,
+            traceId: nil,
+            parentInvocationId: nil,
+            sourceEventId: nil,
+            sourceSequence: nil,
+            streamCursor: 92
+        )
+        let eventData = try JSONEncoder().encode(payload)
+
+        connection.onEvent?(
+            EngineEventDelivery(
+                topic: "events.session",
+                subscriptionId: "sub-future-event",
+                cursor: EngineStreamCursor(rawValue: 92),
+                event: payload,
+                eventData: eventData
+            )
+        )
+
+        var iterator = stream.makeAsyncIterator()
+        let event = try #require(await iterator.next())
+        #expect(event.eventType == "future.workflow.changed")
+        if case .unknown(let type) = event {
+            #expect(type == "future.workflow.changed")
+        } else {
+            Issue.record("Expected an unknown event placeholder")
+        }
+    }
 }

@@ -31,15 +31,25 @@ pub(crate) async fn session_delete_value(
 pub(crate) async fn session_fork_value(
     params: Option<&Value>,
     deps: &Deps,
+    causal_session_id: Option<&str>,
+    causal_workspace_id: Option<&str>,
+    idempotency_key: Option<&str>,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let from_event_id = opt_string(params, "fromEventId");
+    let expected_head_event_id = opt_string(params, "expectedHeadEventId");
     let title = opt_string(params, "title");
     crate::domains::session::lifecycle::SessionLifecycleService::fork(
         deps,
-        session_id,
-        from_event_id,
-        title,
+        crate::domains::session::lifecycle::ForkSessionRequest {
+            session_id,
+            from_event_id,
+            expected_head_event_id,
+            title,
+            causal_session_id: causal_session_id.map(str::to_owned),
+            causal_workspace_id: causal_workspace_id.map(str::to_owned),
+            idempotency_key: idempotency_key.map(str::to_owned),
+        },
     )
     .await
 }

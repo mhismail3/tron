@@ -19,6 +19,11 @@ final class ChatViewModel {
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
     /// because context maintenance can trigger it asynchronously. A turn_start resets it.
     var isCompacting = false
+    /// Server-authored reconnect projection for the small set of user-facing
+    /// session workflows. Source domains remain authoritative; the chat view
+    /// only renders this snapshot and never derives workflow state from
+    /// capability invocations.
+    var workflowSnapshot: SessionWorkflowSnapshotV1?
     var showSettings = false
     /// Set to true when the session doesn't exist on server and view should navigate back
     var shouldDismiss = false

@@ -20,6 +20,7 @@ use super::{
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::session::event_store::{AppendOptions, EventType};
+use crate::domains::session::reconstruction::SessionReconstructionService;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
     InvocationId, ListResources, RiskLevel, TraceId, UpdateResource,
@@ -31,6 +32,7 @@ const DEFAULT_OPERATION_AT: &str = "2026-06-30T12:00:00Z";
 
 struct Fixture {
     deps: Deps,
+    session_deps: crate::domains::session::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -39,6 +41,7 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
+        let session_deps = crate::domains::session::Deps::from_test_context(&ctx);
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
             event_store: ctx.event_store.clone(),
@@ -109,6 +112,7 @@ impl Fixture {
         .await;
         Self {
             deps,
+            session_deps,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -651,9 +655,22 @@ async fn session_briefing_ui_wrappers_accept_first_party_client_context() {
 
     let compact_payload = json!({
         "sessionId": fixture.session_id,
-        "reason": "Manual Session Briefing compact from iOS",
+        "reason": "Manual Context Revision compact from iOS",
         "idempotencyKey": "ui-compact-1"
     });
+    fixture
+        .deps
+        .event_store
+        .append(&AppendOptions {
+            session_id: &fixture.session_id,
+            event_type: EventType::MessageUser,
+            payload: json!({
+                "content": "Keep the decision marker CERULEAN-ANCHOR after compaction."
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .expect("seed semantic user context before compact");
     fixture
         .deps
         .event_store
@@ -698,6 +715,46 @@ async fn session_briefing_ui_wrappers_accept_first_party_client_context() {
     assert_eq!(
         compact["projection"]["result"]["currentAgentRunMustStop"],
         json!(true)
+    );
+    let boundary = fixture
+        .deps
+        .event_store
+        .get_latest_event_by_type(&fixture.session_id, "compact.boundary")
+        .expect("read compact boundary")
+        .expect("compact boundary exists");
+    let boundary_payload = fixture
+        .deps
+        .event_store
+        .resolve_event_payloads(std::slice::from_ref(&boundary))
+        .expect("resolve compact boundary")
+        .remove(0);
+    assert!(
+        boundary_payload["summary"]
+            .as_str()
+            .is_some_and(|summary| summary.contains("CERULEAN-ANCHOR")),
+        "manual compaction must preserve concrete user context"
+    );
+    let reconstruction = SessionReconstructionService::reconstruct(
+        &fixture.session_deps,
+        fixture.session_id.clone(),
+        None,
+        None,
+    )
+    .await
+    .expect("reconstruct context workflow");
+    assert_eq!(
+        reconstruction["workflows"]["contextRevision"]["kind"],
+        "compact"
+    );
+    assert_eq!(
+        reconstruction["workflows"]["contextRevision"]["state"],
+        "succeeded"
+    );
+    assert!(
+        reconstruction["workflows"]["contextRevision"]
+            .get("boundary")
+            .is_none(),
+        "the UI projection must not expose event-level boundary identifiers"
     );
 
     let list_payload = json!({

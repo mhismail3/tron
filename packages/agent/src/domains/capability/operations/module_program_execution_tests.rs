@@ -403,233 +403,6 @@ async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_
     }
 }
 
-#[tokio::test]
-async fn subagent_launch_activates_accepted_module_pack_with_reviewable_result_refs() {
-    if !sandbox_available() {
-        return;
-    }
-
-    let ctx = make_test_context();
-    let root = tempdir().expect("working directory");
-    let fixture = Fixture::new(
-        &ctx,
-        root.path(),
-        "subagent-module-pack",
-        "subagent-runtime-request-1",
-    )
-    .await;
-    let subagent_grant = fixture
-        .subagent_grant(
-            "subagent_launch",
-            &fixture.runtime_resource_id,
-            &fixture.subagent_task_resource_id("subagent-task-alpha", "subagent-launch-key"),
-        )
-        .await;
-    let launch = fixture
-        .invoke_with_grant(
-            "subagent-launch",
-            subagent_grant.clone(),
-            Some("subagent-launch-key"),
-            json!({
-                "operation": "subagent_launch",
-                "taskId": "subagent-task-alpha",
-                "objectiveSummary": "Run a bounded delegated module task.",
-                "promptSummary": "Return summary-only merge proposal evidence.",
-                "modelPolicy": "accepted_jobs_program_execution_v1",
-                "workerKind": "module_program_execution",
-                "modulePackId": "jobs_program_execution",
-                "moduleLifecycleResourceId": fixture.lifecycle_id,
-                "runtimeRequestId": fixture.runtime_request_id,
-                "command": "printf subagent-module-output",
-                "runtimeId": "runtime.shell",
-                "languageId": "language.shell",
-                "programFingerprint": "sha256:subagent-module-program",
-                "networkPolicy": "none",
-                "handoffRefs": [{"kind": "fingerprint", "id": "subagent-handoff"}],
-                "timeoutMs": 5000,
-                "maxOutputBytes": 1000,
-                "idempotencyKey": "subagent-launch-key"
-            }),
-        )
-        .await;
-    let launch_details = &launch["details"]["subagentTasks"];
-    assert_eq!(launch_details["status"], json!("running"));
-    assert_eq!(
-        launch_details["delegation"]["moduleRuntimeRef"]["kind"],
-        json!("module_runtime_state")
-    );
-    assert_eq!(
-        launch_details["delegation"]["jobRef"]["kind"],
-        json!("job_process")
-    );
-    assert_eq!(launch_details["execution"]["resultMerged"], json!(false));
-    assert_no_provider_leaks("subagent launch", launch_details);
-
-    let subagent_task_resource_id = launch_details["subagentTaskResourceId"]
-        .as_str()
-        .expect("subagent task id")
-        .to_owned();
-    let runtime_resource_id = launch_details["delegation"]["moduleRuntimeResourceId"]
-        .as_str()
-        .expect("runtime id")
-        .to_owned();
-    let job_resource_id = launch_details["delegation"]["jobResourceId"]
-        .as_str()
-        .expect("job id")
-        .to_owned();
-    let result_grant = fixture
-        .subagent_grant(
-            "subagent_result",
-            &runtime_resource_id,
-            &subagent_task_resource_id,
-        )
-        .await;
-
-    let mut terminal_result = None;
-    for index in 0..100 {
-        let result = fixture
-            .invoke_with_grant(
-                &format!("subagent-result-{index}"),
-                result_grant.clone(),
-                None,
-                json!({
-                    "operation": "subagent_result",
-                    "subagentTaskResourceId": subagent_task_resource_id
-                }),
-            )
-            .await;
-        let details = &result["details"]["subagentTasks"];
-        if details["status"] == json!("completed") {
-            terminal_result = Some(result);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    let result = terminal_result.expect("subagent result completed");
-    let result_details = &result["details"]["subagentTasks"];
-    assert_eq!(result_details["result"]["kind"], json!("merge_proposal"));
-    assert_eq!(
-        result_details["result"]["mergeProposal"]["reviewRequired"],
-        json!(true)
-    );
-    assert_eq!(
-        result_details["projection"]["parentConversationMutated"],
-        json!(false)
-    );
-    assert_eq!(
-        result_details["result"]["mergeProposal"]["jobRef"]["resourceId"],
-        json!(job_resource_id)
-    );
-    assert_eq!(
-        result_details["result"]["mergeProposal"]["moduleRuntimeRef"]["resourceId"],
-        json!(runtime_resource_id)
-    );
-    assert_no_provider_leaks("subagent result", result_details);
-}
-
-#[tokio::test]
-async fn subagent_launch_partial_replay_recovers_existing_delegated_job_refs() {
-    if !sandbox_available() {
-        return;
-    }
-
-    let ctx = make_test_context();
-    let root = tempdir().expect("working directory");
-    let fixture = Fixture::new(
-        &ctx,
-        root.path(),
-        "subagent-partial-replay",
-        "subagent-partial-runtime-request",
-    )
-    .await;
-    let partial_start = fixture
-        .invoke_with_grant(
-            "partial-delegated-start",
-            fixture.start_grant().await,
-            Some("partial-delegated-start-call"),
-            json!({
-                "operation": "module_program_execution_start",
-                "moduleLifecycleResourceId": fixture.lifecycle_id,
-                "runtimeRequestId": fixture.runtime_request_id,
-                "command": "printf subagent-partial-replay",
-                "runtimeId": "runtime.shell",
-                "languageId": "language.shell",
-                "programFingerprint": format!("sha256:{}", fixture.runtime_request_id),
-                "networkPolicy": "none",
-                "reason": "Recover a delegated module task after parent persistence failed.",
-                "timeoutMs": 5000,
-                "maxOutputBytes": 1000,
-                "idempotencyKey": "subagent-partial-replay-key"
-            }),
-        )
-        .await;
-    let partial_details = module_details(&partial_start);
-    let partial_runtime_id = partial_details["moduleRuntime"]["moduleRuntimeResourceId"]
-        .as_str()
-        .expect("partial runtime id")
-        .to_owned();
-    let partial_job_id = partial_details["job"]["job"]["jobResourceId"]
-        .as_str()
-        .expect("partial job id")
-        .to_owned();
-    let partial_program_id = partial_details["programExecution"]["programExecutionResourceId"]
-        .as_str()
-        .expect("partial program id")
-        .to_owned();
-
-    let launch = fixture
-        .invoke_with_grant(
-            "subagent-partial-replay-launch",
-            fixture
-                .subagent_grant(
-                    "subagent_launch",
-                    &fixture.runtime_resource_id,
-                    &fixture.subagent_task_resource_id(
-                        "subagent-partial-task",
-                        "subagent-partial-replay-key",
-                    ),
-                )
-                .await,
-            Some("subagent-partial-replay-key"),
-            json!({
-                "operation": "subagent_launch",
-                "taskId": "subagent-partial-task",
-                "objectiveSummary": "Recover a delegated module task after parent persistence failed.",
-                "promptSummary": "Return summary-only merge proposal evidence.",
-                "modelPolicy": "accepted_jobs_program_execution_v1",
-                "workerKind": "module_program_execution",
-                "modulePackId": "jobs_program_execution",
-                "moduleLifecycleResourceId": fixture.lifecycle_id,
-                "runtimeRequestId": fixture.runtime_request_id,
-                "command": "printf subagent-partial-replay",
-                "runtimeId": "runtime.shell",
-                "languageId": "language.shell",
-                "programFingerprint": format!("sha256:{}", fixture.runtime_request_id),
-                "networkPolicy": "none",
-                "timeoutMs": 5000,
-                "maxOutputBytes": 1000,
-                "idempotencyKey": "subagent-partial-replay-key"
-            }),
-        )
-        .await;
-    let launch_details = &launch["details"]["subagentTasks"];
-    assert_eq!(launch_details["status"], json!("running"));
-    assert_eq!(
-        launch_details["delegation"]["moduleRuntimeResourceId"],
-        json!(partial_runtime_id)
-    );
-    assert_eq!(
-        launch_details["delegation"]["jobResourceId"],
-        json!(partial_job_id)
-    );
-    assert_eq!(
-        launch_details["delegation"]["programExecutionResourceId"],
-        json!(partial_program_id)
-    );
-    assert_eq!(launch_details["idempotentReplay"], json!(false));
-    assert_no_provider_leaks("subagent partial replay launch", launch_details);
-}
-
 struct Fixture<'a> {
     ctx: &'a ServerRuntimeContext,
     root: &'a Path,
@@ -744,53 +517,6 @@ impl<'a> Fixture<'a> {
             &[runtime_resource_id],
             &[job_resource_id],
             FollowupAccess::Write,
-        )
-        .await
-    }
-
-    async fn subagent_grant(
-        &self,
-        operation: &str,
-        runtime_resource_id: &str,
-        subagent_task_resource_id: &str,
-    ) -> AuthorityGrantId {
-        let selectors = [
-            "kind:subagent_task".to_owned(),
-            "kind:module_runtime_state".to_owned(),
-            "kind:module_lifecycle_state".to_owned(),
-            "kind:program_execution_record".to_owned(),
-            "kind:job_process".to_owned(),
-            "kind:execution_output".to_owned(),
-            format!("resource:{}", self.lifecycle_id),
-            format!("resource:{runtime_resource_id}"),
-            format!("resource:{subagent_task_resource_id}"),
-        ];
-        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
-        self.derive_grant(
-            &format!("subagent-{}", short_fingerprint(&[runtime_resource_id])),
-            operation,
-            &[
-                "capability.execute",
-                "subagents.read",
-                "subagents.write",
-                "module_runtime.read",
-                "module_runtime.write",
-                "program_execution.read",
-                "program_execution.write",
-                "jobs.read",
-                "jobs.write",
-                "resource.read",
-                "resource.write",
-            ],
-            &[
-                "subagent_task",
-                "module_runtime_state",
-                "module_lifecycle_state",
-                "program_execution_record",
-                "job_process",
-                "execution_output",
-            ],
-            &selector_refs,
         )
         .await
     }
@@ -950,10 +676,6 @@ impl<'a> Fixture<'a> {
         runtime_resource_id(&self.session_id, &self.lifecycle_id, runtime_request_id)
     }
 
-    fn subagent_task_resource_id(&self, task_id: &str, idempotency_key: &str) -> String {
-        subagent_task_resource_id(&self.session_id, task_id, idempotency_key)
-    }
-
     async fn derive_grant(
         &self,
         suffix: &str,
@@ -1022,8 +744,6 @@ impl<'a> Fixture<'a> {
         .with_scope("capability.execute")
         .with_scope("module_runtime.read")
         .with_scope("module_runtime.write")
-        .with_scope("subagents.read")
-        .with_scope("subagents.write")
         .with_scope("program_execution.read")
         .with_scope("program_execution.write")
         .with_scope("jobs.read")
@@ -1223,18 +943,6 @@ fn runtime_resource_id(
         format!("session:{session_id}:{lifecycle_resource_id}:{runtime_request_id}").as_bytes(),
     );
     format!("module_runtime_state:{}", hex::encode(hasher.finalize()))
-}
-
-fn subagent_task_resource_id(session_id: &str, task_id: &str, idempotency_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"session");
-    hasher.update(b":");
-    hasher.update(session_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(task_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(idempotency_key.as_bytes());
-    format!("subagent_task:{}", hex::encode(hasher.finalize()))
 }
 
 fn sandbox_available() -> bool {

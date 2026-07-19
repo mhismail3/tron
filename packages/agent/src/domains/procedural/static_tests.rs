@@ -218,6 +218,7 @@ fn repo_managed_skills_and_skill_copy_wiring_remain_absent() {
     for path in tracked_files
         .iter()
         .filter(|path| path.starts_with("packages/agent/src/") && path.ends_with(".rs"))
+        .filter(|path| repo_root.join(path).exists())
         .filter(|path| {
             !path.ends_with("_tests.rs")
                 && !path.ends_with("/tests.rs")

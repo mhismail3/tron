@@ -288,6 +288,7 @@ extension ChatViewModel {
 
     func handleCompaction(_ pluginResult: CompactionPlugin.Result) {
         compactionCoordinator.handleCompaction(pluginResult, context: self)
+        advanceStreamRecoveryRequest()
     }
 
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
@@ -309,6 +310,23 @@ extension ChatViewModel {
             contextControlActionResourceId: pluginResult.contextControlActionResourceId
         )
         appendToMessages(clearedMessage)
+        advanceStreamRecoveryRequest()
+    }
+
+    func handleDelegationChanged(_ result: DelegationChangedPlugin.Result) {
+        logger.debug(
+            "Delegation lifecycle changed (\(result.state ?? "unknown")); refreshing source-owned workflow state",
+            category: .events
+        )
+        advanceStreamRecoveryRequest()
+    }
+
+    func handleContextRevisionChanged(_ result: ContextRevisionChangedPlugin.Result) {
+        logger.debug(
+            "Context Revision lifecycle changed; refreshing source-owned workflow state",
+            category: .events
+        )
+        advanceStreamRecoveryRequest()
     }
 
     func handleMessageDeleted(_ pluginResult: MessageDeletedPlugin.Result) {

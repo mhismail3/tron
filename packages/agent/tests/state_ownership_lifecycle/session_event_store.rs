@@ -224,8 +224,8 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "get_session(&session_id_for_fork)",
         "head_event_id",
         "ForkOptions",
-        ".fork(",
-        "init_sequence_counter(&new_session_id, 0)",
+        ".fork_with_identity(",
+        "init_sequence_counter(&new_session_id, child_max_sequence)",
         "TronEvent::SessionForked",
     ] {
         assert!(

@@ -80,7 +80,7 @@ struct ContextControlMemoryDisplay: Equatable {
 
     init(raw: [String: Any]?) {
         status = raw?.string("status") ?? "read_only"
-        policy = raw?.string("policy") ?? "Memory refs only in Session Briefing"
+        policy = raw?.string("policy") ?? "Memory refs only in Context Revision"
         promptTraceRefCount = raw?.array("promptTraceRefs")?.count ?? 0
         redactedMemoryRefCount = raw?.array("redactedMemoryRefs")?.count ?? 0
     }

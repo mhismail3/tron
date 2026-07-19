@@ -524,6 +524,7 @@ pub(super) fn emit_turn_end(
     model_name: &str,
     provider_type: Provider,
     requested_reasoning_level: Option<&str>,
+    run_id: Option<&str>,
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
@@ -567,6 +568,9 @@ pub(super) fn emit_turn_end(
             "contextLimit": context_limit,
             "reasoningStatusEvidence": reasoning_status_evidence,
         });
+        if let Some(run_id) = run_id {
+            payload["runId"] = json!(run_id);
+        }
         if let Some(token_usage) = stream_result.token_usage.as_ref() {
             payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
         }

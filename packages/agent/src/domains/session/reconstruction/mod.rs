@@ -41,6 +41,7 @@
 //!   isRunning: bool,
 //!   runId: string?,          // active run id, null when idle
 //!   metadata: {...},
+//!   workflows: {...}?,       // bounded Level 2 reconnect projection on the first page
 //! }
 //! ```
 
@@ -149,7 +150,7 @@ async fn load_durable_reconstruction(
                     .head_event_id
                     .as_deref()
                     .ok_or_else(|| CapabilityError::Internal {
-                        message: "Forked session has no head event".into(),
+                        message: "Branch session has no head event".into(),
                     })?;
             let mut ancestors =
                 event_store
@@ -369,6 +370,26 @@ impl SessionReconstructionService {
             .unwrap_or(0);
         let last_sequence = represented_sequence.unwrap_or(durable_sequence);
         let oldest_event_id = events.first().map(|e| e.id.clone());
+        let workflows = if is_top_level {
+            match crate::domains::session::workflow_projection::session_workflow_snapshot(
+                deps,
+                &session_id,
+            )
+            .await
+            {
+                Ok(snapshot) => Some(snapshot),
+                Err(error) => {
+                    tracing::warn!(
+                        session_id,
+                        error = %error,
+                        "optional Level 2 workflow projection unavailable during reconstruction"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // 4. Convert events to wire format
         let resolved_payloads =
@@ -406,6 +427,7 @@ impl SessionReconstructionService {
             // "processing"; every terminal or between-turn window is "idle".
             "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
+            "workflows": workflows,
         }))
     }
 
@@ -504,7 +526,7 @@ impl SessionReconstructionService {
 mod tests {
     use super::*;
     use crate::domains::session::event_store::{AppendOptions, EventType};
-    use crate::domains::session::lifecycle::SessionLifecycleService;
+    use crate::domains::session::lifecycle::{ForkSessionRequest, SessionLifecycleService};
     use crate::shared::protocol::events::{BaseEvent, TronEvent};
     use crate::shared::server::test_support::make_test_context;
 
@@ -1108,29 +1130,45 @@ mod tests {
             .session_manager
             .create_session("model", "/tmp", Some("parent"))
             .unwrap();
-        for turn in 1..=4 {
-            ctx.event_store
-                .append(&AppendOptions {
-                    session_id: &parent_id,
-                    event_type: EventType::MessageUser,
-                    payload: json!({ "content": format!("parent-{turn}"), "turn": turn }),
-                    parent_id: None,
-                    sequence: None,
-                })
-                .unwrap();
-        }
-        assert_eq!(ctx.event_store.get_max_sequence(&parent_id).unwrap(), 4);
+        let assistant = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &parent_id,
+                event_type: EventType::MessageAssistant,
+                payload: json!({ "content": "parent response", "turn": 1 }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let turn_end = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &parent_id,
+                event_type: EventType::StreamTurnEnd,
+                payload: json!({ "turn": 1, "stopReason": "end_turn" }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        assert_eq!(ctx.event_store.get_max_sequence(&parent_id).unwrap(), 2);
 
         let fork = SessionLifecycleService::fork(
             &Deps::from_test_context(&ctx),
-            parent_id.clone(),
-            None,
-            Some("child".into()),
+            ForkSessionRequest {
+                session_id: parent_id.clone(),
+                from_event_id: Some(assistant.id),
+                expected_head_event_id: None,
+                title: Some("child".into()),
+                causal_session_id: Some(parent_id.clone()),
+                causal_workspace_id: None,
+                idempotency_key: None,
+            },
         )
         .await
         .unwrap();
         let child_id = fork["newSessionId"].as_str().unwrap().to_owned();
         let child_root_id = fork["rootEventId"].as_str().unwrap().to_owned();
+        assert_eq!(fork["forkedFromEventId"], turn_end.id);
 
         let initial = SessionReconstructionService::reconstruct(
             &Deps::from_test_context(&ctx),
@@ -1141,6 +1179,26 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(initial["lastSequence"], 0);
+        assert_eq!(
+            initial["workflows"]["schemaVersion"],
+            "tron.session_workflows.v1"
+        );
+        assert_eq!(initial["workflows"]["branchLineage"]["isBranch"], true);
+        assert_eq!(
+            initial["workflows"]["branchLineage"]
+                .as_object()
+                .unwrap()
+                .len(),
+            1,
+            "minimal branch projection must expose only isBranch"
+        );
+        assert!(initial["workflows"]["contextRevision"].is_null());
+        assert!(
+            initial["workflows"]["activeDelegations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
 
         let ancestor_page = SessionReconstructionService::reconstruct(
             &Deps::from_test_context(&ctx),
@@ -1153,5 +1211,6 @@ mod tests {
         assert_eq!(ancestor_page["events"].as_array().unwrap().len(), 1);
         assert_eq!(ancestor_page["events"][0]["sessionId"], parent_id);
         assert_eq!(ancestor_page["lastSequence"], 0);
+        assert!(ancestor_page["workflows"].is_null());
     }
 }

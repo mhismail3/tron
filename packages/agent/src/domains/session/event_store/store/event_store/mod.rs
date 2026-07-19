@@ -44,6 +44,8 @@ pub struct ForkResult {
     pub session: SessionRow,
     /// The root `session.fork` event.
     pub fork_event: EventRow,
+    /// Whether explicit identities recovered an already-committed fork.
+    pub replayed: bool,
 }
 
 /// Options for appending an event.
@@ -79,6 +81,13 @@ pub struct ForkOptions<'a> {
     pub model: Option<&'a str>,
     /// Optional title for the forked session.
     pub title: Option<&'a str>,
+    /// Source session required to own the fork point, when public scope has
+    /// already selected one.
+    pub expected_source_session_id: Option<&'a str>,
+    /// Source head observed by the caller, checked in the fork transaction.
+    pub expected_head_event_id: Option<&'a str>,
+    /// Immutable public request fingerprint bound to an idempotent fork.
+    pub request_fingerprint: Option<&'a str>,
 }
 
 /// High-level `EventStore` wrapping a connection pool and all repositories.

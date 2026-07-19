@@ -4,7 +4,7 @@ use crate::domains::capability::{
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
-    SUBAGENT_TASK_KIND, TraceId,
+    TraceId,
 };
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
@@ -34,14 +34,7 @@ struct DynamicAuthorityState {
 }
 
 struct RuntimeResolutionContext<'a> {
-    engine_host: &'a EngineHostHandle,
     session_id: &'a str,
-    workspace_id: Option<&'a str>,
-    working_directory: &'a str,
-    invocation_id: &'a str,
-    model_primitive_name: &'a str,
-    turn: i64,
-    run_id: Option<&'a str>,
     args: &'a Value,
 }
 
@@ -71,14 +64,7 @@ pub(super) async fn derive_capability_runtime_grant(
         .ok_or_else(|| *invalid_authority_request("unknown", "operation is required"))?;
     let policy = authority_policy(operation);
     let resolution_context = RuntimeResolutionContext {
-        engine_host,
         session_id,
-        workspace_id,
-        working_directory,
-        invocation_id,
-        model_primitive_name,
-        turn,
-        run_id,
         args: effective_args,
     };
     let (resolved, operation_risk) = match policy {
@@ -389,8 +375,7 @@ fn resolve_dynamic_resource_kinds(
         | ResourceKindPolicy::CapabilityRouteUnion
         | ResourceKindPolicy::CapabilityBinding(_)
         | ResourceKindPolicy::ModuleRuntime(_)
-        | ResourceKindPolicy::ModuleProgramExecution(_)
-        | ResourceKindPolicy::Subagent(_) => {}
+        | ResourceKindPolicy::ModuleProgramExecution(_) => {}
         ResourceKindPolicy::OptionalGoal {
             field, linked_kind, ..
         } => {
@@ -482,21 +467,6 @@ async fn apply_selector_additions(
                 idempotency_field,
                 operation,
             )?,
-            SelectorAddition::DerivedSubagentTask { task_id_field } => {
-                push_subagent_launch_selector(selectors, context, task_id_field, operation)?;
-            }
-            SelectorAddition::DelegatedSubagentResources {
-                task_resource_field,
-            } => {
-                push_delegated_subagent_followup_selectors(
-                    context.engine_host,
-                    selectors,
-                    context.args,
-                    task_resource_field,
-                    operation,
-                )
-                .await?;
-            }
         }
     }
     Ok(())
@@ -634,82 +604,6 @@ fn push_module_runtime_state_selector(
     )
 }
 
-fn push_subagent_launch_selector(
-    selectors: &mut Vec<String>,
-    context: &RuntimeResolutionContext<'_>,
-    task_id_field: &str,
-    operation: &str,
-) -> AuthorityResult<()> {
-    let task_id = optional_non_empty_string(context.args, task_id_field, operation)?
-        .unwrap_or(context.invocation_id);
-    let idempotency_key = model_capability_invocation_idempotency_key(
-        context.run_id,
-        context.session_id,
-        context.turn,
-        context.invocation_id,
-        context.model_primitive_name,
-        context.working_directory,
-        context.workspace_id,
-        context.args,
-    );
-    push_resource_selector(
-        selectors,
-        &subagent_task_resource_id(context.session_id, task_id, &idempotency_key),
-        operation,
-    )
-}
-
-async fn push_delegated_subagent_followup_selectors(
-    engine_host: &EngineHostHandle,
-    selectors: &mut Vec<String>,
-    args: &Value,
-    task_resource_field: &str,
-    operation: &str,
-) -> AuthorityResult<()> {
-    let Some(resource_id) = optional_non_empty_string(args, task_resource_field, operation)? else {
-        return Ok(());
-    };
-    let Some(inspection) = engine_host
-        .inspect_resource(resource_id)
-        .await
-        .map_err(|error| engine_error_to_failure(&error))?
-    else {
-        return Ok(());
-    };
-    if inspection.resource.kind != SUBAGENT_TASK_KIND {
-        return Ok(());
-    }
-    let Some(payload) = inspection
-        .versions
-        .iter()
-        .find(|version| {
-            inspection
-                .resource
-                .current_version_id
-                .as_ref()
-                .is_some_and(|current| current == &version.version_id)
-        })
-        .or_else(|| inspection.versions.last())
-        .map(|version| &version.payload)
-    else {
-        return Ok(());
-    };
-    for pointer in [
-        "/delegation/moduleRuntimeResourceId",
-        "/delegation/jobResourceId",
-        "/delegation/programExecutionResourceId",
-    ] {
-        if let Some(resource_id) = payload
-            .pointer(pointer)
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-        {
-            push_resource_selector(selectors, resource_id, operation)?;
-        }
-    }
-    Ok(())
-}
-
 fn module_lifecycle_state_resource_id(
     session_id: &str,
     install_decision_resource_id: &str,
@@ -731,18 +625,6 @@ fn module_runtime_state_resource_id(
             format!("session:{session_id}:{lifecycle_resource_id}:{runtime_request_id}").as_bytes()
         )
     )
-}
-
-fn subagent_task_resource_id(session_id: &str, task_id: &str, idempotency_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"session");
-    hasher.update(b":");
-    hasher.update(session_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(task_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(idempotency_key.as_bytes());
-    format!("subagent_task:{:x}", hasher.finalize())
 }
 
 fn invalid_authority_field(operation: &str, field: &str) -> Box<FailureEnvelope> {

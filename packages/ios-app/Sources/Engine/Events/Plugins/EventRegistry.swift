@@ -150,6 +150,8 @@ final class EventRegistry: @unchecked Sendable {
         register(SessionUnarchivedPlugin.self)
         register(SessionDeletedPlugin.self)
         register(SessionProcessingChangedPlugin.self)
+        register(DelegationChangedPlugin.self)
+        register(ContextRevisionChangedPlugin.self)
 
         // Server events
         register(ServerRestartingPlugin.self)

@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicI64;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use crate::domains::agent::context::summarizer::{KeywordSummarizer, Summarizer};
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::session::event_store::{AppendOptions, EventRow, EventType};
@@ -17,8 +18,7 @@ use super::authority::{AccessMode, ensure_authority, session_scope_for_invocatio
 use super::contract::{ACTION_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION, WORKER};
 use super::projection::{
     action_projection, action_response, action_summary, event_ref, policy_record_response,
-    policy_snapshot_response, policy_summary, safe_compacted_token_estimate,
-    safe_compaction_summary, snapshot_projection,
+    policy_snapshot_response, policy_summary, safe_compacted_token_estimate, snapshot_projection,
 };
 use super::records::{
     ActionInput, EpochInput, PolicyRecordInput, PolicySnapshotInput, action_record,
@@ -809,6 +809,12 @@ pub(crate) async fn compact_value_at(
         .pointer("/session/messageCount")
         .and_then(Value::as_u64)
         .unwrap_or_default();
+    let snapshot_head_event_id = snapshot_payload
+        .pointer("/session/headEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "Context compaction snapshot is missing its head boundary".to_owned(),
+        })?;
 
     let (state, result, audit_refs, boundary_event) = if message_count < 2 || estimated_tokens == 0
     {
@@ -830,65 +836,107 @@ pub(crate) async fn compact_value_at(
         )
     } else {
         let tokens_after = safe_compacted_token_estimate(message_count);
-        let summary = safe_compaction_summary(&session_id, message_count, estimated_tokens);
-        let event = if let Some(event) = find_boundary_event(
-            deps,
-            &session_id,
-            EventType::CompactBoundary,
-            &action_resource_id,
-        )
-        .await?
-        {
-            event
+        let summary = manual_compaction_summary(deps, snapshot_head_event_id).await;
+        if summary.is_err() {
+            (
+                "failed",
+                json!({
+                    "status": "failed",
+                    "reason": "summary_generation_failed",
+                    "timelineEventWritten": false
+                }),
+                vec![version_ref(
+                    &snapshot_resource,
+                    &snapshot_version,
+                    "preflight_snapshot",
+                )],
+                None,
+            )
         } else {
-            deps.event_store
-                .append(&AppendOptions {
-                    session_id: &session_id,
-                    event_type: EventType::CompactBoundary,
-                    payload: json!({
-                        "originalTokens": estimated_tokens,
-                        "compactedTokens": tokens_after,
-                        "compressionRatio": if estimated_tokens > 0 {
-                            tokens_after as f64 / estimated_tokens as f64
-                        } else {
-                            1.0
-                        },
-                        "reason": "manual",
-                        "summary": summary,
-                        "estimatedContextTokens": tokens_after,
-                        "preservedTurns": 0,
-                        "summarizedTurns": message_count,
-                        "preservedMessages": 0,
-                        "contextControlActionResourceId": &action_resource_id,
-                        "contextControlActionVersionId": &action_version.version_id,
-                        "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
-                        "boundaryInvocationId": invocation.id.as_str()
+            let summary = summary.expect("checked above");
+            let existing_boundary = find_boundary_event(
+                deps,
+                &session_id,
+                EventType::CompactBoundary,
+                &action_resource_id,
+            )
+            .await?;
+            let event = if let Some(event) = existing_boundary {
+                Ok(event)
+            } else {
+                deps.event_store.append_if_head(
+                    &AppendOptions {
+                        session_id: &session_id,
+                        event_type: EventType::CompactBoundary,
+                        payload: json!({
+                            "originalTokens": estimated_tokens,
+                            "compactedTokens": tokens_after,
+                            "compressionRatio": if estimated_tokens > 0 {
+                                tokens_after as f64 / estimated_tokens as f64
+                            } else {
+                                1.0
+                            },
+                            "reason": "manual",
+                            "summary": summary,
+                            "estimatedContextTokens": tokens_after,
+                            "preservedTurns": 0,
+                            "summarizedTurns": message_count,
+                            "preservedMessages": 0,
+                            "contextControlActionResourceId": &action_resource_id,
+                            "contextControlActionVersionId": &action_version.version_id,
+                            "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
+                            "boundaryInvocationId": invocation.id.as_str()
+                        }),
+                        parent_id: None,
+                        sequence: None,
+                    },
+                    snapshot_head_event_id,
+                )
+            };
+            match event {
+                Ok(event) => {
+                    deps.session_manager.invalidate_session(&session_id);
+                    (
+                        "succeeded",
+                        json!({
+                            "status": "succeeded",
+                            "tokensBefore": estimated_tokens,
+                            "tokensAfter": tokens_after,
+                            "timelineEventWritten": true,
+                            "timelineEvent": event_ref(&event.id, event.sequence, "compact.boundary"),
+                            "providerContextBoundaryCommitted": true,
+                            "providerContextAppliesOnNextAgentRun": true,
+                            "currentAgentRunMustStop": true,
+                            "historyStillInspectable": true
+                        }),
+                        vec![
+                            version_ref(
+                                &snapshot_resource,
+                                &snapshot_version,
+                                "preflight_snapshot",
+                            ),
+                            event_ref(&event.id, event.sequence, "compact.boundary"),
+                        ],
+                        Some(event),
+                    )
+                }
+                Err(error) if error.to_string().contains("session head changed") => (
+                    "failed",
+                    json!({
+                        "status": "failed",
+                        "reason": "session_head_changed",
+                        "timelineEventWritten": false
                     }),
-                    parent_id: None,
-                    sequence: None,
-                })
-                .map_err(store_error)?
-        };
-        deps.session_manager.invalidate_session(&session_id);
-        (
-            "succeeded",
-            json!({
-                "status": "succeeded",
-                "tokensBefore": estimated_tokens,
-                "tokensAfter": tokens_after,
-                "timelineEventWritten": true,
-                "timelineEvent": event_ref(&event.id, event.sequence, "compact.boundary"),
-                "providerContextBoundaryCommitted": true,
-                "providerContextAppliesOnNextAgentRun": true,
-                "currentAgentRunMustStop": true,
-                "historyStillInspectable": true
-            }),
-            vec![
-                version_ref(&snapshot_resource, &snapshot_version, "preflight_snapshot"),
-                event_ref(&event.id, event.sequence, "compact.boundary"),
-            ],
-            Some(event),
-        )
+                    vec![version_ref(
+                        &snapshot_resource,
+                        &snapshot_version,
+                        "preflight_snapshot",
+                    )],
+                    None,
+                ),
+                Err(error) => return Err(store_error(error)),
+            }
+        }
     };
 
     let record = action_record(ActionInput {
@@ -954,6 +1002,47 @@ pub(crate) async fn compact_value_at(
         &version,
         &payload,
         false,
+    ))
+}
+
+async fn manual_compaction_summary(
+    deps: &Deps,
+    head_event_id: &str,
+) -> Result<String, CapabilityError> {
+    let store = deps.event_store.clone();
+    let head_event_id = head_event_id.to_owned();
+    let reconstructed = crate::shared::server::context::run_blocking_task(
+        "context_control.compact.reconstruct",
+        move || store.get_messages_at(&head_event_id).map_err(store_error),
+    )
+    .await?;
+    let messages = reconstructed
+        .messages_with_event_ids
+        .into_iter()
+        .map(|entry| serde_json::to_value(entry.message))
+        .map(|value| {
+            value
+                .and_then(serde_json::from_value)
+                .map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to normalize context for compaction: {error}"),
+                })
+        })
+        .collect::<Result<Vec<crate::shared::protocol::messages::Message>, _>>()?;
+    let summary = KeywordSummarizer::new()
+        .summarize(&messages)
+        .await
+        .map_err(|error| CapabilityError::Internal {
+            message: format!("Failed to summarize session context: {error}"),
+        })?;
+    if summary.narrative.trim().is_empty() {
+        return Err(CapabilityError::Internal {
+            message: "Context summarizer returned an empty summary".to_owned(),
+        });
+    }
+    Ok(crate::shared::foundation::text::truncate_with_suffix(
+        &summary.narrative,
+        4_000,
+        "...",
     ))
 }
 
@@ -1090,6 +1179,12 @@ pub(crate) async fn clear_value_at(
         .pointer("/session/estimatedTokens")
         .and_then(Value::as_u64)
         .unwrap_or_default();
+    let snapshot_head_event_id = snapshot_payload
+        .pointer("/session/headEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "Context clear snapshot is missing its head boundary".to_owned(),
+        })?;
     let event = if let Some(event) = find_boundary_event(
         deps,
         &session_id,
@@ -1100,8 +1195,8 @@ pub(crate) async fn clear_value_at(
     {
         event
     } else {
-        deps.event_store
-            .append(&AppendOptions {
+        match deps.event_store.append_if_head(
+            &AppendOptions {
                 session_id: &session_id,
                 event_type: EventType::ContextCleared,
                 payload: json!({
@@ -1115,8 +1210,64 @@ pub(crate) async fn clear_value_at(
                 }),
                 parent_id: None,
                 sequence: None,
-            })
-            .map_err(store_error)?
+            },
+            snapshot_head_event_id,
+        ) {
+            Ok(event) => event,
+            Err(error) if error.to_string().contains("session head changed") => {
+                let failed_record = action_record(ActionInput {
+                    action_id: &format!("clear-{idempotency_key}"),
+                    state: "failed",
+                    action_kind: "clear",
+                    reason: &reason,
+                    actor_kind: actor_kind(invocation),
+                    scope: &scope,
+                    session_id: &session_id,
+                    snapshot_resource: &snapshot_resource,
+                    snapshot_version: &snapshot_version,
+                    expected_effect: "commit a new context epoch for the next agent run while keeping history/resources/traces inspectable",
+                    result: json!({
+                        "status": "failed",
+                        "reason": "session_head_changed",
+                        "timelineEventWritten": false
+                    }),
+                    audit_refs: vec![version_ref(
+                        &snapshot_resource,
+                        &snapshot_version,
+                        "preflight_snapshot",
+                    )],
+                    created_at: &now,
+                    updated_at: &now,
+                    invocation,
+                    idempotency_key: &idempotency_key,
+                });
+                let (resource, version, payload) = update_action_resource(
+                    deps,
+                    invocation,
+                    &action_resource_id,
+                    action_version.version_id.clone(),
+                    "failed",
+                    failed_record,
+                )
+                .await?;
+                publish_action_lifecycle_best_effort(
+                    deps,
+                    invocation,
+                    "context_control.clear_failed",
+                    &resource,
+                    json!({"metadataOnly": true, "networkPolicy": "none"}),
+                )
+                .await;
+                return Ok(action_response(
+                    "context_control_clear",
+                    &resource,
+                    &version,
+                    &payload,
+                    false,
+                ));
+            }
+            Err(error) => return Err(store_error(error)),
+        }
     };
     deps.session_manager.invalidate_session(&session_id);
     let epoch_id = format!("epoch-{}", event.sequence);

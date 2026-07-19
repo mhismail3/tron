@@ -11,4 +11,6 @@ pub struct PromptRequest {
     /// Engine causality moved from the accepted invocation into the provider
     /// turn, completion resources, and runtime stream records.
     pub engine_causality: Option<PromptEngineCausality>,
+    /// Server-owned execution restriction selected by the accepting workflow.
+    pub execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy,
 }

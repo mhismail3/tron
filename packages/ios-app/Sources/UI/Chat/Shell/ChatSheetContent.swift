@@ -67,6 +67,7 @@ struct ChatSheetContent: View {
                 initialContextWindow: viewModel.contextState.currentContextWindow,
                 initialTokensRemaining: viewModel.contextState.tokensRemaining,
                 reasoningLevel: currentModelSupportsReasoning ? viewModel.inputBarState.reasoningLevel : nil,
+                isAgentRunning: viewModel.agentPhase.isProcessing,
                 client: dependencies.contextControlRepository,
                 modelRepository: dependencies.modelRepository
             )

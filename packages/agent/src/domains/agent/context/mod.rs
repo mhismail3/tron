@@ -7,7 +7,7 @@
 //! | `context_manager` | Entry point — owns context lifecycle, compaction triggers, and manager dependency projections |
 //! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
 //! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
-//! | `summarizer` | Summarizer trait and recovery implementations |
+//! | `summarizer` | Summarizer trait and deterministic bounded salience implementation |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
 //! | `soul` | Static seed instruction for the primitive loop |
 //! | `token_estimator` | Token counting and context budget calculations |

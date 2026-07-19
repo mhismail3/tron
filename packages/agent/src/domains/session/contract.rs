@@ -49,7 +49,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("session::fork", "session", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("session.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"fromEventId":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"expectedHeadEventId":{"type":"string"},"fromEventId":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
@@ -163,5 +163,30 @@ mod tests {
             }),
         )
         .expect("complete pagination response must pass the wire contract");
+    }
+
+    #[test]
+    fn session_fork_contract_accepts_safe_head_precondition() {
+        let fork = capabilities()
+            .expect("session contracts")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "session::fork")
+            .expect("session::fork contract");
+        let schema = fork
+            .request_schema
+            .as_ref()
+            .expect("session::fork request schema");
+
+        crate::engine::kernel::schema::validate_payload(
+            &fork.function_id,
+            "request",
+            schema,
+            &json!({
+                "sessionId": "sess_source",
+                "fromEventId": "evt_assistant",
+                "expectedHeadEventId": "evt_turn_end"
+            }),
+        )
+        .expect("branch precondition must pass the closed engine contract");
     }
 }

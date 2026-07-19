@@ -379,6 +379,7 @@ async fn assert_provider_result_identity_survives_reconstruction(
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     })
     .await;
     assert_eq!(outcome.capability_invocations_executed, 1);
@@ -501,6 +502,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     })
     .await;
 
@@ -673,6 +675,7 @@ async fn parent_cancellation_during_capability_wave_marks_active_turn_interrupte
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     })
     .await;
     cancel_task.await.unwrap();
@@ -732,6 +735,7 @@ async fn context_boundary_terminalizes_later_started_invocations_without_executi
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     })
     .await;
 
@@ -798,6 +802,7 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     })
     .await;
 
@@ -864,6 +869,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
+        execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
     })
     .await;
 

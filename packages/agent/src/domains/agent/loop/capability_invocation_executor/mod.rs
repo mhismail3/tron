@@ -50,7 +50,9 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
-use crate::domains::capability::{is_supported_operation, validate_operation_payload};
+use crate::domains::capability::{
+    OperationEffect, is_supported_operation, operation_effect, validate_operation_payload,
+};
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -234,6 +236,7 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     pub provider_type: &'a str,
     pub trace_id: Option<&'a TraceId>,
     pub parent_invocation_id: Option<&'a InvocationId>,
+    pub execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy,
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -279,6 +282,35 @@ pub async fn execute_capability_invocation(
 
     let stops_turn = engine_target.stops_turn;
     let effective_args = Value::Object(capability_invocation.arguments.clone());
+    if ctx.execution_policy == crate::domains::agent::r#loop::types::ExecutionPolicy::ReadOnly
+        && effective_args
+            .get("operation")
+            .and_then(Value::as_str)
+            .and_then(operation_effect)
+            != Some(OperationEffect::ReadOnly)
+    {
+        let failure = FailureEnvelope::new(
+            ENGINE_POLICY_VIOLATION,
+            FailureCategory::Auth,
+            "Delegated read-only runs cannot invoke mutating or work-starting capabilities",
+            false,
+            true,
+            FailureOrigin::Engine,
+        );
+        return CapabilityInvocationExecutionResult {
+            result: capability_failure_result(
+                failure,
+                &model_primitive_name,
+                &invocation_id,
+                session_id,
+                ctx.trace_id,
+                ctx.parent_invocation_id,
+                Some(json!({"executionPolicy": "read_only"})),
+            ),
+            duration_ms: duration_ceil_ms(start.elapsed()),
+            stops_turn: false,
+        };
+    }
     let primitive_identity = primitive_capability_identity(
         &model_primitive_name,
         &effective_args,

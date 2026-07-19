@@ -288,9 +288,9 @@ replaceable summarizers honored those refs. Policy refs are typed,
 kind-matched, non-wildcard provider-safe refs with required rationale, and
 policy snapshot/list projections fail closed if active records exceed the
 bounded projection instead of silently truncating custody evidence. The iOS
-Session Briefing sheet renders this substrate from the prompt composer's
+Context Revision sheet renders this substrate from the prompt composer's
 proportional context ring and audited timeline actions as a Context Breakdown section,
-alongside the same model picker used by new-session setup. Native Session Briefing
+alongside the same model picker used by new-session setup. Native Context Revision
 uses first-party `context_control::ui_*` wrappers that validate the current
 session and record through the same server-owned context-control service instead
 of widening model-facing authority. It does not restore memory retain/edit,
@@ -986,12 +986,6 @@ Current primitive operations:
 | `web_research_source_inspect` | Inspect one scoped `web_research_source` through exact `kind:web_research_source` plus `resource:<id>` selector authorization, returning bounded citation/source artifact metadata and refs only. |
 | `tool_source_list` | List a bounded number of current-session inert `tool_source_proposal` records with source identity, state/summary, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
-| `subagent_launch` | Accepted Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
-| `subagent_status` | Inspect one scoped `subagent_task`, then inspect the delegated module runtime/job binding through `module_program_execution_status`, returning bounded/redacted task and delegated job refs without raw output payloads. |
-| `subagent_result` | Return a reviewable merge proposal for one scoped delegated subagent task by reading the bound module runtime/job refs; it proves `parentConversationMutated: false` and does not merge output into conversation state. |
-| `subagent_cancel` | Cancel one nonterminal scoped delegated subagent task with idempotency and optional expected subagent version freshness, delegating cancellation through the bound module runtime/job pair before recording subagent cancellation provenance. |
-| `subagent_task_list` | List scoped `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, handoff/evidence/output refs, explicit truncation metadata, `networkPolicy: none`, and no raw prompts, raw results, logs, paths, or result-merge side effects. |
-| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle, delegation, and merge-proposal evidence without raw prompts, secrets, raw process output, local paths, or raw authority ids. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `context_control_status` | Implementation-candidate read-only operation called with only `operation` in provider-facing `capability::execute`; trusted runtime context supplies the current session. It returns provider-safe context composition, token estimates, memory/resource/execution refs, epoch metadata, and freshness proof without recording a snapshot or action, using exact session-scoped read authority, `networkPolicy: none`, and no raw prompt bodies, hidden chain-of-thought, secrets, env values, local paths, commands, logs, grant ids, or authority ids. |
@@ -1113,7 +1107,7 @@ Current primitive operations:
 
 File access goes through the hardened `filesystem_*` operation package.
 
-The execute-operation contract boundary is fail closed. All 188 supported
+The execute-operation contract boundary is fail closed. All 187 supported
 operations have one canonical closed input schema and provider-safe output
 contract under `operations::operation_contract`, including the normalized
 envelope profile, required semantic success facts, expected resource/collection
@@ -1131,7 +1125,7 @@ validation that cannot be expressed as a static provider contract.
 Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`, `media`,
-`worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
+`worker_lifecycle`, `web`, `tool_sources`, `delegation`, `procedural`, and model-provider modules. The
 accepted Phase 3 module-plane additions through Slice 23H include `module_registry`,
 `module_authoring`, `module_validation`, `module_install`, `module_lifecycle`,
 `module_runtime`, `module_dependencies`, `capability_binding`, and `module_activity` metadata and
@@ -1249,8 +1243,9 @@ Push-requested sends record inbox-only, no-device, policy-disabled,
 family-opt-out, relay-disabled, delivered, or failed evidence. Eligible sends
 delegate to the injected HMAC APNs relay adapter; the notification domain does
 not own tokens or credentials. Device registration and notification sends use
-one canonical event-family taxonomy; the default `agent_attention` family is
-enabled by the default device policy. Send results distinguish durable inbox
+one canonical event-family taxonomy; Level 2 child-work notifications use the
+`delegation` family and the retired `subagent` family cannot be created. The
+default `agent_attention` family is enabled by the default device policy. Send results distinguish durable inbox
 recording from APNs acceptance, partial delivery, policy/configuration skips,
 and transport failure, including on idempotent replay. iOS versions its token
 registration idempotency key when registration policy changes so an existing
@@ -1461,42 +1456,12 @@ execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
 iOS fixed UI.
 
-The accepted Slice 10A foundation adds the `subagents` domain as an inert task
-lifecycle/provenance boundary. Trusted internal system/admin callers can
-create and update `subagent_task` resources only with derived non-bootstrap
-`subagents.write` and `resource.write` authority, explicit non-wildcard
-`subagent_task` resource grants, idempotency, bounded objective/prompt
-summaries, parent session/workspace/trace refs, evidence/output refs,
-summary-only redaction, and `networkPolicy: none`. Agent-visible access is
-read-only through `subagent_task_list` and `subagent_task_inspect` under
-`capability::execute`; those operations require trusted current-session
-context, `subagents.read`, `resource.read`, explicit `subagent_task` resource
-authority plus a matching `kind:subagent_task` selector, stored kind/schema
-revalidation, allowlisted bounded/redacted projection, scope isolation, and
-`networkPolicy: none`.
-
-Accepted Slice 24C activates provider-visible subagent lifecycle operation values
-`subagent_launch`, `subagent_status`, `subagent_result`, and
-`subagent_cancel` behind the same single `capability::execute` primitive.
-Launch requires trusted current-session context, derived non-bootstrap
-`subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
-authority, exact `resource:<subagent_task_id>` selectors in addition to
-`kind:subagent_task`, idempotency, explicit
-`modelPolicy: accepted_jobs_program_execution_v1`, `workerKind:
-module_program_execution`, `modulePackId: jobs_program_execution`, bounded
-objective/prompt summaries, summary-only handoff refs, one running subagent
-task per current scope, parent session/workspace/trace refs, replay refs, exact
-enabled module lifecycle/runtime selectors, and delegated module
-runtime/program/job refs. Status/result/cancel follow the delegated
-module-runtime/job binding through the accepted `module_program_execution_*`
-adapter and require the exact task resource selector from
-`subagentTaskResourceId`; result returns reviewable merge-proposal evidence and
-explicitly does not mutate parent conversation state. Accepted Slice 24C still does not
-spawn hidden child agents, launch arbitrary workers or packages, execute tools
-outside the accepted module pack, open network/browser/search/login scope,
-register catalog entries, promote trust, merge results into conversation state,
-start autonomous work, expand public `/engine` APIs, add settings/profile
-migrations, or add fixed native iOS subagent UI.
+Historical `subagent_task.v1` module-execution records retain their engine
+resource definition for durable database compatibility and generic resource
+inspection only. The former `subagents` domain, provider-visible `subagent_*`
+and `subagent_task_*` execute operations, and module-job adapter have been
+retired. Historical records are not aliases for the Level 2 Delegation
+workflow and cannot launch new work.
 
 The accepted Slice 11A foundation added the smallest procedural inspection
 foundation: a built-in `procedural_record` resource schema for skills, rules,
@@ -2025,13 +1990,6 @@ records nor activates external tools.
 Failures rejected before an effectful trace record is inserted still rely on
 the direct capability failure result projection for bounded error code/path
 evidence; durable pre-trace failure records remain a deferred tracing slice.
-Subagent lifecycle operations read and mutate scoped `subagent_task` resources
-and, for Slice 24C provider-visible launch/status/result/cancel, inspect or
-cancel only the delegated jobs/program-execution module runtime/job refs
-recorded on that task. Projections are allowlisted, bounded, and redacted:
-summary-only handoff refs and merge-proposal refs are visible, while raw
-prompts, raw results, command output, logs, paths, raw authority ids, and
-silent parent conversation mutation remain excluded.
 Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,
@@ -2069,10 +2027,70 @@ The retained substrate workers are covered by the source-owned state,
 scheduling, security, observability, storage, and resource-governance boundary
 tests under `packages/agent/tests/`.
 
-Fixed helper-orchestration routes are not registered on the primitive teardown
-branch. Any future parallel helper behavior must be created by the agent
-through `execute` and recorded as agent-owned state or generic runtime
-artifacts.
+No generic helper-orchestration runtime is registered on the primitive branch.
+The narrow Delegation workflow below composes the existing prompt/session
+substrate and records its lifecycle as source-owned engine state; broader
+parallel behavior still requires an explicit contract rather than hidden
+bootstrap orchestration.
+
+### Level 2 session workflows
+
+The first Level 2 kernel is intentionally limited to three user-facing session
+concepts: **Context Revision**, **Branch**, and **Delegation**. It is a thin
+composition layer over existing source-owned truth, not a generic workflow
+engine and not a second persistence model:
+
+- Context Revision projects the latest Context Control action. Manual
+  compaction reconstructs durable provider history and writes a bounded,
+  deterministic bounded summary that retains chronological edges plus explicit
+  middle-session constraints and decisions; it fails closed instead of
+  substituting a token-count placeholder. Raw history remains inspectable and
+  authoritative.
+- Branch projects lineage already stored on the child session row. The iOS
+  session-actions menu creates and enters a Branch; it is gated while offline,
+  while the agent is active, or while another request is pending. Public forks
+  commit only at completed `stream.turn_end` boundaries and use causal,
+  freshness, and idempotency checks described below.
+- Delegation owns one bounded handoff to a fresh child session, a server-owned
+  read-only execution policy, an exact child run, and an explicitly accepted
+  result. Its `delegation` resource is distinct from legacy
+  `subagent_task.v1` module-execution records; the two schemas are never
+  reinterpreted as each other. The child shares the workspace through
+  canonical read-only capability effects, receives no network or further
+  delegation authority, and never enters session fork lineage. A parent may
+  have at most three preparing, running, or result-ready children; acceptance
+  or another terminal disposition releases that capacity. Exact-version
+  cancellation cannot stop a replacement run. Child identity is deterministic
+  and durable before session creation, and start admission is serialized so
+  concurrent starts cannot exceed the capacity bound. Live `AgentEnd`
+  reconciliation records terminal state and result refs. Restart repair
+  requires a durable exact-run terminal result plus the final matching turn;
+  an assistant message or tool-loop turn boundary alone cannot become a ready
+  result. List/inspect/start/capacity paths repair interrupted state so stale
+  work cannot consume capacity forever. Lifecycle changes publish the
+  session-scoped `delegation.changed` invalidation signal.
+
+Provider-facing delegation is exposed only through the closed
+`delegation_start`, `delegation_list`, `delegation_inspect`, `delegation_cancel`, and
+`delegation_accept_result` operations on `capability::execute`. Direct
+`delegation::*` functions remain typed application/engine entry points.
+`executionPolicy: read_only` exists only on the hidden delegated-prompt
+contract with trusted System causality; the public prompt contract, ordinary
+clients, and model output cannot select or widen it. Ready result content and
+refs remain hidden from projections until exact acceptance. `accept_result` is
+intentionally the explicit join/reveal boundary, not approval after a
+pre-accept preview; it then carries the bounded provider-safe summary into
+parent context for evaluation.
+
+The first page of `session::reconstruct` may include the bounded
+`tron.session_workflows.v1` read model. It contains provider/UI-safe summaries,
+branch lineage, and explicit truncation without resource, version, session, or
+event identifiers; older pages omit it. Projection failure degrades to an
+absent optional field and never fails base chat reconstruction. Clients mount
+it on reconnect and subscribe to source-owned lifecycle invalidations that
+trigger another reconstruction instead of mutating a parallel local state.
+Context Control
+resources, session rows/events, and delegation resources remain canonical.
 
 ---
 
@@ -2093,6 +2111,14 @@ expose normal Rust modules without `#[path]` aliases. The high-level
 session root/fork creation, identity-aware append, parent/sequence allocation,
 and durable writes, while SQLite repositories stay under
 `event_store/sqlite/repositories`.
+The public `session::fork` operation validates causal session/workspace scope
+and resolves branches only at persisted `stream.turn_end` boundaries. A
+`message.assistant` selector is normalized to its matching terminal boundary;
+arbitrary or cross-session event selectors fail closed. The optional
+`expectedHeadEventId` rejects stale current-session actions. Session rows and
+their root `session.fork` events remain the only lineage truth, while the
+existing durable engine idempotency key derives explicit fork identities so a
+retry after an ambiguous post-commit failure recovers the same child.
 Prompt execution appends `message.user` after reconstructing prior history but
 before constructing or calling a provider. If that append fails, the runtime
 emits a canonical persistence error, releases the active run, and creates no
@@ -2634,7 +2660,7 @@ packages/ios-app/Sources/
   shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
   inline folder creation, prompt input with clearable
   device-local recent-input reuse, the
-  Session Briefing sheet opened from the composer context ring for model switching,
+  Context Revision sheet opened from the composer context ring for model switching,
   provider-safe context breakdown, compact, clear, read-only memory status, and
   recent action audit detail,
   functional-only native composer attachment menu that preserves keyboard

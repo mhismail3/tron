@@ -102,6 +102,10 @@ pub const TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID: &str =
 pub const SUBAGENT_TASK_KIND: &str = "subagent_task";
 /// Built-in inert subagent task lifecycle resource schema id.
 pub const SUBAGENT_TASK_SCHEMA_ID: &str = "tron.resource.subagent_task.v1";
+/// Built-in durable child-agent delegation lifecycle resource kind.
+pub const DELEGATION_KIND: &str = "delegation";
+/// Built-in durable child-agent delegation lifecycle resource schema id.
+pub const DELEGATION_SCHEMA_ID: &str = "tron.resource.delegation.v1";
 /// Built-in inert procedural state record resource kind.
 pub const PROCEDURAL_RECORD_KIND: &str = "procedural_record";
 /// Built-in inert procedural state record resource schema id.

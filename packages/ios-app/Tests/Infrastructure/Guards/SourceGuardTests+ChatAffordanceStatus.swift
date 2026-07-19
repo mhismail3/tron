@@ -148,7 +148,7 @@ extension SourceGuardTests {
         }
     }
 
-    @Test("Chat pill sheet is canonically named Session Briefing")
+    @Test("Chat pill sheet is canonically named Context Revision")
     func testChatPillSheetUsesSessionBriefingName() throws {
         let iosRoot = iosAppRoot()
         let repoRoot = iosRoot
@@ -184,20 +184,20 @@ extension SourceGuardTests {
 
         #expect(FileManager.default.fileExists(atPath: uiTest.path))
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/" + "Agent" + "Control" + "UITests.swift").path))
-        #expect(projectReference.contains("Session Briefing sheet opened from the composer context ring"))
+        #expect(projectReference.contains("Context Revision sheet opened from the composer context ring"))
         #expect(!projectReference.contains(retiredSurfaceName + " sheet opened from the composer context ring"))
         #expect(contextButton.contains("Context Briefing Button"))
-        #expect(contextButton.contains(".accessibilityLabel(\"Session Briefing\")"))
+        #expect(contextButton.contains(".accessibilityLabel(\"Context Revision\")"))
         #expect(!contextButton.contains("Opens " + retiredSurfaceName))
         #expect(contextSheet.contains("session-briefing-context-summary"))
         #expect(contextSheet.contains("session-briefing-composition-card"))
         #expect(contextSheet.contains("session-briefing-model-card"))
-        #expect(contextSheet.contains("Session Briefing payload"))
+        #expect(contextSheet.contains("Context Revision payload"))
         #expect(!contextSheet.contains(retiredSurfaceName + " payload"))
         #expect(!contextSheet.contains(retiredIdentifierPrefix + "-context-summary"))
         #expect(!contextSheet.contains(retiredIdentifierPrefix + "-composition-card"))
-        #expect(contextModels.contains("Memory refs only in Session Briefing"))
-        #expect(contextContract.contains("First-party Session Briefing UI wrapper"))
+        #expect(contextModels.contains("Memory refs only in Context Revision"))
+        #expect(contextContract.contains("First-party Context Revision UI wrapper"))
         #expect(contextContract.contains(#""session-briefing""#))
         #expect(!contextContract.contains("First-party " + retiredSurfaceName + " UI wrapper"))
         #expect(!contextContract.contains(#"""# + retiredIdentifierPrefix + #"""#))

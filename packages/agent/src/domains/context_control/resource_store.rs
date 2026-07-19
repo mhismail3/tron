@@ -331,6 +331,7 @@ pub(super) async fn publish_lifecycle_event(
         .publish_stream_event(PublishStreamEvent {
             topic: CONTEXT_CONTROL_TOPIC.to_owned(),
             payload: json!({
+                "type": "context_revision.changed",
                 "event": event_type,
                 "resource": resource_ref(resource, "subject"),
                 "details": payload,

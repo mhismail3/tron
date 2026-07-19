@@ -11,6 +11,9 @@ operation_bindings! {
         "prompt" => |invocation, deps| {
             prompt_value(invocation, deps).await
         },
+        "prompt_delegated" => |invocation, deps| {
+            prompt_value(invocation, deps).await
+        },
         "prompt_apply" => |invocation, deps| {
             prompt_apply_value(Some(&invocation.payload), invocation, deps).await
         },

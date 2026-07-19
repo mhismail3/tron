@@ -24,6 +24,13 @@ extension ChatViewModel {
             ? mergeReconstructionEvents(previousEvents, eventWindow.events)
             : eventWindow.events
 
+        // Workflow state comes from the same server cut as the event watermark.
+        // Assign nil as well: an older server or a snapshot without the Level 2
+        // projection must not leave stale workflow UI mounted after reconnect.
+        workflowSnapshot = result.workflows.flatMap { snapshot in
+            snapshot.schemaVersion == "tron.session_workflows.v1" ? snapshot : nil
+        }
+
         // 1. Reconstruct the transient chat projection (messages + config + tokens)
         //    Uses reconstructSessionState() as single source of truth.
         let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)

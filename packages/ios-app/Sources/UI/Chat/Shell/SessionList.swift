@@ -242,7 +242,7 @@ enum SessionListStatus: Equatable {
         case .processing:
             "active"
         case .forked:
-            "forked"
+            "branch"
         case .idle:
             "idle"
         }

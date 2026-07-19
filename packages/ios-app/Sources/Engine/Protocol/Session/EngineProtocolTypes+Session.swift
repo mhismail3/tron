@@ -192,6 +192,7 @@ struct SessionHistoryResult: Decodable {
 struct SessionForkParams: Encodable {
     let sessionId: String
     let fromEventId: String?  // Event ID to fork from (nil = fork from HEAD)
+    let expectedHeadEventId: String?  // Reject the branch if the source advanced before commit.
 }
 
 struct SessionForkResult: Decodable {

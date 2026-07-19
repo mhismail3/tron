@@ -45,6 +45,17 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
 
 fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
+        CapabilityContract::new("agent::prompt_delegated", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
+            .visibility(VisibilityScope::Internal)
+            .request_schema(agent_prompt_delegated_request_schema())
+            .response_schema(agent_prompt_response_schema())
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .compensation(CompensationContract::new(
+                CompensationKind::ExternalIrreversible,
+                "hidden delegated prompt starts a server-owned read-only child run",
+            ))
+            .stream_topics(STREAM_TOPICS.to_vec())
+            .build()?,
         CapabilityContract::new("agent::prompt_apply", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
             .visibility(VisibilityScope::Internal)
             .request_schema(agent_prompt_apply_request_schema())
@@ -70,6 +81,17 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     ])
 }
 
+fn agent_prompt_delegated_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object", "required": ["sessionId", "prompt", "executionPolicy"],
+        "additionalProperties": false,
+        "properties": {
+            "sessionId": {"type": "string"}, "prompt": {"type": "string"},
+            "executionPolicy": {"type": "string", "const": "read_only"}
+        }
+    })
+}
+
 fn agent_prompt_apply_request_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -83,6 +105,7 @@ fn agent_prompt_apply_request_schema() -> serde_json::Value {
             "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
             "source": {"type": "string"},
             "workspaceId": {"type": "string"}
+            ,"executionPolicy": {"type": "string", "enum": ["read_only"]}
         }
     })
 }
@@ -117,6 +140,7 @@ mod tests {
                 "agent::abort",
                 "agent::abort_invocation",
                 "agent::status",
+                "agent::prompt_delegated",
                 "agent::prompt_apply",
                 "agent::run_turn",
             ]
@@ -126,7 +150,12 @@ mod tests {
     #[test]
     fn prompt_contracts_admit_only_affirmative_acknowledgements() {
         let specs = capabilities().expect("agent contracts");
-        for function_id in ["agent::prompt", "agent::prompt_apply", "agent::run_turn"] {
+        for function_id in [
+            "agent::prompt",
+            "agent::prompt_delegated",
+            "agent::prompt_apply",
+            "agent::run_turn",
+        ] {
             let spec = specs
                 .iter()
                 .find(|spec| spec.function_id.as_str() == function_id)
@@ -141,5 +170,31 @@ mod tests {
                 "{function_id} must not encode rejection as a successful response"
             );
         }
+    }
+
+    #[test]
+    fn read_only_policy_is_admitted_only_by_the_hidden_delegated_prompt_contract() {
+        let specs = capabilities().expect("agent contracts");
+        let public = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "agent::prompt")
+            .expect("prompt capability");
+        let public_schema = public
+            .request_schema
+            .as_ref()
+            .expect("public prompt schema");
+        assert!(public_schema["properties"].get("executionPolicy").is_none());
+        let prompt = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "agent::prompt_delegated")
+            .expect("delegated prompt capability");
+        let delegated_schema = prompt
+            .request_schema
+            .as_ref()
+            .expect("delegated prompt schema");
+        assert_eq!(
+            delegated_schema["properties"]["executionPolicy"]["const"],
+            json!("read_only")
+        );
     }
 }

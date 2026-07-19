@@ -44,11 +44,12 @@ use crate::domains::registration::worker::{
 };
 use crate::domains::{
     agent, approval, auth, blob, capability, capability_binding, catalog_discovery,
-    context_control, device, filesystem, git, import_history, import_preview, jobs, logs, media,
-    memory, message, model, module_activity, module_authoring, module_dependencies, module_install,
-    module_lifecycle, module_registry, module_runtime, module_validation, notifications,
-    program_execution, prompt_artifacts, repository_tree, scheduler, session, settings, subagents,
-    system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
+    context_control, delegation, device, filesystem, git, import_history, import_preview, jobs,
+    logs, media, memory, message, model, module_activity, module_authoring, module_dependencies,
+    module_install, module_lifecycle, module_registry, module_runtime, module_validation,
+    notifications, program_execution, prompt_artifacts, repository_tree, scheduler, session,
+    settings, system, tool_sources, transcription, update_diagnostics, web, web_research,
+    worker_lifecycle,
 };
 
 #[must_use = "activate after transport-trigger registration"]
@@ -151,6 +152,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
         device::worker_module(&deps)?,
         notifications::worker_module(&deps)?,
         context_control::worker_module(&deps)?,
+        delegation::worker_module(&deps)?,
         media::worker_module(&deps)?,
         import_history::worker_module(&deps)?,
         repository_tree::worker_module(&deps)?,
@@ -173,7 +175,6 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
         git::worker_module(&deps)?,
         web::worker_module(&deps)?,
         tool_sources::worker_module(&deps)?,
-        subagents::worker_module(&deps)?,
         scheduler::worker_module(&deps)?,
         filesystem::worker_module(&deps)?,
         blob::worker_module(&deps)?,

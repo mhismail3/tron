@@ -413,7 +413,7 @@ tron_events! {
     /// Session unarchived.
     SessionUnarchived {} => "session_unarchived",
 
-    /// Session forked.
+    /// Branch created from a session boundary.
     SessionForked {
         #[serde(rename = "newSessionId")]
         new_session_id: String,

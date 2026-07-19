@@ -5,8 +5,10 @@
 
 use serde_json::Value;
 
-use crate::shared::protocol::content::AssistantContent;
-use crate::shared::protocol::messages::{Message, UserMessageContent};
+use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Message, UserMessageContent,
+};
 
 use super::types::{ExtractedData, SummaryResult};
 
@@ -16,8 +18,8 @@ use super::types::{ExtractedData, SummaryResult};
 
 /// Trait for generating compaction summaries from conversation messages.
 ///
-/// The primitive loop retains [`KeywordSummarizer`] as a deterministic recovery
-/// summarizer using keyword extraction.
+/// The primitive loop retains [`KeywordSummarizer`] as a deterministic bounded
+/// summarizer using chronological and semantic-salience extraction.
 #[async_trait::async_trait]
 pub trait Summarizer: Send + Sync {
     /// Summarize a sequence of messages into a structured result.
@@ -31,11 +33,11 @@ pub trait Summarizer: Send + Sync {
 // Keyword Summarizer
 // =============================================================================
 
-/// Fast recovery summarizer that extracts keywords from messages.
+/// Deterministic bounded summarizer for the primitive loop.
 ///
-/// Used when the LLM summarizer fails (timeout, parse error, etc.).
-/// Produces a simple narrative by concatenating user messages and
-/// extracting file paths and capability ids.
+/// It preserves chronological edges plus explicit constraints, decisions, and
+/// importance markers from the middle of long sessions, then extracts file
+/// paths and capability ids. Raw history remains the durable source of truth.
 pub struct KeywordSummarizer;
 
 impl KeywordSummarizer {
@@ -62,13 +64,15 @@ impl Summarizer for KeywordSummarizer {
         let mut files_modified = Vec::new();
         let mut topics = Vec::new();
         let mut model_capability_names = Vec::new();
+        let mut assistant_outcomes = Vec::new();
+        let mut capability_outcomes = Vec::new();
 
         for msg in messages {
             match msg {
                 Message::User { content, .. } => {
                     let text = user_content_text(content);
                     if !text.is_empty() {
-                        user_messages.push(truncate(&text, 200));
+                        user_messages.push(truncate(&text, 240));
                     }
                 }
                 Message::Assistant { content, .. } => {
@@ -92,6 +96,10 @@ impl Summarizer for KeywordSummarizer {
                                 }
                             }
                             AssistantContent::Text { text } => {
+                                let outcome = truncate(text.trim(), 240);
+                                if !outcome.is_empty() {
+                                    assistant_outcomes.push(outcome);
+                                }
                                 if let Some(first_sentence) = text.split('.').next() {
                                     let topic = truncate(first_sentence.trim(), 80);
                                     if !topic.is_empty() && !topics.contains(&topic) {
@@ -103,7 +111,19 @@ impl Summarizer for KeywordSummarizer {
                         }
                     }
                 }
-                Message::CapabilityResult { .. } => {}
+                Message::CapabilityResult {
+                    content, is_error, ..
+                } => {
+                    let text = capability_result_text(content);
+                    if !text.is_empty() {
+                        let status = if *is_error == Some(true) {
+                            "Capability error"
+                        } else {
+                            "Capability result"
+                        };
+                        capability_outcomes.push(format!("{status}: {}", truncate(&text, 200)));
+                    }
+                }
             }
         }
 
@@ -112,7 +132,22 @@ impl Summarizer for KeywordSummarizer {
         } else {
             let mut parts = Vec::new();
             parts.push(format!("The user made {} requests.", user_messages.len()));
-            parts.push(format!("Key requests: {}", user_messages.join("; ")));
+            parts.push(format!(
+                "Key requests: {}",
+                bounded_salient_sequence(&user_messages, 6).join("; ")
+            ));
+            if !assistant_outcomes.is_empty() {
+                parts.push(format!(
+                    "Assistant outcomes and decisions: {}",
+                    bounded_salient_sequence(&assistant_outcomes, 6).join("; ")
+                ));
+            }
+            if !capability_outcomes.is_empty() {
+                parts.push(format!(
+                    "Execution outcomes: {}",
+                    bounded_salient_sequence(&capability_outcomes, 4).join("; ")
+                ));
+            }
             if !model_capability_names.is_empty() {
                 parts.push(format!(
                     "Capabilities used: {}",
@@ -128,10 +163,16 @@ impl Summarizer for KeywordSummarizer {
         Ok(SummaryResult {
             narrative,
             extracted_data: ExtractedData {
-                current_goal: user_messages.first().cloned().unwrap_or_default(),
-                completed_steps: Vec::new(),
+                current_goal: user_messages.last().cloned().unwrap_or_default(),
+                completed_steps: bounded_salient_sequence(&assistant_outcomes, 6),
                 pending_tasks: Vec::new(),
-                key_decisions: Vec::new(),
+                key_decisions: bounded_salient_sequence(&assistant_outcomes, 6)
+                    .into_iter()
+                    .map(|decision| super::types::KeyDecision {
+                        decision,
+                        reason: "Recovered from prior assistant output".to_owned(),
+                    })
+                    .collect(),
                 files_modified,
                 topics_discussed: topics,
                 user_preferences: Vec::new(),
@@ -161,6 +202,98 @@ fn user_content_text(content: &UserMessageContent) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
     }
+}
+
+fn capability_result_text(content: &CapabilityResultMessageContent) -> String {
+    match content {
+        CapabilityResultMessageContent::Text(text) => text.clone(),
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                CapabilityResultContent::Text { text } => Some(text.as_str()),
+                CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn bounded_salient_sequence(values: &[String], limit: usize) -> Vec<String> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    if values.len() <= limit {
+        return values.to_vec();
+    }
+
+    let mut selected = std::collections::BTreeSet::new();
+    let _ = selected.insert(0);
+    let _ = selected.insert(values.len() - 1);
+    if limit >= 4 {
+        let _ = selected.insert(1);
+        let _ = selected.insert(values.len() - 2);
+    }
+
+    let mut salient = values
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !selected.contains(index))
+        .map(|(index, value)| (semantic_salience(value), index))
+        .filter(|(score, _)| *score > 0)
+        .collect::<Vec<_>>();
+    salient.sort_by(|(left_score, left_index), (right_score, right_index)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left_index.cmp(right_index))
+    });
+    for (_, index) in salient {
+        if selected.len() == limit {
+            break;
+        }
+        let _ = selected.insert(index);
+    }
+
+    // Fill remaining capacity across the whole chronology instead of allowing
+    // a long middle region to disappear deterministically.
+    for step in 1..values.len() {
+        if selected.len() == limit {
+            break;
+        }
+        let index = step * (values.len() - 1) / values.len();
+        let _ = selected.insert(index);
+    }
+
+    selected
+        .into_iter()
+        .take(limit)
+        .map(|index| values[index].clone())
+        .collect()
+}
+
+fn semantic_salience(value: &str) -> usize {
+    const MARKERS: &[&str] = &[
+        "critical",
+        "important",
+        "must",
+        "never",
+        "always",
+        "constraint",
+        "decision",
+        "preserve",
+        "required",
+        "do not",
+        "don't",
+        "cannot",
+        "should not",
+        "invariant",
+        "preference",
+        "remember",
+    ];
+    let lower = value.to_ascii_lowercase();
+    MARKERS
+        .iter()
+        .filter(|marker| lower.contains(**marker))
+        .count()
 }
 
 // =============================================================================
@@ -226,6 +359,51 @@ mod tests {
         let summarizer = KeywordSummarizer;
         let result = summarizer.summarize(&[]).await.unwrap();
         assert!(result.narrative.contains("0 messages summarized"));
+    }
+
+    #[tokio::test]
+    async fn keyword_summarizer_preserves_late_decisions_and_execution_outcomes() {
+        let mut messages = (0..20)
+            .map(|index| Message::user(format!("request-{index} {}", "x".repeat(500))))
+            .collect::<Vec<_>>();
+        messages.push(Message::assistant(
+            "LATE-DECISION: keep the transactional boundary.",
+        ));
+        messages.push(Message::CapabilityResult {
+            invocation_id: "cap-late".into(),
+            content: CapabilityResultMessageContent::Text("LATE-RESULT: validation passed".into()),
+            is_error: Some(false),
+        });
+
+        let result = KeywordSummarizer.summarize(&messages).await.unwrap();
+        assert!(result.narrative.len() <= 4_000);
+        assert!(result.narrative.contains("request-19"));
+        assert!(result.narrative.contains("LATE-DECISION"));
+        assert!(result.narrative.contains("LATE-RESULT"));
+    }
+
+    #[tokio::test]
+    async fn keyword_summarizer_preserves_critical_middle_request_and_decision() {
+        let mut messages = Vec::new();
+        for index in 0..10 {
+            let request = if index == 1 {
+                "request-1 CRITICAL-MIDDLE-REQUEST: preserve the CERULEAN invariant".to_owned()
+            } else {
+                format!("request-{index} routine detail")
+            };
+            messages.push(Message::user(request));
+            let outcome = if index == 4 {
+                "IMPORTANT-MIDDLE-DECISION: never weaken the transactional boundary".to_owned()
+            } else {
+                format!("outcome-{index} completed")
+            };
+            messages.push(Message::assistant(outcome));
+        }
+
+        let result = KeywordSummarizer.summarize(&messages).await.unwrap();
+        assert!(result.narrative.contains("CRITICAL-MIDDLE-REQUEST"));
+        assert!(result.narrative.contains("IMPORTANT-MIDDLE-DECISION"));
+        assert!(result.narrative.contains("request-9"));
     }
 
     // -- User content helpers --

@@ -58,6 +58,7 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub provider_type: &'a str,
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
+    pub execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy,
 }
 
 #[derive(Default)]
@@ -351,6 +352,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         provider_type: params.provider_type,
                         trace_id: params.trace_id,
                         parent_invocation_id: params.parent_invocation_id,
+                        execution_policy: params.execution_policy,
                     };
                 let working_dir = working_dir.as_str();
                 async move {

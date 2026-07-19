@@ -80,7 +80,7 @@ enum PersistedEventType: String, CaseIterable {
         // Session lifecycle
         case .sessionStart:            return .init(false,   true,    false,   true,   "Session started")
         case .sessionEnd:              return .init(false,   false,   false,   true,   "Session ended")
-        case .sessionFork:             return .init(false,   true,    false,   true,   "Session forked")
+        case .sessionFork:             return .init(false,   true,    false,   true,   "Branch created")
         case .sessionBranch:           return .init(false,   false,   false,   true,   "Branch created")
         // Conversation
         case .messageUser:             return .init(true,    true,    false,   false,  "User message")

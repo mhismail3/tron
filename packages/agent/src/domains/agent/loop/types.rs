@@ -7,6 +7,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::domains::agent::r#loop::errors::StopReason;
 
+/// Server-owned capability policy for one agent run.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ExecutionPolicy {
+    /// Ordinary session execution under operation-specific runtime grants.
+    #[default]
+    Standard,
+    /// Delegated analysis may invoke canonical read-only operations only.
+    ReadOnly,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent configuration
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,6 +102,9 @@ pub struct VolatileTokens {}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunContext {
+    /// Server-owned run capability restriction; never sourced from model output.
+    #[serde(skip)]
+    pub execution_policy: ExecutionPolicy,
     /// Stable runtime run id for causal/idempotency metadata. This is assigned
     /// by the prompt runtime and is intentionally not serialized into prompt
     /// context snapshots.

@@ -169,3 +169,67 @@ struct SessionCreateParamsEncodingTests {
         #expect(json["workingDirectory"] as? String == "/tmp")
     }
 }
+
+@Suite("Session workflow reconstruction projection")
+struct SessionWorkflowProjectionTests {
+    @Test("Decodes the minimal context, branch, and delegation snapshot")
+    func decodesMinimalWorkflowSnapshot() throws {
+        let data = Data(#"""
+        {
+          "events": [],
+          "hasMoreEvents": false,
+          "oldestEventId": null,
+          "inFlight": null,
+          "lastSequence": 12,
+          "isRunning": false,
+          "isCompacting": false,
+          "compactionReason": null,
+          "agentPhase": "idle",
+          "metadata": {},
+          "workflows": {
+            "schemaVersion": "tron.session_workflows.v1",
+            "contextRevision": {
+              "state": "succeeded",
+              "kind": "compact",
+              "reason": "long session"
+            },
+            "branchLineage": {"isBranch":true},
+            "activeDelegations": [{
+              "state":"running",
+              "objectiveSummary":"Review persistence",
+              "resultSummary":null
+            }],
+            "recentDelegations": [],
+            "truncated": false
+          }
+        }
+        """#.utf8)
+
+        let result = try JSONDecoder().decode(SessionReconstructResult.self, from: data)
+        let workflows = try #require(result.workflows)
+        #expect(workflows.schemaVersion == "tron.session_workflows.v1")
+        #expect(workflows.contextRevision?.kind == "compact")
+        #expect(workflows.contextRevision?.state == "succeeded")
+        #expect(workflows.branchLineage.isBranch)
+        #expect(workflows.activeDelegations.first?.objectiveSummary == "Review persistence")
+        #expect(workflows.recentDelegations.isEmpty)
+    }
+
+    @Test("Older reconstruction payload without workflows remains compatible")
+    func absentWorkflowSnapshotDecodesAsNil() throws {
+        let data = Data(#"""
+        {
+          "events": [],
+          "hasMoreEvents": false,
+          "oldestEventId": null,
+          "inFlight": null,
+          "lastSequence": 0,
+          "isRunning": false,
+          "metadata": {}
+        }
+        """#.utf8)
+
+        let result = try JSONDecoder().decode(SessionReconstructResult.self, from: data)
+        #expect(result.workflows == nil)
+    }
+}

@@ -863,6 +863,8 @@ final class CachedSessionTests: XCTestCase {
             id: "source-session-a",
             workingDirectory: "/tmp/tron-fixtures/source-a"
         )
+        sourceSession.headEventId = "source-event-a"
+        sourceSession.eventCount = 1
         sourceSession.serverOrigin = "127.0.0.1:65507"
         try await database.sessions.insert(sourceSession)
 
@@ -950,6 +952,89 @@ final class CachedSessionTests: XCTestCase {
         let cachedForkEvent = try await database.events.get("fork-root-a")
         XCTAssertNotNil(cachedSourceEvent)
         XCTAssertNotNil(cachedForkEvent)
+        await manager.shutdown()
+    }
+
+    func testBranchRetryKeepsOriginalHeadAndIdentityAfterSourceAdvances() async throws {
+        let database = testState.makeDatabase(fileName: "branch-lost-response-retry.db")
+        try await database.initialize()
+        var sourceSession = createTestSession(id: "source-session-retry")
+        sourceSession.headEventId = "head-before-request"
+        sourceSession.eventCount = 2
+        try await database.sessions.insert(sourceSession)
+
+        let client = makeEngineClient(port: 65505)
+        let transport = makeConnectedTransport(port: 65505)
+        client.session = SessionClient(transport: transport)
+        var requests: [SessionForkParams] = []
+        var identities: [EngineIdempotencyKey] = []
+        transport.writeHandler = { functionId, payload, idempotencyKey, _ in
+            guard functionId.rawValue == "session::fork",
+                  let params = payload as? SessionForkParams else {
+                throw EngineConnectionError.invalidResponse
+            }
+            requests.append(params)
+            identities.append(idempotencyKey)
+            throw EngineConnectionError.timeout
+        }
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: client,
+            defaults: testState.defaults
+        )
+
+        do {
+            _ = try await manager.forkSession(sourceSession.id)
+            XCTFail("lost response must surface as a timeout")
+        } catch EngineConnectionError.timeout {
+            // Expected: request identity remains pending because commit is unknown.
+        }
+
+        sourceSession.headEventId = "head-after-sync"
+        sourceSession.eventCount = 3
+        try await database.sessions.insert(sourceSession)
+
+        do {
+            _ = try await manager.forkSession(sourceSession.id)
+            XCTFail("retry timeout must surface")
+        } catch EngineConnectionError.timeout {
+            // Expected.
+        }
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map(\.expectedHeadEventId), ["head-before-request", "head-before-request"])
+        XCTAssertEqual(identities.count, 2)
+        XCTAssertEqual(identities[0], identities[1])
+        await manager.shutdown()
+    }
+
+    func testBranchFailsClosedWhenSourceHeadIsUnavailable() async throws {
+        let database = testState.makeDatabase(fileName: "branch-missing-head.db")
+        try await database.initialize()
+        let sourceSession = createTestSession(id: "source-session-without-head")
+        try await database.sessions.insert(sourceSession)
+        let client = makeEngineClient(port: 65504)
+        let transport = makeConnectedTransport(port: 65504)
+        client.session = SessionClient(transport: transport)
+        var writes = 0
+        transport.writeHandler = { _, _, _, _ in
+            writes += 1
+            throw EngineConnectionError.invalidResponse
+        }
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: client,
+            defaults: testState.defaults
+        )
+
+        do {
+            _ = try await manager.forkSession(sourceSession.id)
+            XCTFail("branch must fail closed without a freshness boundary")
+        } catch BranchSessionError.sourceHeadUnavailable {
+            // Expected.
+        }
+
+        XCTAssertEqual(writes, 0)
         await manager.shutdown()
     }
 

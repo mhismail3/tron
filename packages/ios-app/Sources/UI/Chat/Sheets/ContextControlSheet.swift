@@ -8,6 +8,7 @@ struct ContextControlSheet: View {
     let initialContextWindow: Int
     let initialTokensRemaining: Int
     let reasoningLevel: String?
+    let isAgentRunning: Bool
     let client: any ContextControlRepository
     let modelRepository: any ModelRepository
 
@@ -26,6 +27,12 @@ struct ContextControlSheet: View {
     @State private var showModelPicker = false
 
     private var isMutating: Bool { activeMutation != nil }
+    private var canMutateContext: Bool {
+        SessionBriefingMutationPolicy.canMutate(
+            isAgentRunning: isAgentRunning,
+            isMutationActive: isMutating
+        )
+    }
 
     private var selectedModelInfo: ModelInfo? {
         availableModels.first { $0.id == currentModelId }
@@ -97,14 +104,14 @@ struct ContextControlSheet: View {
                         .disabled(isMutating)
                 }
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Session Briefing", color: .tronEmerald)
+                    SheetTitle(title: "Context Revision", color: .tronEmerald)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     SessionBriefingToolbarButton(
                         icon: "arrow.triangle.2.circlepath",
                         color: .tronEmerald,
                         isBusy: activeMutation == .compact,
-                        isEnabled: !isMutating,
+                        isEnabled: canMutateContext,
                         accessibilityLabel: "Compact session context"
                     ) {
                         Task { await compactNow() }
@@ -113,7 +120,7 @@ struct ContextControlSheet: View {
                     SessionBriefingToolbarButton(
                         icon: "xmark.circle",
                         color: .tronError,
-                        isEnabled: !isMutating,
+                        isEnabled: canMutateContext,
                         accessibilityLabel: "Clear session context"
                     ) {
                         showClearConfirmation = true
@@ -124,7 +131,7 @@ struct ContextControlSheet: View {
                         color: .tronEmerald,
                         isBusy: isLoadingContext && !isMutating,
                         isEnabled: !isMutating,
-                        accessibilityLabel: "Reload session briefing"
+                        accessibilityLabel: "Reload context revision"
                     ) {
                         Task {
                             await reload()
@@ -168,7 +175,7 @@ struct ContextControlSheet: View {
     }
 
     private var sessionBriefingSection: some View {
-        SessionBriefingSection(title: "Briefing", icon: "person.text.rectangle", tint: .tronEmerald) {
+        SessionBriefingSection(title: "Current Context", icon: "person.text.rectangle", tint: .tronEmerald) {
             SessionBriefingGlassCard(color: .tronEmerald) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(sessionBriefingTitle)
@@ -279,7 +286,7 @@ struct ContextControlSheet: View {
                         ]
                     )
                     SessionBriefingInlineRows(rows: [
-                        ContextControlMetric(label: "Policy", value: memory?.policy ?? "Memory refs only in Session Briefing"),
+                        ContextControlMetric(label: "Policy", value: memory?.policy ?? "Memory refs only in Context Revision"),
                         ContextControlMetric(label: "Edit controls", value: "Not included in this surface")
                     ])
                 }
@@ -358,12 +365,6 @@ struct ContextControlSheet: View {
                         ],
                         tint: detail.summary.tint
                     )
-                    Text(detail.summary.resourceId)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
-                        .textSelection(.enabled)
-                        .lineLimit(3)
-                        .accessibilityLabel("Context action resource id")
                 }
             }
         }
@@ -414,13 +415,14 @@ struct ContextControlSheet: View {
     }
 
     private func compactNow() async {
+        guard canMutateContext else { return }
         activeMutation = .compact
         defer { activeMutation = nil }
         do {
             errorMessage = nil
             let response = try await client.compact(
                 sessionId: sessionId,
-                reason: "Manual context compaction requested from iOS Session Briefing"
+                reason: "Manual context compaction requested from iOS Context Revision"
             )
             selectedAction = ContextControlActionDetailDisplay(response: response)
             await reload()
@@ -430,13 +432,14 @@ struct ContextControlSheet: View {
     }
 
     private func clearContext() async {
+        guard canMutateContext else { return }
         activeMutation = .clear
         defer { activeMutation = nil }
         do {
             errorMessage = nil
             let response = try await client.clear(
                 sessionId: sessionId,
-                reason: "Manual context clear requested from iOS Session Briefing"
+                reason: "Manual context clear requested from iOS Context Revision"
             )
             selectedAction = ContextControlActionDetailDisplay(response: response)
             await reload()
@@ -459,9 +462,9 @@ struct ContextControlSheet: View {
         if let connectionError = error as? EngineConnectionError {
             switch connectionError {
             case .invalidResponse:
-                return "The server did not return a Session Briefing payload. Restart the dev server so it runs the same build as the app."
+                return "The server did not return a Context Revision payload. Restart the dev server so it runs the same build as the app."
             case .decodingError(let detail):
-                return "Could not read the Session Briefing payload: \(detail)"
+                return "Could not read the Context Revision payload: \(detail)"
             default:
                 break
             }

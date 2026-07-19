@@ -36,6 +36,38 @@ struct SessionReconstructResult: Decodable {
     let agentPhase: String?
     /// Session metadata.
     let metadata: ReconstructMetadata
+    /// Minimal source-owned Level 2 projection used to restore workflow UI
+    /// after reconnect. Older servers omit this field.
+    var workflows: SessionWorkflowSnapshotV1? = nil
+}
+
+// MARK: - Minimal Level 2 workflow projection
+
+/// Reconnect projection for the three Level 2 workflows currently owned by
+/// Tron. These values are read models; their source domains remain canonical.
+struct SessionWorkflowSnapshotV1: Codable, Equatable, Sendable {
+    let schemaVersion: String
+    let contextRevision: ContextRevisionSnapshotV1?
+    let branchLineage: BranchLineageSnapshotV1
+    let activeDelegations: [DelegationSnapshotV1]
+    let recentDelegations: [DelegationSnapshotV1]
+    let truncated: Bool
+}
+
+struct ContextRevisionSnapshotV1: Codable, Equatable, Sendable {
+    let state: String
+    let kind: String?
+    let reason: String?
+}
+
+struct BranchLineageSnapshotV1: Codable, Equatable, Sendable {
+    let isBranch: Bool
+}
+
+struct DelegationSnapshotV1: Codable, Equatable, Sendable {
+    let state: String
+    let objectiveSummary: String?
+    let resultSummary: String?
 }
 
 /// In-flight state for an active turn.

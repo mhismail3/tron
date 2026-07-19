@@ -74,6 +74,12 @@ final class EventStoreManager {
     @ObservationIgnored
     private var processingOverrides: [ProcessingOverrideKey: ProcessingOverride] = [:]
 
+    /// Retained until a branch response or definitive rejection is observed.
+    /// The original freshness boundary must survive source synchronization so
+    /// a retry after a lost response replays instead of creating a second branch.
+    @ObservationIgnored
+    var pendingBranchRequests: [String: PendingBranchRequest] = [:]
+
     /// Task for global event handling
     @ObservationIgnored
     private var globalEventTask: Task<Void, Never>?
@@ -117,6 +123,7 @@ final class EventStoreManager {
         engineClient = client
         if client.serverOrigin != previousOrigin {
             processingOverrides.removeAll()
+            pendingBranchRequests.removeAll()
         }
         setupGlobalEventHandlers()
         logger.info("engine client updated to \(client.serverOrigin)", category: .session)

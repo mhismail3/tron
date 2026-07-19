@@ -158,11 +158,16 @@ final class SessionClient: EngineDomainClient {
     func fork(
         _ sessionId: String,
         fromEventId: String? = nil,
+        expectedHeadEventId: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionForkResult {
         _ = try requireTransport().requireConnection()
 
-        let params = SessionForkParams(sessionId: sessionId, fromEventId: fromEventId)
+        let params = SessionForkParams(
+            sessionId: sessionId,
+            fromEventId: fromEventId,
+            expectedHeadEventId: expectedHeadEventId
+        )
         logger.info("[FORK] Sending fork request: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
 
         let result: SessionForkResult = try await invokeWrite(

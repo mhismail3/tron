@@ -209,7 +209,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             Some(WRITE_SCOPE),
         )
         .description(
-            "First-party Session Briefing UI wrapper for recording a provider-safe context snapshot",
+            "First-party Context Revision UI wrapper for recording a provider-safe context snapshot",
         )
         .tags(vec!["context", "snapshot", "ios", "session-briefing"])
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
@@ -223,7 +223,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
             Some(WRITE_SCOPE),
         )
-        .description("First-party Session Briefing UI wrapper for compacting context")
+        .description("First-party Context Revision UI wrapper for compacting context")
         .tags(vec!["context", "compact", "ios", "session-briefing"])
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
@@ -237,7 +237,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some(WRITE_SCOPE),
         )
-        .description("First-party Session Briefing UI wrapper for clearing context into a new epoch")
+        .description("First-party Context Revision UI wrapper for clearing context into a new epoch")
         .tags(vec!["context", "clear", "ios", "session-briefing"])
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .compensation(CompensationContract::new(
@@ -255,7 +255,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Low,
             Some(READ_SCOPE),
         )
-        .description("First-party Session Briefing UI wrapper for listing context actions")
+        .description("First-party Context Revision UI wrapper for listing context actions")
         .tags(vec!["context", "actions", "ios", "session-briefing"])
         .request_schema(list_request_schema())
         .response_schema(common_response_schema("context_control_action_list"))
@@ -266,7 +266,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Low,
             Some(READ_SCOPE),
         )
-        .description("First-party Session Briefing UI wrapper for inspecting one context action")
+        .description("First-party Context Revision UI wrapper for inspecting one context action")
         .tags(vec!["context", "action", "ios", "session-briefing"])
         .request_schema(inspect_request_schema())
         .response_schema(common_response_schema("context_control_action_inspect"))

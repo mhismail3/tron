@@ -103,6 +103,7 @@ impl PromptFailureHarness {
                 reasoning_level: None,
                 attachments: None,
                 engine_causality: None,
+                execution_policy: crate::domains::agent::r#loop::types::ExecutionPolicy::Standard,
             },
         })
         .await;

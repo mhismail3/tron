@@ -461,29 +461,25 @@ const fn presentation(operation: OperationId) -> OperationPresentation {
             "Inspect Tool Source",
             "Inspect one tool-source proposal or conformance report without activation.",
         ),
-        OperationId::SubagentLaunch => presented(
-            "Launch Subagent",
-            "Launch a governed delegated task through the accepted supervised runtime.",
+        OperationId::DelegationStart => presented(
+            "Delegate Work",
+            "Start bounded read-only work in a fresh child agent session.",
         ),
-        OperationId::SubagentStatus => presented(
-            "Inspect Subagent Status",
-            "Inspect one delegated task and its supervised runtime status.",
+        OperationId::DelegationList => presented(
+            "List Delegations",
+            "List bounded current-session delegation handles and states.",
         ),
-        OperationId::SubagentResult => presented(
-            "Review Subagent Result",
-            "Return a reviewable result proposal without mutating the parent conversation.",
+        OperationId::DelegationInspect => presented(
+            "Inspect Delegation",
+            "Inspect one child agent delegation and its joinable result state.",
         ),
-        OperationId::SubagentCancel => presented(
-            "Cancel Subagent",
-            "Cancel one nonterminal delegated task through its supervised runtime.",
+        OperationId::DelegationCancel => presented(
+            "Cancel Delegation",
+            "Cancel the exact active child run without affecting replacement work.",
         ),
-        OperationId::SubagentTaskList => presented(
-            "List Subagent Tasks",
-            "List delegated task records with bounded lifecycle and handoff summaries.",
-        ),
-        OperationId::SubagentTaskInspect => presented(
-            "Inspect Subagent Task",
-            "Inspect one delegated task's lifecycle, runtime, and handoff evidence.",
+        OperationId::DelegationAcceptResult => presented(
+            "Accept Delegated Result",
+            "Explicitly accept one ready child result into parent workflow context.",
         ),
         OperationId::WorkerPackageList => presented(
             "List Worker Packages",

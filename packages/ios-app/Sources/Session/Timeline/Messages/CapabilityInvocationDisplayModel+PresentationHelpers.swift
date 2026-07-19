@@ -4,6 +4,9 @@ extension CapabilityInvocationDisplayModel {
     static let technicalSummaryKeys: Set<String> = [
         "afterRevision",
         "classes",
+        "childSessionId",
+        "delegationResourceId",
+        "expectedVersionId",
         "grantId",
         "idempotencyKey",
         "includeDocs",
@@ -77,7 +80,9 @@ extension CapabilityInvocationDisplayModel {
         ])
         let extraRows = payload
             .filter { key, value in
-                !alreadyShown.contains(key) && simplePayloadExtraValue(value) != nil
+                !alreadyShown.contains(key)
+                    && !technicalSummaryKeys.contains(key)
+                    && simplePayloadExtraValue(value) != nil
             }
             .sorted { $0.key < $1.key }
             .prefix(3)

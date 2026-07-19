@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Context Briefing Button
 
-/// Compact context-window progress control that opens Session Briefing.
+/// Compact context-window progress control that opens Context Revision.
 ///
 /// The full ring is the model's available context and the colored arc is the
 /// server-projected percentage currently in use. Model identity remains in the
@@ -64,7 +64,7 @@ struct ContextBriefingButton: View {
         .buttonStyle(.plain)
         .disabled(!canOpen)
         .accessibilityIdentifier("session-briefing-button")
-        .accessibilityLabel("Session Briefing")
+        .accessibilityLabel("Context Revision")
         .accessibilityValue(accessibilityValue)
         .accessibilityHint(canOpen ? "Opens context and model controls" : "")
     }

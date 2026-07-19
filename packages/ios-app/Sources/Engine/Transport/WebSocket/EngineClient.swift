@@ -376,7 +376,17 @@ final class EngineClient: EngineTransport {
 
         // Parse event using plugin system (no re-parsing of JSON for type extraction)
         guard let eventV2 = EventRegistry.shared.parse(type: eventType, data: delivery.eventData) else {
-            logger.warning("Failed to parse event: \(eventType)", category: .events)
+            // A registered event can become undecodable when a newer server adds
+            // an incompatible shape. Do not leave the upstream cursor pinned on
+            // that delivery: notify every subscriber that its live projection is
+            // incomplete, then acknowledge so source-owned reconstruction can
+            // make progress past the unsupported event.
+            logger.error(
+                "Failed to parse event \(eventType); requiring reconstruction before acknowledging the delivery",
+                category: .events
+            )
+            publishStreamRecoveryRequired(reason: "client_event_decode_failed")
+            recordAndAck(delivery)
             return
         }
 
@@ -408,21 +418,31 @@ final class EngineClient: EngineTransport {
                 "Local live event buffer overflowed for \(droppedSubscriberDeliveries) subscriber(s); requiring reconstruction",
                 category: .events
             )
-            let result = StreamRecoveryRequiredPlugin.Result(
+            publishStreamRecoveryRequired(
                 reason: "client_buffer_overflow",
                 droppedEventCount: UInt64(droppedSubscriberDeliveries)
             )
-            let recoveryEvent = ParsedEventV2.plugin(
-                type: StreamRecoveryRequiredPlugin.eventType,
-                event: ParsedEventData(value: result),
-                sessionId: nil,
-                sequence: nil,
-                transform: { result }
-            )
-            _eventStream.send(recoveryEvent)
         }
 
         recordAndAck(delivery)
+    }
+
+    private func publishStreamRecoveryRequired(
+        reason: String,
+        droppedEventCount: UInt64 = 0
+    ) {
+        let result = StreamRecoveryRequiredPlugin.Result(
+            reason: reason,
+            droppedEventCount: droppedEventCount
+        )
+        let recoveryEvent = ParsedEventV2.plugin(
+            type: StreamRecoveryRequiredPlugin.eventType,
+            event: ParsedEventData(value: result),
+            sessionId: nil,
+            sequence: nil,
+            transform: { result }
+        )
+        _eventStream.send(recoveryEvent)
     }
 
     // MARK: - State Accessors
@@ -480,7 +500,84 @@ final class EngineClient: EngineTransport {
     @discardableResult
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
         currentSessionId = sessionId
-        return try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
+        let sessionEvents = try await subscribeToSessionEvents(
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+        do {
+            _ = try await subscribeToDelegationEvents(
+                sessionId: sessionId,
+                workspaceId: workspaceId
+            )
+        } catch {
+            // Level 2 is optional across mixed-version servers and must never
+            // prevent the hardened session event lane from connecting.
+            logger.warning(
+                "Delegation workflow subscription unavailable: \(error.localizedDescription)",
+                category: .events
+            )
+        }
+        do {
+            _ = try await subscribeToContextRevisionEvents(
+                sessionId: sessionId,
+                workspaceId: workspaceId
+            )
+        } catch {
+            logger.warning(
+                "Context Revision workflow subscription unavailable: \(error.localizedDescription)",
+                category: .events
+            )
+        }
+        return sessionEvents
+    }
+
+    private func subscribeToContextRevisionEvents(
+        sessionId: String,
+        workspaceId: String?
+    ) async throws -> EngineSubscription {
+        try await subscribeToWorkflowInvalidations(
+            topic: "context_control.lifecycle",
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+    }
+
+    private func subscribeToDelegationEvents(
+        sessionId: String,
+        workspaceId: String?
+    ) async throws -> EngineSubscription {
+        try await subscribeToWorkflowInvalidations(
+            topic: "delegation.lifecycle",
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+    }
+
+    private func subscribeToWorkflowInvalidations(
+        topic: String,
+        sessionId: String,
+        workspaceId: String?
+    ) async throws -> EngineSubscription {
+        guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
+        guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
+        let key = EngineStreamSubscriptionKey(
+            topic: topic,
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+        if let existing = streamSubscriptions[key] { return existing }
+        let subscription = try await ws.subscribe(
+            topic: key.topic,
+            cursor: nil,
+            filters: Self.sessionEventFilters(sessionId: sessionId, workspaceId: workspaceId),
+            context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
+        )
+        streamSubscriptions[key] = subscription
+        logger.info(
+            "Subscribed to \(key.topic) for workflow invalidations in session \(sessionId)",
+            category: .events
+        )
+        return subscription
     }
 
     private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {

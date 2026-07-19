@@ -15,7 +15,7 @@
 //! | `archive` | Archive, unarchive, and batch archive stale sessions through `ended_at`. |
 //! | `create` | Normalize working directories, create durable sessions, and initialize runtime sequence counters. |
 //! | `delete` | Delete a session through the session manager and clear session-scoped runtime projections. |
-//! | `fork` | Fork from an explicit event or session head and initialize the child runtime sequence counter. |
+//! | `fork` | Resolve safe completed-turn fork points, validate source scope, and initialize the child runtime sequence counter. |
 //! | `operations` | JSON parameter parsing for lifecycle capability entry points. |
 //!
 //! ## Invariants
@@ -29,6 +29,14 @@
 //!   owned by the source session.
 //! - Message deletion is represented by a `message.deleted` event, never by
 //!   physically deleting one event from the log.
+//! - Public forks resolve to persisted `stream.turn_end` boundaries in the
+//!   requested source session. Assistant selectors normalize to their matching
+//!   terminal boundary; arbitrary internal events are rejected.
+//! - Invoking session/workspace scope must match the source. Durable engine
+//!   idempotency plus deterministic identities and a root-event-bound immutable
+//!   request fingerprint makes ambiguous retries converge on one child session
+//!   even after the source advances. Replay lookup precedes mutable source-head
+//!   validation.
 //! - Archive clears the active compaction handler but preserves the live
 //!   sequence counter so unarchive cannot reuse a provider-visible sequence.
 //!   Permanent delete clears both projections; shutdown clears all remaining
@@ -42,6 +50,16 @@ pub(crate) struct CreateSessionRequest {
     pub(crate) working_directory: String,
     pub(crate) model: String,
     pub(crate) title: Option<String>,
+}
+
+pub(crate) struct ForkSessionRequest {
+    pub(crate) session_id: String,
+    pub(crate) from_event_id: Option<String>,
+    pub(crate) expected_head_event_id: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) causal_session_id: Option<String>,
+    pub(crate) causal_workspace_id: Option<String>,
+    pub(crate) idempotency_key: Option<String>,
 }
 
 pub(crate) struct SessionLifecycleService;

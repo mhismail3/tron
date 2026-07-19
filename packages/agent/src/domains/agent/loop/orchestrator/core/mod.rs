@@ -532,6 +532,29 @@ impl Orchestrator {
         }
     }
 
+    /// Abort only when `expected_run_id` still owns the session run slot.
+    ///
+    /// Workflow callers must use this exact identity boundary so a delayed
+    /// cancellation for an older run cannot stop a replacement run.
+    pub fn abort_run(&self, session_id: &str, expected_run_id: &str) -> Result<bool, RuntimeError> {
+        let runs = self.run_registry.active_runs.lock();
+        let Some(run) = runs.get(session_id) else {
+            return Ok(false);
+        };
+        if run.run_id != expected_run_id {
+            return Err(RuntimeError::Internal(format!(
+                "run identity is stale for session {session_id}"
+            )));
+        }
+        warn!(
+            session_id,
+            run_id = expected_run_id,
+            "exact-run abort requested"
+        );
+        run.cancel.cancel();
+        Ok(true)
+    }
+
     /// Number of reconstructed session projections currently cached.
     ///
     /// The health and `system.info` wire contracts retain their historical

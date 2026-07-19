@@ -54,7 +54,7 @@
 //! | `goals` | Goal and user-question lifecycle records |
 //! | `web` | Direct web fetch source provenance resources |
 //! | `tool_sources` | Read-only tool-source proposal/conformance evidence projection |
-//! | `subagents` | Inert subagent task lifecycle evidence |
+//! | `delegation` | Bounded real child-agent delegation lifecycle |
 //! | `procedural` | Inert skill/rule/hook/procedure provenance inspection evidence |
 //! | `scheduler` | Durable schedules, missed-run policy, cancellation, and run records |
 //! | `notifications` | Durable notification inbox, read state, badges, and delivery evidence |
@@ -125,6 +125,7 @@ pub mod capability;
 pub mod capability_binding;
 pub mod catalog_discovery;
 pub mod context_control;
+pub mod delegation;
 pub mod device;
 pub mod filesystem;
 pub mod git;
@@ -155,7 +156,6 @@ pub mod scheduler;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;
-pub mod subagents;
 pub mod system;
 pub mod tool_sources;
 pub mod transcription;

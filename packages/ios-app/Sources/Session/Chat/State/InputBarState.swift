@@ -87,7 +87,7 @@ struct InputBarConfig {
     /// Whether a captured recording is being transcribed.
     let isTranscribing: Bool
 
-    /// Session Briefing yields its composer slot throughout the authoritative
+    /// Context Revision yields its composer slot throughout the authoritative
     /// voice lifecycle so capture/transcription status stays adjacent to the
     /// trailing action.
     var showsContextBriefingControl: Bool {

@@ -78,6 +78,106 @@ fn fork_with_identity_persists_explicit_replay_fields() {
 }
 
 #[test]
+fn fork_with_identity_retry_returns_existing_matching_lineage() {
+    let store = setup();
+    let source = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+    let identity = SessionForkIdentity::new(
+        SessionIdentity::new("sess_retry_fork", "2026-06-09T13:00:00Z"),
+        EventIdentity::new("evt_retry_fork", "2026-06-09T13:00:01Z"),
+    );
+
+    let first = store
+        .fork_with_identity(
+            &source.root_event.id,
+            &ForkOptions::default(),
+            identity.clone(),
+        )
+        .unwrap();
+    let retry = store
+        .fork_with_identity(&source.root_event.id, &ForkOptions::default(), identity)
+        .unwrap();
+
+    assert_eq!(first.session.id, retry.session.id);
+    assert_eq!(first.fork_event.id, retry.fork_event.id);
+    assert!(!first.replayed);
+    assert!(retry.replayed);
+    assert_eq!(
+        store
+            .list_sessions(&ListSessionsOptions::default())
+            .unwrap()
+            .into_iter()
+            .filter(
+                |session| session.parent_session_id.as_deref() == Some(source.session.id.as_str())
+            )
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn fork_with_identity_collision_rejects_different_lineage() {
+    let store = setup();
+    let source = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+    let later = store
+        .append(&AppendOptions {
+            session_id: &source.session.id,
+            event_type: EventType::MessageUser,
+            payload: serde_json::json!({"content": "later"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    let identity = SessionForkIdentity::new(
+        SessionIdentity::new("sess_collision_fork", "2026-06-09T13:00:00Z"),
+        EventIdentity::new("evt_collision_fork", "2026-06-09T13:00:01Z"),
+    );
+    store
+        .fork_with_identity(
+            &source.root_event.id,
+            &ForkOptions::default(),
+            identity.clone(),
+        )
+        .unwrap();
+
+    let error = store
+        .fork_with_identity(&later.id, &ForkOptions::default(), identity)
+        .unwrap_err();
+    assert!(error.to_string().contains("different lineage"));
+}
+
+#[test]
+fn fork_preconditions_are_checked_inside_creation_transaction() {
+    let store = setup();
+    let source = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+
+    let error = store
+        .fork(
+            &source.root_event.id,
+            &ForkOptions {
+                expected_source_session_id: Some(&source.session.id),
+                expected_head_event_id: Some("stale-head"),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("session head changed"));
+    assert_eq!(
+        store
+            .list_sessions(&ListSessionsOptions::default())
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn fork_ancestors_cross_sessions() {
     let store = setup();
     let cr = store
@@ -117,6 +217,7 @@ fn fork_with_model_override() {
             &ForkOptions {
                 model: Some("claude-sonnet-4-5"),
                 title: Some("Forked"),
+                ..Default::default()
             },
         )
         .unwrap();

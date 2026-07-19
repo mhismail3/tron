@@ -117,6 +117,19 @@ extension ChatView {
                         // by 2% over 0.25s, shifting "bottom" while we're scrolling to it.
                         .animation(initialLoadComplete ? .easeOut(duration: 0.25) : nil, value: viewModel.messages.count)
 
+                        // Current workflow state belongs at the live edge of
+                        // the transcript so a restored session actually shows
+                        // it after the initial bottom reveal. It naturally
+                        // recedes with the conversation as new messages land.
+                        if let workflowSnapshot = viewModel.workflowSnapshot {
+                            SessionWorkflowSummaryCard(
+                                snapshot: workflowSnapshot,
+                                onContextRevisionTap: {
+                                    sheetCoordinator.showContextControl(actionResourceId: nil)
+                                }
+                            )
+                        }
+
                         // Always present in view tree to avoid layout shifts.
                         // Zero height + clipped + zero opacity = invisible with no layout impact.
                         AnimatedThinkingLine()

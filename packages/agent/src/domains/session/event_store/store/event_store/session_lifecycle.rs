@@ -211,12 +211,66 @@ impl EventStore {
     ) -> Result<ForkResult> {
         self.with_global_write_lock(|| {
             let mut conn = self.conn()?;
+
+            // The engine receipt can be lost after this transaction commits.
+            // Explicit identities let that retry recover the committed fork.
+            if let Some(existing_session) = SessionRepo::get_by_id(&conn, &identity.session.id)? {
+                let existing_event = EventRepo::get_by_id(&conn, &identity.fork_event.id)?
+                    .ok_or_else(|| {
+                        EventStoreError::InvalidOperation(format!(
+                            "fork replay session {} has no root event {}",
+                            identity.session.id, identity.fork_event.id
+                        ))
+                    })?;
+                let replay_payload: serde_json::Value =
+                    serde_json::from_str(&existing_event.payload).map_err(|error| {
+                        EventStoreError::Internal(format!(
+                            "fork replay root payload is invalid: {error}"
+                        ))
+                    })?;
+                let same_fork = existing_session.fork_from_event_id.as_deref()
+                    == Some(from_event_id)
+                    && existing_session.root_event_id.as_deref()
+                        == Some(identity.fork_event.id.as_str())
+                    && existing_event.session_id == existing_session.id
+                    && existing_event.parent_id.as_deref() == Some(from_event_id)
+                    && existing_event.event_type == EventType::SessionFork.as_str()
+                    && opts.request_fingerprint.is_none_or(|fingerprint| {
+                        replay_payload["requestFingerprint"].as_str() == Some(fingerprint)
+                    });
+                if !same_fork {
+                    return Err(EventStoreError::InvalidOperation(format!(
+                        "fork identity {} is already bound to different lineage",
+                        identity.session.id
+                    )));
+                }
+                return Ok(ForkResult {
+                    session: existing_session,
+                    fork_event: existing_event,
+                    replayed: true,
+                });
+            }
+
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
             let source_event = EventRepo::get_by_id(&tx, from_event_id)?
                 .ok_or_else(|| EventStoreError::EventNotFound(from_event_id.to_string()))?;
             let source_session = SessionRepo::get_by_id(&tx, &source_event.session_id)?
                 .ok_or_else(|| EventStoreError::SessionNotFound(source_event.session_id.clone()))?;
+            if let Some(expected_source_session_id) = opts.expected_source_session_id
+                && source_session.id != expected_source_session_id
+            {
+                return Err(EventStoreError::InvalidOperation(
+                    "fork point does not belong to the requested source session".into(),
+                ));
+            }
+            if let Some(expected_head_event_id) = opts.expected_head_event_id
+                && source_session.head_event_id.as_deref() != Some(expected_head_event_id)
+            {
+                return Err(EventStoreError::InvalidOperation(
+                    "session head changed before fork commit".into(),
+                ));
+            }
 
             let model = opts.model.unwrap_or(&source_session.latest_model);
             let session = SessionRepo::create_with_identity(
@@ -238,6 +292,7 @@ impl EventStore {
             let payload = serde_json::json!({
                 "sourceSessionId": source_session.id,
                 "sourceEventId": from_event_id,
+                "requestFingerprint": opts.request_fingerprint,
             });
 
             let fork_event = SessionEvent {
@@ -286,6 +341,7 @@ impl EventStore {
             Ok(ForkResult {
                 session: updated_session,
                 fork_event: fork_event_row,
+                replayed: false,
             })
         })
     }

@@ -65,6 +65,30 @@ final class EventRegistryDispatchTests: XCTestCase {
         XCTAssertEqual(mockContext.handleThinkingEndKindCalledWith, .thinking)
     }
 
+    func testDispatch_delegationChanged_requestsWorkflowRefresh() {
+        let result = DelegationChangedPlugin.Result(state: "result_ready")
+
+        registry.dispatch(
+            type: DelegationChangedPlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.handleDelegationChangedCalledWith?.state, "result_ready")
+    }
+
+    func testDispatch_contextRevisionChanged_requestsWorkflowRefresh() {
+        let result = ContextRevisionChangedPlugin.Result()
+
+        registry.dispatch(
+            type: ContextRevisionChangedPlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertTrue(mockContext.handleContextRevisionChangedCalled)
+    }
+
     // MARK: - Capability Event Tests
 
     func testDispatch_capabilityInvocationStarted_callsHandleCapabilityInvocationStart() {
@@ -483,6 +507,8 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Context Operations
     var handleCompactionCalledWith: CompactionPlugin.Result?
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
+    var handleDelegationChangedCalledWith: DelegationChangedPlugin.Result?
+    var handleContextRevisionChangedCalled = false
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
 
     // MARK: - Logging
@@ -576,6 +602,14 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result) {
         handleMessageDeletedCalledWith = result
+    }
+
+    func handleDelegationChanged(_ result: DelegationChangedPlugin.Result) {
+        handleDelegationChangedCalledWith = result
+    }
+
+    func handleContextRevisionChanged(_ result: ContextRevisionChangedPlugin.Result) {
+        handleContextRevisionChangedCalled = true
     }
 
     // MARK: - Server

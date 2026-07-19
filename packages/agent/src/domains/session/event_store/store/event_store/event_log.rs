@@ -168,6 +168,36 @@ impl EventStore {
         self.with_session_write_lock(opts.session_id, || self.append_inner(opts))
     }
 
+    /// Append only if the session still has the caller's reconstructed head.
+    ///
+    /// Context-boundary workflows use this to make their read → summarize →
+    /// commit cut atomic with respect to concurrent session appends.
+    pub(crate) fn append_if_head(
+        &self,
+        opts: &AppendOptions<'_>,
+        expected_head_event_id: &str,
+    ) -> Result<EventRow> {
+        self.with_session_write_lock(opts.session_id, || {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let session = SessionRepo::get_by_id(&tx, opts.session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(opts.session_id.to_owned()))?;
+            if session.head_event_id.as_deref() != Some(expected_head_event_id) {
+                return Err(EventStoreError::InvalidOperation(
+                    "session head changed before context boundary commit".into(),
+                ));
+            }
+            let event = append_event_in_tx_with_identity(
+                &tx,
+                &session,
+                opts,
+                EventIdentity::generate_current(),
+            )?;
+            tx.commit()?;
+            EventRepo::get_by_id(&conn, &event.id)?.ok_or(EventStoreError::EventNotFound(event.id))
+        })
+    }
+
     /// Append an event with an explicit ID and timestamp.
     ///
     /// Replay/import paths use this to avoid ambient entropy in durable event

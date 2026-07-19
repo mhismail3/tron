@@ -517,8 +517,7 @@ fn dynamic_resource_selector_projection(policy: ResourceKindPolicy) -> Value {
         | ResourceKindPolicy::CapabilityBinding(_)
         | ResourceKindPolicy::CapabilityRouteUnion
         | ResourceKindPolicy::ModuleRuntime(_)
-        | ResourceKindPolicy::ModuleProgramExecution(_)
-        | ResourceKindPolicy::Subagent(_) => json!({"mode": "none"}),
+        | ResourceKindPolicy::ModuleProgramExecution(_) => json!({"mode": "none"}),
         ResourceKindPolicy::OptionalGoal {
             field, linked_kind, ..
         } => json!({
@@ -601,16 +600,6 @@ fn selector_addition_projection(addition: SelectorAddition) -> Value {
             "lifecycleField": lifecycle_field,
             "requestIdField": request_id_field,
             "idempotencyField": idempotency_field
-        }),
-        SelectorAddition::DerivedSubagentTask { task_id_field } => json!({
-            "mode": "derived_subagent_task",
-            "taskIdField": task_id_field
-        }),
-        SelectorAddition::DelegatedSubagentResources {
-            task_resource_field,
-        } => json!({
-            "mode": "delegated_subagent_resources",
-            "taskResourceField": task_resource_field
         }),
     }
 }
@@ -703,9 +692,7 @@ fn catalog_audience(namespace: &str) -> CapabilityPoolAudience {
 
 fn catalog_replacement_class(namespace: &str) -> CapabilityPoolReplacementClass {
     match namespace {
-        "filesystem" | "git" | "jobs" | "web" | "subagents" => {
-            CapabilityPoolReplacementClass::RuntimeRoutable
-        }
+        "filesystem" | "git" | "jobs" | "web" => CapabilityPoolReplacementClass::RuntimeRoutable,
         "context_control" | "memory" | "media" | "import_history" | "repository_tree"
         | "import_preview" | "program_execution" | "prompt_artifacts" | "update_diagnostics"
         | "device" | "notifications" | "scheduler" | "module_activity" | "web_research"
@@ -934,7 +921,7 @@ mod tests {
 
     #[test]
     fn every_operation_projects_exact_canonical_effect_risk_and_preflight() {
-        assert_eq!(supported_operation_names().len(), 188);
+        assert_eq!(supported_operation_names().len(), 187);
         for operation in supported_operation_names() {
             let effect = operation_effect(operation).expect("canonical effect");
             let risk = operation_risk(operation).expect("canonical risk");

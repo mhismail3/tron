@@ -217,6 +217,47 @@ extension ChatViewModelPaginationTests {
         XCTAssertTrue(viewModel.prunedLiveMessages.isEmpty)
         XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 120)
     }
+
+    func testReconnectMountsServerAuthoredWorkflowSnapshotAndClearsItWhenOmitted() async {
+        let (viewModel, _) = makeViewModel()
+        let workflows = workflowSnapshotFixture()
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [],
+                hasMoreEvents: false,
+                oldestEventId: nil,
+                workflows: workflows
+            )
+        )
+
+        XCTAssertEqual(viewModel.workflowSnapshot, workflows)
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(events: [], hasMoreEvents: false, oldestEventId: nil)
+        )
+
+        XCTAssertNil(viewModel.workflowSnapshot)
+
+        let unsupported = SessionWorkflowSnapshotV1(
+            schemaVersion: "tron.session_workflows.v2",
+            contextRevision: workflows.contextRevision,
+            branchLineage: workflows.branchLineage,
+            activeDelegations: workflows.activeDelegations,
+            recentDelegations: workflows.recentDelegations,
+            truncated: workflows.truncated
+        )
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [],
+                hasMoreEvents: false,
+                oldestEventId: nil,
+                workflows: unsupported
+            )
+        )
+
+        XCTAssertNil(viewModel.workflowSnapshot)
+    }
 }
 
 extension ChatViewModelPaginationTests {
@@ -283,7 +324,8 @@ extension ChatViewModelPaginationTests {
         oldestEventId: String?,
         inFlight: InFlightState? = nil,
         isCompacting: Bool = false,
-        compactionReason: String? = nil
+        compactionReason: String? = nil,
+        workflows: SessionWorkflowSnapshotV1? = nil
     ) -> SessionReconstructResult {
         SessionReconstructResult(
             events: events,
@@ -302,7 +344,29 @@ extension ChatViewModelPaginationTests {
                 title: nil,
                 tokenUsage: nil,
                 totalCost: nil
-            )
+            ),
+            workflows: workflows
+        )
+    }
+
+    func workflowSnapshotFixture() -> SessionWorkflowSnapshotV1 {
+        SessionWorkflowSnapshotV1(
+            schemaVersion: "tron.session_workflows.v1",
+            contextRevision: ContextRevisionSnapshotV1(
+                state: "succeeded",
+                kind: "compact",
+                reason: "Keep the useful decisions"
+            ),
+            branchLineage: BranchLineageSnapshotV1(isBranch: true),
+            activeDelegations: [
+                DelegationSnapshotV1(
+                    state: "running",
+                    objectiveSummary: "Review the reconnect behavior",
+                    resultSummary: nil
+                )
+            ],
+            recentDelegations: [],
+            truncated: false
         )
     }
 

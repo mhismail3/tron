@@ -15,7 +15,7 @@ extension SessionEvent {
             return "Session ended (\(reason))"
 
         case .sessionFork:
-            return "Forked session"
+            return "Branch created"
 
         case .messageUser:
             if let content = payload.string("content") {

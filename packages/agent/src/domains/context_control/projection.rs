@@ -155,19 +155,6 @@ pub(super) fn event_ref(event_id: &str, sequence: i64, event_type: &str) -> Valu
     })
 }
 
-pub(super) fn safe_compaction_summary(
-    session_id: &str,
-    message_count: u64,
-    estimated_tokens: u64,
-) -> String {
-    format!(
-        "Earlier provider context for session {session_id} was compacted by Context Control. \
-         It contained {message_count} reconstructed messages and about {estimated_tokens} \
-         estimated tokens. Raw prior turns remain inspectable through durable session history, \
-         traces, and resource refs, but are intentionally excluded from future provider context."
-    )
-}
-
 pub(super) fn safe_compacted_token_estimate(message_count: u64) -> u64 {
     120_u64.saturating_add(message_count.min(100).saturating_mul(2))
 }

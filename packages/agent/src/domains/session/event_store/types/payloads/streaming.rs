@@ -20,6 +20,9 @@ pub struct StreamTurnStartPayload {
 pub struct StreamTurnEndPayload {
     /// Turn number.
     pub turn: i64,
+    /// Runtime run identity when emitted by a live agent run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
     /// Token usage for this turn, when the provider reported usage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
@@ -98,6 +101,7 @@ mod tests {
         );
         let payload = StreamTurnEndPayload {
             turn: 2,
+            run_id: None,
             token_usage: None,
             token_record: None,
             cost: None,

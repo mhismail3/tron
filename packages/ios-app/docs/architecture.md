@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-18 (prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
+> Last verified: 2026-07-18 (session reconstruction mounts one minimal server-authored workflow summary for context revision, branch lineage, and delegation state; prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Context Revision context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
 
 ## Overview
 
@@ -36,7 +36,7 @@ being silently omitted from counts or verified/no-capabilities summaries. The ap
 does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
-Session Briefing opens from the prompt composer's context progress ring or an
+Context Revision opens from the prompt composer's context progress ring or an
 audited timeline action. The ring fills in direct proportion to the bounded
 server-projected context percentage; model identity remains available to
 accessibility without occupying a floating visual pill. The server-backed
@@ -47,6 +47,20 @@ recent context action audit detail. Its context section renders
 `context_control::ui_*` wrappers; model/provider access remains behind
 `capability::execute`. It does not restore memory retain/edit, skill activation,
 source control, prompt-library controls, or raw logs.
+
+The transcript live edge may include one compact Session activity card reconstructed
+from the optional `tron.session_workflows.v1` server projection. Context events
+and the session-scoped `delegation.changed` lane invalidate that read model and
+coalesce through normal source reconstruction, so the mounted card does not
+invent or retain stale local lifecycle state. It names only
+Context Revision, branch lineage, and active/recent delegation at the user
+workflow level. It does not infer workflow status from capability invocations,
+render internal resource/session identifiers, or introduce a generic workflow
+framework. Tapping Context Revision opens the existing Context Revision audit
+surface. The session-actions menu creates a Branch at the latest completed turn
+and navigates to it; that action is unavailable while disconnected, while the
+agent is active, or while another Branch request is pending. Delegation summaries
+remain review-oriented projections of the agent-owned workflow.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
@@ -108,9 +122,14 @@ historical deleted-path campaigns remain available through Git history.
   empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
-- Composer context-ring Session Briefing sheet for model switching,
+- Optional reconstruction of the server-owned session workflow snapshot into
+  one transcript-level summary for Context Revision, branch lineage, and
+  active/recent delegation; absent snapshots clear stale workflow UI.
+- Composer context-ring Context Revision sheet for model switching,
   server-owned context snapshots, manual compact/clear actions, read-only memory
-  refs, and durable context action audit refs.
+  refs, and durable context action audit refs. Compact/clear remain disabled
+  while an agent run is active so a UI mutation cannot commit a boundary under
+  an in-flight turn.
 - Dashboard band and sheet for core engine link/catalog health,
   catalog discovery, worker lifecycle catalog/resource state, package actions,
   server-owned module activity, capability binding cockpit visibility, and
@@ -178,6 +197,7 @@ Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models 
 Push:    AppDelegate token -> observable PushNotificationService -> system device::register (install + bundle + environment identity) -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
+Resume:  session::reconstruct.workflows -> ChatViewModel.workflowSnapshot -> SessionWorkflowSummaryCard
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Context: ContextBriefingButton/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
@@ -233,7 +253,7 @@ and the connection observer preserve `.stopping` while the server outcome is
 unknown. Active reconstruction keeps that stricter phase; terminal reconstruction
 accepts the server's completed state.
 
-`ContextControlSheet` presents Session Briefing as a mobile-first progressive
+`ContextControlSheet` presents Context Revision as a mobile-first progressive
 disclosure surface. The top level is narrative plus compact metric strips; the
 same server-owned snapshot, memory refs, context actions, and audit details are
 available through divided rows and detail sections without duplicating raw
@@ -758,7 +778,7 @@ Model-catalog prefetch and the selected `ModelInfo` establish the mounted
 context-window limit, while `agent.turn_end.contextLimit` provides the live
 server correction. Turn-end token records plus `agent.compaction` and
 `agent.context_cleared` update mounted token state directly; they do not launch
-a second context-refresh lifecycle. Session Briefing keeps its server-owned
+a second context-refresh lifecycle. Context Revision keeps its server-owned
 snapshot and reload work sheet-local through `ContextControlRepository`.
 
 `EventStoreManager` owns the client generation for each persistence operation;

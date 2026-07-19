@@ -18,7 +18,7 @@ pub(crate) const EVENT_FAMILIES: &[&str] = &[
     "web",
     "git",
     "job",
-    "subagent",
+    "delegation",
     "memory",
     "system",
     DEFAULT_EVENT_FAMILY,

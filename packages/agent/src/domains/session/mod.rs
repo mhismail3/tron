@@ -14,6 +14,7 @@
 //! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
 //! | `replay` | Canonical `tron.replay.v1` manifest export, hashing, idempotency refs, and offline roundtrip harness. |
 //! | `event_store` | Durable event/session/blob/log/trace storage and reconstruction primitives. |
+//! | `workflow_projection` | Bounded optional projection for Context Revision, Branch, and Delegation only. |
 //!
 //! ## Invariants
 //!
@@ -40,6 +41,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod query;
 pub(crate) mod reconstruction;
 pub(crate) mod replay;
+mod workflow_projection;
 
 use std::sync::Arc;
 
@@ -117,7 +119,13 @@ operation_bindings! {
             session_delete_value(Some(&invocation.payload), deps).await
         },
         "fork" => |invocation, deps| {
-            session_fork_value(Some(&invocation.payload), deps).await
+            session_fork_value(
+                Some(&invocation.payload),
+                deps,
+                invocation.causal_context.session_id.as_deref(),
+                invocation.causal_context.workspace_id.as_deref(),
+                invocation.causal_context.idempotency_key.as_deref(),
+            ).await
         },
         "get_head" => |invocation, deps| {
             session_get_head_value(Some(&invocation.payload), deps).await

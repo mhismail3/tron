@@ -40,6 +40,11 @@ import Foundation
     func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result)
 }
 
+@MainActor protocol WorkflowEventHandler: AnyObject {
+    func handleDelegationChanged(_ result: DelegationChangedPlugin.Result)
+    func handleContextRevisionChanged(_ result: ContextRevisionChangedPlugin.Result)
+}
+
 @MainActor protocol DisplayStreamEventHandler: AnyObject {
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result)
 }
@@ -56,6 +61,7 @@ import Foundation
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler,
+    WorkflowEventHandler,
     ServerEventHandler,
     DisplayStreamEventHandler,
     EventDispatchLogger {}
