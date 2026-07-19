@@ -43,6 +43,8 @@
 //! syntax owns it as a quoted route-call argument (for example,
 //! `router.get("/api/users")`). Generic quoted, unquoted, Markdown-code, Windows,
 //! UNC, and ambiguous absolute paths fail closed as local paths.
+//! Regression fixtures use generic identities so this boundary remains portable
+//! under the repository-wide personal-information guard.
 
 use std::sync::LazyLock;
 
