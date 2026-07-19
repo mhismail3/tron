@@ -22,6 +22,9 @@
 //! venv and model cache under `~/.tron/internal/transcription/`, but it must
 //! not persist user audio beyond temporary files used for one request. Voice
 //! notes and media storage remain Phase 2 work.
+//! The disposable, version-pinned venv is health-checked on every enabled
+//! startup and rebuilt when its interpreter or package graph is stale; the
+//! independently owned model cache survives that repair.
 //! Sidecar modules stay private; this root exports only the explicit engine,
 //! result, error, and runtime-state contract used by application composition.
 

@@ -1,1 +1,1 @@
-parakeet-mlx
+parakeet-mlx==0.5.2

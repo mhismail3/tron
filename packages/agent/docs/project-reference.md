@@ -1786,7 +1786,12 @@ proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
 recording, treats recording startup as cancellation-aware, cancels capture and
 in-flight transcription when leaving chat, and the server reports explicit
-disabled/loading/ready/failed model state. Slice 14A adds backend-only
+disabled/loading/ready/failed model state. Its pinned Parakeet MLX environment
+is disposable and health-checked on each enabled server startup: a missing
+Homebrew interpreter, failed import, or package-version drift rebuilds only the
+venv from an available Python 3.10+ runtime while preserving the independently
+cached model. Readiness is published only after the exact-version import and
+worker model load both succeed. Slice 14A adds backend-only
 `media_artifact` resource custody for blob refs and bounded metadata; native
 voice-note UI, capture flows, and server-side transcription orchestration are
 still absent. Slice 14B adds a backend-only `import_history_record` lineage
