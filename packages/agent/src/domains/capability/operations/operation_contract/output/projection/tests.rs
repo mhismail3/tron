@@ -1,6 +1,6 @@
+use super::super::types::PROVIDER_OUTPUT_MAX_BYTES;
 use super::*;
 use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::messages::CapabilityResultMessageContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use serde_json::{Value, json};
 
@@ -21,9 +21,7 @@ fn make_exec_result_with_details(
 }
 
 fn provider_envelope(result: &CapabilityResult) -> Value {
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(result) else {
-        panic!("canonical provider output must be text-only");
-    };
+    let text = extract_model_context_result_text(result);
     let envelope: Value = serde_json::from_str(&text).expect("canonical provider envelope parses");
     assert_eq!(
         envelope["schemaVersion"],
@@ -280,11 +278,7 @@ fn extract_result_content_omits_redundant_supported_operation_directory() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(!text.contains("modelFacingGuidance"));
     assert!(!text.contains("supportedExecuteOperations"));
     assert!(!text.contains("filesystem_write"));
@@ -1582,9 +1576,7 @@ fn extract_result_content_projects_schema_error_code_and_path() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
     assert!(text.contains("$.baseContentHash"));
     assert!(text.contains("resource::payload"));
@@ -1618,9 +1610,7 @@ fn extract_result_content_redacts_authority_tokens_but_keeps_selector_guidance()
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("ENGINE_POLICY_VIOLATION"));
     assert!(text.contains("capability_binding_request_list"));
     assert!(text.contains("requires explicit kind:capability_binding_request selector"));
@@ -1697,13 +1687,522 @@ fn extract_result_content_projects_filesystem_resource_refs_without_diff_or_cont
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("patch_proposal:provider-call"));
     assert!(text.contains("ver_patch"));
     assert!(!text.contains("--- raw diff"));
     assert!(!text.contains("raw file content"));
+}
+
+#[test]
+fn filesystem_read_projects_bounded_redacted_chunks_with_path_hash_and_size() {
+    let sensitive_prefix = concat!(
+        "heading\n",
+        "Authorization: Basic dXNlcjpwQHNzdzByZCE=\n",
+        "Authorization: Bearer bearer.token-with+punctuation==\n",
+        "Authorization: Digest username=\"digest-user\", response=\"digest-response\"\n",
+        "digest-next-line-visible\n",
+        "Authorization: TronCustom custom-value:with/punctuation==\n",
+        "custom-next-line-visible\n",
+        r#"{"password":"p@ssw0rd!","secret":"s:e,c;r}et!","token":"tok.en+=="}"#,
+        "\n",
+        r#"{"password":"before\"quoted\\tail-after","secret":"left\\right\"suffix","safe":"keep\"this"}"#,
+        "\n",
+        "-----BEGIN RSA PRIVATE KEY-----\n",
+        "password=inside-pem-must-not-survive!\n",
+        "cGVtLWJvZHktc2VjcmV0\n",
+        "-----END RSA PRIVATE KEY-----\n",
+        "token=supersecretcredential\n",
+        "/root/private /run/tron.sock /mnt/archive path:/srv/data file:///var/db/private\n",
+        "markdown `/root/markdown-private`\n",
+        r#"markdown `C:\Users\developer\secret.txt`"#,
+        "\n",
+        r#"markdown `\\server\share\secret.txt`"#,
+        "\n",
+        "database file /v1/private/credentials.db\n",
+        "let database = \"/v1/private/quoted.db\"\n",
+        "let ambiguous = \"/api/private.db\"\n",
+        "router.get(\"/api/users\")\n",
+        "https://example.com/public\n"
+    );
+    let content = format!("{sensitive_prefix}{}\ntail-marker", "a".repeat(7_000));
+    let content_len = content.len();
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "filesystem_read ok: src/lib.rs",
+        )]),
+        Some(json!({
+            "primitiveOperation": "filesystem_read",
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "read",
+                "path": {"root": "working_directory", "relativePath": "src/lib.rs"},
+                "file": {
+                    "exists": true,
+                    "isBinary": false,
+                    "sizeBytes": content_len,
+                    "contentHash": "hash-read",
+                    "truncated": false,
+                    "content": content
+                }
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "filesystem.path.root"), "working_directory");
+    assert_eq!(
+        fact(&envelope, "filesystem.path.relativePath"),
+        "src/lib.rs"
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.file.sizeBytes"),
+        &json!(content_len)
+    );
+    assert_eq!(fact(&envelope, "filesystem.file.contentHash"), &Value::Null);
+    assert_eq!(
+        fact(&envelope, "filesystem.file.writeSafeFromProjection"),
+        &json!(false)
+    );
+    assert_eq!(
+        fact(
+            &envelope,
+            "filesystem.file.contentProjection.providerTruncated"
+        ),
+        &json!(true)
+    );
+    assert_eq!(
+        fact(
+            &envelope,
+            "filesystem.file.contentProjection.redactionPerformed"
+        ),
+        &json!(true)
+    );
+    let chunks = collection(&envelope, "filesystem.file.contentProjection.chunks");
+    assert_eq!(chunks["returned"], 8);
+    let rendered = envelope_text(&envelope);
+    assert!(rendered.contains("heading"));
+    assert!(rendered.contains("[redacted-secret]"));
+    assert!(rendered.contains("[redacted-private-key]"));
+    assert!(rendered.contains("[redacted-path]"));
+    assert!(rendered.contains("router.get(\\\"/api/users\\\")"));
+    assert!(rendered.contains("https://example.com/public"));
+    assert!(rendered.contains("digest-next-line-visible"));
+    assert!(rendered.contains("custom-next-line-visible"));
+    assert!(rendered.contains("safe"));
+    assert!(rendered.contains("keep"));
+    for secret in [
+        "dXNlcjpwQHNzdzByZCE=",
+        "bearer.token-with+punctuation==",
+        "digest-user",
+        "digest-response",
+        "custom-value:with/punctuation==",
+        "p@ssw0rd!",
+        "s:e,c;r}et!",
+        "tok.en+==",
+        "before",
+        "quoted",
+        "tail-after",
+        "left",
+        "right",
+        "suffix",
+        "inside-pem-must-not-survive!",
+        "cGVtLWJvZHktc2VjcmV0",
+        "supersecretcredential",
+    ] {
+        assert!(!rendered.contains(secret), "credential leaked: {secret}");
+    }
+    assert!(!rendered.contains("BEGIN RSA PRIVATE KEY"));
+    assert!(!rendered.contains("END RSA PRIVATE KEY"));
+    for path in [
+        "/root/private",
+        "/run/tron.sock",
+        "/mnt/archive",
+        "/srv/data",
+        "file:///var/db/private",
+        "/root/markdown-private",
+        r#"C:\Users\developer\secret.txt"#,
+        r#"\\server\share\secret.txt"#,
+        "/v1/private/credentials.db",
+        "/v1/private/quoted.db",
+        "/api/private.db",
+    ] {
+        assert!(!rendered.contains(path), "local path leaked: {path}");
+    }
+    assert!(!rendered.contains("tail-marker"));
+    assert!(rendered.len() <= PROVIDER_OUTPUT_MAX_BYTES);
+}
+
+#[test]
+fn filesystem_read_keeps_hash_only_for_complete_unredacted_text_projection() {
+    let content = (1..=80)
+        .map(|line| format!("line {line:02}: provider-visible documentation\n"))
+        .collect::<String>();
+    let content_len = content.len();
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("filesystem_read ok: docs/guide.md".to_owned()),
+        Some(json!({
+            "primitiveOperation": "filesystem_read",
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "read",
+                "path": {"root": "working_directory", "relativePath": "docs/guide.md"},
+                "file": {
+                    "exists": true,
+                    "isBinary": false,
+                    "sizeBytes": content_len,
+                    "contentHash": "complete-hash",
+                    "truncated": false,
+                    "content": content
+                }
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "filesystem.file.contentHash"),
+        "complete-hash"
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.file.writeSafeFromProjection"),
+        &json!(true)
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.file.contentProjection.truncated"),
+        &json!(false)
+    );
+    let chunks = collection(&envelope, "filesystem.file.contentProjection.chunks");
+    assert!(chunks["returned"].as_u64().is_some_and(|count| count > 1));
+    assert_eq!(item_fact(&chunks["items"][0], "lineStart"), 1);
+    let rendered = envelope_text(&envelope);
+    assert!(rendered.contains("line 80: provider-visible documentation"));
+    assert!(rendered.len() <= PROVIDER_OUTPUT_MAX_BYTES);
+}
+
+#[test]
+fn filesystem_list_projects_nonempty_safe_relative_entry_rows() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("filesystem_list ok: .".to_owned()),
+        Some(json!({
+            "primitiveOperation": "filesystem_list",
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "list",
+                "path": {"root": "working_directory", "relativePath": "."},
+                "entries": [{
+                    "name": "Sources",
+                    "relativePath": "Sources",
+                    "isDirectory": true,
+                    "isFile": false,
+                    "isSymlink": false,
+                    "authorized": true,
+                    "sizeBytes": null
+                }, {
+                    "name": "unsafe",
+                    "relativePath": "/Users/example/private.txt",
+                    "isDirectory": false,
+                    "isFile": true,
+                    "isSymlink": false,
+                    "authorized": true,
+                    "sizeBytes": 12
+                }, {
+                    "name": "escape",
+                    "relativePath": "../outside.txt",
+                    "isDirectory": false,
+                    "isFile": true,
+                    "isSymlink": false,
+                    "authorized": false,
+                    "sizeBytes": 8
+                }],
+                "total": 5,
+                "returned": 3,
+                "omitted": 2,
+                "truncated": true,
+                "resultLimitReached": true,
+                "walkLimitReached": false,
+                "limit": 500
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    let entries = collection(&envelope, "filesystem.entries");
+    assert_eq!(entries["total"], 3);
+    assert_eq!(entries["returned"], 3);
+    assert_eq!(entries["truncated"], false);
+    assert_eq!(
+        fact(&envelope, "filesystem.resultProjection.sourceTotalItems"),
+        5
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.resultProjection.sourceReturnedItems"),
+        3
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.resultProjection.sourceOmittedItems"),
+        2
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.resultProjection.sourceTruncated"),
+        &json!(true)
+    );
+    assert_eq!(item_fact(&entries["items"][0], "name"), "Sources");
+    assert_eq!(item_fact(&entries["items"][0], "relativePath"), "Sources");
+    assert!(
+        entries["items"]
+            .as_array()
+            .expect("entry rows")
+            .iter()
+            .all(|entry| !entry["facts"].as_array().expect("entry facts").is_empty())
+    );
+    assert_eq!(
+        item_fact(&entries["items"][1], "relativePath"),
+        "[redacted-path]"
+    );
+    assert_eq!(
+        item_fact(&entries["items"][2], "relativePath"),
+        "[redacted-path]"
+    );
+    assert!(!envelope_text(&envelope).contains("/Users/example"));
+    assert!(!envelope_text(&envelope).contains("../outside.txt"));
+}
+
+#[test]
+fn filesystem_search_projects_bounded_redacted_match_previews() {
+    let matches = (0..13)
+        .map(|index| {
+            let preview = if index == 0 {
+                "needle password=supersecretcredential /Users/example/private"
+            } else {
+                "needle safe match"
+            };
+            let source_omitted = usize::from(index == 0) * 120;
+            json!({
+                "relativePath": format!("src/file-{index}.rs"),
+                "lineNumber": index + 1,
+                "preview": preview,
+                "previewSourceBytes": preview.len() + source_omitted,
+                "previewReturnedBytes": preview.len(),
+                "previewOmittedBytes": source_omitted,
+                "previewTruncated": source_omitted > 0,
+                "contentHash": format!("hash-{index}")
+            })
+        })
+        .collect::<Vec<_>>();
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("filesystem_search_text ok: .".to_owned()),
+        Some(json!({
+            "primitiveOperation": "filesystem_search_text",
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "search_text",
+                "query": "needle",
+                "path": {"root": "working_directory", "relativePath": "."},
+                "matches": matches,
+                "skippedBinaryFiles": 2,
+                "truncatedInputFiles": 2,
+                "truncated": true,
+                "resultLimitReached": true,
+                "walkLimitReached": false,
+                "limit": 100
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    let matches = collection(&envelope, "filesystem.matches");
+    assert_eq!(matches["total"], 13);
+    assert!(
+        matches["returned"]
+            .as_u64()
+            .is_some_and(|count| count <= 12)
+    );
+    assert_eq!(
+        matches["returned"],
+        matches["items"].as_array().unwrap().len()
+    );
+    assert_eq!(matches["truncated"], true);
+    assert_eq!(
+        item_fact(&matches["items"][0], "relativePath"),
+        "src/file-0.rs"
+    );
+    assert_eq!(item_fact(&matches["items"][0], "lineNumber"), 1);
+    assert_eq!(
+        item_fact(&matches["items"][0], "previewProjection.sourceTruncated"),
+        &json!(true)
+    );
+    assert_eq!(
+        item_fact(&matches["items"][0], "previewProjection.sourceOmittedBytes"),
+        120
+    );
+    assert_eq!(fact(&envelope, "filesystem.truncatedInputFiles"), 2);
+    assert_eq!(
+        fact(
+            &envelope,
+            "filesystem.resultProjection.sourceResultLimitReached"
+        ),
+        &json!(true)
+    );
+    assert_eq!(
+        fact(
+            &envelope,
+            "filesystem.resultProjection.sourceWalkLimitReached"
+        ),
+        &json!(false)
+    );
+    assert!(
+        envelope["evidence"]["facts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|fact| !matches!(
+                fact["field"].as_str(),
+                Some("filesystem.resultProjection.returnedItems")
+                    | Some("filesystem.resultProjection.providerTruncated")
+            ))
+    );
+    let rendered = envelope_text(&envelope);
+    assert!(rendered.contains("needle"));
+    assert!(rendered.contains("password=[redacted-secret]"));
+    assert!(rendered.contains("[redacted-path]"));
+    assert!(!rendered.contains("supersecretcredential"));
+    assert!(!rendered.contains("/Users/example"));
+}
+
+#[test]
+fn filesystem_collection_counts_follow_final_byte_budget_trimming() {
+    let matches = (0..20)
+        .map(|index| {
+            json!({
+                "relativePath": format!("src/{}/file-{index}.rs", "p".repeat(300)),
+                "lineNumber": index + 1,
+                "preview": format!("needle {}", "\"".repeat(290)),
+                "previewSourceBytes": 297,
+                "previewReturnedBytes": 297,
+                "previewOmittedBytes": 0,
+                "previewTruncated": false,
+                "contentHash": "h".repeat(700)
+            })
+        })
+        .collect::<Vec<_>>();
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("filesystem_search_text ok: .".to_owned()),
+        Some(json!({
+            "primitiveOperation": "filesystem_search_text",
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "search_text",
+                "query": "needle",
+                "path": {"root": "working_directory", "relativePath": "."},
+                "matches": matches,
+                "skippedBinaryFiles": 0,
+                "truncatedInputFiles": 0,
+                "truncated": false,
+                "resultLimitReached": false,
+                "walkLimitReached": false,
+                "limit": 100
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    let matches = collection(&envelope, "filesystem.matches");
+    assert_eq!(matches["total"], 20);
+    assert!(matches["returned"].as_u64().is_some_and(|count| count < 12));
+    assert_eq!(
+        matches["returned"],
+        matches["items"].as_array().unwrap().len()
+    );
+    assert_eq!(matches["truncated"], true);
+    assert_eq!(envelope["truncation"]["truncated"], true);
+    assert!(
+        envelope["truncation"]["omittedItems"]
+            .as_u64()
+            .is_some_and(|omitted| omitted >= 8)
+    );
+    assert!(
+        envelope["evidence"]["facts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|fact| !matches!(
+                fact["field"].as_str(),
+                Some("filesystem.resultProjection.returnedItems")
+                    | Some("filesystem.resultProjection.providerTruncated")
+            ))
+    );
+}
+
+#[test]
+fn filesystem_diff_projects_only_bounded_redacted_read_only_diff_chunks() {
+    let diff = format!(
+        "--- a/note.txt\n+++ b/note.txt\n@@\n-password=supersecretcredential\n+/etc/passwd\n{}",
+        "+changed line\n".repeat(600)
+    );
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("filesystem_diff preview: note.txt".to_owned()),
+        Some(json!({
+            "primitiveOperation": "filesystem_diff",
+            "status": "preview",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "preview",
+                "path": {"root": "working_directory", "relativePath": "note.txt"},
+                "commit": false,
+                "before": {
+                    "exists": true,
+                    "isBinary": false,
+                    "sizeBytes": 10,
+                    "contentHash": "before-hash",
+                    "truncated": false,
+                    "preview": "must not project"
+                },
+                "after": {
+                    "sizeBytes": 11,
+                    "contentHash": "after-hash",
+                    "preview": "must not project"
+                },
+                "diff": diff,
+                "diffTruncated": false,
+                "rollback": {"previousPreview": "must not project"}
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "filesystem.before.contentHash"),
+        "before-hash"
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.after.contentHash"),
+        "after-hash"
+    );
+    assert_eq!(
+        fact(&envelope, "filesystem.diffProjection.providerTruncated"),
+        &json!(true)
+    );
+    let chunks = collection(&envelope, "filesystem.diffProjection.chunks");
+    assert_eq!(chunks["returned"], 8);
+    let rendered = envelope_text(&envelope);
+    assert!(rendered.contains("--- a/note.txt"));
+    assert!(rendered.contains("password=[redacted-secret]"));
+    assert!(rendered.contains("[redacted-path]"));
+    assert!(!rendered.contains("supersecretcredential"));
+    assert!(!rendered.contains("/etc/passwd"));
+    assert!(!rendered.contains("must not project"));
+    assert!(rendered.len() <= PROVIDER_OUTPUT_MAX_BYTES);
 }
 
 #[test]
@@ -2023,11 +2522,7 @@ fn extract_result_content_redacts_log_evidence_for_model_context() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("[redacted-path]"));
     assert!(text.contains("gh*_****"));
     assert!(!text.contains("/Users/example"));
@@ -2178,9 +2673,7 @@ fn extract_result_content_projects_bounded_web_source_list_contract() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("web_source_list"));
     assert!(text.contains("Provider-safe source evidence"));
     assert!(text.contains("web_source:test"));
@@ -2339,9 +2832,7 @@ fn extract_result_content_drops_failure_actual_object_values() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
     assert!(text.contains("$.baseContentHash"));
     assert!(text.contains("string"));
@@ -2381,9 +2872,7 @@ fn extract_result_content_denies_authority_version_and_resource_ids() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("module_runtime:ok"));
     assert!(text.contains("ver_module_runtime_ok"));
     assert!(text.contains("module_runtime_ref:ok"));
@@ -2434,9 +2923,7 @@ fn extract_result_content_drops_authority_containers_before_recursing() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("module_runtime:safe"));
     assert!(text.contains("ver_module_runtime_safe"));
     assert!(text.contains("module_runtime_ref:safe"));

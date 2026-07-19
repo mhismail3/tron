@@ -51,7 +51,8 @@ impl EffectClass {
     }
 }
 
-/// Risk level for discovery and policy.
+/// Risk level for discovery and policy, including its stable lowercase
+/// persistence, policy-hash, and catalog spelling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RiskLevel {
     /// Low-risk capability.
@@ -62,6 +63,19 @@ pub enum RiskLevel {
     High,
     /// Critical-risk capability.
     Critical,
+}
+
+impl RiskLevel {
+    /// Stable serialized key used outside serde-owned protocol payloads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
 }
 
 /// Invocation delivery mode.

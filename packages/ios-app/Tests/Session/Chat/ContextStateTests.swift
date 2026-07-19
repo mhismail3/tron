@@ -303,7 +303,7 @@ final class ContextStateTests: XCTestCase {
     func testReconstructionRestorationFlow() {
         // Simulates the exact flow that processReconstructionResult should follow
         let state = ContextTrackingState()
-        state.currentContextWindow = 200_000  // Set by prefetchModels or refreshContextFromServer
+        state.currentContextWindow = 200_000  // Set by model prefetch or selected ModelInfo
 
         // Simulate what updateTokenState does with reconstruction data
         let usage = TokenUsage(inputTokens: 15000, outputTokens: 3000, cacheReadTokens: 12000, cacheCreationTokens: 500)
@@ -330,7 +330,7 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.contextWindowTokens, 85000)
         XCTAssertEqual(state.contextPercentage, 0)
 
-        // Once currentContextWindow is set (by refreshContextFromServer), pill updates
+        // Once model prefetch or turn_end.contextLimit sets currentContextWindow, the pill updates
         state.currentContextWindow = 200_000
         XCTAssertEqual(state.contextPercentage, 43)
     }

@@ -7,16 +7,19 @@
 //! reviewable result-merge proposal contract. Follow-ups inspect or cancel the
 //! delegated module/job pair through the module runtime binding checks; they do
 //! not silently mutate the parent conversation.
+//! Services borrow the composition-owned engine host directly and own no
+//! parallel dependency container.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `execution` | Controlled launch/status/result/cancel lifecycle over delegated module refs |
+//! | `execution_tests` | Production-backed lifecycle, authority, idempotency, and validation coverage |
 //! | `projection` | Allowlisted, bounded, redacted read projections for list/inspect |
-//! | `service` | Read-only list/inspect projection plus test fixtures for task records |
+//! | `service` | Read-only list/inspect authorization and projection |
 //! | `validation` | Bounded payload readers and redaction/non-goal guards |
-//! | `tests` | Authority, scoping, idempotency, schema, and non-goal guards |
+//! | `tests` | Read scoping, projection, schema, and non-goal guards |
 //!
 //! # INVARIANT: delegated execution stays explicit and reviewable
 //!
@@ -25,11 +28,19 @@
 //! result merging. The only activated path is the accepted
 //! jobs/program-execution module pack selected by exact payload fields and exact
 //! resource selectors. Completion is surfaced as merge-proposal evidence for
-//! review, not as hidden parent-state mutation. Delegated launch and follow-up
-//! grants must include exact module runtime, job, program-execution, lifecycle,
-//! and subagent-task selectors without implicit `agent_state` authority. Launch replay
-//! must recover the same delegated runtime/job/program refs from module
-//! supervision metadata before creating the parent task, or fail closed.
+//! review, not as hidden parent-state mutation. Result inspection must traverse
+//! the delegated module binding; no local or test-only result endpoint may
+//! return the persisted placeholder as if it were the production result.
+//! Each read-only module follow-up and its provider-visible projection must use
+//! one validated task snapshot so concurrent task updates cannot mix versions
+//! with delegated runtime or job references. Cancellation deliberately
+//! re-inspects after the module side effect to retain its compare-and-set
+//! freshness boundary.
+//! Delegated launch and follow-up grants must include exact module runtime, job,
+//! program-execution, lifecycle, and subagent-task selectors without implicit
+//! `agent_state` authority. Launch replay must recover the same delegated
+//! runtime/job/program refs from module supervision metadata before creating
+//! the parent task, or fail closed.
 //! The adapter seam for future module replacement is exact task/runtime/job
 //! authority plus reviewable merge-proposal parity: a replacement must preserve
 //! provider-safe refs, replay/idempotency evidence, bounded side effects, and
@@ -47,16 +58,6 @@ pub(crate) const SUBAGENT_TASK_TOPIC: &str = "subagents.lifecycle";
 pub(crate) const READ_SCOPE: &str = "subagents.read";
 pub(crate) const WRITE_SCOPE: &str = "subagents.write";
 pub(crate) const SCHEMA_VERSION: &str = "tron.subagent_task.v1";
-
-#[cfg(test)]
-pub(crate) const CREATE_TASK_FUNCTION: &str = "subagents::create_task";
-#[cfg(test)]
-pub(crate) const UPDATE_TASK_FUNCTION: &str = "subagents::update_task";
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) fn worker_module(
     _deps: &DomainRegistrationContext,

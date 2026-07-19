@@ -9,7 +9,7 @@ import Foundation
 ///   a real DMG install and a local Release build copied into Applications.
 /// - Unsupported/misplaced release builds, which must fail loudly before registration.
 enum MacRuntimeVariant: Equatable, Sendable {
-    case xcodeDebug(bundlePath: String)
+    case xcodeDebug
     case installedRelease
     case misplacedRelease(actualPath: String)
     case unsupported(bundleIdentifier: String?)
@@ -24,7 +24,7 @@ enum MacRuntimeVariant: Equatable, Sendable {
         let path = bundleURL.standardizedFileURL.path
         switch bundleIdentifier {
         case debugBundleIdentifier:
-            return .xcodeDebug(bundlePath: path)
+            return .xcodeDebug
         case releaseBundleIdentifier:
             if path == TronPaths.releaseApplicationURL.standardizedFileURL.path {
                 return .installedRelease
@@ -46,17 +46,6 @@ enum MacRuntimeVariant: Equatable, Sendable {
         }
     }
 
-    var precedence: Int {
-        switch self {
-        case .xcodeDebug:
-            return 2
-        case .installedRelease:
-            return 3
-        case .misplacedRelease, .unsupported:
-            return 0
-        }
-    }
-
     var locationProblem: String? {
         switch self {
         case .xcodeDebug, .installedRelease:
@@ -69,16 +58,15 @@ enum MacRuntimeVariant: Equatable, Sendable {
         }
     }
 
-    static func precedence(forParentBundleIdentifier bundleIdentifier: String?) -> Int {
-        switch bundleIdentifier {
-        case releaseBundleIdentifier:
-            return 3
-        case debugBundleIdentifier:
-            return 2
-        case .some:
-            return 1
-        case nil:
-            return 0
+    func canTakeOverRegistration(ownedBy bundleIdentifier: String) -> Bool {
+        switch self {
+        case .installedRelease:
+            return bundleIdentifier != Self.releaseBundleIdentifier
+        case .xcodeDebug:
+            return bundleIdentifier != Self.releaseBundleIdentifier
+                && bundleIdentifier != Self.debugBundleIdentifier
+        case .misplacedRelease, .unsupported:
+            return false
         }
     }
 

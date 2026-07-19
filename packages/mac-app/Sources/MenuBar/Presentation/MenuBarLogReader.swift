@@ -25,7 +25,7 @@ enum MenuBarLogReader {
     static func fetchRecentLogs(
         host: String = "127.0.0.1",
         port: Int = TronPaths.defaultServerPort,
-        token: String? = BearerTokenReader.read(at: TronPaths.bearerTokenPath),
+        token: String?,
         limit: Int = defaultLimit,
         timeout: TimeInterval = 5
     ) async -> Result<String, MenuBarLogReadError> {

@@ -244,6 +244,8 @@ async fn agent_search_text_is_bounded_and_skips_binary() {
     .await;
     assert!(value["matches"].as_array().unwrap().len() >= 3);
     assert_eq!(value["skippedBinaryFiles"], 1);
+    assert_eq!(value["resultLimitReached"], false);
+    assert_eq!(value["truncated"], false);
 
     let bounded = invoke_ok(
         &ctx,
@@ -253,6 +255,154 @@ async fn agent_search_text_is_bounded_and_skips_binary() {
     )
     .await;
     assert_eq!(bounded["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["resultLimitReached"], true);
+    assert_eq!(bounded["truncated"], true);
+}
+
+#[tokio::test]
+async fn agent_list_distinguishes_exact_limit_from_actual_overflow() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("only.txt"), "one").expect("only");
+
+    let exact = invoke_ok(
+        &ctx,
+        contract::LIST_FUNCTION,
+        json!({"path": ".", "maxResults": 1}),
+        client_context(root.path(), "list-exact-limit", false),
+    )
+    .await;
+    assert_eq!(exact["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(exact["resultLimitReached"], false);
+    assert_eq!(exact["truncated"], false);
+
+    fs::write(root.path().join("overflow.txt"), "two").expect("overflow");
+    let overflow = invoke_ok(
+        &ctx,
+        contract::LIST_FUNCTION,
+        json!({"path": ".", "maxResults": 1}),
+        client_context(root.path(), "list-actual-overflow", false),
+    )
+    .await;
+    assert_eq!(overflow["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(overflow["total"], 2);
+    assert_eq!(overflow["omitted"], 1);
+    assert_eq!(overflow["resultLimitReached"], true);
+    assert_eq!(overflow["truncated"], true);
+}
+
+#[tokio::test]
+async fn agent_find_reports_result_limit_truncation() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("needle-one.txt"), "one").expect("one");
+    fs::write(root.path().join("needle-two.txt"), "two").expect("two");
+
+    let bounded = invoke_ok(
+        &ctx,
+        contract::FIND_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 1}),
+        client_context(root.path(), "find-result-limit", false),
+    )
+    .await;
+
+    assert_eq!(bounded["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["resultLimitReached"], true);
+    assert_eq!(bounded["truncated"], true);
+}
+
+#[tokio::test]
+async fn agent_find_exact_limit_without_an_extra_match_is_complete() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("needle.txt"), "one").expect("match");
+    fs::write(root.path().join("other.txt"), "two").expect("non-match");
+
+    let exact = invoke_ok(
+        &ctx,
+        contract::FIND_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 1}),
+        client_context(root.path(), "find-exact-limit", false),
+    )
+    .await;
+
+    assert_eq!(exact["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(exact["resultLimitReached"], false);
+    assert_eq!(exact["truncated"], false);
+}
+
+#[tokio::test]
+async fn agent_search_exact_limit_without_an_extra_match_is_complete() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(root.path().join("one.txt"), "needle once\n").expect("match");
+    fs::write(root.path().join("other.txt"), "no match\n").expect("non-match");
+
+    let exact = invoke_ok(
+        &ctx,
+        contract::SEARCH_TEXT_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 1}),
+        client_context(root.path(), "search-exact-limit", false),
+    )
+    .await;
+
+    assert_eq!(exact["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(exact["resultLimitReached"], false);
+    assert_eq!(exact["truncated"], false);
+}
+
+#[tokio::test]
+async fn agent_search_reports_source_preview_omission() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let preview_limit = agent_support::MAX_LINE_PREVIEW;
+    let line = format!("needle {}", "x".repeat(preview_limit + 40));
+    fs::write(root.path().join("long-line.txt"), format!("{line}\n")).expect("long line");
+
+    let result = invoke_ok(
+        &ctx,
+        contract::SEARCH_TEXT_FUNCTION,
+        json!({"path": ".", "query": "needle", "maxResults": 10}),
+        client_context(root.path(), "search-preview-omission", false),
+    )
+    .await;
+    let search_match = &result["matches"][0];
+    assert_eq!(search_match["previewSourceBytes"], line.len());
+    assert_eq!(search_match["previewReturnedBytes"], preview_limit);
+    assert_eq!(
+        search_match["previewOmittedBytes"],
+        line.len() - preview_limit
+    );
+    assert_eq!(search_match["previewTruncated"], true);
+}
+
+#[tokio::test]
+async fn agent_search_reports_truncated_input_files() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    fs::write(
+        root.path().join("large.txt"),
+        format!("{}needle after bounded prefix\n", "prefix\n".repeat(20)),
+    )
+    .expect("large file");
+
+    let bounded = invoke_ok(
+        &ctx,
+        contract::SEARCH_TEXT_FUNCTION,
+        json!({
+            "path": ".",
+            "query": "needle",
+            "maxResults": 10,
+            "maxFileBytes": 16
+        }),
+        client_context(root.path(), "search-truncated-input", false),
+    )
+    .await;
+
+    assert!(bounded["matches"].as_array().is_some_and(Vec::is_empty));
+    assert_eq!(bounded["truncatedInputFiles"], 1);
+    assert_eq!(bounded["resultLimitReached"], false);
+    assert_eq!(bounded["truncated"], true);
 }
 
 #[tokio::test]
@@ -466,6 +616,7 @@ async fn execute_filesystem_write_requires_idempotency_at_provider_boundary() {
         session_id,
         workspace_id,
         root.path(),
+        "filesystem_write",
     )
     .await;
     let error = invoke_error(
@@ -509,7 +660,14 @@ async fn execute_rejects_unsupported_file_write_operation() {
             "path": "unsupported.txt",
             "content": "bypass"
         }),
-        execute_context(&ctx, root.path(), "unsupported-file-write-rejected", true).await,
+        execute_context(
+            &ctx,
+            root.path(),
+            "unsupported-file-write-rejected",
+            "file_write",
+            true,
+        )
+        .await,
     )
     .await;
     assert!(
@@ -546,7 +704,14 @@ async fn execute_filesystem_write_commit_refuses_truncated_existing_hash() {
             "commit": true,
             "idempotencyKey": "execute-large-write-refused"
         }),
-        execute_context(&ctx, root.path(), "execute-large-write-refused", true).await,
+        execute_context(
+            &ctx,
+            root.path(),
+            "execute-large-write-refused",
+            "filesystem_write",
+            true,
+        )
+        .await,
     )
     .await;
     assert!(error.contains("hash is unavailable"), "{error}");
@@ -572,7 +737,14 @@ async fn execute_filesystem_apply_patch_refuses_truncated_preview() {
             "commit": true,
             "idempotencyKey": "execute-large-patch-refused"
         }),
-        execute_context(&ctx, root.path(), "execute-large-patch-refused", true).await,
+        execute_context(
+            &ctx,
+            root.path(),
+            "execute-large-patch-refused",
+            "filesystem_apply_patch",
+            true,
+        )
+        .await,
     )
     .await;
     assert!(error.contains("refuses files larger"), "{error}");
@@ -639,6 +811,7 @@ async fn execute_context(
     ctx: &ServerRuntimeContext,
     root: &Path,
     key: &str,
+    operation: &str,
     idempotent: bool,
 ) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
@@ -652,6 +825,7 @@ async fn execute_context(
         &session_id,
         &workspace_id,
         root,
+        operation,
     )
     .await;
     let mut context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
@@ -680,7 +854,9 @@ async fn derive_execute_grant(
     session_id: &str,
     workspace_id: &str,
     root: &Path,
+    operation: &str,
 ) -> AuthorityGrantId {
+    let max_risk = crate::domains::capability::operation_risk(operation).unwrap_or("medium");
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -695,10 +871,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": ["kind:patch_proposal", "kind:materialized_file"],
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": 2},
                 "canDelegate": false,
-                "provenance": {"source": "filesystem_test"}
+                "provenance": {"source": "filesystem_test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:filesystem-test").unwrap(),
@@ -708,7 +884,7 @@ async fn derive_execute_grant(
             )
             .with_scope("grant.write")
             .with_session_id(session_id)
-            .with_idempotency_key(format!("derive-{workspace_id}")),
+            .with_idempotency_key(format!("derive-{workspace_id}-{operation}")),
         ))
         .await;
     assert_eq!(

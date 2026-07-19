@@ -1,4 +1,4 @@
-//! Engine host handle constructors and narrow test/bootstrap locking.
+//! Engine host handle constructors and test-only deep inspection.
 
 use super::*;
 
@@ -28,12 +28,9 @@ impl EngineHostHandle {
         Self { inner }
     }
 
-    /// Lock the host for deep test inspection or narrow bootstrap setup.
-    ///
-    /// Production invocation/discovery paths should use the intent-shaped
-    /// methods on this handle so they do not hold the host mutex across handler
-    /// execution.
-    pub async fn lock(&self) -> MutexGuard<'_, EngineHost> {
+    /// Lock the host for deep unit-test inspection.
+    #[cfg(test)]
+    pub(crate) async fn lock(&self) -> tokio::sync::MutexGuard<'_, EngineHost> {
         self.inner.lock().await
     }
 }

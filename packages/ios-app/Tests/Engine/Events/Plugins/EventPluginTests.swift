@@ -2,23 +2,19 @@ import XCTest
 @testable import TronMobile
 
 final class EventPluginTests: XCTestCase {
-
-    override func setUp() {
-        super.setUp()
-        EventRegistry.shared.clearForTesting()
-    }
+    private let registry = EventRegistry()
 
     // MARK: - Protocol Conformance Tests
 
     func testAllPluginsConformToProtocol() {
         // Verify that all plugins have a non-empty event type
-        EventRegistry.shared.registerAll()
-        XCTAssertGreaterThan(EventRegistry.shared.pluginCount, 0)
+        registry.registerAll()
+        XCTAssertGreaterThan(registry.pluginCount, 0)
     }
 
     func testEventTypesAreUnique() {
-        EventRegistry.shared.registerAll()
-        let types = EventRegistry.shared.registeredTypes
+        registry.registerAll()
+        let types = registry.registeredTypes
         let uniqueTypes = Set(types)
         XCTAssertEqual(types.count, uniqueTypes.count, "Event types must be unique")
     }
@@ -53,13 +49,13 @@ final class EventPluginTests: XCTestCase {
     // MARK: - Registry Tests
 
     func testRegisterPlugin() {
-        EventRegistry.shared.register(TextDeltaPlugin.self)
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.text_delta"))
-        XCTAssertEqual(EventRegistry.shared.pluginCount, 1)
+        registry.register(TextDeltaPlugin.self)
+        XCTAssertTrue(registry.hasPlugin(for: "agent.text_delta"))
+        XCTAssertEqual(registry.pluginCount, 1)
     }
 
     func testParseKnownEventType() {
-        EventRegistry.shared.register(TextDeltaPlugin.self)
+        registry.register(TextDeltaPlugin.self)
 
         let json = """
         {
@@ -72,7 +68,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "agent.text_delta", data: json)
+        let result = registry.parse(type: "agent.text_delta", data: json)
         XCTAssertNotNil(result)
 
         if case .plugin(let type, _, let sessionId, _, let transform) = result {
@@ -92,7 +88,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testParseErrorEventPreservesCanonicalFailure() {
-        EventRegistry.shared.register(ErrorPlugin.self)
+        registry.register(ErrorPlugin.self)
 
         let json = """
         {
@@ -117,7 +113,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let parsed = EventRegistry.shared.parse(type: "error", data: json)
+        let parsed = registry.parse(type: "error", data: json)
 
         guard case .plugin(_, _, _, _, let transform) = parsed,
               let result = transform() as? ErrorPlugin.Result else {
@@ -132,7 +128,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testParseErrorEventWithoutCanonicalFailureDropsTransform() {
-        EventRegistry.shared.register(ErrorPlugin.self)
+        registry.register(ErrorPlugin.self)
 
         let json = """
         {
@@ -144,7 +140,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let parsed = EventRegistry.shared.parse(type: "error", data: json)
+        let parsed = registry.parse(type: "error", data: json)
 
         guard case .plugin(_, _, _, _, let transform) = parsed else {
             XCTFail("expected plugin parse")
@@ -154,13 +150,13 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testParseUnknownEventType() {
-        EventRegistry.shared.registerAll()
+        registry.registerAll()
 
         let json = """
         {"type": "some.unknown.event"}
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "some.unknown.event", data: json)
+        let result = registry.parse(type: "some.unknown.event", data: json)
 
         if case .unknown(let type) = result {
             XCTAssertEqual(type, "some.unknown.event")
@@ -170,7 +166,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testSessionIdExtraction() {
-        EventRegistry.shared.register(TextDeltaPlugin.self)
+        registry.register(TextDeltaPlugin.self)
 
         let json = """
         {
@@ -180,12 +176,12 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "agent.text_delta", data: json)
+        let result = registry.parse(type: "agent.text_delta", data: json)
         XCTAssertEqual(result?.sessionId, "session-456")
     }
 
     func testSessionIdNilWhenMissing() {
-        EventRegistry.shared.register(ConnectedPlugin.self)
+        registry.register(ConnectedPlugin.self)
 
         let json = """
         {
@@ -194,12 +190,12 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "connection.established", data: json)
+        let result = registry.parse(type: "connection.established", data: json)
         XCTAssertNil(result?.sessionId)
     }
 
     func testMatchesSession() {
-        EventRegistry.shared.register(TextDeltaPlugin.self)
+        registry.register(TextDeltaPlugin.self)
 
         let json = """
         {
@@ -209,7 +205,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "agent.text_delta", data: json)!
+        let result = registry.parse(type: "agent.text_delta", data: json)!
 
         XCTAssertTrue(result.matchesSession("session-789"))
         XCTAssertFalse(result.matchesSession("other-session"))
@@ -217,7 +213,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testMatchesSessionGlobalEvent() {
-        EventRegistry.shared.register(ConnectedPlugin.self)
+        registry.register(ConnectedPlugin.self)
 
         let json = """
         {
@@ -226,7 +222,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "connection.established", data: json)!
+        let result = registry.parse(type: "connection.established", data: json)!
 
         // Global events (no sessionId) match any session
         XCTAssertTrue(result.matchesSession("any-session"))
@@ -234,24 +230,24 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testRegisteredPluginCount() {
-        EventRegistry.shared.registerAll()
+        registry.registerAll()
         // Should have all 38+ plugins registered
-        XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 38)
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.start"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.error"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.interrupted"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.retry"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "context.warning"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "session.forked"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.thinking_start"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.response_complete"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.thinking_end"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "capability.invocation.batch"))
-        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "capability.invocation.arguments_delta"))
+        XCTAssertGreaterThanOrEqual(registry.pluginCount, 38)
+        XCTAssertTrue(registry.hasPlugin(for: "agent.start"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.error"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.interrupted"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.retry"))
+        XCTAssertTrue(registry.hasPlugin(for: "context.warning"))
+        XCTAssertTrue(registry.hasPlugin(for: "session.forked"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.thinking_start"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.response_complete"))
+        XCTAssertTrue(registry.hasPlugin(for: "agent.thinking_end"))
+        XCTAssertTrue(registry.hasPlugin(for: "capability.invocation.batch"))
+        XCTAssertTrue(registry.hasPlugin(for: "capability.invocation.arguments_delta"))
     }
 
     func testSessionScopedMarkerPluginsParseWithoutUiResult() {
-        EventRegistry.shared.registerAll()
+        registry.registerAll()
 
         for type in [
             "agent.start",
@@ -260,7 +256,6 @@ final class EventPluginTests: XCTestCase {
             "context.warning",
             "session.forked",
             "agent.thinking_start",
-            "agent.response_complete",
             "capability.invocation.batch",
             "capability.invocation.arguments_delta"
         ] {
@@ -274,7 +269,7 @@ final class EventPluginTests: XCTestCase {
             }
             """.data(using: .utf8)!
 
-            let result = EventRegistry.shared.parse(type: type, data: json)
+            let result = registry.parse(type: type, data: json)
             XCTAssertEqual(result?.eventType, type)
             XCTAssertEqual(result?.sessionId, "session-marker")
             XCTAssertEqual(result?.sequence, 42)
@@ -283,7 +278,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testThinkingEndPluginParsesAuthoritativeSnapshot() {
-        EventRegistry.shared.registerAll()
+        registry.registerAll()
         let json = """
         {
             "type": "agent.thinking_end",
@@ -294,7 +289,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "agent.thinking_end", data: json)
+        let result = registry.parse(type: "agent.thinking_end", data: json)
         let pluginResult = result?.getResult() as? ThinkingEndPlugin.Result
 
         XCTAssertEqual(result?.eventType, "agent.thinking_end")
@@ -303,7 +298,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testThinkingPluginsParseReasoningSummaryKind() {
-        EventRegistry.shared.registerAll()
+        registry.registerAll()
         let deltaJson = """
         {
             "type": "agent.thinking_delta",
@@ -323,9 +318,9 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let deltaResult = EventRegistry.shared.parse(type: "agent.thinking_delta", data: deltaJson)?
+        let deltaResult = registry.parse(type: "agent.thinking_delta", data: deltaJson)?
             .getResult() as? ThinkingDeltaPlugin.Result
-        let endResult = EventRegistry.shared.parse(type: "agent.thinking_end", data: endJson)?
+        let endResult = registry.parse(type: "agent.thinking_end", data: endJson)?
             .getResult() as? ThinkingEndPlugin.Result
 
         XCTAssertEqual(deltaResult?.kind, .reasoningSummary)
@@ -335,7 +330,7 @@ final class EventPluginTests: XCTestCase {
     // MARK: - Session Archive/Unarchive Plugin Tests
 
     func testSessionArchivedPlugin_parsesFromTopLevelSessionId() {
-        EventRegistry.shared.register(SessionArchivedPlugin.self)
+        registry.register(SessionArchivedPlugin.self)
 
         let json = """
         {
@@ -346,7 +341,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "session.archived", data: json)
+        let result = registry.parse(type: "session.archived", data: json)
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.sessionId, "sess-123")
 
@@ -360,7 +355,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testSessionArchivedPlugin_parsesFromDataSessionId() {
-        EventRegistry.shared.register(SessionArchivedPlugin.self)
+        registry.register(SessionArchivedPlugin.self)
 
         let json = """
         {
@@ -369,7 +364,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "session.archived", data: json)
+        let result = registry.parse(type: "session.archived", data: json)
         if case .plugin(_, _, _, _, let transform) = result {
             let eventResult = transform() as? SessionArchivedPlugin.Result
             XCTAssertEqual(eventResult?.sessionId, "sess-456")
@@ -379,7 +374,7 @@ final class EventPluginTests: XCTestCase {
     }
 
     func testSessionUnarchivedPlugin_parses() {
-        EventRegistry.shared.register(SessionUnarchivedPlugin.self)
+        registry.register(SessionUnarchivedPlugin.self)
 
         let json = """
         {
@@ -389,7 +384,7 @@ final class EventPluginTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let result = EventRegistry.shared.parse(type: "session.unarchived", data: json)
+        let result = registry.parse(type: "session.unarchived", data: json)
         XCTAssertNotNil(result)
 
         if case .plugin(let type, _, _, _, let transform) = result {

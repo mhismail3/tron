@@ -81,16 +81,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.enqueuedCapabilityStarts[0].modelPrimitiveName, "execute")
     }
 
-    func testCapabilityInvocationGeneratingTracksCapabilityInvocation() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_track")
-
-        coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
-
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].invocationId, "gen_track")
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelPrimitiveName, "execute")
-    }
-
     func testCapabilityInvocationGeneratingSkipsDuplicateChip() async throws {
         // Given: A capability message already exists
         let existing = ChatMessage(
@@ -137,17 +127,14 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         } else {
             XCTFail("Expected capability invocation content")
         }
-        // Then: currentCapabilityInvocationMessages is updated
-        XCTAssertEqual(mockContext.currentCapabilityInvocationMessages.count, 1)
-        // Then: currentTurnCapabilityInvocations arguments are updated
-        XCTAssertTrue(mockContext.currentTurnCapabilityInvocations[0].arguments.contains("file_path"))
+        // Then: current-turn membership tracks only the authoritative message identity.
+        XCTAssertEqual(mockContext.currentTurnCapabilityMessageIds, [mockContext.messages[0].id])
     }
 
     func testCapabilityInvocationEndUpdatesGeneratingChip() async throws {
         // Given: capability.invocation.generating created a chip
         let genResult = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_end")
         coordinator.handleCapabilityInvocationGenerating(genResult, context: mockContext)
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
 
         // When: capability.invocation.completed arrives
         let endEvent = CapabilityInvocationCompletedPlugin.Result(
@@ -159,10 +146,10 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         )
         coordinator.handleCapabilityInvocationCompleted(endEvent, context: mockContext)
 
-        // Then: Capability invocation record is updated
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].result, "File written")
-        // Then: Capability end is enqueued
+        // Then: The authoritative completion update is enqueued.
         XCTAssertEqual(mockContext.enqueuedCapabilityEnds.count, 1)
+        XCTAssertEqual(mockContext.enqueuedCapabilityEnds[0].result, "File written")
+        XCTAssertTrue(mockContext.enqueuedCapabilityEnds[0].success)
     }
 
     func testMultipleCapabilityGeneratingEvents() async throws {
@@ -306,26 +293,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
     }
 
-    func testCapabilityInvocationStartTracksCapabilityInvocation() async throws {
-        // Given: A capability start event
-        let event = CapabilityInvocationStartedPlugin.Result(
-            modelPrimitiveName: "execute",
-            invocationId: "inv_789",
-            arguments: nil,
-            formattedArguments: "{\"operation\":\"text_search\",\"payload\":{\"pattern\":\"needle\"}}",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "text_search")
-        )
-
-        // When: Handling capability start
-        coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
-
-        // Then: Capability invocation should be tracked
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].invocationId, "inv_789")
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelPrimitiveName, "execute")
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].identity.operationName, "text_search")
-    }
-
     func testCapabilityInvocationStartMakesCapabilityVisible() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(
@@ -380,31 +347,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.enqueuedCapabilityEnds[0].success)
     }
 
-    func testCapabilityInvocationEndUpdatesCapabilityInvocationRecord() async throws {
-        // Given: A tracked capability invocation
-        mockContext.currentTurnCapabilityInvocations.append(CapabilityInvocationRecord(
-            invocationId: "inv_track_123",
-            modelPrimitiveName: "execute",
-            arguments: "{}"
-        ))
-
-        // Given: A capability end event
-        let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "inv_track_123",
-            success: false,
-            displayResult: "Command failed",
-            durationMs: 50,
-            details: nil
-        )
-
-        // When: Handling capability end
-        coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
-
-        // Then: Capability invocation record should be updated
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].result, "Command failed")
-        XCTAssertTrue(mockContext.currentTurnCapabilityInvocations[0].isError)
-    }
-
     // MARK: - Thinking Block Boundary Tests
 
     func testCapabilityInvocationEndResetsThinkingStateForNewBlock() async throws {
@@ -453,8 +395,7 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
     var runningCapabilityInvocationCount: Int = 0
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
-    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
+    var currentTurnCapabilityMessageIds: Set<UUID> = []
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false

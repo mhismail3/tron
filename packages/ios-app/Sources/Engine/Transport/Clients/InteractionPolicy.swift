@@ -2,9 +2,9 @@ import Foundation
 
 /// Central read-only / interaction policy for the app.
 ///
-/// Every mutation surface (send button, mic, new session, archive swipe,
-/// plugin source, etc.) reads predicates from this type via the SwiftUI environment
-/// and applies `.disabled(!policy.canX)`. No surface checks connection state directly anymore.
+/// Mutation surfaces read this policy through the SwiftUI environment for shared,
+/// debounced readiness. Transport-facing controls may also read raw repository
+/// connectivity as an immediate safety gate; that does not replace this policy.
 ///
 /// Transitions into `.connected` are debounced (default 500ms) to avoid UI flicker from rapid
 /// reconnects. Transitions out of `.connected` (disconnect, failed, reconnecting) flip read-only
@@ -32,7 +32,7 @@ final class InteractionPolicy {
     /// Raw passthrough of the current connection state.
     var state: ConnectionState { connection.state }
 
-    /// Debounced "are we ready for writes" flag — the single truth for UI gating.
+    /// Shared, debounced "are we ready for writes" UI policy.
     private(set) var isConnected: Bool
 
     var isReadOnly: Bool { !isConnected }
@@ -117,23 +117,22 @@ final class InteractionPolicy {
 
     private func startObserving() {
         observationTask?.cancel()
+        let connection = connection
         observationTask = Task { [weak self] in
             var lastState: ConnectionState? = nil
             while !Task.isCancelled {
-                guard let self else { return }
                 // Read current state at the top so we never miss a transition between cycles.
-                let currentState = self.connection.state
-                if lastState != currentState {
-                    self.apply(newState: currentState)
-                    lastState = currentState
+                let currentState = connection.state
+                do {
+                    guard let self else { return }
+                    if lastState != currentState {
+                        apply(newState: currentState)
+                        lastState = currentState
+                    }
                 }
 
-                await withCheckedContinuation { continuation in
-                    withObservationTracking {
-                        _ = self.connection.state
-                    } onChange: {
-                        continuation.resume()
-                    }
+                await waitForObservationChange {
+                    connection.state
                 }
             }
         }
@@ -154,16 +153,18 @@ final class InteractionPolicy {
         if isConnected { return }
 
         // Debounced flip: wait for `debounceDuration`, then re-check state and flip on.
+        let clock = clock
+        let debounceDuration = debounceDuration
+        let connection = connection
         debounceTask = Task { [weak self] in
-            guard let self else { return }
             do {
-                try await self.clock.sleep(for: self.debounceDuration)
+                try await clock.sleep(for: debounceDuration)
             } catch {
                 return
             }
             guard !Task.isCancelled else { return }
-            if self.connection.state.isConnected {
-                self.isConnected = true
+            if connection.state.isConnected {
+                self?.isConnected = true
             }
         }
     }

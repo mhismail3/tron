@@ -28,15 +28,15 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`shared`] | Provider-neutral traits, retry, SSE, context composition, stream helpers, and health tracking |
-//! | [`factory`] | Default provider factory and settings/auth capture |
+//! | [`factory`] | Per-construction API-settings projection and auth loading |
 //! | [`anthropic`], [`google`], [`kimi`], [`minimax`], [`ollama`], [`openai`] | Provider-specific wire protocol implementations |
 //! | [`tokens`] | Provider-neutral usage normalization and pricing helpers |
 //!
 //! ## Entry Points
 //!
 //! - [`shared::provider::Provider`] is the trait every backend implements.
-//! - [`factory::DefaultProviderFactory`] creates providers from server settings
-//!   and auth state.
+//! - [`factory::DefaultProviderFactory`] creates providers from one admitted
+//!   API-settings snapshot and current auth state.
 //! - Protocol helpers from [`crate::domains::model::protocol`] are re-exported
 //!   here for provider-local conversion code.
 //!
@@ -47,8 +47,8 @@
 //! utilities eliminate duplication while keeping provider-specific wire
 //! protocol handling physically isolated.
 //!
-//! Depends on: model contracts, provider-protocol conversion helpers, active
-//! settings, and provider auth state.
+//! Depends on: model contracts, provider-protocol conversion helpers, an
+//! admitted API-settings snapshot, and provider auth state.
 //! Depended on by: `domains::model::responder`, model routing/catalog code,
 //! and app bootstrap only as the composition/root startup path.
 //!

@@ -2,26 +2,6 @@ import XCTest
 
 final class DashboardHitTargetUITests: XCTestCase {
     @MainActor
-    func testAgentBriefingBandVisibleEdgeOpensSheet() throws {
-        let app = XCUIApplication()
-        app.launchArguments.append("--tron-ui-test-onboarding-complete")
-        app.launch()
-
-        let briefingBand = app.buttons["agent-briefing-dashboard-band"].firstMatch
-        XCTAssertTrue(
-            briefingBand.waitForExistence(timeout: 20),
-            "Agent Briefing dashboard band should be visible above grouped sessions"
-        )
-
-        briefingBand.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
-
-        XCTAssertTrue(
-            app.staticTexts["Agent Briefing"].waitForExistence(timeout: 10),
-            "Tapping near the visible trailing edge of the Agent Briefing band should open its sheet"
-        )
-    }
-
-    @MainActor
     func testEngineCockpitProgressiveDisclosurePath() throws {
         let app = XCUIApplication()
         app.launchArguments.append("--tron-ui-test-onboarding-complete")
@@ -30,53 +10,58 @@ final class DashboardHitTargetUITests: XCTestCase {
         let cockpitBand = app.buttons["engine-cockpit-dashboard-band"].firstMatch
         XCTAssertTrue(
             cockpitBand.waitForExistence(timeout: 20),
-            "Engine Cockpit dashboard band should be visible above grouped sessions"
+            "Dashboard band should be visible above grouped sessions"
         )
         keepScreenshot(named: "engine-cockpit-dashboard-band")
 
         cockpitBand.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
 
-        XCTAssertTrue(app.staticTexts["Engine Cockpit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Dashboard"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Capabilities"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Activity"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Core"].exists)
         XCTAssertFalse(app.buttons["Discovery"].exists)
-        XCTAssertTrue(app.staticTexts["Operations verified"].waitForExistence(timeout: 10))
         XCTAssertTrue(
-            app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS %@", "Built-in engine operations can be invoked directly"))
+            app.descendants(matching: .any)["dashboard-summary-capabilities"]
                 .firstMatch
                 .waitForExistence(timeout: 10)
         )
+        XCTAssertTrue(app.buttons["Check capabilities"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Operations verified"].exists)
         keepScreenshot(named: "engine-cockpit-capabilities")
 
         let coreEngineGroup = app.buttons["capability-group-core_engine"].firstMatch
         XCTAssertTrue(coreEngineGroup.waitForExistence(timeout: 10))
+        let dashboardScroll = app.scrollViews.firstMatch
+        for _ in 0..<4 where !coreEngineGroup.isHittable {
+            dashboardScroll.swipeUp()
+        }
+        XCTAssertTrue(coreEngineGroup.isHittable)
+        keepScreenshot(named: "engine-cockpit-capability-card-alignment")
         coreEngineGroup.tap()
         XCTAssertTrue(app.staticTexts["Core Engine"].waitForExistence(timeout: 10))
         XCTAssertTrue(
             app.staticTexts["Can Tron inspect and invoke its own primitive engine?"].waitForExistence(timeout: 10)
         )
-        XCTAssertTrue(app.staticTexts["auth::clear"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["IdempotentWrite"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Operation ID:"))
+                .firstMatch
+                .waitForExistence(timeout: 10),
+            "Capability detail should expose at least one current server-owned operation"
+        )
         keepScreenshot(named: "engine-cockpit-capability-detail")
 
-        let operation = app.buttons["operation-row-capability_binding_decision_inspect"].firstMatch
-        XCTAssertTrue(operation.waitForExistence(timeout: 10))
+        let operation = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "operation-row-")
+        ).firstMatch
+        XCTAssertTrue(
+            operation.waitForExistence(timeout: 10),
+            "Capability detail should provide a disclosure row for its current operation"
+        )
         operation.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         XCTAssertTrue(app.staticTexts["Operation Detail"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Role"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Kernel-evolution only"].waitForExistence(timeout: 10))
         keepScreenshot(named: "engine-cockpit-operation-role-detail")
-        app.buttons["Close"].tap()
-
-        app.buttons["Close"].tap()
-        app.buttons["Activity"].tap()
-        XCTAssertTrue(app.staticTexts["No engine work"].waitForExistence(timeout: 10))
-        XCTAssertTrue(
-            app.staticTexts["No engine or module work is running, waiting, or blocked."].waitForExistence(timeout: 10)
-        )
-        keepScreenshot(named: "engine-cockpit-activity-empty")
     }
 
     @MainActor

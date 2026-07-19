@@ -6,13 +6,8 @@ import Foundation
 @MainActor
 protocol AppConnectionRepository: AnyObject {
     var connectionState: ConnectionState { get }
-    var isConnected: Bool { get }
 
     func connect() async
-    func disconnect() async
-    func verifyConnection() async -> Bool
-    func manualRetry() async
-    func setBackgroundState(_ inBackground: Bool)
 }
 
 // MARK: - Session Event Repository
@@ -35,33 +30,24 @@ protocol SessionEventRepository: AnyObject {
 struct ServerSettingsSnapshot: Equatable, Sendable {
     let defaultModel: String
     let defaultWorkspace: String?
+    let tailscaleIp: String?
     let compactionPreserveRecentCount: Int
     let compactionTriggerTokenThreshold: Double
-    let observabilityLogLevel: String
-    let observabilityVerboseRetentionDays: UInt64
-    let storageRetentionEnabled: Bool
-    let storageMaxDatabaseMb: UInt64
     let transcriptionEnabled: Bool
 
     init(
         defaultModel: String,
         defaultWorkspace: String?,
+        tailscaleIp: String?,
         compactionPreserveRecentCount: Int,
         compactionTriggerTokenThreshold: Double,
-        observabilityLogLevel: String,
-        observabilityVerboseRetentionDays: UInt64,
-        storageRetentionEnabled: Bool,
-        storageMaxDatabaseMb: UInt64,
         transcriptionEnabled: Bool
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
+        self.tailscaleIp = tailscaleIp
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
-        self.observabilityLogLevel = observabilityLogLevel
-        self.observabilityVerboseRetentionDays = observabilityVerboseRetentionDays
-        self.storageRetentionEnabled = storageRetentionEnabled
-        self.storageMaxDatabaseMb = storageMaxDatabaseMb
         self.transcriptionEnabled = transcriptionEnabled
     }
 
@@ -69,12 +55,9 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         self.init(
             defaultModel: settings.defaultModel,
             defaultWorkspace: settings.defaultWorkspace,
+            tailscaleIp: settings.tailscaleIp,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
             compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
-            observabilityLogLevel: settings.observabilityLogLevel,
-            observabilityVerboseRetentionDays: settings.observabilityVerboseRetentionDays,
-            storageRetentionEnabled: settings.storageRetentionEnabled,
-            storageMaxDatabaseMb: settings.storageMaxDatabaseMb,
             transcriptionEnabled: settings.transcriptionEnabled
         )
     }
@@ -87,10 +70,6 @@ enum SettingsMutation {
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)
     case compactionPreserveRecentCount(Int)
-    case observabilityLogLevel(String)
-    case observabilityVerboseRetentionDays(UInt64)
-    case storageRetentionEnabled(Bool)
-    case storageMaxDatabaseMb(UInt64)
     case transcriptionEnabled(Bool)
 }
 
@@ -344,12 +323,6 @@ protocol WorkerLifecycleRepository: AnyObject {
         sessionId: String?,
         workspaceId: String?
     ) async throws -> CapabilityCockpitOverviewDTO
-
-    func agentBriefingOverview(
-        limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> AgentBriefingOverviewDTO
 
     func proposePackageChange(
         manifest: [String: AnyCodable],

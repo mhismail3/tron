@@ -1,9 +1,21 @@
 import Foundation
 
-// ARCHITECTURE: ~591 lines — dual-path transformer (persisted events + live streaming
-// events) producing ChatMessages. Both paths share block-building logic for text,
-// capability invocations, and thinking content. Splitting would duplicate the shared
-// content-block assembly.
+/// Session-owned transient projection restored from durable event history.
+///
+/// Server/session metadata remains authoritative for model, turn, workspace,
+/// branch, file, and metadata facts. This value carries only the timeline and
+/// presentation state that `ChatViewModel` mounts after reconstruction.
+struct ReconstructedState {
+    var messages: [ChatMessage] = []
+    var reasoningLevel: String? = nil
+    var totalTokenUsage = TokenUsage(
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: nil,
+        cacheCreationTokens: nil
+    )
+    var lastTurnInputTokens = 0
+}
 
 // =============================================================================
 // MARK: - Unified Event Transformer
@@ -237,15 +249,14 @@ struct UnifiedEventTransformer {
 
 extension UnifiedEventTransformer {
 
-    /// Reconstruct full session state from persisted events.
+    /// Reconstruct the mounted chat projection from persisted events.
     ///
     /// This generic implementation works with any `EventTransformable` type,
     /// processing all events in order to extract:
     /// - Chat messages for display
+    /// - The latest reasoning level
     /// - Accumulated token usage
-    /// - Current model (after any switches)
-    /// - Working directory
-    /// - Extended state (file activity, compaction, metadata, etc.)
+    /// - The latest server-reported context size
     ///
     /// **Two-Pass Reconstruction**:
     /// - Pass 1: Collect deleted event IDs, capability invocation maps, and config state
@@ -257,7 +268,7 @@ extension UnifiedEventTransformer {
     ///                and should NOT be re-sorted. This is critical for forked sessions
     ///                where sequence numbers reset and sorting by sequence would interleave
     ///                parent and forked session events incorrectly.
-    /// - Returns: Fully reconstructed session state
+    /// - Returns: The transient timeline/config/token projection mounted by chat
     static func reconstructSessionState<E: EventTransformable>(from events: [E], presorted: Bool = false) -> ReconstructedState {
         var state = ReconstructedState()
 
@@ -291,14 +302,6 @@ extension UnifiedEventTransformer {
             guard let eventType = PersistedEventType(rawValue: event.type) else { continue }
 
             switch eventType {
-            case .sessionStart:
-                if let payload = SessionStartPayload(from: event.payload) {
-                    state.currentModel = payload.model
-                    state.workingDirectory = payload.workingDirectory
-                    state.sessionInfo.startTime = parseTimestamp(event.timestamp)
-                    state.sessionInfo.initialModel = payload.model
-                }
-
             case .capabilityInvocationCompleted, .capabilityInvocationStarted, .streamThinkingComplete:
                 // Skip - processed via message.assistant content blocks
                 break
@@ -315,8 +318,7 @@ extension UnifiedEventTransformer {
                 }
                 state.messages.append(contentsOf: interleaved)
 
-                let parsedPayload = AssistantMessagePayload(from: event.payload)
-                if let parsed = parsedPayload, let record = parsed.tokenRecord {
+                if let record = AssistantMessagePayload(from: event.payload)?.tokenRecord {
                     state.totalTokenUsage = TokenUsage(
                         inputTokens: state.totalTokenUsage.inputTokens + record.source.rawInputTokens,
                         outputTokens: state.totalTokenUsage.outputTokens + record.source.rawOutputTokens,
@@ -324,9 +326,6 @@ extension UnifiedEventTransformer {
                         cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + record.source.rawCacheCreationTokens
                     )
                     state.lastTurnInputTokens = record.computed.contextWindowTokens
-                }
-                if let parsed = parsedPayload, parsed.turn > state.currentTurn {
-                    state.currentTurn = parsed.turn
                 }
 
             case .messageUser, .messageSystem,
@@ -339,46 +338,16 @@ extension UnifiedEventTransformer {
                     }
                     state.messages.append(message)
                 }
-                if eventType == .configModelSwitch,
-                   let parsed = ModelSwitchPayload(from: event.payload) {
-                    state.currentModel = parsed.newModel
-                }
-
-            case .streamTurnEnd:
-                if let payload = StreamTurnEndPayload(from: event.payload),
-                   payload.turn > state.currentTurn {
-                    state.currentTurn = payload.turn
-                }
-
-            case .sessionBranch:
-                if let parsed = SessionBranchPayload(from: event.payload) {
-                    state.sessionInfo.branchName = parsed.name
-                }
-
-            case .fileRead, .fileWrite, .fileEdit:
-                handleFileActivityEvent(eventType, payload: event.payload,
-                                        timestamp: event.timestamp, state: &state)
 
             case .compactBoundary:
                 if let message = transformPersistedEvent(event) {
                     state.messages.append(message)
                 }
                 if let parsed = CompactBoundaryPayload(from: event.payload) {
-                    state.compaction.boundaries.append(ReconstructedState.CompactionState.Boundary(
-                        rangeFrom: parsed.rangeFrom,
-                        rangeTo: parsed.rangeTo,
-                        originalTokens: parsed.originalTokens,
-                        compactedTokens: parsed.compactedTokens,
-                        timestamp: parseTimestamp(event.timestamp)
-                    ))
                     // Update context tokens so pill reflects post-compaction state on resume.
                     // If a later message.assistant arrives with a tokenRecord, it overwrites with API ground truth.
                     state.lastTurnInputTokens = parsed.estimatedContextTokens ?? parsed.compactedTokens
                 }
-
-            case .metadataUpdate, .metadataTag:
-                handleMetadataEvent(eventType, payload: event.payload,
-                                    timestamp: event.timestamp, state: &state)
 
             default:
                 break
@@ -386,69 +355,5 @@ extension UnifiedEventTransformer {
         }
 
         return state
-    }
-
-    // =========================================================================
-    // MARK: - Reconstruction Event Handlers
-    // =========================================================================
-
-    private static func handleFileActivityEvent(
-        _ eventType: PersistedEventType,
-        payload: [String: AnyCodable],
-        timestamp: String,
-        state: inout ReconstructedState
-    ) {
-        let ts = parseTimestamp(timestamp)
-
-        switch eventType {
-        case .fileRead:
-            if let parsed = FileReadPayload(from: payload) {
-                state.fileActivity.reads.append(ReconstructedState.FileActivityState.FileRead(
-                    path: parsed.path, timestamp: ts,
-                    linesStart: parsed.linesStart, linesEnd: parsed.linesEnd
-                ))
-            }
-        case .fileWrite:
-            if let parsed = FileWritePayload(from: payload) {
-                state.fileActivity.writes.append(ReconstructedState.FileActivityState.FileWrite(
-                    path: parsed.path, timestamp: ts,
-                    size: parsed.size, contentHash: parsed.contentHash
-                ))
-            }
-        case .fileEdit:
-            if let parsed = FileEditPayload(from: payload) {
-                state.fileActivity.edits.append(ReconstructedState.FileActivityState.FileEdit(
-                    path: parsed.path, timestamp: ts,
-                    oldString: parsed.oldString, newString: parsed.newString, diff: parsed.diff
-                ))
-            }
-        default:
-            break
-        }
-    }
-
-    private static func handleMetadataEvent(
-        _ eventType: PersistedEventType,
-        payload: [String: AnyCodable],
-        timestamp: String,
-        state: inout ReconstructedState
-    ) {
-        switch eventType {
-        case .metadataUpdate:
-            if let parsed = MetadataUpdatePayload(from: payload) {
-                state.metadata.customData[parsed.key] = parsed.newValue
-                state.metadata.lastUpdated = parseTimestamp(timestamp)
-            }
-        case .metadataTag:
-            if let parsed = MetadataTagPayload(from: payload) {
-                if parsed.action == "add" && !state.tags.contains(parsed.tag) {
-                    state.tags.append(parsed.tag)
-                } else if parsed.action == "remove" {
-                    state.tags.removeAll { $0 == parsed.tag }
-                }
-            }
-        default:
-            break
-        }
     }
 }

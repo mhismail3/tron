@@ -233,18 +233,6 @@ struct ProviderStatusHelpersTests {
         #expect(ProviderStatusHelpers.hasRefreshableOAuth(info) == false)
     }
 
-    // MARK: - isServiceConfigured
-
-    @Test("isServiceConfigured reflects service API key state")
-    func isServiceConfiguredReflectsApiKeyState() throws {
-        let configured = ServiceAuthSnapshot(try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":true,"apiKeyHint":"BSA0...abc"}"#.utf8)))
-        let empty = ServiceAuthSnapshot(try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":false}"#.utf8)))
-
-        #expect(ProviderStatusHelpers.isServiceConfigured(configured))
-        #expect(!ProviderStatusHelpers.isServiceConfigured(empty))
-        #expect(!ProviderStatusHelpers.isServiceConfigured(nil))
-    }
-
     // MARK: - trimmedLabel
 
     @Test("trimmedLabel strips surrounding whitespace")

@@ -224,12 +224,13 @@ fn should_refresh_with_buffer() {
 #[test]
 fn calculate_expires_at_basic() {
     let before = now_ms();
-    let result = calculate_expires_at(3600, 300);
+    let result = calculate_expires_at(3600);
     let after = now_ms();
 
-    // Should be approximately now + (3600 - 300) * 1000 = now + 3_300_000
-    assert!(result >= before + 3_300_000);
-    assert!(result <= after + 3_300_000);
+    // The stored timestamp is the provider's actual expiry. Refresh policy
+    // applies its safety buffer when it reads this value.
+    assert!(result >= before + 3_600_000);
+    assert!(result <= after + 3_600_000);
 }
 
 #[test]

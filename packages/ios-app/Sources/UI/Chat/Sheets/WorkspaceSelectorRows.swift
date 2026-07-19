@@ -15,34 +15,20 @@ struct WorkspaceQuickPathPill: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: row.icon)
+        WorkspaceCompactPillButton(
+            icon: row.icon,
+            title: row.title,
+            titleColor: .tronTextPrimary,
+            tintOpacity: isSelected ? 0.2 : 0.08,
+            accessibilityLabel: "\(row.title), \(row.subtitle)",
+            action: action
+        ) {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
-                    .frame(width: 14)
-
-                Text(row.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(isSelected ? 0.2 : 0.08)).interactive(),
-            in: Capsule()
-        )
-        .accessibilityLabel("\(row.title), \(row.subtitle)")
     }
 }
 
@@ -53,30 +39,90 @@ struct WorkspaceDirectoryActionPill: View {
     let action: () -> Void
 
     var body: some View {
+        WorkspaceCompactPillButton(
+            icon: icon,
+            title: title,
+            titleColor: .tronEmerald,
+            tintOpacity: 0.09,
+            accessibilityLabel: subtitle.map { "\(title), \($0)" } ?? title,
+            action: action
+        )
+    }
+}
+
+private struct WorkspaceCompactPillButton<Accessory: View>: View {
+    let icon: String
+    let title: String
+    let titleColor: Color
+    let tintOpacity: Double
+    let accessibilityLabel: String
+    let action: () -> Void
+    @ViewBuilder let accessory: () -> Accessory
+
+    init(
+        icon: String,
+        title: String,
+        titleColor: Color,
+        tintOpacity: Double,
+        accessibilityLabel: String,
+        action: @escaping () -> Void,
+        @ViewBuilder accessory: @escaping () -> Accessory
+    ) {
+        self.icon = icon
+        self.title = title
+        self.titleColor = titleColor
+        self.tintOpacity = tintOpacity
+        self.accessibilityLabel = accessibilityLabel
+        self.action = action
+        self.accessory = accessory
+    }
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
-                    .frame(width: 16)
+                    .frame(width: 14)
 
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(titleColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.88)
+
+                accessory()
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(minHeight: 38, alignment: .leading)
+            .padding(.vertical, 7)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(0.09)).interactive(),
+            .regular.tint(Color.tronEmerald.opacity(tintOpacity)).interactive(),
             in: Capsule()
         )
-        .accessibilityLabel(subtitle.map { "\(title), \($0)" } ?? title)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private extension WorkspaceCompactPillButton where Accessory == EmptyView {
+    init(
+        icon: String,
+        title: String,
+        titleColor: Color,
+        tintOpacity: Double,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) {
+        self.init(
+            icon: icon,
+            title: title,
+            titleColor: titleColor,
+            tintOpacity: tintOpacity,
+            accessibilityLabel: accessibilityLabel,
+            action: action,
+            accessory: EmptyView.init
+        )
     }
 }
 

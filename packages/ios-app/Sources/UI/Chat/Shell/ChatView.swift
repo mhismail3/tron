@@ -12,11 +12,12 @@ struct ChatView: View {
     // MARK: - Environment & State (internal for extension access)
     @Environment(\.dismiss) var dismiss
     @Environment(\.dependencies) var dependencies
+    @Environment(\.scenePhase) private var scenePhase
     @State var viewModel: ChatViewModel
 
     // Convenience accessor
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
-    @State var inputHistory = InputHistoryStore()
+    @State var inputHistory = InputHistoryStore(defaults: .standard)
     @State var scrollCoordinator = ScrollStateCoordinator()
     @State var taskCoordinator: ChatViewTaskCoordinator
 
@@ -39,27 +40,17 @@ struct ChatView: View {
     @State var toolbarTitleOffsetY: CGFloat = 4
 
     // MARK: - Scroll State (internal for extension access)
-    @State var scrollProxy: ScrollViewProxy?
+    var scrollProxy: ScrollViewProxy? {
+        get { viewportMeasurements.scrollProxy }
+        nonmutating set { viewportMeasurements.scrollProxy = newValue }
+    }
+    @State var transcriptScrollPosition = ScrollPosition()
 
     // MARK: - Message Loading State (internal for extension access)
     @State var initialLoadComplete = false
-    @State var autoloadEarlierTask: Task<Void, Never>?
-    /// Content height reported by scroll geometry during initial load.
-    /// Used by the scroll convergence loop to detect when LazyVStack heights stabilize.
-    @State var initContentHeight: Int = 0
-    /// Measured distance from the visible viewport to the bottom anchor during
-    /// initial load. The transcript is not revealed until this reaches the
-    /// bottom tolerance, which prevents resumed sessions from opening mid-log.
-    @State var initDistanceFromBottom: CGFloat = .greatestFiniteMagnitude
-    /// Visible message frames in the scroll viewport coordinate space.
-    /// Used only to preserve the user's reading position when older history is prepended.
-    @State var messageViewportFrames: [UUID: CGRect] = [:]
-    @State var messageViewportHeight: CGFloat = 0
-    @State var isNearTopHistoryDetent = false
-    /// True after a top-detent sample has inserted one older page. This prevents
-    /// repeated loads from the same stale geometry sample while still allowing
-    /// the next user scroll to explicitly re-arm older-history paging.
-    @State var hasConsumedTopHistoryDetent = false
+    /// Non-observable measurement cache. Geometry callbacks must not invalidate
+    /// the same LazyVStack layout pass that produced their values.
+    @State var viewportMeasurements = ChatViewportMeasurements()
 
     // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?
@@ -67,13 +58,11 @@ struct ChatView: View {
     // MARK: - Stored Properties (internal for extension access)
     let sessionId: String
     let services: ChatSessionServices
-    let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(services: ChatSessionServices, sessionId: String, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(services: ChatSessionServices, sessionId: String, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
         self.services = services
-        self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
         _viewModel = State(wrappedValue: ChatViewModel(services: services, sessionId: sessionId))
@@ -87,8 +76,7 @@ struct ChatView: View {
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
-            sessionId: sessionId,
-            workspaceDeleted: workspaceDeleted
+            sessionId: sessionId
         )
         .sheet(isPresented: $viewModel.displayStreamState.showStreamSheet) {
             StreamSheetView(
@@ -140,10 +128,16 @@ struct ChatView: View {
             // Reasoning level is restored from server via reconstruction (config.reasoning_level events)
             // Note: Message entry animations are handled in .task after messages load
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            scrollCoordinator.sceneDidBecomeActive(
+                isPositionedByUser: transcriptScrollPosition.isPositionedByUser
+            )
+            guard initialLoadComplete else { return }
+            scrollToBottomIfAllowed(reason: "foreground activation")
+        }
         .onDisappear {
             taskCoordinator.invalidate()
-            autoloadEarlierTask?.cancel()
-            autoloadEarlierTask = nil
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             viewModel.clearLocalNotifications()
@@ -191,7 +185,8 @@ struct ChatView: View {
 
             // Connect, resume, and reconstruct session state in one flow
             logger.debug("[INIT] starting connectAndReconstruct", category: .ui)
-            await viewModel.connectAndReconstruct()
+            let recoveryGenerationBeforeReconstruction = viewModel.streamRecoveryRequestGeneration
+            let initialReconstructionOutcome = await viewModel.connectAndReconstruct()
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
@@ -201,24 +196,22 @@ struct ChatView: View {
             await handleInitialMessageVisibility(guardedBy: ticket)
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
+            if initialReconstructionOutcome == .retryableFailure
+                || viewModel.streamRecoveryRequestGeneration != recoveryGenerationBeforeReconstruction {
+                scheduleCoalescedRecoveryRefresh()
+            }
         }
         .onChange(of: services.connection.connectionState) { oldState, newState in
             // React when connection transitions to connected
-            if newState.isConnected && !oldState.isConnected {
-                taskCoordinator.replaceTask(.connectionRefresh) { ticket in
-                    guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                    if initialLoadComplete {
-                        // Reconnection after initial setup — reconstruct state
-                        await viewModel.reconnectAndReconstruct()
-                    } else {
-                        // First connection — use initial connect flow
-                        await viewModel.connectAndReconstruct()
-                    }
-                    guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                }
+            if initialLoadComplete, newState.isConnected && !oldState.isConnected {
+                scheduleReconstructionRefresh()
             }
             // Input-bar read-only mode is derived from `interactionPolicy` (500ms
             // reconnect debounce) — no per-view debounce state needed.
+        }
+        .onChange(of: viewModel.streamRecoveryRequestGeneration) { _, _ in
+            guard initialLoadComplete else { return }
+            scheduleCoalescedRecoveryRefresh()
         }
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
             // Navigate back when session doesn't exist on server
@@ -245,11 +238,69 @@ struct ChatView: View {
         }
     }
 
+    /// Connected edges and explicit stream-continuity markers share one
+    /// cancel-and-replace reconstruction task owner.
+    private func scheduleReconstructionRefresh() {
+        taskCoordinator.replaceTask(.connectionRefresh) { ticket in
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            await restoreContinuity(guardedBy: ticket)
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+        }
+    }
+
+    /// A marker burst represents one outstanding continuity gap. Keep one
+    /// follow-up behind any reconstruction already in flight instead of
+    /// repeatedly cancelling the repair.
+    private func scheduleCoalescedRecoveryRefresh() {
+        taskCoordinator.coalesceTask(.connectionRefresh) { ticket in
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            await restoreContinuity(guardedBy: ticket)
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+        }
+    }
+
+    /// Keep one continuity repair outstanding while the socket remains
+    /// connected. Retryable RPC failures retain the live-event buffer and use
+    /// bounded backoff; disconnects stop this task and the next connected edge
+    /// restarts it through the same keyed owner.
+    private func restoreContinuity(guardedBy ticket: ChatViewTaskTicket) async {
+        let retryDelays: [Duration] = [
+            .milliseconds(250),
+            .seconds(1),
+            .seconds(2),
+            .seconds(5),
+            .seconds(10)
+        ]
+        var retryIndex = 0
+
+        while taskCoordinator.isCurrent(ticket), !Task.isCancelled {
+            let outcome = await viewModel.connectAndReconstruct()
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+
+            switch outcome {
+            case .completed, .terminalFailure, .cancelled:
+                return
+            case .retryableFailure:
+                guard services.connection.connectionState.isConnected else { return }
+                let delay = retryDelays[min(retryIndex, retryDelays.count - 1)]
+                retryIndex += 1
+                logger.warning(
+                    "[RECONSTRUCT] Continuity repair failed; retrying after \(delay)",
+                    category: .session
+                )
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
     // MARK: - Chat Navigation Content (extracted to reduce body complexity for type-checker)
 
     private var chatNavigationContent: some View {
         chatCoreContent
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
         .toolbar {

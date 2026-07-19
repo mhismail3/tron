@@ -25,35 +25,19 @@ struct InputBar: View {
     @State private var showFilePicker = false
     @State private var showingImagePicker = false
     @State private var showRecentInputs = false
-    @State private var hasAppeared = false
-    @State private var showAttachmentButton = false
-
-    // Namespaces for morph animations
-    @Namespace private var actionButtonNamespace
-    @Namespace private var attachmentButtonNamespace
 
     private let actionButtonSize: CGFloat = 40
 
     // MARK: - Computed Properties
 
     private var canSend: Bool {
-        guard config.agentPhase.isIdle else { return false }
-        return state.hasContent && config.sendBlockReason == nil
+        config.canSend(hasContent: state.hasContent)
     }
 
     /// Show stop button while the agent is active.
     private var showStop: Bool {
         config.agentPhase.isActive
     }
-
-    private var shouldShowActionButton: Bool {
-        if config.agentPhase.isActive {
-            return true
-        }
-        return canSend
-    }
-
-    private var shouldShowStatusPills: Bool { true }
 
     private var shouldShowRecentInputsMenuAction: Bool {
         RecentInputHistoryPresentation.shouldShowMenuAction(
@@ -68,94 +52,76 @@ struct InputBar: View {
         return config.readOnly || config.agentPhase.isActive || config.isTranscribing || !config.isConnected
     }
 
-    private var textFieldTrailingPadding: CGFloat {
-        let basePadding: CGFloat = 14
-        var totalPadding = basePadding
-        if !shouldShowActionButton {
-            totalPadding += actionButtonSize + 8
-        }
-        return totalPadding
-    }
-
     // MARK: - Body
 
     var body: some View {
         VStack(spacing: 10) {
-            // Content area: attachments and status pills
-            contentArea
-                .padding(.horizontal, 16)
-                .transition(.opacity)
+            if !state.attachments.isEmpty {
+                attachmentArea
+                    .padding(.horizontal, 16)
+                    .transition(.opacity)
+            }
 
-            // Input row - floating liquid glass elements
-            HStack(alignment: .bottom, spacing: 12) {
-                // Attachment button
-                if showAttachmentButton {
-                    GlassAttachmentButton(
-                        isDisabled: config.agentPhase.isActive || config.readOnly,
-                        attachmentCapability: config.attachmentCapability,
-                        includeRecentInputs: shouldShowRecentInputsMenuAction,
-                        onSelect: presentAttachmentAction,
-                        buttonSize: actionButtonSize
-                    )
-                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+            // One composer surface owns the attachment action, text, context
+            // briefing progress, and trailing state action.
+            HStack(alignment: .bottom, spacing: 4) {
+                if !config.readOnly {
+                    // Reserve the attachment action's layout inside the glass.
+                    // The native Menu itself is overlaid after the material so
+                    // rebuilding its label cannot replace the glass owner.
+                    Color.clear
+                        .frame(width: actionButtonSize, height: actionButtonSize)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
 
-                // Text field with glass background
-                textFieldGlass
-                    .overlay(alignment: .leading) {
-                        Group {
-                            if !showAttachmentButton {
-                                AttachmentButtonDock(buttonSize: actionButtonSize)
-                                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
-                            }
-                        }
-                        // Prevent overlay from intercepting text selection drag gestures
-                        .allowsHitTesting(false)
-                    }
-                    .overlay(alignment: .trailing) {
-                        HStack(spacing: 8) {
-                            if !shouldShowActionButton {
-                                ActionButtonDock(namespace: actionButtonNamespace, buttonSize: actionButtonSize)
-                            }
-                        }
-                        .padding(.trailing, 8)
-                        // Prevent overlay from intercepting text selection drag gestures
-                        .allowsHitTesting(false)
-                    }
+                inputField
 
-                // Send/Abort button
-                if shouldShowActionButton && !config.readOnly {
-                    GlassActionButton(
-                        showStop: showStop,
-                        canSend: canSend,
-                        onSend: actions.onSend,
-                        onAbort: actions.onAbort,
-                        namespace: actionButtonNamespace,
-                        buttonSize: actionButtonSize
+                if !config.readOnly, config.showsContextBriefingControl {
+                    ContextBriefingButton(
+                        contextPercentage: config.contextPercentage,
+                        modelName: config.currentModelInfo?.name,
+                        onTap: actions.onContextTap
                     )
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
-                    // Explain the disabled state. Visible on long-press
-                    // / hover via `.help()`; always read by VoiceOver via
-                    // `.accessibilityHint()`.
-                    .help(config.sendBlockReason?.description ?? "")
-                    .accessibilityHint(config.sendBlockReason?.description ?? "")
                 }
 
                 if !config.readOnly {
-                    GlassMicButton(
+                    ComposerTrailingButton(
+                        showStop: showStop,
+                        canSend: canSend,
                         isRecording: config.isRecording,
                         isTranscribing: config.isTranscribing,
-                        isDisabled: micDisabled,
+                        micDisabled: micDisabled,
+                        onSend: actions.onSend,
+                        onAbort: actions.onAbort,
                         onMicTap: {
                             isFocused = false
                             actions.onMicTap()
                         },
                         buttonSize: actionButtonSize
                     )
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .help(config.sendBlockReason?.description ?? "")
                 }
-
+            }
+            .frame(minHeight: actionButtonSize)
+            .padding(.horizontal, 4)
+            .glassEffect(
+                .regular
+                    .tint(Color.tronPhthaloGreen.opacity(0.25))
+                    .interactive(!config.readOnly),
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
+            .overlay(alignment: .bottomLeading) {
+                if !config.readOnly {
+                    ComposerAttachmentButton(
+                        isDisabled: config.agentPhase.isActive || config.readOnly,
+                        attachmentCapability: config.attachmentCapability,
+                        includeRecentInputs: shouldShowRecentInputsMenuAction,
+                        onSelect: presentAttachmentAction,
+                        buttonSize: actionButtonSize
+                    )
+                    .padding(.leading, 4)
+                }
             }
             .overlay(alignment: .top) {
                 if config.showDragHint {
@@ -166,8 +132,6 @@ struct InputBar: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showAttachmentButton)
-            .animation(.tronStandard, value: shouldShowActionButton)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
@@ -209,59 +173,23 @@ struct InputBar: View {
                 )
             }
         }
-        // Entrance animation — staggered morph-ins for attachment/status.
-        // All timings/springs live in TronAnimationTiming so the
-        // cumulative timeline can be tweaked in one place.
-        .onAppear {
-            showAttachmentButton = false
-            hasAppeared = false
-
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarAttachmentDelayNanos)
-                withAnimation(TronAnimationTiming.inputBarButtonSpring) {
-                    showAttachmentButton = true
-                }
-                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarFinalDelayNanos)
-                withAnimation(TronAnimationTiming.inputBarFinalSpring) {
-                    hasAppeared = true
-                }
-            }
-        }
-        .onDisappear {
-            showAttachmentButton = false
-            hasAppeared = false
-        }
     }
 
-    // MARK: - Content Area
+    // MARK: - Attachment Area
 
     @ViewBuilder
-    private var contentArea: some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            if !state.attachments.isEmpty {
-                ContentAreaView(
-                    attachments: state.attachments,
-                    attachmentCapability: config.attachmentCapability,
-                    onRemoveAttachment: actions.onRemoveAttachment
-                )
-            }
-
-            Spacer(minLength: 0)
-
-            ContextStatusPill(
-                contextPercentage: config.contextPercentage,
-                modelName: config.currentModelInfo?.name,
-                hasAppeared: hasAppeared,
-                readOnly: config.readOnly,
-                onTap: actions.onContextTap
-            )
-            .opacity(shouldShowStatusPills ? 1 : 0)
-        }
+    private var attachmentArea: some View {
+        ContentAreaView(
+            attachments: state.attachments,
+            attachmentCapability: config.attachmentCapability,
+            onRemoveAttachment: actions.onRemoveAttachment
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Text Field
 
-    private var textFieldGlass: some View {
+    private var inputField: some View {
         ZStack(alignment: .leading) {
             if state.text.isEmpty && !isFocused {
                 HStack(spacing: 7) {
@@ -278,7 +206,7 @@ struct InputBar: View {
                         .foregroundStyle(.tronEmerald.opacity(0.5))
                         .contentTransition(.opacity)
                 }
-                .padding(.leading, 14)
+                .padding(.leading, 2)
                 .padding(.vertical, 10)
                 .id("\(config.placeholderText)-\(config.placeholderShowsProgress)")
                 .accessibilityIdentifier("message-input-placeholder")
@@ -288,27 +216,35 @@ struct InputBar: View {
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
                 .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
-                .padding(.leading, 14)
-                .padding(.trailing, textFieldTrailingPadding)
+                .padding(.horizontal, 2)
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
                 .focused($isFocused)
                 .disabled(config.readOnly)
                 .accessibilityLabel("Message input")
                 .onSubmit {
-                    if !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !config.readOnly {
-                        actions.onSend()
-                    }
+                    guard canSend else { return }
+                    actions.onSend()
                 }
                 .onKeyPress(.tab) {
                     resignInputFocusForKeyboardTraversal()
                 }
         }
         .frame(minHeight: actionButtonSize)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .animation(.tronStandard, value: shouldShowActionButton)
+        .overlay(alignment: .trailing) {
+            if config.isRecording {
+                GeometryReader { geometry in
+                    RecordingLevelWaveform(level: config.recordingAudioLevel)
+                        .frame(width: max(52, geometry.size.width * 0.22), height: 24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
         .animation(.easeOut(duration: 0.18), value: config.placeholderText)
         .animation(.easeOut(duration: 0.18), value: config.placeholderShowsProgress)
+        .animation(.easeOut(duration: 0.18), value: config.isRecording)
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {
@@ -342,43 +278,49 @@ struct InputBar: View {
 
     private func addCameraImageAttachment(_ capturedImage: UIImage) {
         Task {
-            // Camera always produces JPEG.
             let jpegData = capturedImage.jpegData(compressionQuality: 1.0) ?? Data()
-            let limits = config.providerImageLimits
-            if let result = await ImageProcessor.process(
-                originalData: jpegData,
-                mimeType: "image/jpeg",
-                limits: limits
-            ) {
-                let attachment = Attachment(
-                    type: .image,
-                    data: result.data,
-                    mimeType: result.mimeType,
-                    fileName: nil,
-                    originalSize: jpegData.count,
-                    wasConverted: result.wasConverted
-                )
+            guard let attachment = await AttachmentImagePreparer.prepare(
+                data: jpegData,
+                declaredMimeType: "image/jpeg",
+                limits: config.providerImageLimits
+            ) else {
                 await MainActor.run {
-                    actions.onAddAttachment(attachment)
+                    actions.onAttachmentError("Could not attach photo", "The captured photo could not be processed.")
                 }
+                return
+            }
+            await MainActor.run {
+                actions.onAddAttachment(attachment)
             }
         }
     }
 
-    private func addDocumentAttachment(url: URL, mimeType: String, fileName: String?) {
-        do {
-            let data = try Data(contentsOf: url)
-            let type = AttachmentType.from(mimeType: mimeType)
+    private func addDocumentAttachment(data: Data, mimeType: String, fileName: String?) {
+        if mimeType.hasPrefix("image/") {
+            Task {
+                guard let attachment = await AttachmentImagePreparer.prepare(
+                    data: data,
+                    declaredMimeType: mimeType,
+                    fileName: fileName,
+                    limits: config.providerImageLimits
+                ) else {
+                    await MainActor.run {
+                        actions.onAttachmentError("Could not attach image", "The selected image could not be processed.")
+                    }
+                    return
+                }
+                await MainActor.run {
+                    actions.onAddAttachment(attachment)
+                }
+            }
+        } else {
             let attachment = Attachment(
-                type: type,
+                type: AttachmentType.from(mimeType: mimeType),
                 data: data,
                 mimeType: mimeType,
                 fileName: fileName
             )
             actions.onAddAttachment(attachment)
-        } catch {
-            logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
-            actions.onAttachmentError("Could not attach file", error.localizedDescription)
         }
     }
 
@@ -411,13 +353,9 @@ extension Notification.Name {
         InputBar(
             state: previewState,
             config: InputBarConfig(
-                tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
                 contextPercentage: 30,
-                contextWindow: 200_000,
-                lastTurnInputTokens: 60000,
                 currentModelInfo: nil,
                 inputHistory: nil,
-                animationCoordinator: nil,
                 readOnly: false
             ),
             actions: InputBarActions()

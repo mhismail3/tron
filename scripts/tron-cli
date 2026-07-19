@@ -19,6 +19,7 @@ done
 LIB_DIR="$(cd -P "$(dirname "$_SOURCE")" && pwd)"
 
 # Source shared library (always lives alongside this script)
+unset RUST_WORKSPACE
 source "$LIB_DIR/tron-lib.sh"
 
 # Workspace path (recorded by tron install/manual-deploy)
@@ -46,17 +47,7 @@ cmd_help() {
     echo ""
     echo "Usage: tron <command> [options]"
     echo ""
-    echo -e "${BOLD}Runtime:${NC}"
-    echo "  status          Show service status"
-    echo "  start           Start launchd service"
-    echo "  stop            Stop service"
-    echo "  restart         Restart service"
-    echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
-    echo "  rollback        Restore previous binary (--yes to skip confirmation)"
-    echo "  login           Authenticate with a provider (--provider, --label for options)"
-    echo "  logs            Query database logs (use -h for options)"
-    echo "  errors          Show recent errors"
-    echo ""
+    show_runtime_command_help
     if [ -n "$_WORKSPACE_PATH" ] && [ -d "$_WORKSPACE_PATH" ]; then
         echo -e "${BOLD}Development (via workspace):${NC}"
         echo "  dev             Start server (-b build, -t test, -d background)"
@@ -77,26 +68,9 @@ case "${1:-help}" in
     help|--help|-h) cmd_help; exit 0 ;;
 esac
 
-ensure_tron_home
-ensure_default_configs
-
 case "$1" in
-    # Runtime (handled directly)
-    status)          cmd_status ;;
-    start)           cmd_start ;;
-    stop)            cmd_stop ;;
-    restart)         cmd_restart ;;
-    uninstall)       shift; cmd_uninstall "$@" ;;
-    logs)            shift; query_logs "$@" ;;
-    errors)          cmd_errors ;;
-    rollback)        shift; cmd_rollback "$@" ;;
-    login)           shift; cmd_login "$@" ;;
-    # Dev (delegate to workspace)
+    # Development commands delegate to the workspace.
     dev|manual-deploy|ci|bench|version|preflight|setup|install)
         delegate_to_workspace "$@" ;;
-    *)
-        print_error "Unknown command: $1"
-        cmd_help
-        exit 1
-        ;;
+    *) dispatch_runtime_command "$@" ;;
 esac

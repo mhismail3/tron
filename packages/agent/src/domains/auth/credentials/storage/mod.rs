@@ -1,9 +1,10 @@
 //! Auth storage file I/O.
 //!
 //! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions
-//! (`0o600`). Fresh Mac installs intentionally seed this file as `{}`; the
-//! loader treats only that exact empty object as a pristine install sentinel and
-//! materializes the normal schema on the first write.
+//! (`0o600`). Constitution creates an exact empty compatibility sentinel for
+//! profile validation; this owner materializes the normal schema on the first
+//! write. A missing file remains a legitimate direct-write case, and the loader
+//! retains sentinel compatibility for interrupted or older installs.
 
 use std::path::{Path, PathBuf};
 
@@ -26,7 +27,7 @@ pub fn auth_file_path(data_dir: &Path) -> PathBuf {
 /// * `Ok(None)`     — file does not exist (first-use on a clean machine).
 /// * `Ok(Some(..))` — file exists, parsed successfully, version matches. An
 ///   exact empty JSON object (`{}`) returns a pristine [`AuthStorage::new()`]
-///   so fresh installer seeds can be materialized by the first write.
+///   so legacy pristine sentinels can be materialized by the next write.
 /// * `Err(..)`      — read I/O failure, parse failure, or unsupported version.
 ///
 /// INVARIANT: A parse error surfaces as [`AuthError::MalformedAuthFile`] and
@@ -442,11 +443,14 @@ pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock>
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&lock_path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let lock_file = options.open(&lock_path)?;
 
     #[cfg(unix)]
     {

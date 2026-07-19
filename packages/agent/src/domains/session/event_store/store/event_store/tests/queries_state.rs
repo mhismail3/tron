@@ -1,47 +1,5 @@
 use super::*;
 
-// ── Batch session queries ─────────────────────────────────────────
-
-#[test]
-fn get_sessions_by_ids_basic() {
-    let store = setup();
-    let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/a", Some("A"), None)
-        .unwrap();
-    let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/b", Some("B"), None)
-        .unwrap();
-    store
-        .create_session("claude-opus-4-6", "/tmp/c", Some("C"), None)
-        .unwrap();
-
-    let ids = [cr1.session.id.as_str(), cr2.session.id.as_str()];
-    let result = store.get_sessions_by_ids(&ids).unwrap();
-    assert_eq!(result.len(), 2);
-    assert!(result.contains_key(&cr1.session.id));
-    assert!(result.contains_key(&cr2.session.id));
-}
-
-#[test]
-fn get_sessions_by_ids_empty() {
-    let store = setup();
-    let result = store.get_sessions_by_ids(&[]).unwrap();
-    assert!(result.is_empty());
-}
-
-#[test]
-fn get_sessions_by_ids_missing_omitted() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None)
-        .unwrap();
-
-    let ids = [cr.session.id.as_str(), "sess_nonexistent"];
-    let result = store.get_sessions_by_ids(&ids).unwrap();
-    assert_eq!(result.len(), 1);
-    assert!(result.contains_key(&cr.session.id));
-}
-
 #[test]
 fn get_session_message_previews_basic() {
     let store = setup();
@@ -183,6 +141,56 @@ fn get_events_by_type_basic() {
         .unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].event_type, "message.user");
+}
+
+#[test]
+fn turn_queries_use_denormalized_session_ordinals() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
+        .unwrap();
+    let first_start = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::StreamTurnStart,
+            payload: serde_json::json!({"turn": 20}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    let _ = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::TurnFailed,
+            payload: serde_json::json!({"turn": 20, "error": "cancelled"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    let second_start = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::StreamTurnStart,
+            payload: serde_json::json!({"turn": 21}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    assert_eq!(
+        store
+            .get_max_turn_by_type(&cr.session.id, EventType::StreamTurnStart)
+            .unwrap(),
+        Some(21)
+    );
+    assert_eq!(
+        store
+            .get_latest_event_by_type_and_turn(&cr.session.id, EventType::StreamTurnStart, 20,)
+            .unwrap()
+            .map(|row| row.id),
+        Some(first_start.id)
+    );
+    assert_eq!(second_start.turn, Some(21));
 }
 
 #[test]
@@ -665,7 +673,9 @@ fn event_rows_to_session_events_converts_correctly() {
         cost: None,
     };
 
-    let events = super::event_rows_to_session_events(&[row]);
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let events = super::super::state::event_rows_to_session_events(&conn, &[row]).unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].id, "evt_1");
     assert_eq!(events[0].event_type, EventType::SessionStart);
@@ -673,7 +683,7 @@ fn event_rows_to_session_events_converts_correctly() {
 }
 
 #[test]
-fn event_rows_to_session_events_handles_invalid_json() {
+fn event_rows_to_session_events_rejects_invalid_json() {
     let row = EventRow {
         id: "evt_1".to_string(),
         session_id: "sess_1".to_string(),
@@ -702,16 +712,20 @@ fn event_rows_to_session_events_handles_invalid_json() {
         cost: None,
     };
 
-    let events = super::event_rows_to_session_events(&[row]);
-    assert_eq!(events.len(), 1);
-    assert!(events[0].payload.is_null());
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let error = super::super::state::event_rows_to_session_events(&conn, &[row])
+        .expect_err("invalid durable payload must fail reconstruction");
+    let message = error.to_string();
+    assert!(message.contains("evt_1"));
+    assert!(message.contains("payload could not be resolved"));
 }
 
 #[test]
-fn event_rows_to_session_events_skips_unknown_event_types() {
+fn event_rows_to_session_events_rejects_unknown_event_types() {
     // Regression: previously an unknown event_type silently became
     // EventType::SessionStart, which would misclassify the row during
-    // reconstruction. Now the row is dropped and logged as corrupt.
+    // reconstruction. It must now fail the complete history conversion.
     let unknown = EventRow {
         id: "evt_bad".to_string(),
         session_id: "sess_1".to_string(),
@@ -767,8 +781,50 @@ fn event_rows_to_session_events_skips_unknown_event_types() {
         cost: None,
     };
 
-    let events = super::event_rows_to_session_events(&[unknown, good]);
-    assert_eq!(events.len(), 1, "unknown event type row must be filtered");
-    assert_eq!(events[0].id, "evt_good", "only the valid row survives");
-    assert_eq!(events[0].event_type, EventType::MessageUser);
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let error = super::super::state::event_rows_to_session_events(&conn, &[unknown, good])
+        .expect_err("unknown durable event type must fail reconstruction");
+    let message = error.to_string();
+    assert!(message.contains("evt_bad"));
+    assert!(message.contains("some.unknown.event.type"));
+}
+
+#[test]
+fn event_rows_to_session_events_rejects_unmatched_malformed_capability_completion() {
+    let row = EventRow {
+        id: "evt_bad_completion".to_string(),
+        session_id: "sess_1".to_string(),
+        parent_id: None,
+        sequence: 0,
+        depth: 0,
+        event_type: "capability.invocation.completed".to_string(),
+        timestamp: "2025-01-01T00:00:00Z".to_string(),
+        payload: r#"{"content":"output","isError":false}"#.to_string(),
+        content_blob_id: None,
+        workspace_id: "ws_1".to_string(),
+        role: None,
+        model_primitive_name: None,
+        invocation_id: None,
+        turn: None,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_creation_tokens: None,
+        checksum: None,
+        model: None,
+        latency_ms: None,
+        stop_reason: None,
+        has_thinking: None,
+        provider_type: None,
+        cost: None,
+    };
+
+    let store = setup();
+    let conn = store.conn().unwrap();
+    let error = super::super::state::event_rows_to_session_events(&conn, &[row])
+        .expect_err("malformed completion identity must fail before it can appear unmatched");
+    let message = error.to_string();
+    assert!(message.contains("evt_bad_completion"));
+    assert!(message.contains("invocationId"));
 }

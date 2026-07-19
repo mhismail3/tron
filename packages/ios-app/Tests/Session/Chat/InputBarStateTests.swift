@@ -43,28 +43,28 @@ final class InputBarStateTests: XCTestCase {
         XCTAssertEqual(fp1, fp2)
     }
 
-    // MARK: - hasDraftContent
+    // MARK: - hasContent
 
-    func testHasDraftContent_emptyState_returnsFalse() {
+    func testHasContent_emptyState_returnsFalse() {
         let state = InputBarState()
-        XCTAssertFalse(state.hasDraftContent)
+        XCTAssertFalse(state.hasContent)
     }
 
-    func testHasDraftContent_textOnly_returnsTrue() {
+    func testHasContent_textOnly_returnsTrue() {
         let state = InputBarState()
         state.text = "hello"
-        XCTAssertTrue(state.hasDraftContent)
+        XCTAssertTrue(state.hasContent)
     }
 
-    func testHasDraftContent_attachmentsOnly_returnsTrue() {
+    func testHasContent_attachmentsOnly_returnsTrue() {
         let state = InputBarState()
         state.attachments = [makeAttachment()]
-        XCTAssertTrue(state.hasDraftContent)
+        XCTAssertTrue(state.hasContent)
     }
 
-    func testHasDraftContent_whitespaceOnlyText_returnsFalse() {
+    func testHasContent_whitespaceOnlyText_returnsFalse() {
         let state = InputBarState()
         state.text = "   \n\t  "
-        XCTAssertFalse(state.hasDraftContent)
+        XCTAssertFalse(state.hasContent)
     }
 }

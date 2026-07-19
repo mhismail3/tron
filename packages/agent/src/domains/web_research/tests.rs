@@ -8,20 +8,20 @@ use super::service::{
     record_source_value_at,
 };
 use super::{
-    Deps, WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
+    WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
     WEB_RESEARCH_REVIEW_SCHEMA_ID, WEB_RESEARCH_SOURCE_KIND, WEB_RESEARCH_SOURCE_SCHEMA_ID,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
-    EngineResourceVersioningMode, FunctionId, Invocation, InvocationId, RiskLevel, TraceId,
-    builtin_resource_type_definitions,
+    EngineHostHandle, EngineResourceVersioningMode, FunctionId, Invocation, InvocationId,
+    RiskLevel, TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-27T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -30,12 +30,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -57,7 +55,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[
@@ -74,7 +72,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -84,7 +82,7 @@ impl Fixture {
     async fn request(&self, key: &str) -> Value {
         let invocation = self.write_invocation(key, request_payload(key));
         record_request_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -120,7 +118,7 @@ impl Fixture {
     ) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             scopes,
             &[
@@ -241,7 +239,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
         &fixture.session_id,
     );
     let review = record_review_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &review_invocation,
         &review_invocation.payload,
         default_operation_at(),
@@ -253,7 +251,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
         .expect("review id");
 
     let source_grant = derive_grant(
-        &fixture.deps,
+        &fixture.engine_host,
         "source-both-exact",
         &[
             READ_SCOPE,
@@ -299,7 +297,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
         &fixture.session_id,
     );
     let source = record_source_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &source_invocation,
         &source_invocation.payload,
         default_operation_at(),
@@ -313,7 +311,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
 
     assert_eq!(
         list_request_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("list-requests", json!({})),
             &json!({})
         )
@@ -326,7 +324,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
     );
     assert_eq!(
         list_review_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("list-reviews", json!({})),
             &json!({})
         )
@@ -339,7 +337,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
     );
     assert_eq!(
         list_source_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("list-sources", json!({})),
             &json!({})
         )
@@ -353,7 +351,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
 
     let request_grant = fixture.exact_read_grant("request-exact", request_id).await;
     let inspected_request = inspect_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "inspect-request",
             json!({"webResearchRequestResourceId": request_id}),
@@ -372,7 +370,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
 
     let review_grant = fixture.exact_read_grant("review-exact", review_id).await;
     let inspected_review = inspect_review_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "inspect-review",
             json!({"webResearchReviewResourceId": review_id}),
@@ -391,7 +389,7 @@ async fn request_review_source_record_list_inspect_and_replay_are_provider_safe(
 
     let source_grant = fixture.exact_read_grant("source-exact", source_id).await;
     let inspected_source = inspect_source_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "inspect-source",
             json!({"webResearchSourceResourceId": source_id}),
@@ -431,7 +429,7 @@ async fn unsafe_payloads_network_policy_and_missing_exact_selectors_are_rejected
     ] {
         let invocation = fixture.write_invocation("unsafe", payload);
         let error = record_request_value_at(
-            &fixture.deps,
+            &fixture.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -448,7 +446,7 @@ async fn unsafe_payloads_network_policy_and_missing_exact_selectors_are_rejected
     }
 
     let network_grant = derive_grant(
-        &fixture.deps,
+        &fixture.engine_host,
         "network-declared",
         &[
             READ_SCOPE,
@@ -482,7 +480,7 @@ async fn unsafe_payloads_network_policy_and_missing_exact_selectors_are_rejected
         &fixture.session_id,
     );
     let error = record_request_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &network_invocation,
         &network_invocation.payload,
         default_operation_at(),
@@ -495,7 +493,7 @@ async fn unsafe_payloads_network_policy_and_missing_exact_selectors_are_rejected
     let request = fixture.request("selector").await;
     let request_id = request["webResearchRequestResourceId"].as_str().unwrap();
     let selector_denied = inspect_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation(
             "selector-denied",
             json!({"webResearchRequestResourceId": request_id}),
@@ -508,7 +506,7 @@ async fn unsafe_payloads_network_policy_and_missing_exact_selectors_are_rejected
     assert!(selector_denied.contains("exact resource:"));
 
     let review_without_selector = record_review_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "review-denied",
             json!({
@@ -535,7 +533,7 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
     let oversized = json!({"lifecycleState": "x".repeat(300)});
 
     let error = list_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("request-list-unsupported", unsupported.clone()),
         &unsupported,
     )
@@ -545,7 +543,7 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
     assert!(error.contains("unsupported web research lifecycle ready_for_browser"));
 
     let error = list_review_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("review-list-unsupported", unsupported.clone()),
         &unsupported,
     )
@@ -555,7 +553,7 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
     assert!(error.contains("unsupported web research lifecycle ready_for_browser"));
 
     let error = list_source_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("source-list-unsupported", unsupported.clone()),
         &unsupported,
     )
@@ -565,7 +563,7 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
     assert!(error.contains("unsupported web research lifecycle ready_for_browser"));
 
     let error = list_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("request-list-oversized", oversized.clone()),
         &oversized,
     )
@@ -575,7 +573,7 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
     assert!(error.contains("lifecycleState must be a bounded non-wildcard token"));
 
     let error = list_review_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("review-list-oversized", oversized.clone()),
         &oversized,
     )
@@ -585,7 +583,7 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
     assert!(error.contains("lifecycleState must be a bounded non-wildcard token"));
 
     let error = list_source_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation("source-list-oversized", oversized.clone()),
         &oversized,
     )
@@ -596,14 +594,14 @@ async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     label: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     resource_selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    deps.engine_host
+    engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("web-research-{label}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").expect("parent grant"),

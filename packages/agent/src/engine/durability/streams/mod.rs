@@ -5,6 +5,9 @@
 //! all poll the same stream cursor model. Package-owned lifecycle topics such
 //! as `catalog.discovery` and `approval.lifecycle` publish durable evidence
 //! transitions through this substrate without becoming typed session events.
+//! Durable consumers own subscription rows through subscribe/poll/ack. An
+//! ephemeral transport can instead read a topic from an explicit cursor and
+//! keep its connection lifecycle state outside this store.
 //!
 //! INVARIANT: live subscriptions that omit an explicit cursor start at the
 //! topic tail. Historical replay is explicit (`afterCursor` / `cursor`) and

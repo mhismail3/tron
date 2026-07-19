@@ -1,5 +1,6 @@
 #![allow(missing_docs, unused_results)]
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -21,6 +22,52 @@ fn repo_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("packages/agent has a repo root")
         .to_path_buf()
+}
+
+fn read_repo_file(path: &str) -> String {
+    let full_path = repo_root().join(path);
+    std::fs::read_to_string(&full_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
+}
+
+fn sqlite_table_names(source: &str) -> BTreeSet<String> {
+    const MARKER: &str = "CREATE TABLE IF NOT EXISTS ";
+    source
+        .lines()
+        .filter_map(|line| {
+            let rest = line.split_once(MARKER)?.1;
+            let table_name: String = rest
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect();
+            (!table_name.is_empty()).then_some(table_name)
+        })
+        .collect()
+}
+
+fn project_reference_database_table_names() -> BTreeSet<String> {
+    let reference = read_repo_file("packages/agent/docs/project-reference.md");
+    let table_section = reference
+        .split_once("### Tables\n")
+        .expect("project reference must document the database tables")
+        .1;
+    let mut names = BTreeSet::new();
+    let mut rows_started = false;
+    for line in table_section.lines() {
+        if line.trim().is_empty() && rows_started {
+            break;
+        }
+        if !line.starts_with('|') || line.starts_with("| Table") || line.starts_with("|---") {
+            continue;
+        }
+        rows_started = true;
+        let table_cell = line
+            .split('|')
+            .nth(1)
+            .expect("database table row must have a name cell");
+        names.extend(table_cell.split('`').skip(1).step_by(2).map(str::to_owned));
+    }
+    names
 }
 
 fn setup_tron_home() -> (tempfile::TempDir, PathBuf) {
@@ -177,6 +224,39 @@ fn startup_migrations_only_touch_tron_sqlite() {
 }
 
 #[test]
+fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
+    let schema_sources = [
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+        "packages/agent/src/shared/storage/schema.rs",
+        "packages/agent/src/engine/durability/ledger/sqlite_codec.rs",
+        "packages/agent/src/engine/durability/queue/sqlite_store.rs",
+        "packages/agent/src/engine/durability/streams/sqlite_store.rs",
+        "packages/agent/src/engine/durability/state.rs",
+        "packages/agent/src/engine/durability/resources/store/sqlite_codec.rs",
+        "packages/agent/src/engine/authority/grants/mod.rs",
+        "packages/agent/src/engine/authority/leases.rs",
+        "packages/agent/src/engine/authority/compensation.rs",
+    ];
+    let source_tables = schema_sources
+        .into_iter()
+        .flat_map(|path| {
+            let tables = sqlite_table_names(&read_repo_file(path));
+            assert!(
+                !tables.is_empty(),
+                "schema source declares no tables: {path}"
+            );
+            tables
+        })
+        .collect();
+
+    assert_eq!(
+        project_reference_database_table_names(),
+        source_tables,
+        "project-reference database catalog must match active SQLite schema owners"
+    );
+}
+
+#[test]
 fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
     let root = repo_root();
     let scripts = [
@@ -199,6 +279,63 @@ fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
     assert!(tron_lib.contains("RUN_DIR=\"$TRON_HOME/internal/run\""));
     assert!(tron_lib.contains("CONTRIBUTOR_DIR=\"$RUN_DIR\""));
     assert!(tron_lib.contains("DEV_BUNDLE=\"$RUN_DIR/Tron-Dev.app\""));
+}
+
+#[test]
+fn runtime_owners_do_not_delete_unified_storage_ad_hoc() {
+    let root = repo_root();
+    assert!(
+        !root.join("scripts/reset-db").exists(),
+        "database-only reset scripts cannot preserve unified storage integrity"
+    );
+
+    let mut files = Vec::new();
+    collect_text_files(&root.join("scripts"), &mut files);
+    for file in files {
+        let Ok(body) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let relative = repo_relative(&file);
+        for forbidden in [
+            "rm -rf \"$TRON_HOME\"",
+            "rm -rf \"${TRON_HOME}\"",
+            "rm -rf ~/.tron",
+            "rm -rf \"$HOME/.tron\"",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "{} must not mutate unified runtime storage through {forbidden}",
+                relative
+            );
+        }
+        let owns_runtime_storage = matches!(
+            relative.as_str(),
+            "scripts/tron" | "scripts/tron-cli" | "scripts/tron-lib.sh"
+        ) || relative.starts_with("scripts/tron.d/")
+            || relative.starts_with("scripts/tron-lib.d/");
+        if owns_runtime_storage {
+            for forbidden in ["PRAGMA foreign_keys = OFF", "DELETE FROM "] {
+                assert!(
+                    !body.contains(forbidden),
+                    "{relative} must not mutate the runtime database through {forbidden}"
+                );
+            }
+        }
+    }
+
+    let mut rust_files = Vec::new();
+    collect_text_files(&root.join("packages/agent/src"), &mut rust_files);
+    for file in rust_files {
+        let Ok(body) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let compact: String = body.chars().filter(|ch| !ch.is_whitespace()).collect();
+        assert!(
+            !(compact.contains("remove_dir_all(") && compact.contains("paths::tron_home")),
+            "{} must not recursively delete the resolved Tron home",
+            repo_relative(&file)
+        );
+    }
 }
 
 #[test]
@@ -328,7 +465,7 @@ fn mac_bundle_script_has_no_push_relay_build_plane() {
 }
 
 #[test]
-fn tron_dev_has_no_push_relay_build_plane() {
+fn tron_dev_loads_only_private_push_relay_runtime_configuration() {
     let root = repo_root();
     let script_path = root.join("scripts/tron");
     let workspace_script_path = root.join("scripts/tron.d/workspace.sh");
@@ -340,8 +477,15 @@ fn tron_dev_has_no_push_relay_build_plane() {
     assert!(!script.contains("MAC_APP_LOCAL_ENV_FILE"));
     assert!(!workspace_script.contains("TRON_RELAY"));
     assert!(!workspace_script.contains("relay"));
-    assert!(!dev_script.contains("TRON_RELAY"));
-    assert!(!dev_script.contains("relay"));
+    assert!(dev_script.contains("packages/mac-app/.env.local"));
+    assert!(dev_script.contains("TRON_RELAY_URL|TRON_RELAY_SECRET"));
+    assert!(
+        dev_script.contains("TRON_RELAY_URL and TRON_RELAY_SECRET must be configured together")
+    );
+    assert!(dev_script.contains("chmod 600 \"$DEV_PLIST_PATH\""));
+    assert!(!dev_script.contains("TRON_APNS_KEY"));
+    assert!(!dev_script.contains("TRON_APNS_KEY_ID"));
+    assert!(!dev_script.contains("TRON_APNS_TEAM_ID"));
 }
 
 #[test]
@@ -402,6 +546,15 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
         });
     let body = &workflow[validate..distribute];
 
+    assert_eq!(
+        body.matches("asc testflight groups list").count(),
+        1,
+        "current Homebrew asc must be the single TestFlight group-list owner"
+    );
+    assert!(
+        !body.contains("asc testflight beta-groups list"),
+        "release workflow must not retain a legacy asc command-shape fallback"
+    );
     assert!(
         body.contains("attempting public-link auto-discovery"),
         "stale public TestFlight group config should use ASC public-link discovery"

@@ -228,12 +228,37 @@ pub struct ResponsesResponse {
     /// Response ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Provider error attached to a failed response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ResponsesError>,
+    /// Provider reason attached to an incomplete response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incomplete_details: Option<ResponsesIncompleteDetails>,
     /// Output items.
     #[serde(default)]
     pub output: Vec<ResponsesOutputItem>,
     /// Usage information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ResponsesUsage>,
+}
+
+/// Error details carried by a failed Responses API response.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ResponsesError {
+    /// Provider-specific error code.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// Human-readable provider error message.
+    #[serde(default)]
+    pub message: String,
+}
+
+/// Reason carried by an incomplete Responses API response.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ResponsesIncompleteDetails {
+    /// Provider reason, such as `max_output_tokens` or `content_filter`.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// A Responses API SSE event.
@@ -259,6 +284,12 @@ pub struct ResponsesSseEvent {
     /// Call ID (for `function_call_arguments.delta`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
+    /// Error code on a top-level `error` stream event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Error message on a top-level `error` stream event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     /// Full response (for `response.completed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<ResponsesResponse>,
@@ -291,6 +322,15 @@ pub enum SseEventType {
     /// Final complete response.
     #[serde(rename = "response.completed")]
     Completed,
+    /// Terminal provider failure containing a failed response object.
+    #[serde(rename = "response.failed")]
+    Failed,
+    /// Terminal response with partial output and an incomplete reason.
+    #[serde(rename = "response.incomplete")]
+    Incomplete,
+    /// Top-level Responses API stream error.
+    #[serde(rename = "error")]
+    Error,
     /// Forward-compatible catch-all for unknown event types.
     #[default]
     #[serde(other)]

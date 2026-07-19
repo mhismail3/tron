@@ -1,38 +1,20 @@
-use serde_json::Value;
-
 use crate::domains::registration::bindings::operation_bindings;
-use crate::engine::Invocation;
-use crate::shared::server::errors::CapabilityError;
+use crate::engine::EngineHostHandle;
 
-use super::{Deps, service};
+use super::service;
 
 operation_bindings! {
-    deps = Deps;
+    deps = EngineHostHandle;
     hidden = [];
     bindings = [
-        "search" => |invocation, deps| {
-            search(invocation, deps).await
+        "search" => |invocation, engine_host| {
+            service::search_catalog_value(engine_host, invocation, &invocation.payload).await
         },
-        "inspect" => |invocation, deps| {
-            inspect(invocation, deps).await
+        "inspect" => |invocation, engine_host| {
+            service::inspect_catalog_value(engine_host, invocation, &invocation.payload).await
         },
-        "conformance_report" => |invocation, deps| {
-            conformance_report(invocation, deps).await
+        "conformance_report" => |invocation, engine_host| {
+            service::conformance_report_value(engine_host, invocation, &invocation.payload).await
         },
     ];
-}
-
-async fn search(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
-    service::search_catalog_value(&deps.engine_host, invocation, &invocation.payload).await
-}
-
-async fn inspect(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
-    service::inspect_catalog_value(&deps.engine_host, invocation, &invocation.payload).await
-}
-
-async fn conformance_report(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    service::conformance_report_value(&deps.engine_host, invocation, &invocation.payload).await
 }

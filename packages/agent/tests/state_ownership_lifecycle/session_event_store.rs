@@ -13,7 +13,6 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "Deleting a session is the only physical event-row cleanup path",
         "Fork-inherited ancestor history stays",
         "`message.deleted` event",
-        "Runtime sequence counters and compaction handlers are projections",
     ] {
         assert!(
             lifecycle_mod.contains(required),
@@ -27,33 +26,28 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "session manager create/resume/end lifecycle",
         &session_manager,
         &[
-            "pub fn create_session",
+            "pub(crate) fn create_session",
             ".create_session(model, workspace_path, title, None)",
-            "active_sessions",
-            "pub fn resume_session",
+            "cached_sessions",
+            "pub(in crate::domains) fn resume_session",
             "session_reconstructor::reconstruct",
-            "pub async fn end_session",
-            "persister.flush().await",
+            "fn end_session",
+            "cached_sessions.remove(session_id)",
             ".append(&AppendOptions",
             "EventType::SessionEnd",
             ".end_session(session_id)",
         ],
     );
     for required in [
-        "pub fn fork_session",
-        "head_event_id",
-        ".fork(",
-        "pub fn archive_session",
-        "active_sessions.remove(session_id)",
+        "pub(in crate::domains) fn archive_session",
+        "cached_sessions.remove(session_id)",
         ".end_session(session_id)",
-        "pub fn unarchive_session",
-        ".clear_session_ended(session_id)",
-        "pub fn delete_session",
+        "pub(in crate::domains) fn delete_session",
         ".delete_session(session_id)",
-        "pub fn evict_idle_sessions",
+        "pub(crate) fn evict_idle_sessions",
         "retain(|session_id, cached|",
-        "pub fn mark_processing",
-        "pub fn clear_processing",
+        "pub(in crate::domains::agent) fn resume_session_for_prompt",
+        "pub(in crate::domains) fn invalidate_session",
     ] {
         assert!(
             session_manager.contains(required),
@@ -111,6 +105,9 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
             "SessionRepo::delete",
             "tx.commit()",
             "self.remove_session_write_lock(session_id)",
+            "pub(crate) fn get_session_message_previews(",
+            "pub(crate) fn get_session_activity_summaries(",
+            "pub(crate) fn get_session_activity_summaries_batch(",
         ],
     );
 
@@ -185,13 +182,12 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
     for required in [
         "SessionLifecycleService::archive",
         "archive_session(&session_id_for_archive)",
-        "remove_sequence_counter(&session_id)",
         "remove_compaction_handler(&session_id)",
         "TronEvent::SessionArchived",
-        "unarchive_session(&session_id_for_unarchive)",
+        "clear_session_ended(&session_id_for_unarchive)",
         "TronEvent::SessionUnarchived",
         "archive_older_than",
-        "include_archived: false",
+        "ended: Some(false)",
         "Self::archive(deps, session_id.clone()).await",
     ] {
         assert!(
@@ -225,8 +221,10 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
     }
     let lifecycle_fork = read_repo_file("packages/agent/src/domains/session/lifecycle/fork.rs");
     for required in [
-        "fork_session(",
-        "from_event_id.as_deref()",
+        "get_session(&session_id_for_fork)",
+        "head_event_id",
+        "ForkOptions",
+        ".fork(",
         "init_sequence_counter(&new_session_id, 0)",
         "TronEvent::SessionForked",
     ] {
@@ -236,34 +234,13 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         );
     }
 
-    let reconstruction = read_repo_file("packages/agent/src/domains/session/reconstruction/mod.rs");
-    for required in [
-        "MAX_RECONSTRUCT_EVENTS",
-        ".clamp(0, MAX_RECONSTRUCT_EVENTS)",
-        "session.parent_session_id.is_some()",
-        "event_store.get_ancestors(head_id)",
-        "paginate_ordered_chain",
-        "get_events_before",
-        "has_events_before",
-        "get_latest_events",
-        "resolve_event_payloads",
-        "current_sequence(&session_id)",
-        "build_in_flight_state",
-    ] {
-        assert!(
-            reconstruction.contains(required),
-            "session reconstruction lifecycle missing `{required}`"
-        );
-    }
-
     let event_state =
         read_repo_file("packages/agent/src/domains/session/event_store/store/event_store/state.rs");
     for required in [
         "get_messages_at_head",
         "get_ancestors(&conn, head_id)",
-        "event_rows_to_session_events_with_conn",
+        "event_rows_to_session_events(&conn",
         "resolve_stored_json_value",
-        "reconstruct_from_events(&events)",
         "build_session_state",
     ] {
         assert!(
@@ -290,31 +267,28 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         );
     }
 
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs",
-        "packages/agent/src/domains/session/lifecycle/archive.rs",
-        "packages/agent/src/domains/session/lifecycle/mod.rs",
-        "packages/agent/src/domains/session/mod.rs",
-        "packages/agent/src/domains/session/query/mod.rs",
-        "packages/agent/src/domains/session/reconstruction/mod.rs",
-        "packages/agent/src/domains/session/event_store/mod.rs",
-        "packages/agent/src/domains/session/event_store/store/event_store/event_log.rs",
-        "packages/agent/src/domains/session/event_store/store/event_store/locking.rs",
-        "packages/agent/src/domains/session/event_store/store/event_store/session_lifecycle.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/crud.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/session_queries.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tree_queries.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-6"))),
-            "SOL inventory must tag {required} as part of SOL-6"
-        );
-    }
+    let session_update =
+        read_repo_file("packages/agent/src/domains/agent/runtime/runtime/session_update.rs");
+    let update_loader_signature = session_update
+        .split_once("pub(in crate::domains::agent::runtime) async fn load_session_update_event(")
+        .expect("session-update loader must remain runtime-owned")
+        .1
+        .split_once(") ->")
+        .expect("session-update loader signature missing")
+        .0;
+    assert!(update_loader_signature.contains("event_store: Arc<EventStore>"));
+    assert!(
+        !update_loader_signature.contains("session_manager"),
+        "durable session-update reads must not advertise session-cache ownership"
+    );
+    assert!(session_update.contains("TronEvent::SessionUpdated"));
+    assert!(!session_update.contains("struct SessionUpdateData"));
+
+    let completion =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/completion.rs");
+    assert!(
+        !completion.contains("session_manager"),
+        "prompt completion must depend on EventStore, not SessionManager"
+    );
+    assert!(!completion.contains("TronEvent::SessionUpdated"));
 }

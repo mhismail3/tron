@@ -3,6 +3,7 @@ use crate::domains::model::providers::openai::types::{
     ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, MessageContent, OpenAIApiSettings,
     OpenAIAuth, ReasoningEffort, ResponsesInputItem,
 };
+use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::Message;
 use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
@@ -655,4 +656,41 @@ async fn ensure_valid_tokens_skips_refresh_when_valid() {
     // Tokens expire in 1 hour, no refresh needed
     let result = provider.ensure_valid_tokens().await;
     assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn failed_terminal_frame_without_newline_is_preserved_as_provider_error() {
+    use futures::StreamExt;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let body = concat!(
+        "data: {\"type\":\"response.failed\",\"response\":{",
+        "\"id\":\"resp_failed\",\"error\":{\"code\":\"server_error\",",
+        "\"message\":\"The model failed to generate a response.\"},\"output\":[]}}"
+    );
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+        .mount(&server)
+        .await;
+
+    let mut config = api_key_config("gpt-5.5");
+    config.base_url = Some(server.uri());
+    let provider = OpenAIProvider::new(config);
+    let mut stream = provider
+        .stream(&Context::default(), &ProviderStreamOptions::default())
+        .await
+        .unwrap();
+
+    assert!(matches!(stream.next().await, Some(Ok(StreamEvent::Start))));
+    assert!(matches!(
+        stream.next().await,
+        Some(Err(ProviderError::StreamApi {
+            code: Some(code),
+            retryable: true,
+            ..
+        })) if code == "server_error"
+    ));
 }

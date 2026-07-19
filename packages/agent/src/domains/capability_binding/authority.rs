@@ -1,7 +1,6 @@
-use crate::engine::{EngineGrant, Invocation, is_bootstrap_authority_grant_id};
+use crate::engine::{EngineGrant, EngineHostHandle, Invocation, is_bootstrap_authority_grant_id};
 use crate::shared::server::errors::CapabilityError;
 
-use super::Deps;
 use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_POLICY_KIND,
     CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
@@ -13,7 +12,7 @@ use super::{
 };
 
 pub(super) async fn ensure_write_authority(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
@@ -32,7 +31,7 @@ pub(super) async fn ensure_write_authority(
             "{operation} requires a derived non-bootstrap grant"
         )));
     }
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(host, invocation, operation).await?;
     for scope in [
         READ_SCOPE,
         WRITE_SCOPE,
@@ -49,11 +48,11 @@ pub(super) async fn ensure_write_authority(
 }
 
 pub(super) async fn inspect_read_grant(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(host, invocation, operation).await?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
     require_explicit_grant_item(
         &grant.allowed_authority_scopes,
@@ -68,7 +67,7 @@ pub(super) async fn inspect_read_grant(
 }
 
 pub(super) async fn ensure_shadow_trial_write_authority(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
@@ -87,7 +86,7 @@ pub(super) async fn ensure_shadow_trial_write_authority(
             "{operation} requires a derived non-bootstrap grant"
         )));
     }
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(host, invocation, operation).await?;
     for scope in [
         READ_SCOPE,
         WRITE_SCOPE,
@@ -104,11 +103,11 @@ pub(super) async fn ensure_shadow_trial_write_authority(
 }
 
 pub(super) async fn inspect_shadow_trial_read_grant(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(host, invocation, operation).await?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
     require_explicit_grant_item(
         &grant.allowed_authority_scopes,
@@ -123,7 +122,7 @@ pub(super) async fn inspect_shadow_trial_read_grant(
 }
 
 pub(super) async fn ensure_route_write_authority(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
@@ -142,7 +141,7 @@ pub(super) async fn ensure_route_write_authority(
             "{operation} requires a derived non-bootstrap grant"
         )));
     }
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(host, invocation, operation).await?;
     for scope in [
         READ_SCOPE,
         WRITE_SCOPE,
@@ -159,11 +158,11 @@ pub(super) async fn ensure_route_write_authority(
 }
 
 pub(super) async fn inspect_route_read_grant(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(host, invocation, operation).await?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
     require_explicit_grant_item(
         &grant.allowed_authority_scopes,
@@ -327,12 +326,11 @@ fn require_route_kind_selectors(
 }
 
 async fn inspect_grant(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    deps.engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+    host.inspect_authority_grant(&invocation.causal_context.authority_grant_id)
         .await
         .map_err(engine_error)?
         .ok_or_else(|| invalid(format!("{operation} authority grant was not found")))

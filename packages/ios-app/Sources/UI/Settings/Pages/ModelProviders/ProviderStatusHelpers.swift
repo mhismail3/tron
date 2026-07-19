@@ -195,10 +195,6 @@ enum ProviderStatusHelpers {
         return accounts.contains { !$0.isExpired || $0.hasRefreshToken }
     }
 
-    static func isServiceConfigured(_ info: ServiceAuthSnapshot?) -> Bool {
-        info?.hasApiKey == true
-    }
-
     static func trimmedLabel(_ label: String) -> String {
         label.trimmingCharacters(in: .whitespacesAndNewlines)
     }

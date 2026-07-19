@@ -463,7 +463,6 @@ impl LiveCatalog {
                 err,
             );
         }
-        self.invocations.push(record);
         result
     }
 }

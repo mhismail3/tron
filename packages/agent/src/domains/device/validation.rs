@@ -5,21 +5,13 @@ use crate::shared::server::errors::CapabilityError;
 
 pub(super) const LIST_LIMIT_DEFAULT: usize = 25;
 pub(super) const LIST_LIMIT_MAX: usize = 100;
-#[cfg(test)]
 pub(super) const DEVICE_ID_MAX_BYTES: usize = 160;
-#[cfg(test)]
 pub(super) const LABEL_MAX_BYTES: usize = 160;
-#[cfg(test)]
 pub(super) const REASON_MAX_BYTES: usize = 1_000;
-#[cfg(test)]
-pub(super) const MAX_EVENT_FAMILIES: usize = 12;
-#[cfg(test)]
+pub(super) const BUNDLE_ID_MAX_BYTES: usize = 255;
 pub(super) const DEFAULT_RETENTION_DAYS: u64 = 90;
-#[cfg(test)]
 pub(super) const MAX_RETENTION_DAYS: u64 = 366;
-#[cfg(test)]
 pub(super) const DEFAULT_MAX_INBOX_RECORDS: u64 = 500;
-#[cfg(test)]
 pub(super) const MAX_INBOX_RECORDS: u64 = 5_000;
 
 pub(super) fn required_string(payload: &Value, field: &str) -> Result<String, CapabilityError> {
@@ -57,17 +49,17 @@ pub(super) fn optional_u64(payload: &Value, field: &str) -> Result<Option<u64>, 
     }
 }
 
-#[cfg(test)]
 pub(super) fn optional_string_array(
     payload: &Value,
     field: &str,
+    max_items: usize,
 ) -> Result<Option<Vec<String>>, CapabilityError> {
     match payload.get(field) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Array(items)) => {
-            if items.len() > MAX_EVENT_FAMILIES {
+            if items.len() > max_items {
                 return Err(invalid(format!(
-                    "{field} may contain at most {MAX_EVENT_FAMILIES} entries"
+                    "{field} may contain at most {max_items} entries"
                 )));
             }
             items
@@ -119,7 +111,6 @@ pub(super) fn bounded_token(
     Ok(trimmed)
 }
 
-#[cfg(test)]
 pub(super) fn parse_platform(value: Option<String>) -> Result<String, CapabilityError> {
     match value.as_deref().unwrap_or("ios") {
         "ios" => Ok("ios".to_owned()),
@@ -127,7 +118,6 @@ pub(super) fn parse_platform(value: Option<String>) -> Result<String, Capability
     }
 }
 
-#[cfg(test)]
 pub(super) fn parse_apns_environment(value: &str) -> Result<String, CapabilityError> {
     match value {
         "development" | "production" => Ok(value.to_owned()),
@@ -137,7 +127,6 @@ pub(super) fn parse_apns_environment(value: &str) -> Result<String, CapabilityEr
     }
 }
 
-#[cfg(test)]
 pub(super) fn validate_apns_token(value: &str) -> Result<String, CapabilityError> {
     let trimmed = value.trim();
     if !(32..=512).contains(&trimmed.len()) || !trimmed.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -149,7 +138,6 @@ pub(super) fn validate_apns_token(value: &str) -> Result<String, CapabilityError
     Ok(trimmed.to_ascii_lowercase())
 }
 
-#[cfg(test)]
 pub(super) fn idempotency_key(
     invocation: &Invocation,
     payload: &Value,
@@ -163,21 +151,9 @@ pub(super) fn idempotency_key(
 }
 
 pub(super) fn resource_scope(
-    invocation: &Invocation,
+    _invocation: &Invocation,
 ) -> Result<EngineResourceScope, CapabilityError> {
-    invocation
-        .causal_context
-        .session_id
-        .as_ref()
-        .map(|session| EngineResourceScope::Session(session.clone()))
-        .or_else(|| {
-            invocation
-                .causal_context
-                .workspace_id
-                .as_ref()
-                .map(|workspace| EngineResourceScope::Workspace(workspace.clone()))
-        })
-        .ok_or_else(|| invalid("device operations require trusted session or workspace scope"))
+    Ok(EngineResourceScope::System)
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> CapabilityError {

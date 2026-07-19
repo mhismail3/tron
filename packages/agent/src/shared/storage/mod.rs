@@ -11,6 +11,9 @@
 //! schema only. Generation inspection errors fail closed, archived DB/WAL/SHM
 //! files carry an `archive-manifest.json`, and shared storage schema setup runs
 //! behind a savepoint with drift and payload-reference integrity checks.
+//! Startup and manual cleanup share one managed diagnostic horizon and active
+//! database budget. Those bounds prune only low-signal diagnostic data and
+//! unowned blobs; they are not chat, session, or memory retention policy.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,7 +33,7 @@ mod stats;
 mod tests;
 
 pub use archive::{archive_non_current_active_database, prepare_active_database};
-pub use maintenance::{checkpoint_database, enforce_size_budget, export_snapshot, retention_run};
+pub use maintenance::{checkpoint_database, export_snapshot};
 pub use payloads::{
     decode_blob_content, encode_blob_content, register_existing_blob_owner,
     resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
@@ -56,8 +59,11 @@ pub const STORAGE_GENERATION_KEY: &str = "storage_generation";
 /// previews and blob refs instead of duplicating full JSON in primary rows.
 pub const DEFAULT_MAX_INLINE_PAYLOAD_BYTES: usize = 8 * 1024;
 
-/// Default retention horizon for verbose diagnostic payload refs.
-pub const DEFAULT_VERBOSE_RETENTION_DAYS: i64 = 7;
+/// Managed retention horizon for verbose diagnostic evidence.
+pub const DIAGNOSTIC_RETENTION_DAYS: u64 = 7;
+
+/// Managed soft budget for the active engine database.
+pub const DATABASE_STORAGE_BUDGET_MB: u64 = 512;
 
 const ZSTD_COMPRESSION_THRESHOLD_BYTES: usize = 1024;
 
@@ -137,8 +143,8 @@ pub struct StorageExportReport {
 pub struct StorageRetentionReport {
     /// Whether this run only counted rows.
     pub dry_run: bool,
-    /// Verbose log retention horizon used for this pass.
-    pub verbose_retention_days: u64,
+    /// Diagnostic retention horizon used for this pass.
+    pub diagnostic_retention_days: u64,
     /// Log rows deleted or that would be deleted.
     pub rows_deleted: i64,
     /// Unreferenced blobs deleted or that would be deleted.
@@ -161,7 +167,7 @@ pub struct StorageBudgetReport {
     pub before_total_bytes: u64,
     /// Total active storage bytes after safe retention/checkpoint work.
     pub after_total_bytes: u64,
-    /// Whether the pre-enforcement total exceeded the configured budget.
+    /// Whether the pre-enforcement total exceeded the managed budget.
     pub over_limit: bool,
     /// Safe retention pass, when one was needed.
     pub retention: Option<StorageRetentionReport>,
@@ -416,22 +422,18 @@ impl StorageRuntime {
     }
 
     /// Run storage retention.
-    pub fn retention_run(
-        &self,
-        dry_run: bool,
-        verbose_retention_days: u64,
-    ) -> Result<StorageRetentionReport> {
-        retention_run(&self.path, dry_run, verbose_retention_days)
+    pub fn retention_run(&self, dry_run: bool) -> Result<StorageRetentionReport> {
+        maintenance::retention_run(&self.path, dry_run, DIAGNOSTIC_RETENTION_DAYS)
     }
 
-    /// Enforce the configured soft size budget with safe retention and a WAL
+    /// Enforce the managed soft size budget with safe retention and a WAL
     /// checkpoint. Audit-critical owner refs are never deleted by this path.
-    pub fn enforce_size_budget(
-        &self,
-        max_database_mb: u64,
-        verbose_retention_days: u64,
-    ) -> Result<StorageBudgetReport> {
-        enforce_size_budget(&self.path, max_database_mb, verbose_retention_days)
+    pub fn enforce_size_budget(&self) -> Result<StorageBudgetReport> {
+        maintenance::enforce_size_budget(
+            &self.path,
+            DATABASE_STORAGE_BUDGET_MB,
+            DIAGNOSTIC_RETENTION_DAYS,
+        )
     }
 }
 

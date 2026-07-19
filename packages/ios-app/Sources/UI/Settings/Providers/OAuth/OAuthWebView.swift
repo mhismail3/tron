@@ -12,6 +12,10 @@ struct OAuthWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
+        webView.scrollView.topEdgeEffect.style = .soft
+        webView.scrollView.leftEdgeEffect.style = .soft
+        webView.scrollView.bottomEdgeEffect.style = .soft
+        webView.scrollView.rightEdgeEffect.style = .soft
         webView.navigationDelegate = context.coordinator
         webView.load(URLRequest(url: url))
         return webView

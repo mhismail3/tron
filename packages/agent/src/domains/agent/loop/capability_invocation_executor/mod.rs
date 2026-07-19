@@ -3,10 +3,13 @@
 //! Each model-launched primitive call first derives a non-delegable child grant
 //! from `agent-capability-runtime` with the current canonical working directory
 //! as its only file root, `networkPolicy none`, no namespace authority, and the
-//! exact target function being invoked. The derived grant id and its bounded
-//! operation authority scopes, not the bootstrap runtime grant alone, are then
+//! exact target function and operation being invoked. The derived grant id and
+//! its bounded risk and operation authority scopes, not the bootstrap runtime
+//! grant alone, are then
 //! placed in the engine causal context for `capability::execute` so downstream
-//! domains can enforce goal, prompt-artifact, program-execution, resource,
+//! capability dispatch can revalidate the exact operation claim and canonical
+//! static scopes, base resource custody, and network policy before downstream
+//! domains enforce goal, prompt-artifact, program-execution, resource,
 //! filesystem, and Git contracts without wildcard selectors.
 //! Catalog discovery calls are intentionally narrower than generic execute
 //! calls: `catalog_search` and `catalog_inspect` derive only the execute wrapper
@@ -20,9 +23,14 @@
 //! operations; non-state operations never receive implicit state capabilities.
 //! Unsupported operation names receive only a rejection-only child grant with
 //! `capability::execute`, no resource selectors, and `networkPolicy none`. That
-//! grant exists solely so the canonical operation validator can return
-//! structured recovery guidance and persist a redacted failed trace; it cannot
-//! authorize domain behavior.
+//! grant exists solely so unsupported-operation handling can return structured
+//! recovery guidance and persist a redacted failed trace; its operation claim
+//! cannot authorize any supported domain behavior.
+//! The runtime-owned per-invocation abort registry is required for every model
+//! capability execution. Its registered child token is carried through the
+//! regular engine handler boundary so targeted and parent aborts stop that
+//! handler without bypassing engine lease, durable outcome, compensation, or
+//! capability-trace cleanup.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -54,9 +62,8 @@ use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, failure_result};
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
-    CAPABILITY_ENGINE_HOST_UNAVAILABLE, CAPABILITY_ENGINE_RESULT_MISSING,
-    CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID, ENGINE_POLICY_VIOLATION,
-    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    CAPABILITY_ENGINE_RESULT_MISSING, CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID,
+    ENGINE_POLICY_VIOLATION, FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -221,8 +228,8 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     /// rows using persisted row sequences.
     pub emit_lifecycle_events: bool,
     pub turn: i64,
-    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
-    pub engine_host: Option<&'a EngineHostHandle>,
+    pub invocation_abort_registry: &'a InvocationAbortRegistry,
+    pub engine_host: &'a EngineHostHandle,
     pub run_id: Option<&'a str>,
     pub provider_type: &'a str,
     pub trace_id: Option<&'a TraceId>,
@@ -294,14 +301,11 @@ pub async fn execute_capability_invocation(
         );
     }
 
-    let (per_invocation_cancel, _abort_guard) = match ctx.invocation_abort_registry {
-        Some(registry) => {
-            let child = registry.register(session_id, &invocation_id, ctx.cancel);
-            let guard = InvocationAbortGuard::new(Arc::clone(registry), session_id, &invocation_id);
-            (child, Some(guard))
-        }
-        None => (ctx.cancel.clone(), None),
-    };
+    let per_invocation_cancel =
+        ctx.invocation_abort_registry
+            .register(session_id, &invocation_id, ctx.cancel);
+    let _abort_guard =
+        InvocationAbortGuard::new(ctx.invocation_abort_registry, session_id, &invocation_id);
 
     let capability_result = if per_invocation_cancel.is_cancelled() {
         let failure = FailureEnvelope::new(
@@ -321,9 +325,9 @@ pub async fn execute_capability_invocation(
             ctx.parent_invocation_id,
             None,
         )
-    } else if let Some(engine_host) = ctx.engine_host {
+    } else {
         execute_capability_primitive_via_engine(
-            engine_host,
+            ctx.engine_host,
             engine_target,
             &model_primitive_name,
             &invocation_id,
@@ -336,32 +340,9 @@ pub async fn execute_capability_invocation(
             ctx.trace_id,
             ctx.parent_invocation_id,
             effective_args,
+            &per_invocation_cancel,
         )
         .await
-    } else {
-        let failure = FailureEnvelope::new(
-            CAPABILITY_ENGINE_HOST_UNAVAILABLE,
-            FailureCategory::Unavailable,
-            format!(
-                "Engine host is required to execute capability primitive '{model_primitive_name}'"
-            ),
-            false,
-            false,
-            FailureOrigin::Capability,
-        );
-        return CapabilityInvocationExecutionResult {
-            result: capability_failure_result(
-                failure,
-                &model_primitive_name,
-                &invocation_id,
-                session_id,
-                ctx.trace_id,
-                ctx.parent_invocation_id,
-                None,
-            ),
-            duration_ms: duration_ceil_ms(start.elapsed()),
-            stops_turn,
-        };
     };
 
     let result_stops_turn = capability_result.stop_turn.unwrap_or(false);
@@ -431,6 +412,7 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
+    cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
     let is_supported_execute_operation = model_primitive_name == "execute"
         && effective_args
@@ -532,7 +514,12 @@ async fn execute_capability_primitive_via_engine(
         }
     };
     let mut causal_context = with_agent_working_directory_metadata(
-        CausalContext::new(actor_id, ActorKind::Agent, runtime_grant.grant_id, trace_id),
+        CausalContext::new(
+            actor_id,
+            ActorKind::Agent,
+            runtime_grant.grant_id,
+            trace_id.clone(),
+        ),
         &working_directory,
     )
     .with_scope("capability.execute")
@@ -569,7 +556,23 @@ async fn execute_capability_primitive_via_engine(
         }
     }
     let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
-    let result = engine_host.invoke(invocation).await;
+    let result = engine_host
+        .invoke_regular_cancellable(invocation, cancellation)
+        .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            return capability_failure_result(
+                engine_error_to_failure(&error),
+                model_primitive_name,
+                invocation_id,
+                session_id,
+                Some(&trace_id),
+                parent_invocation_id,
+                Some(json!({ "primitiveTargetId": function_id.to_string() })),
+            );
+        }
+    };
     let result_trace_id = Some(result.trace_id.clone());
     let result_invocation_id = Some(result.invocation_id.clone());
     let replayed_from = result.replayed_from.clone();

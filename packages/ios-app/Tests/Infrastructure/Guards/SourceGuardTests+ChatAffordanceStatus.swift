@@ -19,6 +19,26 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedStatusPath).path))
     }
 
+    @Test("Chat composer reads canonical connection repository without a view-model mirror")
+    func testChatComposerReadsCanonicalConnectionRepository() throws {
+        let iosRoot = iosAppRoot()
+        let messageList = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+MessageList.swift"),
+            encoding: .utf8
+        )
+        let viewModel = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Session/Chat/ViewModel/ChatViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(messageList.contains("isConnected: services.connection.connectionState.isConnected"))
+        #expect(!messageList.contains("viewModel.connectionState"))
+        #expect(!viewModel.contains("var connectionState:"))
+        #expect(!viewModel.contains("connectionState = state"))
+        #expect(viewModel.contains("observeLoop({ connection.connectionState })"))
+        #expect(viewModel.contains("if case .disconnected = state"))
+    }
+
     @Test("Chat timeline autoloads earlier messages without manual pill")
     func testChatTimelineDoesNotMountManualEarlierMessagesPill() throws {
         let iosRoot = iosAppRoot()
@@ -46,6 +66,18 @@ extension SourceGuardTests {
         #expect(!source.contains(#""(\(compressionPercent)%)""#))
     }
 
+    @Test("Local timeline notifications stay single-line with full accessible detail")
+    func testLocalTimelineNotificationsStaySingleLine() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent("Sources/UI/Chat/Messages/NotificationViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("Text(\"\\u{2022}\")"))
+        #expect(source.contains(".lineLimit(1)"))
+        #expect(source.contains(".accessibilityLabel(notification.textContent)"))
+    }
+
     @Test("Chat conversation does not mount passive engine cockpit")
     func testChatConversationDoesNotMountPassiveEngineCockpit() throws {
         let iosRoot = iosAppRoot()
@@ -66,52 +98,8 @@ extension SourceGuardTests {
             #expect(!source.contains("case agentCockpit"))
         }
 
-        let cockpitViews = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitViews.swift"),
-            encoding: .utf8
-        )
-        let cockpitSummaryViews = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift"),
-            encoding: .utf8
-        )
-        let cockpitDiscoveryViews = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift"),
-            encoding: .utf8
-        )
-        let cockpitOperationDetailViews = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift"),
-            encoding: .utf8
-        )
-        #expect(cockpitViews.contains("struct AgentCockpitSheet"))
-        #expect(cockpitSummaryViews.contains("struct EngineCockpitDashboardBand"))
-        #expect(cockpitSummaryViews.contains("overview.invokableUnitLabel"))
-        #expect(cockpitSummaryViews.contains("overview.invokableUnitCount"))
-        #expect(cockpitSummaryViews.contains("briefingPhrase(verificationPhrase)"))
-        #expect(cockpitSummaryViews.contains(#"metric("Capability check""#))
-        #expect(!cockpitSummaryViews.contains(##""rev \(revision)""##))
-        #expect(!cockpitSummaryViews.contains("catalogTrustPhrase"))
-        #expect(!cockpitSummaryViews.contains(#"metric("Verified""#))
-        #expect(!cockpitSummaryViews.contains("Passed Verified"))
-        #expect(!cockpitSummaryViews.contains("Checked"))
-        #expect(!cockpitSummaryViews.contains(#"Image(systemName: "chevron.right")"#))
-        #expect(!cockpitDiscoveryViews.contains(#"Image(systemName: "chevron.right")"#))
-        #expect(cockpitDiscoveryViews.contains("struct CapabilityGroupCard"))
-        #expect(!cockpitDiscoveryViews.contains("capabilityMapRevision(currentRevision)"))
-        #expect(!cockpitDiscoveryViews.contains("Capability map version"))
-        #expect(cockpitDiscoveryViews.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"))
-        #expect(cockpitDiscoveryViews.contains("private struct CapabilityOperationCard"))
-        #expect(cockpitDiscoveryViews.contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"))
-        #expect(cockpitOperationDetailViews.contains(#"Text("Role")"#))
-        #expect(cockpitOperationDetailViews.contains("capabilityReplacementClassLabel"))
-        #expect(!cockpitViews.contains("struct AgentStatusCapsuleView"))
-        #expect(cockpitViews.contains(#"SheetTitle(title: "Engine Cockpit", color: .tronEmerald)"#))
-        #expect(cockpitViews.contains("SheetDismissButton(color: .tronEmerald)"))
-        #expect(cockpitViews.contains("TronSegmentedControl("))
-        #expect(!cockpitViews.contains(#"Picker("Cockpit""#))
-        #expect(cockpitViews.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
-
         let serverSettings = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineServersSection.swift"),
             encoding: .utf8
         )
         let engineSettings = try String(
@@ -124,34 +112,29 @@ extension SourceGuardTests {
         #expect(!engineSettings.contains(#"Image(systemName: "chevron.right")"#))
     }
 
-    @Test("Dashboard allows high-signal briefing and engine cockpit")
-    func testDashboardAllowsAgentBriefingBand() throws {
+    @Test("Dashboard is the single high-signal cockpit surface")
+    func testDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()
         let sidebar = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
             encoding: .utf8
         )
-        let briefingViews = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentBriefing/AgentBriefingViews.swift"),
+        let theme = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Theme/TronColors.swift"),
             encoding: .utf8
         )
-
-        #expect(sidebar.contains("AgentBriefingDashboardBand("))
-        #expect(sidebar.contains("AgentBriefingSheet("))
         #expect(sidebar.contains("EngineCockpitDashboardBand("))
         #expect(sidebar.contains("AgentCockpitSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
-        #expect(sidebar.contains("briefingRefreshKey"))
         #expect(sidebar.contains("cockpitRefreshKey"))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
-        #expect(sidebar.contains(".task(id: briefingRefreshKey)"))
         #expect(sidebar.contains(".task(id: cockpitRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
+        #expect(theme.contains(".glassEffect(\n                        .regular.tint(color.opacity(glassOpacity)).interactive(),\n                        in: shape\n                    )\n                    .contentShape(shape)"))
+        #expect(sidebar.components(separatedBy: ".task(id: cockpitRefreshKey)").count == 2)
+        #expect(sidebar.components(separatedBy: "AgentCockpitSheet(").count == 2)
         #expect(!sidebar.contains("Dash" + "board" + "V2"))
-        #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
-        #expect(!briefingViews.contains(#"Image(systemName: "chevron.right")"#))
-        #expect(!briefingViews.contains(#"SheetTitle(title: "Runtime Cockpit""#))
 
         let retiredLegacyHomePaths = [
             "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2Components.swift",
@@ -173,12 +156,12 @@ extension SourceGuardTests {
             .deletingLastPathComponent()
         let retiredSurfaceName = "Agent " + "Control"
         let retiredIdentifierPrefix = "agent-" + "control"
-        let readme = try String(
+        let projectReference = try String(
             contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
-        let contextPill = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/ContextStatusPill.swift"),
+        let contextButton = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/ContextBriefingButton.swift"),
             encoding: .utf8
         )
         let contextSheet = try String(
@@ -197,18 +180,15 @@ extension SourceGuardTests {
             contentsOf: repoRoot.appendingPathComponent("packages/agent/src/domains/context_control/tests.rs"),
             encoding: .utf8
         )
-        let contextAudit = try String(
-            contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/context-control-primitive-ui-audit.md"),
-            encoding: .utf8
-        )
         let uiTest = iosRoot.appendingPathComponent("UITests/SessionBriefingUITests.swift")
 
         #expect(FileManager.default.fileExists(atPath: uiTest.path))
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/" + "Agent" + "Control" + "UITests.swift").path))
-        #expect(readme.contains("Session Briefing sheet opened from the timeline/model pill"))
-        #expect(!readme.contains(retiredSurfaceName + " sheet opened from the timeline/model pill"))
-        #expect(contextPill.contains("Opens Session Briefing"))
-        #expect(!contextPill.contains("Opens " + retiredSurfaceName))
+        #expect(projectReference.contains("Session Briefing sheet opened from the composer context ring"))
+        #expect(!projectReference.contains(retiredSurfaceName + " sheet opened from the composer context ring"))
+        #expect(contextButton.contains("Context Briefing Button"))
+        #expect(contextButton.contains(".accessibilityLabel(\"Session Briefing\")"))
+        #expect(!contextButton.contains("Opens " + retiredSurfaceName))
         #expect(contextSheet.contains("session-briefing-context-summary"))
         #expect(contextSheet.contains("session-briefing-composition-card"))
         #expect(contextSheet.contains("session-briefing-model-card"))
@@ -222,14 +202,6 @@ extension SourceGuardTests {
         #expect(!contextContract.contains("First-party " + retiredSurfaceName + " UI wrapper"))
         #expect(!contextContract.contains(#"""# + retiredIdentifierPrefix + #"""#))
         #expect(!contextContractTests.contains(retiredSurfaceName))
-        #expect(contextAudit.contains("restored Session Briefing surface"))
-        #expect(contextAudit.contains("Implemented Candidate: Session Briefing / Context Control"))
-        #expect(contextAudit.contains("retired broad chat control panel"))
-        #expect(contextAudit.contains("Old surface history: the retired chat model/percentage pill control"))
-        #expect(!contextAudit.contains(retiredSurfaceName))
-        #expect(!contextAudit.contains("restored " + retiredSurfaceName + " surface"))
-        #expect(!contextAudit.contains("Implemented Candidate: " + retiredSurfaceName + " / Context Control"))
-        #expect(!contextAudit.contains("inside an " + retiredSurfaceName + " host surface"))
     }
 
     @Test("Session list rows use inset liquid glass containers")
@@ -289,11 +261,15 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedOrbitIndicator).path))
     }
 
-    @Test("Chat scoped errors do not use generic alert surface")
-    func testChatScopedErrorsAvoidGenericAlertSurface() throws {
+    @Test("Chat scoped errors use only the local timeline surface")
+    func testChatScopedErrorsUseOnlyLocalTimelineSurface() throws {
         let iosRoot = iosAppRoot()
         let chatView = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView.swift"),
+            encoding: .utf8
+        )
+        let viewModel = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Session/Chat/ViewModel/ChatViewModel.swift"),
             encoding: .utf8
         )
         let errorPath = "Sources/Session/Chat/ViewModel/ChatViewModel+Errors.swift"
@@ -305,5 +281,10 @@ extension SourceGuardTests {
         #expect(!chatView.contains(#".alert("Error""#))
         #expect(errorRouting.contains("appendLocalError"))
         #expect(errorRouting.contains("LocalChatNotification.error"))
+        #expect(!errorRouting.contains("clearError"))
+        #expect(!viewModel.contains("var errorMessage: String?"))
+        #expect(!viewModel.contains("var showError: Bool"))
+        #expect(viewModel.contains("func showError(_ message: String)"))
+        #expect(viewModel.contains("handleError(message, severity: .fatal)"))
     }
 }

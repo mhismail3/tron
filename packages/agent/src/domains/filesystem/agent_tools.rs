@@ -91,14 +91,21 @@ pub(crate) async fn list_value(
             })
         });
         let total = entries.len();
+        let result_limit_reached = total > max_results;
         entries.truncate(max_results);
+        let returned = entries.len();
         Ok(json!({
             "schemaVersion": SCHEMA_VERSION,
             "status": "ok",
             "operation": "list",
             "path": path_value(&path),
             "entries": entries,
-            "truncated": total > max_results,
+            "total": total,
+            "returned": returned,
+            "omitted": total.saturating_sub(returned),
+            "resultLimitReached": result_limit_reached,
+            "walkLimitReached": false,
+            "truncated": result_limit_reached,
             "limit": max_results
         }))
     })
@@ -129,13 +136,16 @@ pub(crate) async fn find_value(
             .min(MAX_RESULTS);
         let mut visited = 0usize;
         let mut matches = Vec::new();
+        let mut result_limit_reached = false;
+        let mut walk_limit_reached = false;
         for entry in WalkDir::new(&base.canonical).follow_links(false) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(_) => continue,
             };
             visited += 1;
-            if visited > MAX_WALK_ENTRIES || matches.len() >= max_results {
+            if visited > MAX_WALK_ENTRIES {
+                walk_limit_reached = true;
                 break;
             }
             let rel = relative_to(&root, entry.path());
@@ -146,6 +156,10 @@ pub(crate) async fn find_value(
             let query_match = query.as_ref().is_some_and(|q| rel_lower.contains(q));
             let glob_match = glob.as_ref().is_some_and(|g| wildcard_match(g, &rel));
             if query_match || glob_match {
+                if matches.len() >= max_results {
+                    result_limit_reached = true;
+                    break;
+                }
                 matches.push(entry_value(&root, entry.path()));
             }
         }
@@ -155,7 +169,9 @@ pub(crate) async fn find_value(
             "operation": if glob_only { "glob" } else { "find" },
             "path": path_value(&base),
             "matches": matches,
-            "truncated": visited > MAX_WALK_ENTRIES,
+            "resultLimitReached": result_limit_reached,
+            "walkLimitReached": walk_limit_reached,
+            "truncated": walk_limit_reached || result_limit_reached,
             "limit": max_results
         }))
     })
@@ -184,13 +200,17 @@ pub(crate) async fn search_text_value(
         let mut visited = 0usize;
         let mut results = Vec::new();
         let mut skipped_binary = 0usize;
-        for entry in WalkDir::new(&base.canonical).follow_links(false) {
+        let mut truncated_input_files = 0usize;
+        let mut result_limit_reached = false;
+        let mut walk_limit_reached = false;
+        'walk: for entry in WalkDir::new(&base.canonical).follow_links(false) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(_) => continue,
             };
             visited += 1;
-            if visited > MAX_WALK_ENTRIES || results.len() >= max_results {
+            if visited > MAX_WALK_ENTRIES {
+                walk_limit_reached = true;
                 break;
             }
             if !entry.file_type().is_file() {
@@ -208,20 +228,30 @@ pub(crate) async fn search_text_value(
                 skipped_binary += 1;
                 continue;
             }
+            if snapshot.truncated {
+                truncated_input_files += 1;
+            }
             let Some(text) = snapshot.text.as_deref() else {
                 continue;
             };
             for (index, line) in text.lines().enumerate() {
                 if line.to_lowercase().contains(&query_lower) {
+                    if results.len() >= max_results {
+                        result_limit_reached = true;
+                        break 'walk;
+                    }
+                    let preview = truncate_chars(line, MAX_LINE_PREVIEW);
+                    let preview_returned_bytes = preview.len();
                     results.push(json!({
                         "relativePath": rel,
                         "lineNumber": index + 1,
-                        "preview": truncate_chars(line, MAX_LINE_PREVIEW),
+                        "preview": preview,
+                        "previewSourceBytes": line.len(),
+                        "previewReturnedBytes": preview_returned_bytes,
+                        "previewOmittedBytes": line.len().saturating_sub(preview_returned_bytes),
+                        "previewTruncated": preview_returned_bytes < line.len(),
                         "contentHash": snapshot.content_hash,
                     }));
-                    if results.len() >= max_results {
-                        break;
-                    }
                 }
             }
         }
@@ -233,7 +263,10 @@ pub(crate) async fn search_text_value(
             "path": path_value(&base),
             "matches": results,
             "skippedBinaryFiles": skipped_binary,
-            "truncated": visited > MAX_WALK_ENTRIES,
+            "truncatedInputFiles": truncated_input_files,
+            "resultLimitReached": result_limit_reached,
+            "walkLimitReached": walk_limit_reached,
+            "truncated": walk_limit_reached || result_limit_reached || truncated_input_files > 0,
             "limit": max_results
         }))
     })

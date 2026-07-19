@@ -5,7 +5,8 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::domains::agent::context::soul::AGENT_SOUL;
-use crate::shared::protocol::events::{BaseEvent, error_event};
+use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
+use crate::shared::server::failure::FailureEnvelope;
 
 use super::{AgentConfig, AgentFactory, CreateAgentOpts};
 
@@ -17,17 +18,20 @@ pub(super) struct BuiltPromptAgent {
 pub(super) async fn build_prompt_agent(
     responder_factory: Arc<dyn crate::domains::model::responder::ModelResponderFactory>,
     engine_host: crate::engine::EngineHostHandle,
-    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+    invocation_abort_registry: Arc<InvocationAbortRegistry>,
     settings: &crate::domains::settings::TronSettings,
     session_id: &str,
     model: &str,
     working_dir: &str,
     server_origin: String,
     messages: Vec<crate::shared::protocol::messages::Message>,
-    initial_turn_count: u32,
+    initial_turn_offset: u32,
     resolved_workspace_id: Option<String>,
-) -> Result<BuiltPromptAgent, ()> {
-    let responder = match responder_factory.create_for_model(model).await {
+) -> Result<BuiltPromptAgent, FailureEnvelope> {
+    let responder = match responder_factory
+        .create_for_model(model, &settings.api)
+        .await
+    {
         Ok(responder) => responder,
         Err(error) => {
             warn!(
@@ -39,8 +43,7 @@ pub(super) async fn build_prompt_agent(
             if failure.model.is_none() {
                 failure.model = Some(model.to_owned());
             }
-            let _ = broadcast.emit(error_event(BaseEvent::now(session_id), &failure, None));
-            return Err(());
+            return Err(failure);
         }
     };
 
@@ -76,9 +79,10 @@ pub(super) async fn build_prompt_agent(
         CreateAgentOpts::primitive(
             responder,
             messages,
-            initial_turn_count,
+            initial_turn_offset,
             compactor_settings.into(),
-            Some(engine_host),
+            invocation_abort_registry,
+            engine_host,
         ),
     );
 

@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    WorkerId,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -16,13 +16,13 @@ use super::contract::{
 };
 use super::projection::{inspected_repository_tree, repository_tree_summary};
 use super::validation::*;
-use super::{Deps, REPOSITORY_TREE_SNAPSHOT_KIND, REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID};
+use super::{REPOSITORY_TREE_SNAPSHOT_KIND, REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID};
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.repository_tree.idempotency.v1";
 const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.repository_tree.idempotency.v1\0";
 
 pub(crate) async fn record_repository_tree_snapshot_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
@@ -53,7 +53,7 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
             "idempotencyKey",
         ],
     )?;
-    ensure_write_authority(deps, invocation, "repository_tree_snapshot").await?;
+    ensure_write_authority(engine_host, invocation, "repository_tree_snapshot").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let snapshot_id = optional_string(payload, "snapshotId")?
@@ -86,8 +86,7 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = repository_tree_resource_id(&scope, &snapshot_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -127,8 +126,7 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: REPOSITORY_TREE_SNAPSHOT_KIND.to_owned(),
@@ -155,7 +153,7 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
         .clone()
         .ok_or_else(|| invalid("repository tree resource was created without a current version"))?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "repository_tree.recorded",
         &resource,
@@ -174,13 +172,13 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
         "idempotentReplay": false,
         "repositoryTreeResourceId": resource.resource_id,
         "repositoryTreeVersionId": version_id,
-        "record": repository_tree_summary_for_resource(deps, &resource).await?,
+        "record": repository_tree_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "repository_tree")]
     }))
 }
 
 pub(crate) async fn list_repository_tree_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
@@ -189,7 +187,7 @@ pub(crate) async fn list_repository_tree_value(
         "repository_tree_list",
         &["operation", "limit", "includeArchived", "repositoryRefId"],
     )?;
-    let _grant = inspect_read_grant(deps, invocation, "repository_tree_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "repository_tree_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -199,8 +197,7 @@ pub(crate) async fn list_repository_tree_value(
     let repository_ref_id = optional_string(payload, "repositoryRefId")?
         .map(|value| bounded_token("repositoryRefId", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(REPOSITORY_TREE_SNAPSHOT_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -216,8 +213,7 @@ pub(crate) async fn list_repository_tree_value(
     let truncated = resources.len() > limit;
     let mut records = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -262,7 +258,7 @@ pub(crate) async fn list_repository_tree_value(
 }
 
 pub(crate) async fn inspect_repository_tree_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
@@ -271,12 +267,11 @@ pub(crate) async fn inspect_repository_tree_value(
         "repository_tree_inspect",
         &["operation", "repositoryTreeResourceId"],
     )?;
-    let _grant = inspect_read_grant(deps, invocation, "repository_tree_inspect").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "repository_tree_inspect").await?;
     let resource_id = required_string(payload, "repositoryTreeResourceId")?;
     validate_repository_tree_resource_id(&resource_id)?;
     let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -359,11 +354,10 @@ fn repository_tree_snapshot(input: RepositoryTreeRecordInput<'_>) -> Value {
 }
 
 async fn repository_tree_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?
@@ -433,13 +427,13 @@ fn validate_repository_tree_resource_id(value: &str) -> Result<(), CapabilityErr
 }
 
 async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: REPOSITORY_TREE_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

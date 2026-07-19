@@ -2,21 +2,10 @@
 
 use serde_json::Value;
 
-use crate::engine::VisibilityScope;
 use crate::shared::server::events::ServerEventPayload;
-use crate::transport::engine::EngineTransportContext;
+use crate::transport::runtime::streams::STREAM_RECOVERY_REQUIRED_EVENT_TYPE;
 
 use super::wire::ProtocolEvent;
-
-pub(super) fn visibility_for_context(context: &EngineTransportContext) -> VisibilityScope {
-    if context.session_id.is_some() {
-        VisibilityScope::Session
-    } else if context.workspace_id.is_some() {
-        VisibilityScope::Workspace
-    } else {
-        VisibilityScope::System
-    }
-}
 
 pub(super) fn protocol_event_value(
     event: &crate::engine::EngineStreamEvent,
@@ -79,21 +68,28 @@ pub(super) fn stream_event_matches_filters(
     let Some(object) = filters.as_object() else {
         return false;
     };
+    let server_payload = server_payload_from_stream_event(event);
+    // A lag marker describes a break before session projection, so it cannot
+    // name every affected session. Let it cross session/workspace narrowing;
+    // explicit event-type filters still apply below.
+    let requires_global_recovery = server_payload.event_type == STREAM_RECOVERY_REQUIRED_EVENT_TYPE;
     if let Some(session_id) = object.get("sessionId").and_then(Value::as_str)
+        && !requires_global_recovery
         && stream_event_session_id(event).as_deref() != Some(session_id)
     {
         return false;
     }
     if let Some(workspace_id) = object.get("workspaceId").and_then(Value::as_str)
+        && !requires_global_recovery
         && stream_event_workspace_id(event).as_deref() != Some(workspace_id)
     {
         return false;
     }
     if let Some(event_type) = object.get("eventType").and_then(Value::as_str) {
-        return server_payload_from_stream_event(event).event_type == event_type;
+        return server_payload.event_type == event_type;
     }
     if let Some(types) = object.get("eventTypes").and_then(Value::as_array) {
-        let event_type = server_payload_from_stream_event(event).event_type;
+        let event_type = server_payload.event_type;
         return types
             .iter()
             .any(|value| value.as_str() == Some(event_type.as_str()));

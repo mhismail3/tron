@@ -393,7 +393,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             connection: DeepLinkTestConnectionRepository(),
             events: DeepLinkTestSessionEventRepository(),
             sessions: sessions,
-            agent: DefaultAgentRepository(agentClient: AgentClient(transport: transport)),
+            agent: AgentClient(transport: transport),
             models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
             messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
             transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
@@ -418,6 +418,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             inFlight: nil,
             lastSequence: Int64(events.map(\.sequence).max() ?? 0),
             isRunning: false,
+            isCompacting: false,
+            compactionReason: nil,
             agentPhase: "idle",
             metadata: ReconstructMetadata(
                 model: nil,
@@ -452,13 +454,8 @@ final class ChatViewModelFindMessageTests: XCTestCase {
 @MainActor
 private final class DeepLinkTestConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState = .connected
-    var isConnected: Bool { true }
 
     func connect() async {}
-    func disconnect() async {}
-    func verifyConnection() async -> Bool { true }
-    func manualRetry() async {}
-    func setBackgroundState(_ inBackground: Bool) {}
 }
 
 @MainActor

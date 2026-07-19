@@ -45,26 +45,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Minimum height this step needs inside the fixed wizard canvas.
-    /// `WizardShell` keeps the actual window at `WizardLayout.height`
-    /// (the tallest step's height) so horizontal page transitions always
-    /// run inside one stable viewport.
-    ///
-    /// Heights are deliberately collapsed into bands rather than tuned
-    /// per-step: the lightweight opening steps share a single lower-height
-    /// band, while the fixed shell height is set to the tallest
-    /// permissions page.
-    var preferredHeight: CGFloat {
-        switch self {
-        case .welcome: return 360
-        case .tailscale: return 360
-        case .permissions: return 360
-        case .iosBeta: return 420
-        case .install: return 440
-        case .pairingInfo: return 420
-        case .done: return 320
-        }
-    }
 }
 
 /// Discriminated source for the icon rendered in `WizardShell`'s
@@ -77,10 +57,17 @@ enum HeaderIcon: Equatable, Sendable {
 }
 
 /// Permission category the wizard probes during the Permissions step.
-/// The primitive wrapper only preflights broad local file access; visual
+/// The Mac wrapper only preflights broad local file access; visual
 /// inspection and click/type control are no longer startup requirements.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
+
+    var systemSettingsURL: URL {
+        switch self {
+        case .fullDiskAccess:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+        }
+    }
 }
 
 /// Per-permission grant state. Mirrors TCC categories.
@@ -119,13 +106,10 @@ enum ExistingInstallStatus: Equatable, Sendable {
     case registered(version: String?)
 }
 
-/// Subset of `system.getInfo` the wrapper needs. Decoded from the WS engine protocol
-/// response by `ServerPing`.
-struct ServerInfo: Equatable, Sendable {
+/// Canonical `system::ping` projection needed by the wrapper after the decoder
+/// validates the complete required response shape.
+struct ServerPingInfo: Equatable, Sendable {
     var version: String
-    var port: Int
-    var tailscaleIp: String?
-    var paired: Bool
 }
 
 /// Pairing payload shared with the iOS app via the
@@ -138,8 +122,8 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var label: String?
 }
 
-/// Discrete steps in the install pipeline. Each is
-/// tested separately in `InstallPlannerTests`.
+/// Discrete steps in the install pipeline. Ordering is covered by
+/// `InstallPipelineStageOrderingTests`.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     /// Confirms this is the release app in `/Applications`.
     case validateApplication
@@ -148,12 +132,4 @@ enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     /// Registers the bundled LaunchAgent through `SMAppService`.
     case registerAgent
     case awaitPing
-}
-
-/// Pure-value description of what the install step plans to do. The
-/// View applies the plan via `SMAppService` through `LaunchAgentManaging`.
-struct InstallPlan: Equatable, Sendable {
-    var plistPath: URL
-    var helperBundle: URL
-    var helperBinary: URL
 }

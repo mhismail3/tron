@@ -19,6 +19,8 @@ impl super::external::ExternalWorkerInvoker for EchoExternalInvoker {
             error: None,
         })
     }
+
+    fn retire(&self) {}
 }
 
 pub(super) struct DisconnectExternalInvoker;
@@ -35,4 +37,6 @@ impl super::external::ExternalWorkerInvoker for DisconnectExternalInvoker {
             })),
         })
     }
+
+    fn retire(&self) {}
 }

@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use super::*;
 use crate::domains::agent::context::context_manager::ContextManager;
@@ -12,6 +13,21 @@ use crate::shared::protocol::messages::{Message, UserMessageContent};
 
 struct MarkerSummarizer {
     calls: Arc<AtomicUsize>,
+}
+
+struct BlockingSummarizer {
+    started: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl Summarizer for BlockingSummarizer {
+    async fn summarize(
+        &self,
+        _messages: &[Message],
+    ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
+        self.started.notify_one();
+        std::future::pending().await
+    }
 }
 
 #[async_trait::async_trait]
@@ -155,4 +171,60 @@ async fn execute_uses_injected_summarizer_but_requires_context_control_proof() {
             .all(|event| event.event_type != EventType::CompactBoundary.as_str()),
         "failed-proof compaction must not append a bare compact.boundary"
     );
+}
+
+#[tokio::test]
+async fn cancellation_pairs_compaction_events_and_restores_context() {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let handler = Arc::new(CompactionHandler::with_summarizer(
+        CompactionTriggerConfig::default(),
+        Arc::new(BlockingSummarizer {
+            started: Arc::clone(&started),
+        }),
+    ));
+    let manager = Arc::new(tokio::sync::Mutex::new(context_manager_with_three_turns()));
+    let before_messages = manager.lock().await.get_messages();
+    let emitter = Arc::new(EventEmitter::new());
+    let mut receiver = emitter.subscribe();
+    let cancel = CancellationToken::new();
+    let sequence = Arc::new(AtomicI64::new(10));
+
+    let task = {
+        let handler = Arc::clone(&handler);
+        let manager = Arc::clone(&manager);
+        let emitter = Arc::clone(&emitter);
+        let cancel = cancel.clone();
+        let sequence = Arc::clone(&sequence);
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            handler
+                .execute_compaction_inner(
+                    &mut manager,
+                    "cancelled-compaction",
+                    &emitter,
+                    CompactionReason::ThresholdExceeded,
+                    Some(&sequence),
+                    Some(&cancel),
+                )
+                .await
+        })
+    };
+
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .expect("summarizer started");
+    cancel.cancel();
+    assert!(matches!(task.await.unwrap(), Err(RuntimeError::Cancelled)));
+    assert_eq!(manager.lock().await.get_messages(), before_messages);
+    assert!(!handler.is_compacting());
+
+    let start = receiver.recv().await.unwrap();
+    let complete = receiver.recv().await.unwrap();
+    assert!(matches!(start, TronEvent::CompactionStart { .. }));
+    assert!(matches!(
+        complete,
+        TronEvent::CompactionComplete { success: false, .. }
+    ));
+    assert_eq!(start.sequence(), Some(11));
+    assert_eq!(complete.sequence(), Some(12));
 }

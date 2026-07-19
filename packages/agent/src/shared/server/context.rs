@@ -160,13 +160,6 @@ pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>
     );
 }
 
-/// Dependencies needed to create and run agents.
-#[derive(Clone)]
-pub struct AgentDeps {
-    /// Factory that creates a fresh model responder per request.
-    pub responder_factory: Arc<dyn ModelResponderFactory>,
-}
-
 /// Broad server runtime context used at app setup and domain registration.
 ///
 /// Runtime domain handlers should not store this type directly. Each domain
@@ -184,12 +177,15 @@ pub struct ServerRuntimeContext {
     pub engine_host: EngineHostHandle,
     /// Lazily loaded local speech-to-text backend.
     pub transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
+    /// Private APNs token custody and optional relay transport.
+    pub apns_runtime: crate::platform::apns::ApnsRuntime,
     /// Path to the sparse user profile settings overlay.
     pub settings_path: PathBuf,
     /// Compiled active profile runtime.
     pub profile_runtime: Arc<crate::domains::agent::r#loop::profile_runtime::ProfileRuntime>,
-    /// Agent execution dependencies (None = prompt handler returns error).
-    pub agent_deps: Option<AgentDeps>,
+    /// Factory that creates a fresh model responder per prompt. When absent,
+    /// the prompt handler returns `NotAvailable`.
+    pub responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
     /// Shutdown coordinator for registering background task handles.
@@ -294,7 +290,7 @@ mod tests {
     use super::*;
     use crate::domains::model::responder::ModelResponderFactory;
     use crate::shared::server::test_support::{
-        ModelAwareMockFactory, StrictMockFactory, make_test_agent_deps, make_test_context,
+        MockModelResponderFactory, ModelAwareMockFactory, StrictMockFactory, make_test_context,
     };
 
     #[test]
@@ -314,13 +310,13 @@ mod tests {
     #[test]
     fn context_has_orchestrator() {
         let ctx = make_test_context();
-        assert!(ctx.orchestrator.can_accept_session());
+        assert_eq!(ctx.orchestrator.active_run_count(), 0);
     }
 
     #[test]
     fn context_has_session_manager() {
         let ctx = make_test_context();
-        assert_eq!(ctx.session_manager.active_count(), 0);
+        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
     }
 
     #[tokio::test]
@@ -330,7 +326,7 @@ mod tests {
             .session_manager
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
-        assert_eq!(ctx.orchestrator.active_session_count(), 1);
+        assert_eq!(ctx.orchestrator.cached_session_count(), 1);
     }
 
     #[test]
@@ -513,39 +509,28 @@ mod tests {
     #[test]
     fn make_test_context_populates_all_fields() {
         let ctx = make_test_context();
-        assert!(ctx.orchestrator.can_accept_session());
-        assert_eq!(ctx.session_manager.active_count(), 0);
+        assert_eq!(ctx.orchestrator.active_run_count(), 0);
+        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
         assert!(ctx.event_store.list_workspaces().is_ok());
         assert!(!ctx.settings_path.as_os_str().is_empty());
     }
 
-    // ── AgentDeps tests ──
-
     #[test]
-    fn context_without_agent_deps_returns_not_available_in_handlers() {
+    fn context_can_leave_responder_factory_unconfigured() {
         let ctx = make_test_context();
-        assert!(ctx.agent_deps.is_none());
-    }
-
-    #[test]
-    fn context_with_agent_deps() {
-        let mut ctx = make_test_context();
-        ctx.agent_deps = Some(make_test_agent_deps());
-        assert!(ctx.agent_deps.is_some());
-    }
-
-    #[test]
-    fn agent_deps_responder_factory_accessible() {
-        let deps = make_test_agent_deps();
-        assert!(Arc::strong_count(&deps.responder_factory) >= 1);
+        assert!(ctx.responder_factory.is_none());
     }
 
     #[tokio::test]
-    async fn agent_deps_factory_creates_responder() {
-        let deps = make_test_agent_deps();
-        let responder = deps
+    async fn context_responder_factory_creates_requested_model() {
+        let mut ctx = make_test_context();
+        ctx.responder_factory = Some(Arc::new(MockModelResponderFactory));
+        let api_settings = crate::domains::settings::ApiSettings::default();
+        let responder = ctx
             .responder_factory
-            .create_for_model("claude-opus-4-6")
+            .as_ref()
+            .unwrap()
+            .create_for_model("claude-opus-4-6", &api_settings)
             .await
             .unwrap();
         assert_eq!(responder.model(), "claude-opus-4-6");
@@ -554,8 +539,15 @@ mod tests {
     #[tokio::test]
     async fn model_aware_factory_returns_correct_model() {
         let factory = ModelAwareMockFactory;
-        let r1 = factory.create_for_model("claude-opus-4-6").await.unwrap();
-        let r2 = factory.create_for_model("gpt-5.3-codex").await.unwrap();
+        let api_settings = crate::domains::settings::ApiSettings::default();
+        let r1 = factory
+            .create_for_model("claude-opus-4-6", &api_settings)
+            .await
+            .unwrap();
+        let r2 = factory
+            .create_for_model("gpt-5.3-codex", &api_settings)
+            .await
+            .unwrap();
         assert_eq!(r1.model(), "claude-opus-4-6");
         assert_eq!(r2.model(), "gpt-5.3-codex");
     }
@@ -563,16 +555,13 @@ mod tests {
     #[tokio::test]
     async fn strict_factory_rejects_unknown_model() {
         let factory = StrictMockFactory;
-        let result = factory.create_for_model("unknown-model").await;
+        let api_settings = crate::domains::settings::ApiSettings::default();
+        let result = factory
+            .create_for_model("unknown-model", &api_settings)
+            .await;
         match result {
             Err(e) => assert_eq!(e.category(), "auth"),
             Ok(_) => panic!("expected auth error"),
         }
-    }
-
-    #[test]
-    fn agent_deps_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<AgentDeps>();
     }
 }

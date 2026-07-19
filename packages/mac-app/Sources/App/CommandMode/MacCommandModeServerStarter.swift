@@ -21,7 +21,7 @@ enum MacCommandModeServerStarter {
             return .unmanagedWrapper
         }
 
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: setup.launchAgentManager,
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel

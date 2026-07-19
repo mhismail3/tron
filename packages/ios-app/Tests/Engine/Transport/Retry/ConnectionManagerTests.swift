@@ -45,6 +45,22 @@ struct ConnectionManagerTests {
         #expect(manager.state == .connected)
     }
 
+    @Test("Idle state observation releases its connection manager")
+    func idleObservationReleasesManager() async {
+        let provider = MockConnectionStateProvider()
+        var manager: ConnectionManager? = ConnectionManager(provider: provider)
+        weak let retainedManager = manager
+
+        provider.connectionState = .connecting
+        await waitForStateSync()
+        #expect(manager?.state == .connecting)
+
+        manager = nil
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(retainedManager == nil)
+    }
+
     // MARK: - runOnReconnect
 
     @Test("runOnReconnect fires immediately when already connected")

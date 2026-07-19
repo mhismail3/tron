@@ -326,8 +326,8 @@ pub fn auth_path() -> PathBuf {
 ///
 /// The bearer token is stored as top-level `bearerToken`. Read by the WS
 /// upgrade handler; written by
-/// `server::onboarding::load_or_create_bearer_token` and
-/// `server::onboarding::rotate_bearer_token`.
+/// [`crate::app::lifecycle::onboarding::load_or_create_bearer_token`] and
+/// [`crate::app::lifecycle::onboarding::rotate_bearer_token`].
 pub fn bearer_token_path() -> PathBuf {
     auth_path()
 }
@@ -366,7 +366,7 @@ pub fn mac_wrapper_lock_path_for(bundle_identifier: &str) -> PathBuf {
 ///
 /// See [`files::ONBOARDED_MARKER`] for purpose. Existence-checked by
 /// `system.getInfo` to populate the `paired` field; created by the Mac
-/// wizard or `server::onboarding::mark_onboarded`.
+/// wizard or [`crate::app::lifecycle::onboarding::mark_onboarded`].
 pub fn onboarded_marker_path() -> PathBuf {
     run_dir().join(files::ONBOARDED_MARKER)
 }

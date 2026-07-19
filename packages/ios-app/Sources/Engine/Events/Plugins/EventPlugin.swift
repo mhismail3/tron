@@ -94,7 +94,7 @@ extension EventPlugin {
 
 /// Extended protocol for plugins that know how to dispatch themselves.
 /// Plugins conforming to this protocol carry their own dispatch logic,
-/// eliminating the need for a switch case in EventDispatchCoordinator.
+/// eliminating the need for a central dispatch switch in EventRegistry.
 protocol DispatchableEventPlugin: EventPlugin {
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget)

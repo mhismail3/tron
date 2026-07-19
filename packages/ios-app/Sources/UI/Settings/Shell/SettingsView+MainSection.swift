@@ -4,25 +4,23 @@ extension SettingsView {
     // MARK: - Main Sections
 
     var mainSettingsSection: some View {
-        VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
-            settingsOwnershipSection(
-                title: "Server-Owned",
-                destinations: MainSettingsGridDestination.serverOwned
-            )
+        VStack(alignment: .leading, spacing: MainSettingsListLayout.sectionSpacing) {
+            VStack(spacing: MainSettingsListLayout.rowSpacing) {
+                ForEach(MainSettingsGridDestination.order, id: \.self) { destination in
+                    SettingsCard {
+                        mainSettingsDestinationRow(destination)
+                    }
+                }
+            }
 
             if showsServerUnavailableState {
                 serverUnavailableCard
             }
 
-            settingsOwnershipSection(
-                title: "This iPhone",
-                destinations: MainSettingsGridDestination.deviceOwned
-            )
-
             mainSettingsDivider
 
-            VStack(alignment: .leading, spacing: 0) {
-                SettingsSectionHeader(title: "Maintenance")
+            VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
+                SettingsSectionHeader(title: "Danger Zone")
 
                 VStack(spacing: MainSettingsListLayout.rowSpacing) {
                     ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
@@ -30,19 +28,6 @@ extension SettingsView {
                             dangerActionRow(action)
                         }
                     }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    func settingsOwnershipSection(title: String, destinations: [MainSettingsGridDestination]) -> some View {
-        VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
-            SettingsSectionHeader(title: title)
-
-            ForEach(destinations, id: \.self) { destination in
-                SettingsCard {
-                    mainSettingsDestinationRow(destination)
                 }
             }
         }
@@ -107,9 +92,9 @@ extension SettingsView {
 
     func isMainSettingsDestinationEnabled(_ destination: MainSettingsGridDestination) -> Bool {
         switch destination {
-        case .server, .app:
+        case .engine, .app:
             return true
-        case .providers, .engine:
+        case .providers:
             return serverSettingsReady
         }
     }
@@ -127,12 +112,6 @@ extension SettingsView {
         switch destination {
         case .engine:
             activePage = .engine
-        case .server:
-            if hasPairedServers {
-                activePage = .server
-            } else {
-                startOnboarding()
-            }
         case .app:
             activePage = .app
         case .providers:
@@ -210,15 +189,10 @@ extension SettingsView {
     }
 
     var settingsFooterDockView: some View {
-        ZStack(alignment: .bottom) {
-            SettingsFooterBackdrop()
-            footerView
-                .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
-                .padding(.top, MainSettingsFooterLayout.topPadding)
-                .padding(.bottom, MainSettingsFooterLayout.bottomPadding)
-        }
+        footerView
+            .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
+            .padding(.vertical, MainSettingsFooterLayout.verticalPadding)
             .frame(maxWidth: .infinity)
-            .frame(height: MainSettingsFooterLayout.dockHeight)
             .cardEntrance(visible: cardsVisible, index: 1)
     }
 
@@ -236,9 +210,9 @@ extension SettingsView {
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, MainSettingsFooterLayout.taglineLeadingPadding)
             .lineLimit(1)
             .minimumScaleFactor(0.92)
-            .padding(.leading, MainSettingsFooterLayout.textLeadingPadding)
     }
 
     var feedbackFooterButton: some View {

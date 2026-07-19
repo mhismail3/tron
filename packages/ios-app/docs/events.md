@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-02 (thinking vs reasoning-summary stream contracts; generating capability chip reconstruction; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
+> Last verified: 2026-07-17 (registry-owned dispatch; source/client stream-loss recovery; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -30,10 +30,54 @@ renders it immediately so the user sees pending parallel work before execution
 finishes. Reconnect reconstruction preserves that `generating` state when the
 server reports an in-flight invocation.
 
+## Stream Ownership and Terminal Drain
+
+`EventStoreManager` owns the current global event subscription without owning
+the shared `AsyncEventStream` bus. The idle subscription task captures the
+manager weakly. Direct and filtered consumers register at that same bus owner;
+filter predicates run before the consumer's single bounded buffer, so filtering
+does not create a second hidden queue or task. Releasing the final bus owner
+finishes every subscriber. `finish()` owns both explicit and deinitializer cleanup:
+it removes the continuation snapshot under lock, then notifies subscribers
+after unlocking. Client replacement is predecessor-chained—including the first
+load—so rapid A→B→C replacement cannot let events or direct projection loads
+from an older origin overtake the latest lane. Session-list refresh completion
+is separately client-identity fenced before reconciliation, projection loads,
+retry registration, and user-visible errors. The refresh awaits its captured
+load generation; server processing flags seed the published projection unless
+a newer accepted live or optimistic per-session override must be preserved.
+Those origin-bound overrides retain explicit true and false values and retire
+only when a later refresh supplies processing state for that session; partial
+or omitted processing truth cannot erase them. Reconnect refresh stays behind
+`SessionRefreshService`'s single coalescing owner.
+
+Live continuity failures are explicit. If the server projection receiver lags,
+it publishes a global `stream.recovery_required` marker. If an iOS subscriber
+buffer evicts an older delivery, `EngineClient` queues the same marker before
+acknowledging the upstream cursor. A mounted chat turns the marker into a
+generation change observed by `ChatView`, which routes reconstruction through
+the existing connection-refresh task. Replacement cancels and joins its keyed
+predecessor before new state mutation. Only a committed server snapshot clears
+reconstruction mode and drains the buffered live suffix; retryable failures and
+cancellation retain both the gate and buffer. The snapshot sequence cut commits
+before cancellable projection work, and the keyed view task retries transient
+failures with capped backoff while connected. Marker bursts retain at most one
+follow-up reconstruction behind the current repair rather than repeatedly
+cancelling it. The global event owner also requests a coalesced session-list
+refresh. Neither event handler opens a second socket or owns retry tasks.
+
+Acceptance is the boundary for shutdown semantics: after the lane accepts an
+event, its database mutation and completion callback are awaited inline. The
+manager's shared terminal drain cancels and joins the global lane, awaits the
+refresh coordinator's terminal drain, then cancels and joins the replacement
+and load chain before fixture-owned database close. Late refresh requests are
+rejected, repeated shutdown callers await the same drain, and neither manager
+shutdown nor deinitialization finishes the shared event bus.
+
 ## Plugin Boundary
 
 Each live plugin parses one server event family into a UI-ready result and
-dispatches itself through `EventDispatchCoordinator`. Plugins may render
+dispatches itself through `EventRegistry`. Plugins may render
 transport facts, progress, errors, and generic runtime data. They must not
 restore deleted product modes or synthesize retired event names.
 
@@ -54,8 +98,7 @@ of ordinary source and docs.
 
 Server stream event labels under `packages/agent/src/transport/runtime/streams`
 must have an iOS plugin entry even when they intentionally render no UI. Marker
-plugins such as `agent.start`, `agent.response_complete`,
-`agent.thinking_start`, `agent.interrupted`,
+plugins such as `agent.start`, `agent.thinking_start`, `agent.interrupted`,
 `agent.retry`, `context.warning`, `session.forked`,
 `capability.invocation.batch`, and `capability.invocation.arguments_delta`
 parse only the routing envelope when their payload can contain partial
@@ -64,6 +107,24 @@ successful parse is a no-op, not a transform warning; malformed payload decode
 still logs at the parser boundary. `SourceGuardTests+EventSurface` compares the
 Rust stream labels with `EventRegistry.registerAll()` so new server events
 cannot silently become unknown in the app.
+
+The marker `agent.interrupted` remains diagnostics-only. A cancelled turn's
+authoritative UI evidence is the durable `agent.turn_failed` event classified
+as `RUNTIME_CANCELLED` / `cancelled`. Its live plugin appends the existing
+Session interrupted notification, and stored reconstruction projects the same
+notification instead of a retryable failure pill. The later `agent.complete`
+event alone finalizes streaming state and returns the mounted chat to idle.
+
+`agent.response_complete` is dispatched lifecycle evidence rather than a
+marker. Its server-owned capability count identifies the conservative subset
+of responses that are final clean text: zero-capability responses may be
+marked final, while capability-bearing responses never own a metadata footer.
+The matching `agent.turn_end` supplies token, model, and latency presentation
+facts, and accounting still updates for every turn. Stored reconstruction
+applies the same policy from `message.assistant`:
+text must exist, the payload must not be interrupted, and no
+capability-invocation block may be present. Neither path treats provider
+stop-reason spelling or rendered item order as finality evidence.
 
 `agent.thinking_end` is not a marker: it carries the server-authoritative final
 thinking-like text for the visible block. The live plugin replaces any
@@ -77,7 +138,7 @@ the UI rather than presented as raw chain-of-thought. Legacy OpenAI
 also rendered as reasoning summaries based on their persisted `providerType`
 so old sessions do not overpromise raw thinking.
 
-## DRC-9 replay manifest/event parity
+## Replay manifest/event parity
 
 `model.provider_request` is a persisted metadata-only session event used by the
 server replay manifest. It is decoded in the stored event enum and summarized as
@@ -97,7 +158,9 @@ placeholder codes, messages, turns, or recoverability. If the current server
 payload omits required failure fields, the plugin transform drops the malformed
 event. Persisted `error.*` and `turn.failed` projections, provider error pills,
 session summaries, expanded event content, and capability error rows prefer the
-server envelope whenever it is present.
+server envelope whenever it is present. Cancellation presentation is selected
+only from the canonical cancellation code/category, never from an abort RPC or
+client-authored error string.
 
 Local reachability and pairing failures may still be classified locally when no
 server response exists. Server-authored categories, retryability,
@@ -106,43 +169,60 @@ must flow from the canonical envelope rather than a client taxonomy.
 
 ## Registration
 
-`EventRegistry.shared.registerAll()` runs at app startup. Registration is the
-only place a live event plugin enters the shell, so deleted roots should be
-removed from both disk and registration instead of left dormant.
+`EventRegistry.shared.registerAll()` runs at app startup. The shared production
+instance owns the live plugin map; focused tests create isolated registry
+instances and register through the same APIs instead of mutating production
+state through a reset hook. Registration is the only place a live event plugin
+enters the shell, so deleted roots should be removed from both disk and
+registration instead of left dormant.
 Events that are intentionally diagnostics-only should still register a parser
 that returns no `EventResult`; unknown event types are reserved for genuine
 drift, not for known server markers.
 
 ## Dispatch
 
-The dispatch model stays switch-free at the central coordinator:
+The registry owns plugin lookup and keeps dispatch switch-free:
 
 ```swift
 func dispatch(type: String, transform: () -> (any EventResult)?, context: EventDispatchTarget) {
-    guard let box = EventRegistry.shared.pluginBox(for: type) else { return }
+    guard let box = pluginBox(for: type) else { return }
     guard let result = transform() else { return }
     box.dispatch(result: result, context: context)
 }
 ```
 
-`ChatViewModel` conforms to the composed dispatch target through small handler
-extensions. The root state object owns orchestration; streaming, UI queue,
+`ChatViewModel` passes itself as the per-call dispatch target and the shared
+production registry never retains it. `ChatViewModel+Events.swift` owns
+the composed target conformance, while small handler extensions implement its
+requirements. The root state object owns
+orchestration; streaming, UI queue,
 capability-completion, and live event callback installation lives in
 `ChatViewModel+RuntimeCallbacks.swift`. The target exposes chat/session
 primitives, not fixed product session-list APIs.
+
+Turn completion accumulates token totals and cost in `ContextTrackingState`
+before `TurnLifecycleContext` persists those totals with the current turn's
+context-window value; the coordinator does not pass a duplicate token snapshot.
 
 ## Stored Reconstruction
 
 `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` reconstructs
 messages from `SessionEvent` rows. Engine reconstruction helpers own persisted
 event decoding support; the transformer is Session-owned because it projects
-durable events into chat timeline state. The retained reconstruction state
-tracks message content, capability invocation lifecycles, streaming state, turn
-grouping, generated runtime data, and compact session metadata needed for chat.
+durable events into chat timeline state. Its transient reconstruction result
+contains only messages, the latest reasoning level, accumulated token usage,
+and the last context size. Capability lifecycle rows are joined into their
+rendered assistant content; compact boundaries retain their rendered message
+and update the context size. Session lifecycle, turn, file, metadata, and tag
+rows remain available as durable diagnostics without creating parallel mounted
+client state.
 Capability identity fields stay primitive: model primitive, operation,
 trace/root invocation ids, theme color, and presentation hints. Reconstruction
 must not recover retired contract, implementation, worker, risk, or binding
 metadata from old payloads.
+When persisted capability lifecycle rows already establish success or error,
+that terminal chip remains authoritative over any lower-fidelity current-turn
+projection returned in the same reconstruction snapshot.
 
 Unsupported event payloads should remain visible as diagnostics or
 transport-only facts. They should not be converted into fixed panels,

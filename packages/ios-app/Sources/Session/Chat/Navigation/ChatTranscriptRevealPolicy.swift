@@ -8,9 +8,11 @@ import CoreGraphics
 /// the already-bottom-anchored content in once initial load is complete.
 enum ChatTranscriptRevealPolicy {
     static let initialBottomTolerance: CGFloat = 16
-    static let initialBottomSettleAttempts = 18
+    static let initialStableBottomSamples = 2
+    static let initialBottomSettleAttempts = 36
     static let initialScrollProxyWaitAttempts = 20
-    static let initialSettleDelayMilliseconds = 35
+    static let initialSettleDelayMilliseconds = 60
+    static let autoscrollBottomTolerance: CGFloat = 100
 
     static func contentOpacity(initialLoadComplete: Bool) -> Double {
         initialLoadComplete ? 1 : 0
@@ -31,18 +33,33 @@ enum ChatTranscriptRevealPolicy {
         return max(0, rawDistance)
     }
 
+    /// Initial reveal follows the actual scroll target, not the padded content
+    /// extent whose safe-area and tail spacing can remain below that target.
+    static func bottomAnchorDistance(
+        viewportHeight: CGFloat,
+        anchorMaxY: CGFloat
+    ) -> CGFloat {
+        let distance = anchorMaxY - viewportHeight
+        guard distance.isFinite else { return .greatestFiniteMagnitude }
+        return max(0, distance)
+    }
+
     static func isNearBottomForAutoscroll(distanceFromBottom: CGFloat) -> Bool {
-        distanceFromBottom < 100
+        distanceFromBottom < autoscrollBottomTolerance
+    }
+
+    static func isAtInitialBottom(distanceFromBottom: CGFloat) -> Bool {
+        distanceFromBottom.isFinite
+            && distanceFromBottom <= initialBottomTolerance
     }
 
     static func isReadyToReveal(
         hasScrollProxy: Bool,
-        contentHeightStable: Bool,
+        consecutiveBottomSamples: Int,
         distanceFromBottom: CGFloat
     ) -> Bool {
         hasScrollProxy
-            && contentHeightStable
-            && distanceFromBottom.isFinite
-            && distanceFromBottom <= initialBottomTolerance
+            && consecutiveBottomSamples >= initialStableBottomSamples
+            && isAtInitialBottom(distanceFromBottom: distanceFromBottom)
     }
 }

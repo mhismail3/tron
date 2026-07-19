@@ -18,6 +18,8 @@ impl external::ExternalWorkerInvoker for ExternalWorkerSoakInvoker {
             error: None,
         })
     }
+
+    fn retire(&self) {}
 }
 
 #[tokio::test]
@@ -41,9 +43,9 @@ async fn external_worker_soak_registers_invokes_disconnects_and_reopens() {
         )
         .with_namespace_claim(&namespace);
         let hello = WorkerHello::loopback(worker).with_session_scope(session_id.clone());
-        runtime.hello(hello).await.unwrap();
         runtime
-            .attach_invoker(worker_id.clone(), Arc::new(ExternalWorkerSoakInvoker))
+            .accept_connection(hello, Arc::new(ExternalWorkerSoakInvoker))
+            .await
             .unwrap();
         assert!(runtime.connections().contains(&worker_id));
 

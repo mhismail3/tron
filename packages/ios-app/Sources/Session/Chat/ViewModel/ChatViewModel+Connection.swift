@@ -6,15 +6,11 @@ import SwiftUI
 extension ChatViewModel: ConnectionContext {
 
     var isConnected: Bool {
-        services.connection.isConnected
+        services.connection.connectionState.isConnected
     }
 
     func connect() async {
         await services.connection.connect()
-    }
-
-    func disconnect() async {
-        await services.connection.disconnect()
     }
 
     func resumeSession(sessionId: String) async throws {
@@ -94,19 +90,18 @@ extension ChatViewModel: ConnectionContext {
         if let thinkingId = thinkingMessageId {
             removeFromMessages { $0.id == thinkingId }
         }
-        // Remove running capability messages (will be re-created from reconstruction)
-        let runningCapabilityIds = currentCapabilityInvocationMessages.keys
-        removeFromMessages { runningCapabilityIds.contains($0.id) }
+        // Remove current-turn capability messages (will be re-created from reconstruction)
+        let currentTurnCapabilityIds = currentTurnCapabilityMessageIds
+        removeFromMessages { currentTurnCapabilityIds.contains($0.id) }
         // Clear turn tracking state
         thinkingMessageId = nil
-        currentTurnCapabilityInvocations.removeAll()
-        currentCapabilityInvocationMessages.removeAll()
+        currentTurnCapabilityMessageIds.removeAll()
         // Reset thinking accumulators so stale content doesn't bleed through
         thinkingState.seedCatchUpThinking("", isStreaming: false)
     }
 
     /// Drain events that were buffered during reconstruction.
-    /// Called by ConnectionCoordinator after reconstruction completes and
+    /// Called by ConnectionCoordinator only after reconstruction commits and
     /// sequenceHighWaterMark is set.
     ///
     /// Sort the buffered batch by `sequence` before dispatch so
@@ -165,30 +160,15 @@ extension ChatViewModel: ConnectionContext {
     // ConnectionContext conformance uses those existing implementations.
 }
 
-// MARK: - Test Support
-
-extension ChatViewModel {
-
-    /// Route an event through the buffer/dispatch pipeline. Test-only entry point.
-    func handleEventForTesting(_ event: ParsedEventV2) {
-        handleEventV2(event)
-    }
-
-    /// Number of events currently buffered during reconstruction.
-    var eventBufferCount: Int { eventBuffer.count }
-}
-
 // MARK: - Connection & Session Management
 
 extension ChatViewModel {
 
-    /// Connect, resume, and reconstruct the session
-    func connectAndReconstruct() async {
+    /// Connect, resume, and reconstruct the session.
+    ///
+    /// Retryable and cancelled attempts retain the buffered live suffix; the
+    /// mounted view's single connection-refresh task owns retry scheduling.
+    func connectAndReconstruct() async -> ConnectionReconstructionOutcome {
         await connectionCoordinator.connectAndReconstruct(context: self)
-    }
-
-    /// Reconnect to server and reconstruct session state
-    func reconnectAndReconstruct() async {
-        await connectionCoordinator.reconnectAndReconstruct(context: self)
     }
 }

@@ -28,16 +28,12 @@ pub(crate) async fn status_value(
         });
     }
 
-    let run_id = deps.orchestrator.get_run_id(&session_id);
+    let (run_id, current_capability) = deps.orchestrator.agent_status_snapshot(&session_id);
     let phase = if run_id.is_some() {
         "processing"
     } else {
         "idle"
     };
-    let current_capability = deps
-        .orchestrator
-        .turn_accumulators()
-        .current_running_capability(&session_id);
     let event_store = deps.event_store.clone();
     let sid_for_latest = session_id.clone();
     let latest_timestamp = run_blocking_task("agent.status.latest_event", move || {

@@ -39,6 +39,11 @@
 //!   or endpoint policy.
 //! - Stream wrappers preserve cancellation and retry events without altering
 //!   provider-native parsing semantics.
+//! - Provider-native terminal failures cross the SSE pipeline as typed
+//!   `ProviderError` values; they are never flattened into transient content
+//!   events or silently discarded at end-of-stream.
+//! - Malformed provider frames remain non-recoverable parse failures; only a
+//!   well-formed stream that closes before its terminal event is recoverable.
 //! - Provider-neutral stream resource bounds live here: SSE/NDJSON frames,
 //!   accumulated text/thinking, tool-call argument buffers, and active streamed
 //!   tool invocations are capped before provider-specific handlers can retain

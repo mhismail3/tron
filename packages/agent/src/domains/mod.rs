@@ -12,9 +12,8 @@
 //! authoring records, inert module validation report records, metadata-only
 //! module install review-gate records, metadata-only module dependency request
 //! and policy records, metadata-only capability binding policy records,
-//! inspect-only generic module activity cockpit projection,
-//! read-only agent briefing projection, metadata-only web research
-//! request/review/source custody,
+//! inspect-only generic module activity cockpit projection, metadata-only web
+//! research request/review/source custody,
 //! durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
@@ -27,7 +26,6 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `agent_briefing` | Read-only chief-of-staff briefing projection |
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `approval` | Approval request/decision evidence and reusable freshness checks |
 //! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
@@ -55,7 +53,7 @@
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
 //! | `web` | Direct web fetch source provenance resources |
-//! | `tool_sources` | Inert external tool-source proposal and preflight evidence |
+//! | `tool_sources` | Read-only tool-source proposal/conformance evidence projection |
 //! | `subagents` | Inert subagent task lifecycle evidence |
 //! | `procedural` | Inert skill/rule/hook/procedure provenance inspection evidence |
 //! | `scheduler` | Durable schedules, missed-run policy, cancellation, and run records |
@@ -82,7 +80,10 @@
 //! Startup enters the domain tree through
 //! `transport::runtime::setup::register_server_domains_for_runtime_context`.
 //! That facade delegates to the crate-private registration owner, which is the
-//! only non-test code allowed to wire concrete domain worker modules.
+//! only non-test code allowed to wire concrete domain worker modules. The
+//! registration owner validates the full composition before catalog mutation
+//! and returns a one-shot lifecycle token; transport setup activates it only
+//! after transport triggers also register successfully.
 //! Single-threaded test fixtures use the paired setup-only facade. Individual
 //! domains expose their public behavior through `contract.rs` definitions and
 //! handler tables, not through transport-specific functions.
@@ -117,7 +118,6 @@
 //! integration/static tests rather than a broad domain root test.
 
 pub mod agent;
-pub mod agent_briefing;
 pub mod approval;
 pub mod auth;
 pub mod blob;

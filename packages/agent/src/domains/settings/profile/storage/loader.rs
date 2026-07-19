@@ -24,37 +24,9 @@ pub fn settings_path() -> PathBuf {
     crate::shared::foundation::paths::user_profile_path()
 }
 
-/// Resolve the managed default profile file.
-pub fn settings_defaults_path() -> PathBuf {
-    crate::shared::foundation::paths::default_profile_dir()
-        .join(crate::shared::foundation::paths::files::PROFILE_TOML)
-}
-
 /// Resolve the built-in auth file (`~/.tron/profiles/auth.json`).
 pub fn auth_path() -> PathBuf {
     crate::shared::foundation::paths::auth_path()
-}
-
-/// Profile settings are seeded as part of the managed profile defaults.
-pub fn seed_settings_defaults() -> Result<Option<PathBuf>> {
-    Ok(None)
-}
-
-/// Profile settings are seeded as part of the managed profile defaults.
-pub fn seed_settings_defaults_at(home: &Path) -> Result<Option<PathBuf>> {
-    let _ = home;
-    Ok(None)
-}
-
-/// Profile settings are seeded as part of profile defaults.
-pub fn seed_settings_defaults_for_path(settings_path: &Path) -> Result<Option<PathBuf>> {
-    let _ = settings_path;
-    Ok(None)
-}
-
-/// Load settings from the default path with env var overrides.
-pub fn load_settings() -> Result<TronSettings> {
-    load_settings_from_path(&settings_path())
 }
 
 /// Load settings from a sparse user profile path with env var overrides.
@@ -404,16 +376,6 @@ authProfile = "default"
             settings.context.compactor.max_tokens,
             defaults.context.compactor.max_tokens
         );
-    }
-
-    #[test]
-    fn seed_settings_defaults_is_noop_because_profiles_seed_settings() {
-        let dir = tempfile::tempdir().unwrap();
-        let seeded = seed_settings_defaults_at(dir.path()).unwrap();
-        assert!(seeded.is_none());
-
-        let second = seed_settings_defaults_at(dir.path()).unwrap();
-        assert!(second.is_none());
     }
 
     #[test]

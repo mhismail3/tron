@@ -1,9 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use crate::domains::capability::operation_binding_metadata;
 use crate::engine::{
-    CreateResource, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    CreateResource, EngineGrant, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
     MODULE_LIFECYCLE_STATE_KIND, MODULE_RUNTIME_STATE_KIND,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
@@ -41,7 +42,7 @@ use super::{
     CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
     CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_BINDING_SCHEMA_ID, CAPABILITY_ROUTE_EVENT_KIND,
     CAPABILITY_ROUTE_EVENT_SCHEMA_ID, CAPABILITY_ROUTE_ROLLBACK_KIND,
-    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, Deps,
+    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
 };
 
 const TARGET_OPERATION: &str = "git_status";
@@ -82,14 +83,14 @@ pub(crate) struct ActiveRoute {
 }
 
 pub(crate) async fn record_replacement_candidate_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_route_write_authority(deps, invocation, "capability_replacement_candidate_record")
+        ensure_route_write_authority(host, invocation, "capability_replacement_candidate_record")
             .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
@@ -106,7 +107,7 @@ pub(crate) async fn record_replacement_candidate_value_at(
     )?;
     let operation = route_target_metadata(payload)?;
     let shadow_evidence = validated_shadow_evidence_from_payload(
-        deps,
+        host,
         Some(&grant),
         &scope,
         payload,
@@ -114,7 +115,7 @@ pub(crate) async fn record_replacement_candidate_value_at(
     )
     .await?;
     let runtime_contract =
-        validate_candidate_runtime_contract(deps, invocation, &grant, payload, &shadow_evidence)
+        validate_candidate_runtime_contract(host, invocation, &grant, payload, &shadow_evidence)
             .await?;
     let candidate = candidate_contract(payload, shadow_evidence, runtime_contract)?;
     let contract = contract_evidence(payload)?;
@@ -128,8 +129,7 @@ pub(crate) async fn record_replacement_candidate_value_at(
         &candidate_id,
         &idempotency_key,
     );
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -176,7 +176,7 @@ pub(crate) async fn record_replacement_candidate_value_at(
         "revision": 1
     });
     let resource = create_route_resource(
-        deps,
+        host,
         invocation,
         resource_id.clone(),
         CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
@@ -190,7 +190,7 @@ pub(crate) async fn record_replacement_candidate_value_at(
     .await?;
     let version_id = current_version_id(&resource, "capability_replacement_candidate_record")?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         "capability_route.candidate_recorded",
         &resource,
@@ -209,18 +209,18 @@ pub(crate) async fn record_replacement_candidate_value_at(
         "idempotentReplay": false,
         "capabilityReplacementCandidateResourceId": resource.resource_id,
         "capabilityReplacementCandidateVersionId": version_id,
-        "replacementCandidate": route_summary_for_resource(deps, &resource).await?,
+        "replacementCandidate": route_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_replacement_candidate")]
     }))
 }
 
 pub(crate) async fn list_replacement_candidate_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_route_values(
-        deps,
+        host,
         invocation,
         payload,
         "capability_replacement_candidate_list",
@@ -232,12 +232,12 @@ pub(crate) async fn list_replacement_candidate_value(
 }
 
 pub(crate) async fn inspect_replacement_candidate_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     inspect_route_value(
-        deps,
+        host,
         invocation,
         payload,
         "capability_replacement_candidate_inspect",
@@ -251,14 +251,14 @@ pub(crate) async fn inspect_replacement_candidate_value(
 }
 
 pub(crate) async fn record_route_binding_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_route_write_authority(deps, invocation, "capability_route_binding_record").await?;
+        ensure_route_write_authority(host, invocation, "capability_route_binding_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let binding_id = bounded_provider_visible_token(
@@ -279,7 +279,7 @@ pub(crate) async fn record_route_binding_value_at(
         "capability_route_binding_record",
     )?;
     let candidate_inspection = inspect_resource_required(
-        deps,
+        host,
         &candidate_resource_id,
         "capability replacement candidate",
     )
@@ -308,7 +308,7 @@ pub(crate) async fn record_route_binding_value_at(
         )));
     }
     let shadow_evidence = validated_shadow_evidence_from_candidate(
-        deps,
+        host,
         Some(&grant),
         &scope,
         candidate_payload,
@@ -329,8 +329,7 @@ pub(crate) async fn record_route_binding_value_at(
         &binding_id,
         &idempotency_key,
     );
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -386,7 +385,7 @@ pub(crate) async fn record_route_binding_value_at(
         "revision": 1
     });
     let resource = create_route_resource(
-        deps,
+        host,
         invocation,
         resource_id.clone(),
         CAPABILITY_ROUTE_BINDING_KIND,
@@ -400,7 +399,7 @@ pub(crate) async fn record_route_binding_value_at(
     .await?;
     let version_id = current_version_id(&resource, "capability_route_binding_record")?;
     publish_lifecycle_event(
-        deps,
+        host,
         invocation,
         "capability_route.binding_recorded",
         &resource,
@@ -419,18 +418,18 @@ pub(crate) async fn record_route_binding_value_at(
         "idempotentReplay": false,
         "capabilityRouteBindingResourceId": resource.resource_id,
         "capabilityRouteBindingVersionId": version_id,
-        "routeBinding": route_summary_for_resource(deps, &resource).await?,
+        "routeBinding": route_summary_for_resource(host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "capability_route_binding")]
     }))
 }
 
 pub(crate) async fn list_route_binding_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_route_values(
-        deps,
+        host,
         invocation,
         payload,
         "capability_route_binding_list",
@@ -442,12 +441,12 @@ pub(crate) async fn list_route_binding_value(
 }
 
 pub(crate) async fn inspect_route_binding_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     inspect_route_value(
-        deps,
+        host,
         invocation,
         payload,
         "capability_route_binding_inspect",
@@ -461,13 +460,13 @@ pub(crate) async fn inspect_route_binding_value(
 }
 
 pub(crate) async fn activate_route_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     let activation = route_control_value_at(
-        deps,
+        host,
         invocation,
         payload,
         operation_at,
@@ -478,13 +477,13 @@ pub(crate) async fn activate_route_value_at(
 }
 
 pub(crate) async fn disable_route_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     route_control_value_at(
-        deps,
+        host,
         invocation,
         payload,
         operation_at,
@@ -494,13 +493,13 @@ pub(crate) async fn disable_route_value_at(
 }
 
 pub(crate) async fn rollback_route_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     route_control_value_at(
-        deps,
+        host,
         invocation,
         payload,
         operation_at,
@@ -510,12 +509,12 @@ pub(crate) async fn rollback_route_value_at(
 }
 
 pub(crate) async fn list_route_event_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_route_values(
-        deps,
+        host,
         invocation,
         payload,
         "capability_route_event_list",
@@ -527,12 +526,12 @@ pub(crate) async fn list_route_event_value(
 }
 
 pub(crate) async fn inspect_route_event_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     inspect_route_value(
-        deps,
+        host,
         invocation,
         payload,
         "capability_route_event_inspect",
@@ -546,15 +545,14 @@ pub(crate) async fn inspect_route_event_value(
 }
 
 pub(crate) async fn active_route_for_git_status(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
 ) -> Result<Option<ActiveRoute>, CapabilityError> {
     let scope = match resource_scope(invocation) {
         Ok(scope) => scope,
         Err(_) => return Ok(None),
     };
-    let activations = deps
-        .engine_host
+    let activations = host
         .list_resources(ListResources {
             kind: Some(CAPABILITY_ROUTE_ACTIVATION_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -565,8 +563,7 @@ pub(crate) async fn active_route_for_git_status(
         .map_err(engine_error)?;
     let mut selected: Option<ActiveRoute> = None;
     for resource in activations {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -579,7 +576,7 @@ pub(crate) async fn active_route_for_git_status(
         if operation_name(payload) != Some(TARGET_OPERATION) {
             continue;
         }
-        if route_has_terminal_event(deps, &scope, &inspection.resource.resource_id).await? {
+        if route_has_terminal_event(host, &scope, &inspection.resource.resource_id).await? {
             continue;
         }
         let Some(binding_ref) = payload
@@ -587,7 +584,7 @@ pub(crate) async fn active_route_for_git_status(
             .and_then(Value::as_str)
         else {
             emit_route_lookup_failed_event(
-                deps,
+                host,
                 invocation,
                 &scope,
                 &inspection,
@@ -603,7 +600,7 @@ pub(crate) async fn active_route_for_git_status(
             .and_then(Value::as_str)
         else {
             emit_route_lookup_failed_event(
-                deps,
+                host,
                 invocation,
                 &scope,
                 &inspection,
@@ -615,7 +612,7 @@ pub(crate) async fn active_route_for_git_status(
             return Err(invalid("active route is missing route binding version ref"));
         };
         let records = match ensure_referenced_route_records(
-            deps,
+            host,
             &scope,
             binding_ref,
             Some(expected_binding_version),
@@ -625,7 +622,7 @@ pub(crate) async fn active_route_for_git_status(
             Ok(records) => records,
             Err(error) => {
                 emit_route_lookup_failed_event(
-                    deps,
+                    host,
                     invocation,
                     &scope,
                     &inspection,
@@ -661,7 +658,7 @@ pub(crate) async fn active_route_for_git_status(
         };
         if selected.is_some() {
             emit_route_lookup_failed_event(
-                deps,
+                host,
                 invocation,
                 &scope,
                 &inspection,
@@ -680,7 +677,7 @@ pub(crate) async fn active_route_for_git_status(
 }
 
 async fn emit_route_lookup_failed_event(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     scope: &EngineResourceScope,
     activation: &EngineResourceInspection,
@@ -701,8 +698,7 @@ async fn emit_route_lookup_failed_event(
         &event_id,
         idempotency_key,
     );
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -762,7 +758,7 @@ async fn emit_route_lookup_failed_event(
         "revision": 1
     });
     let resource = create_route_resource(
-        deps,
+        host,
         invocation,
         resource_id,
         CAPABILITY_ROUTE_EVENT_KIND,
@@ -775,13 +771,13 @@ async fn emit_route_lookup_failed_event(
     )
     .await?;
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "capability route event").await?;
+        inspect_resource_required(host, &resource.resource_id, "capability route event").await?;
     let (version, payload) = current_payload(&inspection, "capability route event")?;
     Ok(Some(route_summary(&inspection.resource, version, payload)))
 }
 
 pub(crate) async fn emit_routed_invocation_event(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     route: &ActiveRoute,
     event_state: &str,
@@ -806,8 +802,7 @@ pub(crate) async fn emit_routed_invocation_event(
         &event_id,
         idempotency_key,
     );
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -861,7 +856,7 @@ pub(crate) async fn emit_routed_invocation_event(
         "revision": 1
     });
     let resource = create_route_resource(
-        deps,
+        host,
         invocation,
         resource_id,
         CAPABILITY_ROUTE_EVENT_KIND,
@@ -874,22 +869,19 @@ pub(crate) async fn emit_routed_invocation_event(
     )
     .await?;
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "capability route event").await?;
+        inspect_resource_required(host, &resource.resource_id, "capability route event").await?;
     let (version, payload) = current_payload(&inspection, "capability route event")?;
     Ok(Some(route_summary(&inspection.resource, version, payload)))
 }
 
 pub(crate) async fn execute_routed_git_status(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     route: &ActiveRoute,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let projected =
         match crate::domains::module_runtime::service::validate_accepted_shadow_projection(
-            &runtime_deps,
+            host,
             invocation,
             TARGET_OPERATION,
             &route.module_runtime_ref,
@@ -901,7 +893,7 @@ pub(crate) async fn execute_routed_git_status(
             Ok(projected) => projected,
             Err(_) => {
                 let route_event = emit_routed_invocation_event(
-                    deps,
+                    host,
                     invocation,
                     route,
                     "failed_closed",
@@ -943,7 +935,7 @@ pub(crate) async fn execute_routed_git_status(
             }
         };
     let route_event = emit_routed_invocation_event(
-        deps,
+        host,
         invocation,
         route,
         "routed",
@@ -990,21 +982,21 @@ pub(crate) async fn execute_routed_git_status(
 }
 
 async fn route_control_value_at(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
     control: RouteControl,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_route_write_authority(deps, invocation, control.operation()).await?;
+    let grant = ensure_route_write_authority(host, invocation, control.operation()).await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let binding_resource_id = required_string(payload, "capabilityRouteBindingResourceId")?;
     validate_route_resource_id(&binding_resource_id, CAPABILITY_ROUTE_BINDING_KIND)?;
     require_exact_resource_selector(&grant, &binding_resource_id, control.operation())?;
     let binding_inspection =
-        inspect_resource_required(deps, &binding_resource_id, "capability route binding").await?;
+        inspect_resource_required(host, &binding_resource_id, "capability route binding").await?;
     ensure_capability_route_binding(&binding_inspection, control.operation())?;
     ensure_scope(&binding_inspection, &scope, control.operation())?;
     if binding_inspection.resource.lifecycle != "ready" && control == RouteControl::Activate {
@@ -1028,7 +1020,7 @@ async fn route_control_value_at(
         REQUEST_ID_MAX_BYTES,
     )?;
     ensure_referenced_route_records(
-        deps,
+        host,
         &scope,
         &binding_resource_id,
         Some(&binding_version.version_id),
@@ -1057,8 +1049,7 @@ async fn route_control_value_at(
                 &activation_id,
                 &idempotency_key,
             );
-            if let Some(existing) = deps
-                .engine_host
+            if let Some(existing) = host
                 .inspect_resource(&resource_id)
                 .await
                 .map_err(engine_error)?
@@ -1112,7 +1103,7 @@ async fn route_control_value_at(
                 "revision": 1
             });
             let resource = create_route_resource(
-                deps,
+                host,
                 invocation,
                 resource_id,
                 CAPABILITY_ROUTE_ACTIVATION_KIND,
@@ -1126,7 +1117,7 @@ async fn route_control_value_at(
             .await?;
             let version_id = current_version_id(&resource, "capability_route_activate")?;
             let event = create_control_event(
-                deps,
+                host,
                 invocation,
                 &scope,
                 "activated",
@@ -1140,7 +1131,7 @@ async fn route_control_value_at(
             )
             .await?;
             publish_lifecycle_event(
-                deps,
+                host,
                 invocation,
                 "capability_route.activated",
                 &resource,
@@ -1159,7 +1150,7 @@ async fn route_control_value_at(
                 "idempotentReplay": false,
                 "capabilityRouteActivationResourceId": resource.resource_id,
                 "capabilityRouteActivationVersionId": version_id,
-                "routeActivation": route_summary_for_resource(deps, &resource).await?,
+                "routeActivation": route_summary_for_resource(host, &resource).await?,
                 "routeEvent": event,
                 "resourceRefs": [resource_ref(&resource, "capability_route_activation")]
             }))
@@ -1170,7 +1161,7 @@ async fn route_control_value_at(
             validate_route_resource_id(&activation_resource_id, CAPABILITY_ROUTE_ACTIVATION_KIND)?;
             require_exact_resource_selector(&grant, &activation_resource_id, control.operation())?;
             let activation_inspection = inspect_resource_required(
-                deps,
+                host,
                 &activation_resource_id,
                 "capability route activation",
             )
@@ -1187,7 +1178,7 @@ async fn route_control_value_at(
                 )));
             }
             let event = create_control_event(
-                deps,
+                host,
                 invocation,
                 &scope,
                 control.state(),
@@ -1238,7 +1229,7 @@ async fn route_control_value_at(
                     "revision": 1
                 });
                 let rollback_resource = create_route_resource(
-                    deps,
+                    host,
                     invocation,
                     rollback_resource_id,
                     CAPABILITY_ROUTE_ROLLBACK_KIND,
@@ -1250,12 +1241,12 @@ async fn route_control_value_at(
                     rollback_record,
                 )
                 .await?;
-                Some(route_summary_for_resource(deps, &rollback_resource).await?)
+                Some(route_summary_for_resource(host, &rollback_resource).await?)
             } else {
                 None
             };
             publish_lifecycle_event(
-                deps,
+                host,
                 invocation,
                 if control == RouteControl::Rollback {
                     "capability_route.rolled_back"
@@ -1313,7 +1304,7 @@ impl RouteControl {
 }
 
 async fn list_route_values(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
@@ -1322,7 +1313,7 @@ async fn list_route_values(
     output_key: &str,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_route_read_grant(deps, invocation, operation).await?;
+    let _grant = inspect_route_read_grant(host, invocation, operation).await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -1333,8 +1324,7 @@ async fn list_route_values(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let lifecycle = optional_string(payload, "lifecycle")?;
-    let resources = deps
-        .engine_host
+    let resources = host
         .list_resources(ListResources {
             kind: Some(kind.to_owned()),
             scope: Some(scope.clone()),
@@ -1352,8 +1342,7 @@ async fn list_route_values(
     let truncated = resources.len() > limit;
     let mut items = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        if let Some(inspection) = deps
-            .engine_host
+        if let Some(inspection) = host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -1380,7 +1369,7 @@ async fn list_route_values(
 }
 
 async fn inspect_route_value(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
@@ -1391,12 +1380,12 @@ async fn inspect_route_value(
     output_key: &str,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_route_read_grant(deps, invocation, operation).await?;
+    let grant = inspect_route_read_grant(host, invocation, operation).await?;
     let resource_id = required_string(payload, id_field)?;
     validate_route_resource_id(&resource_id, kind)?;
     require_exact_resource_selector(&grant, &resource_id, operation)?;
     let scope = resource_scope(invocation)?;
-    let inspection = inspect_resource_required(deps, &resource_id, output_key).await?;
+    let inspection = inspect_resource_required(host, &resource_id, output_key).await?;
     ensure(&inspection, operation)?;
     ensure_scope(&inspection, &scope, operation)?;
     let (version, payload) = current_payload(&inspection, operation)?;
@@ -1416,7 +1405,7 @@ async fn inspect_route_value(
 }
 
 async fn create_control_event(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     scope: &EngineResourceScope,
     state: &str,
@@ -1439,8 +1428,7 @@ async fn create_control_event(
         &event_id,
         idempotency_key,
     );
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -1478,7 +1466,7 @@ async fn create_control_event(
         "revision": 1
     });
     let resource = create_route_resource(
-        deps,
+        host,
         invocation,
         resource_id,
         CAPABILITY_ROUTE_EVENT_KIND,
@@ -1490,11 +1478,11 @@ async fn create_control_event(
         record,
     )
     .await?;
-    route_summary_for_resource(deps, &resource).await
+    route_summary_for_resource(host, &resource).await
 }
 
 async fn create_route_resource(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     resource_id: String,
     kind: &str,
@@ -1505,38 +1493,37 @@ async fn create_route_resource(
     visible_id: &str,
     initial_payload: Value,
 ) -> Result<EngineResource, CapabilityError> {
-    deps.engine_host
-        .create_resource(CreateResource {
-            resource_id: Some(resource_id),
-            kind: kind.to_owned(),
-            schema_id: Some(schema_id.to_owned()),
-            scope: scope.clone(),
-            owner_worker_id: worker_id()?,
-            owner_actor_id: invocation.causal_context.actor_id.clone(),
-            lifecycle: Some(lifecycle.to_owned()),
-            policy: route_resource_policy(kind),
-            initial_payload: Some(initial_payload),
-            locations: vec![EngineResourceLocation {
-                kind: location_kind.to_owned(),
-                uri: format!("{location_kind}:{visible_id}"),
-                mime_type: Some("application/json".to_owned()),
-                size_bytes: None,
-            }],
-            trace_id: invocation.causal_context.trace_id.clone(),
-            invocation_id: Some(invocation.id.clone()),
-        })
-        .await
-        .map_err(engine_error)
+    host.create_resource(CreateResource {
+        resource_id: Some(resource_id),
+        kind: kind.to_owned(),
+        schema_id: Some(schema_id.to_owned()),
+        scope: scope.clone(),
+        owner_worker_id: worker_id()?,
+        owner_actor_id: invocation.causal_context.actor_id.clone(),
+        lifecycle: Some(lifecycle.to_owned()),
+        policy: route_resource_policy(kind),
+        initial_payload: Some(initial_payload),
+        locations: vec![EngineResourceLocation {
+            kind: location_kind.to_owned(),
+            uri: format!("{location_kind}:{visible_id}"),
+            mime_type: Some("application/json".to_owned()),
+            size_bytes: None,
+        }],
+        trace_id: invocation.causal_context.trace_id.clone(),
+        invocation_id: Some(invocation.id.clone()),
+    })
+    .await
+    .map_err(engine_error)
 }
 
 async fn ensure_referenced_route_records(
-    deps: &Deps,
+    host: &EngineHostHandle,
     scope: &EngineResourceScope,
     binding_resource_id: &str,
     expected_binding_version: Option<&str>,
 ) -> Result<ReferencedRouteRecords, CapabilityError> {
     let binding =
-        inspect_resource_required(deps, binding_resource_id, "capability route binding").await?;
+        inspect_resource_required(host, binding_resource_id, "capability route binding").await?;
     ensure_capability_route_binding(&binding, "capability_route_lookup")?;
     ensure_scope(&binding, scope, "capability_route_lookup")?;
     let (binding_version, binding_payload) = current_payload(&binding, "capability_route_lookup")?;
@@ -1556,7 +1543,7 @@ async fn ensure_referenced_route_records(
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("active route binding is missing candidate version ref"))?;
     let candidate = inspect_resource_required(
-        deps,
+        host,
         candidate_resource_id,
         "capability replacement candidate",
     )
@@ -1574,7 +1561,7 @@ async fn ensure_referenced_route_records(
         )));
     }
     let shadow = validated_shadow_evidence_from_candidate(
-        deps,
+        host,
         None,
         scope,
         candidate_payload,
@@ -1597,12 +1584,11 @@ async fn ensure_referenced_route_records(
 }
 
 async fn route_has_terminal_event(
-    deps: &Deps,
+    host: &EngineHostHandle,
     scope: &EngineResourceScope,
     activation_resource_id: &str,
 ) -> Result<bool, CapabilityError> {
-    let events = deps
-        .engine_host
+    let events = host
         .list_resources(ListResources {
             kind: Some(CAPABILITY_ROUTE_EVENT_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -1612,8 +1598,7 @@ async fn route_has_terminal_event(
         .await
         .map_err(engine_error)?;
     for resource in events {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -1640,7 +1625,7 @@ async fn route_has_terminal_event(
 
 fn route_target_metadata(payload: &Value) -> Result<Value, CapabilityError> {
     let target = target_operation_binding_metadata(payload)?;
-    if target.operation_name != TARGET_OPERATION {
+    if target.operation != TARGET_OPERATION {
         return Err(invalid(
             "runtime replacement routing currently targets exactly git_status",
         ));
@@ -1651,7 +1636,7 @@ fn route_target_metadata(payload: &Value) -> Result<Value, CapabilityError> {
         ));
     }
     Ok(json!({
-        "name": target.operation_name,
+        "name": target.operation,
         "family": target.family,
         "currentBuiltInOwner": target.current_owner,
         "ownershipClass": target.ownership_class,
@@ -1662,12 +1647,14 @@ fn route_target_metadata(payload: &Value) -> Result<Value, CapabilityError> {
 }
 
 fn route_operation_record(reason: &str) -> Value {
+    let metadata = operation_binding_metadata(TARGET_OPERATION)
+        .expect("runtime replacement target must remain in the operation registry");
     json!({
-        "name": TARGET_OPERATION,
-        "family": "git",
-        "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
-        "ownershipClass": "adapter_replaceable",
-        "requestedReplacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
+        "name": metadata.operation,
+        "family": metadata.family,
+        "currentBuiltInOwner": metadata.current_owner,
+        "ownershipClass": metadata.ownership_class,
+        "requestedReplacementTarget": metadata.replacement_target,
         "currentExecutionOwner": "accepted_shadow_projection_when_active_else_builtin",
         "routeReason": reason,
         "dispatchChanged": true
@@ -1691,18 +1678,18 @@ struct VersionedRouteRef {
 }
 
 async fn validated_shadow_evidence_from_payload(
-    deps: &Deps,
+    host: &EngineHostHandle,
     grant: Option<&EngineGrant>,
     scope: &EngineResourceScope,
     payload: &Value,
     operation: &str,
 ) -> Result<ValidatedShadowEvidence, CapabilityError> {
     let shadow_evidence_ref = required_shadow_evidence_ref(payload)?;
-    validated_shadow_evidence_ref(deps, grant, scope, &shadow_evidence_ref, operation).await
+    validated_shadow_evidence_ref(host, grant, scope, &shadow_evidence_ref, operation).await
 }
 
 async fn validated_shadow_evidence_from_candidate(
-    deps: &Deps,
+    host: &EngineHostHandle,
     grant: Option<&EngineGrant>,
     scope: &EngineResourceScope,
     candidate_payload: &Value,
@@ -1714,11 +1701,11 @@ async fn validated_shadow_evidence_from_candidate(
             "capability replacement candidate is missing shadow evidence ref",
         ));
     };
-    validated_shadow_evidence_ref(deps, grant, scope, shadow_evidence_ref, operation).await
+    validated_shadow_evidence_ref(host, grant, scope, shadow_evidence_ref, operation).await
 }
 
 async fn validated_shadow_evidence_ref(
-    deps: &Deps,
+    host: &EngineHostHandle,
     grant: Option<&EngineGrant>,
     scope: &EngineResourceScope,
     shadow_evidence_ref: &Value,
@@ -1740,7 +1727,7 @@ async fn validated_shadow_evidence_ref(
         require_exact_resource_selector(grant, resource_id, operation)?;
     }
     let inspection =
-        inspect_resource_required(deps, resource_id, "capability shadow trial evidence").await?;
+        inspect_resource_required(host, resource_id, "capability shadow trial evidence").await?;
     ensure_capability_shadow_trial_evidence(&inspection, operation)?;
     ensure_scope(&inspection, scope, operation)?;
     if inspection.resource.lifecycle != "accepted" {
@@ -1808,7 +1795,7 @@ fn required_shadow_evidence_ref(payload: &Value) -> Result<Value, CapabilityErro
 }
 
 async fn validate_candidate_runtime_contract(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     grant: &EngineGrant,
     payload: &Value,
@@ -1828,11 +1815,8 @@ async fn validate_candidate_runtime_contract(
         &runtime_ref.resource_id,
         "capability_replacement_candidate_record",
     )?;
-    let runtime_deps = crate::domains::module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let projection = crate::domains::module_runtime::service::validate_accepted_shadow_projection(
-        &runtime_deps,
+        host,
         invocation,
         TARGET_OPERATION,
         &runtime_ref.value,
@@ -2155,11 +2139,11 @@ fn route_inspection(
 }
 
 async fn route_summary_for_resource(
-    deps: &Deps,
+    host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "capability route").await?;
+        inspect_resource_required(host, &resource.resource_id, "capability route").await?;
     let (version, payload) = current_payload(&inspection, "capability route projection")?;
     Ok(route_summary(&inspection.resource, version, payload))
 }

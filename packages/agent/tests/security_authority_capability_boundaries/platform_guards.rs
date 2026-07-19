@@ -33,16 +33,16 @@ fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
         );
     }
 
-    let redaction = read_repo_file("packages/agent/src/domains/session/event_store/redaction.rs");
+    let redaction = read_repo_file("packages/agent/src/shared/foundation/redaction.rs");
     for required in [
         "redact_sensitive_content",
         "access_?token",
         "refresh_?token",
         "client_?secret",
         "authorization_?code",
-        "redacts_json_auth_fields",
+        "redacts_provider_and_oauth_secrets",
         "redacts_debug_description_auth_fields",
-        "redacts_unquoted_secret_key_values",
+        "redacts_unquoted_auth_fields",
     ] {
         assert!(
             redaction.contains(required),
@@ -168,6 +168,10 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
             "iOS pairing parser missing host lifecycle guard: {required}"
         );
     }
+    assert!(
+        !ios_parser.contains("static func makeURL("),
+        "iOS pairing support must consume the Mac-owned wire format without a second emitter"
+    );
 
     let ios_validator = read_repo_file(
         "packages/ios-app/Sources/Support/Pairing/Onboarding/PairingStepValidator.swift",
@@ -222,11 +226,11 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
     let mac_builder =
         read_repo_file("packages/mac-app/Sources/Support/Pairing/PairingURLBuilder.swift");
     for required in [
-        "enum PairingHostValidator",
+        "private enum PairingHostValidator",
+        "private static let scheme = \"tron\"",
+        "private static let host = \"pair\"",
         "PairingHostValidator.canonicalHost(payload.host)",
-        "PairingHostValidator.canonicalHost(host)",
         "(1...65_535).contains(payload.port)",
-        "(1...65_535).contains(port)",
         "!trimmed.contains(\"://\")",
         "CharacterSet(charactersIn: \"/\\\\?#@[]\")",
     ] {
@@ -235,6 +239,16 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
             "Mac pairing URL builder missing iOS-parity guard: {required}"
         );
     }
+    assert!(
+        !mac_builder.contains("static func parse(")
+            && !mac_builder.contains("Element == URLQueryItem"),
+        "Mac production must remain an emitter rather than duplicate the iOS parser"
+    );
+    let mac_qr = read_repo_file("packages/mac-app/Sources/Support/Pairing/QRCodeGenerator.swift");
+    assert!(
+        !mac_qr.contains("static func decode("),
+        "Mac production QR support must encode only; decoding belongs to tests and iOS"
+    );
 
     let ios_source_guard = read_repo_file(
         "packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+BuildAndProject.swift",
@@ -250,7 +264,8 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
         "rejectsURLShapedHostValue",
         "rejectsHostFragments",
         "rejectsInvalidIPAndDNSHosts",
-        "makeURLRejectsMalformedRequiredFields",
+        "parsesMacEmitterRequiredFields",
+        "whitespaceOnlyTokenIsMissing",
     ] {
         assert!(
             ios_parser_tests.contains(required),
@@ -290,15 +305,22 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
     let mac_builder_tests =
         read_repo_file("packages/mac-app/Tests/Support/Pairing/PairingURLBuilderTests.swift");
     for required in [
+        "emitsRequiredFields",
+        "omitsBlankLabel",
         "portBoundaries",
-        "parseRejectsOutOfRangePort",
         "ipv6HostAccepted",
         "malformedHostsRejected",
-        "parseRejectsURLShapedHost",
     ] {
         assert!(
             mac_builder_tests.contains(required),
             "Mac pairing URL builder tests missing regression: {required}"
         );
     }
+    let mac_qr_tests =
+        read_repo_file("packages/mac-app/Tests/Support/Pairing/QRCodeGeneratorTests.swift");
+    assert!(
+        mac_qr_tests.contains("private func decodeQRCode")
+            && mac_qr_tests.contains("pairingURLRoundTrip"),
+        "Mac QR tests must decode emitted pairing payloads without a production inverse helper"
+    );
 }

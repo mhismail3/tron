@@ -8,28 +8,42 @@
 //! that tool performs direct primitive operations rather than catalog routing.
 //! The registration entrypoint is crate-private: transport setup is the
 //! server-facing facade, while this module owns the concrete domain-worker
-//! wiring.
+//! wiring, including the single jobs runtime state shared by the jobs worker
+//! and capability adapters. `catalog` owns shared capability contract types
+//! and stable registration identities without maintaining a second domain
+//! enumeration.
+//! `module_registry` owns the manifest resource contract, while
+//! `module_manifests` owns the ordered first-party payload composition.
+//! Registration installs both before any domain worker or function; the engine
+//! owns only generic type registration and version-preserving reconciliation.
+//! The complete production composition validates function ownership,
+//! canonical identity uniqueness, and stream-topic boundaries before either
+//! registration path mutates the engine catalog. Jobs and worker-lifecycle
+//! activation is returned as a one-shot token so transport setup starts those
+//! lifecycles only after domain and trigger registration both succeed.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
 //! Domain method names are internal operation keys for service routing only.
-//! Only canonical function ids are registered.
+//! Only canonical function ids are registered. Every handler binding is owned
+//! by a domain contract; composition has no hidden-operation exceptions.
 
 pub(crate) mod bindings;
 pub(crate) mod catalog;
 pub(crate) mod contract;
+mod module_manifests;
 pub(crate) mod worker;
 
 use std::collections::BTreeSet;
 
-use crate::engine::{EngineError, Result as EngineResult};
+use crate::engine::{EngineError, EngineHostHandle, Result as EngineResult};
 use crate::shared::server::context::ServerRuntimeContext;
 
 use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, agent_briefing, approval, auth, blob, capability, capability_binding, catalog_discovery,
+    agent, approval, auth, blob, capability, capability_binding, catalog_discovery,
     context_control, device, filesystem, git, import_history, import_preview, jobs, logs, media,
     memory, message, model, module_activity, module_authoring, module_dependencies, module_install,
     module_lifecycle, module_registry, module_runtime, module_validation, notifications,
@@ -37,23 +51,37 @@ use crate::domains::{
     system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
 };
 
-/// Register server-owned domain workers, canonical functions, and trigger records.
-pub(crate) fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
-    register_domain_workers(ctx)
+#[must_use = "activate after transport-trigger registration"]
+pub(crate) struct DomainLifecycleActivation {
+    jobs: jobs::Deps,
+    worker_lifecycle: worker_lifecycle::Deps,
 }
 
-/// Register server-owned domain workers, canonical functions, and trigger
-/// records from async server startup.
-pub(crate) async fn register_domain_workers_for_runtime_context(
+impl DomainLifecycleActivation {
+    pub(crate) fn activate(self) {
+        let shutdown_coordinator = self.jobs.shutdown_coordinator.clone();
+        self.jobs.activate_after_registration();
+        self.worker_lifecycle
+            .activate_after_registration(shutdown_coordinator);
+    }
+}
+
+struct DomainComposition {
+    modules: Vec<DomainWorkerModule>,
+    activation: DomainLifecycleActivation,
+}
+
+/// Register server-owned domain workers, canonical functions, and manifest records.
+pub(crate) fn register_domain_workers_for_context(
     ctx: &ServerRuntimeContext,
-) -> EngineResult<()> {
-    register_domain_workers_runtime(ctx).await
-}
-
-fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
+) -> EngineResult<DomainLifecycleActivation> {
+    let DomainComposition {
+        modules,
+        activation,
+    } = domain_worker_modules(ctx)?;
     let handle = &ctx.engine_host;
-    for module in domain_worker_modules(ctx)? {
-        validate_domain_stream_topics(&module)?;
+    install_module_manifest_resources_for_setup(handle)?;
+    for module in modules {
         handle.register_worker_for_setup(module.worker, false)?;
         for function in module.functions {
             handle.register_function_for_setup(
@@ -63,13 +91,21 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
             )?;
         }
     }
-    Ok(())
+    Ok(activation)
 }
 
-async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineResult<()> {
+/// Register server-owned domain workers, canonical functions, and manifest
+/// records from async server startup.
+pub(crate) async fn register_domain_workers_for_runtime_context(
+    ctx: &ServerRuntimeContext,
+) -> EngineResult<DomainLifecycleActivation> {
+    let DomainComposition {
+        modules,
+        activation,
+    } = domain_worker_modules(ctx)?;
     let handle = &ctx.engine_host;
-    for module in domain_worker_modules(ctx)? {
-        validate_domain_stream_topics(&module)?;
+    install_module_manifest_resources(handle).await?;
+    for module in modules {
         handle.register_worker(module.worker, false).await?;
         for function in module.functions {
             handle
@@ -77,15 +113,39 @@ async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineRe
                 .await?;
         }
     }
-    Ok(())
+    Ok(activation)
 }
 
-fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainWorkerModule>> {
+#[cfg(test)]
+pub(in crate::domains) fn install_module_manifests_for_test(
+    handle: &EngineHostHandle,
+) -> EngineResult<()> {
+    install_module_manifest_resources_for_setup(handle)
+}
+
+fn install_module_manifest_resources_for_setup(handle: &EngineHostHandle) -> EngineResult<()> {
+    handle.register_resource_type_for_setup(module_registry::resource_type_definition())?;
+    handle
+        .reconcile_source_resources_for_setup(module_manifests::builtin_module_manifest_resources())
+}
+
+async fn install_module_manifest_resources(handle: &EngineHostHandle) -> EngineResult<()> {
+    handle
+        .register_resource_type(module_registry::resource_type_definition())
+        .await?;
+    handle
+        .reconcile_source_resources(module_manifests::builtin_module_manifest_resources())
+        .await
+}
+
+fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition> {
     let deps = DomainRegistrationContext::from_context(ctx);
+    let jobs_runtime = jobs::RuntimeState::new();
+    let jobs_deps = jobs::Deps::from_engine(&deps, jobs_runtime.clone());
+    let worker_lifecycle_deps = worker_lifecycle::Deps::from_engine(&deps);
     let mut modules = vec![
         system::worker_module(&deps)?,
-        agent_briefing::worker_module(&deps)?,
-        capability::worker_module(&deps)?,
+        capability::worker_module(&deps, jobs_runtime)?,
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
         device::worker_module(&deps)?,
@@ -109,7 +169,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         module_activity::worker_module(&deps)?,
         web_research::worker_module(&deps)?,
         memory::worker_module(&deps)?,
-        jobs::worker_module(&deps)?,
+        jobs::worker_module(jobs_deps.clone())?,
         git::worker_module(&deps)?,
         web::worker_module(&deps)?,
         tool_sources::worker_module(&deps)?,
@@ -121,13 +181,46 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         settings::worker_module(&deps)?,
         transcription::worker_module(&deps)?,
         auth::worker_module(&deps)?,
-        worker_lifecycle::worker_module(&deps)?,
+        worker_lifecycle::worker_module(worker_lifecycle_deps.clone())?,
         agent::worker_module(&deps)?,
         logs::worker_module(&deps)?,
         session::worker_module(&deps)?,
     ];
     modules.extend(model::worker_modules(&deps)?);
-    Ok(modules)
+    validate_domain_composition(&modules)?;
+    for module in &modules {
+        validate_domain_stream_topics(module)?;
+    }
+    Ok(DomainComposition {
+        modules,
+        activation: DomainLifecycleActivation {
+            jobs: jobs_deps,
+            worker_lifecycle: worker_lifecycle_deps,
+        },
+    })
+}
+
+fn validate_domain_composition(modules: &[DomainWorkerModule]) -> EngineResult<()> {
+    let mut function_ids = BTreeSet::new();
+    for module in modules {
+        for function in &module.functions {
+            if function.definition.owner_worker != module.worker.id {
+                return Err(EngineError::PolicyViolation(format!(
+                    "function {} is owned by {} but composed under domain worker {}",
+                    function.definition.id.as_str(),
+                    function.definition.owner_worker.as_str(),
+                    module.worker.id.as_str()
+                )));
+            }
+            if !function_ids.insert(function.definition.id.as_str()) {
+                return Err(EngineError::PolicyViolation(format!(
+                    "duplicate canonical function id {} in domain composition",
+                    function.definition.id.as_str()
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()> {
@@ -146,6 +239,12 @@ fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()
         if topic.trim().is_empty() {
             return Err(EngineError::PolicyViolation(format!(
                 "domain worker {} declares an empty stream topic",
+                module.worker.id.as_str()
+            )));
+        }
+        if !topic.contains('.') {
+            return Err(EngineError::PolicyViolation(format!(
+                "domain worker {} stream topic {topic} must use domain-scoped dotted form",
                 module.worker.id.as_str()
             )));
         }
@@ -270,12 +369,48 @@ mod tests {
     }
 
     #[test]
+    fn stream_topic_validation_rejects_unscoped_topics() {
+        let module = test_module(&["events"], vec!["events"]);
+        let Err(error) = validate_domain_stream_topics(&module) else {
+            panic!("unscoped topic must fail");
+        };
+        assert!(error.to_string().contains("domain-scoped dotted form"));
+    }
+
+    #[test]
     fn stream_topic_validation_rejects_undeclared_function_topics() {
         let module = test_module(&["test.events"], vec!["other.events"]);
         let Err(error) = validate_domain_stream_topics(&module) else {
             panic!("undeclared topic must fail");
         };
         assert!(error.to_string().contains("undeclared domain stream topic"));
+    }
+
+    #[test]
+    fn domain_composition_rejects_duplicate_function_ids() {
+        let mut module = test_module(&[], vec![]);
+        module.functions.push(module.functions[0].clone());
+
+        let Err(error) = validate_domain_composition(&[module]) else {
+            panic!("duplicate canonical function id must fail");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate canonical function id")
+        );
+    }
+
+    #[test]
+    fn domain_composition_rejects_function_owner_drift() {
+        let mut module = test_module(&[], vec![]);
+        module.functions[0].definition.owner_worker =
+            WorkerId::new("other").expect("valid wrong owner");
+
+        let Err(error) = validate_domain_composition(&[module]) else {
+            panic!("function owner drift must fail");
+        };
+        assert!(error.to_string().contains("composed under domain worker"));
     }
 
     #[tokio::test]
@@ -364,7 +499,7 @@ mod tests {
                     "maxRisk": "medium",
                     "budget": {"remainingInvocations": 1},
                     "canDelegate": false,
-                    "provenance": {"source": "registration-test"}
+                    "provenance": {"source": "registration-test", "operation": "observe"}
                 }),
                 CausalContext::new(
                     ActorId::new("system:registration-test").expect("actor id"),
@@ -430,6 +565,7 @@ mod tests {
 
     fn forbidden_startup_prefixes() -> Vec<String> {
         let product_namespaces = vec![
+            ["agent", "_", "briefing"].concat(),
             "browser".to_owned(),
             "cron".to_owned(),
             "display".to_owned(),

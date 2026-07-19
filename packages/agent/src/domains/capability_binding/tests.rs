@@ -37,14 +37,14 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
     CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
     CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_RUN_KIND,
-    CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
+    CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
 };
 use crate::domains::module_lifecycle::contract as module_lifecycle_contract;
 use crate::domains::module_runtime::contract as module_runtime_contract;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeliveryMode, DeriveGrant,
-    EngineResourceLocation, EngineResourceScope, EngineResourceVersioningMode, FunctionId,
-    Invocation, InvocationId, ListResources, MODULE_INSTALL_DECISION_KIND,
+    EngineHostHandle, EngineResourceLocation, EngineResourceScope, EngineResourceVersioningMode,
+    FunctionId, Invocation, InvocationId, ListResources, MODULE_INSTALL_DECISION_KIND,
     MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_LIFECYCLE_STATE_KIND,
     MODULE_LIFECYCLE_STATE_SCHEMA_ID, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID,
     RiskLevel, TraceId, UpdateResource, WorkerId, builtin_resource_type_definitions,
@@ -54,7 +54,7 @@ use crate::shared::server::test_support::make_test_context;
 const DEFAULT_OPERATION_AT: &str = "2026-06-27T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    host: EngineHostHandle,
     capability_deps: crate::domains::capability::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
@@ -64,21 +64,18 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let capability_deps = crate::domains::capability::Deps {
             engine_host: ctx.engine_host.clone(),
             event_store: ctx.event_store.clone(),
             session_manager: ctx.session_manager.clone(),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
-            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
-                startup_cutoff: Utc::now(),
-            },
+            jobs: crate::domains::jobs::RuntimeState::new(),
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -100,7 +97,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[
@@ -117,7 +114,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            host,
             capability_deps,
             session_id,
             write_grant_id,
@@ -128,7 +125,7 @@ impl Fixture {
     async fn binding_request(&self, key: &str) -> Value {
         let invocation = self.write_invocation(key, request_payload(key));
         record_capability_binding_request_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -167,7 +164,7 @@ impl Fixture {
             &self.session_id,
         );
         record_capability_binding_decision_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -204,7 +201,7 @@ impl Fixture {
             &self.session_id,
         );
         activate_capability_binding_policy_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -216,7 +213,7 @@ impl Fixture {
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[
@@ -238,7 +235,7 @@ impl Fixture {
     async fn exact_write_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             &[
                 READ_SCOPE,
@@ -289,7 +286,7 @@ impl Fixture {
 }
 
 struct ShadowFixture {
-    deps: Deps,
+    host: EngineHostHandle,
     capability_deps: crate::domains::capability::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
@@ -299,17 +296,14 @@ struct ShadowFixture {
 impl ShadowFixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let capability_deps = crate::domains::capability::Deps {
             engine_host: ctx.engine_host.clone(),
             event_store: ctx.event_store.clone(),
             session_manager: ctx.session_manager.clone(),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
-            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
-                startup_cutoff: Utc::now(),
-            },
+            jobs: crate::domains::jobs::RuntimeState::new(),
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_kinds = shadow_trial_kinds();
@@ -319,7 +313,7 @@ impl ShadowFixture {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let write_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-shadow-write"),
             &[
                 READ_SCOPE,
@@ -339,7 +333,7 @@ impl ShadowFixture {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let read_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-shadow-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &read_kinds,
@@ -348,7 +342,7 @@ impl ShadowFixture {
         )
         .await;
         Self {
-            deps,
+            host,
             capability_deps,
             session_id,
             write_grant_id,
@@ -359,7 +353,7 @@ impl ShadowFixture {
     async fn shadow_request(&self, key: &str) -> Value {
         let invocation = self.shadow_request_invocation(key);
         record_capability_shadow_trial_request_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -377,7 +371,7 @@ impl ShadowFixture {
             .shadow_decision_invocation(key, request, decision)
             .await;
         record_capability_shadow_trial_decision_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -434,7 +428,7 @@ impl ShadowFixture {
     async fn shadow_run(&self, key: &str, decision: &Value, outcome: &str) -> Value {
         let invocation = self.shadow_run_invocation(key, decision, outcome).await;
         record_capability_shadow_trial_run_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -495,7 +489,7 @@ impl ShadowFixture {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         let kinds = shadow_trial_kinds();
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &kinds,
@@ -512,7 +506,7 @@ impl ShadowFixture {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         let kinds = shadow_trial_kinds();
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             &[
                 READ_SCOPE,
@@ -558,10 +552,18 @@ impl ShadowFixture {
         operation: &str,
         source: &Invocation,
     ) -> Value {
+        let execute_grant_id = derive_operation_bound_execute_grant(
+            &self.capability_deps,
+            &self.session_id,
+            key,
+            operation,
+            &source.causal_context.authority_grant_id,
+        )
+        .await;
         let mut context = CausalContext::new(
             ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
             ActorKind::Agent,
-            source.causal_context.authority_grant_id.clone(),
+            execute_grant_id,
             TraceId::new(format!("trace-{key}")).expect("trace id"),
         )
         .with_session_id(self.session_id.clone())
@@ -590,7 +592,7 @@ impl ShadowFixture {
 }
 
 struct RouteFixture {
-    deps: Deps,
+    host: EngineHostHandle,
     capability_deps: crate::domains::capability::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
@@ -600,17 +602,14 @@ struct RouteFixture {
 impl RouteFixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let capability_deps = crate::domains::capability::Deps {
             engine_host: ctx.engine_host.clone(),
             event_store: ctx.event_store.clone(),
             session_manager: ctx.session_manager.clone(),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
-            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
-                startup_cutoff: Utc::now(),
-            },
+            jobs: crate::domains::jobs::RuntimeState::new(),
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_kinds = route_kinds();
@@ -620,7 +619,7 @@ impl RouteFixture {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let write_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-route-write"),
             &[
                 READ_SCOPE,
@@ -640,7 +639,7 @@ impl RouteFixture {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let read_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-route-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &read_kinds,
@@ -649,7 +648,7 @@ impl RouteFixture {
         )
         .await;
         Self {
-            deps,
+            host,
             capability_deps,
             session_id,
             write_grant_id,
@@ -748,8 +747,7 @@ impl RouteFixture {
         let scope = EngineResourceScope::Session(self.session_id.clone());
         let lifecycle_id = format!("module_lifecycle_state:{key}");
         let lifecycle = self
-            .deps
-            .engine_host
+            .host
             .create_resource(CreateResource {
                 resource_id: Some(lifecycle_id.clone()),
                 kind: MODULE_LIFECYCLE_STATE_KIND.to_owned(),
@@ -778,8 +776,7 @@ impl RouteFixture {
             .expect("lifecycle version");
         let runtime_id = format!("module_runtime_state:{key}");
         let runtime = self
-            .deps
-            .engine_host
+            .host
             .create_resource(CreateResource {
                 resource_id: Some(runtime_id.clone()),
                 kind: MODULE_RUNTIME_STATE_KIND.to_owned(),
@@ -827,8 +824,7 @@ impl RouteFixture {
     async fn runtime_refs_from_module_operations(&self, key: &str) -> (Value, Value) {
         let scope = EngineResourceScope::Session(self.session_id.clone());
         let install_decision_id = format!("module_install_decision:{key}-install-candidate");
-        self.deps
-            .engine_host
+        self.host
             .create_resource(CreateResource {
                 resource_id: Some(install_decision_id.clone()),
                 kind: MODULE_INSTALL_DECISION_KIND.to_owned(),
@@ -855,7 +851,7 @@ impl RouteFixture {
         let lifecycle_id = deterministic_module_lifecycle_resource_id(&scope, &install_decision_id);
         let lifecycle_selector = format!("resource:{lifecycle_id}");
         let lifecycle_grant_id = derive_grant(
-            &self.deps,
+            &self.host,
             &format!("{key}-lifecycle-write"),
             &[
                 module_lifecycle_contract::READ_SCOPE,
@@ -868,9 +864,6 @@ impl RouteFixture {
             "none",
         )
         .await;
-        let lifecycle_deps = crate::domains::module_lifecycle::Deps {
-            engine_host: self.deps.engine_host.clone(),
-        };
         let lifecycle_request_payload = json!({
             "moduleInstallDecisionResourceId": install_decision_id,
             "lifecycleAction": "enable",
@@ -879,7 +872,7 @@ impl RouteFixture {
         });
         let lifecycle_request =
             crate::domains::module_lifecycle::service::request_module_lifecycle_value_at(
-                &lifecycle_deps,
+                &self.host,
                 &invocation(
                     &format!("{key}-lifecycle-request"),
                     lifecycle_request_payload.clone(),
@@ -911,7 +904,7 @@ impl RouteFixture {
         });
         let lifecycle_decision =
             crate::domains::module_lifecycle::service::decide_module_lifecycle_value_at(
-                &lifecycle_deps,
+                &self.host,
                 &invocation(
                     &format!("{key}-lifecycle-decision"),
                     lifecycle_decision_payload.clone(),
@@ -940,7 +933,7 @@ impl RouteFixture {
             deterministic_module_runtime_resource_id(&scope, &lifecycle_id, &runtime_request_id);
         let runtime_selector = format!("resource:{runtime_id}");
         let runtime_grant_id = derive_grant(
-            &self.deps,
+            &self.host,
             &format!("{key}-runtime-write"),
             &[
                 module_runtime_contract::READ_SCOPE,
@@ -958,9 +951,6 @@ impl RouteFixture {
             "none",
         )
         .await;
-        let runtime_deps = crate::domains::module_runtime::Deps {
-            engine_host: self.deps.engine_host.clone(),
-        };
         let runtime_payload = json!({
             "moduleLifecycleResourceId": lifecycle_id,
             "runtimeRequestId": runtime_request_id,
@@ -974,7 +964,7 @@ impl RouteFixture {
             "timeoutMs": 30000
         });
         let runtime = crate::domains::module_runtime::service::request_module_runtime_value_at(
-            &runtime_deps,
+            &self.host,
             &invocation(
                 &format!("{key}-runtime-request"),
                 runtime_payload.clone(),
@@ -1034,7 +1024,7 @@ impl RouteFixture {
             &self.session_id,
         );
         let request = crate::domains::approval::service::request_approval_value(
-            &self.deps.engine_host,
+            &self.host,
             &request_invocation,
             &request_invocation.payload,
         )
@@ -1054,7 +1044,7 @@ impl RouteFixture {
             &self.session_id,
         );
         crate::domains::approval::service::decide_approval_value(
-            &self.deps.engine_host,
+            &self.host,
             &decision_invocation,
             &decision_invocation.payload,
         )
@@ -1073,7 +1063,7 @@ impl RouteFixture {
     async fn shadow_request(&self, key: &str) -> Value {
         let invocation = self.write_invocation(key, shadow_request_payload(key));
         record_capability_shadow_trial_request_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1116,7 +1106,7 @@ impl RouteFixture {
             &self.session_id,
         );
         record_capability_shadow_trial_decision_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1161,7 +1151,7 @@ impl RouteFixture {
             &self.session_id,
         );
         record_capability_shadow_trial_run_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1173,7 +1163,7 @@ impl RouteFixture {
     async fn binding(&self, key: &str, candidate: &Value) -> Value {
         let invocation = self.binding_invocation(key, candidate).await;
         record_route_binding_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1187,8 +1177,7 @@ impl RouteFixture {
             .as_str()
             .expect("candidate id");
         let candidate_inspection = self
-            .deps
-            .engine_host
+            .host
             .inspect_resource(candidate_id)
             .await
             .expect("inspect candidate resource internally")
@@ -1237,7 +1226,7 @@ impl RouteFixture {
     async fn activation(&self, key: &str, binding: &Value) -> Value {
         let invocation = self.activation_invocation(key, binding).await;
         activate_route_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1288,7 +1277,7 @@ impl RouteFixture {
     async fn disable(&self, key: &str, binding: &Value, activation: &Value) -> Value {
         let invocation = self.disable_invocation(key, binding, activation).await;
         disable_route_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1350,7 +1339,7 @@ impl RouteFixture {
     async fn rollback(&self, key: &str, binding: &Value, activation: &Value) -> Value {
         let invocation = self.rollback_invocation(key, binding, activation).await;
         rollback_route_value_at(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -1416,7 +1405,7 @@ impl RouteFixture {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         let kinds = route_kinds();
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &kinds,
@@ -1436,7 +1425,7 @@ impl RouteFixture {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         let kinds = route_kinds();
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             &[
                 READ_SCOPE,
@@ -1453,8 +1442,7 @@ impl RouteFixture {
 
     async fn append_resource_version(&self, key: &str, resource_id: &str, expected_version: &str) {
         let inspection = self
-            .deps
-            .engine_host
+            .host
             .inspect_resource(resource_id)
             .await
             .expect("inspect route resource")
@@ -1469,8 +1457,7 @@ impl RouteFixture {
             json!(payload.get("revision").and_then(Value::as_u64).unwrap_or(1) + 1);
         payload["updatedAt"] = json!("2026-06-27T12:01:00Z");
         let update_invocation = self.write_invocation(key, json!({}));
-        self.deps
-            .engine_host
+        self.host
             .update_resource(UpdateResource {
                 resource_id: resource_id.to_owned(),
                 expected_current_version_id: Some(expected_version.to_owned()),
@@ -1487,8 +1474,7 @@ impl RouteFixture {
 
     async fn set_resource_lifecycle(&self, key: &str, resource_id: &str, lifecycle: &str) {
         let inspection = self
-            .deps
-            .engine_host
+            .host
             .inspect_resource(resource_id)
             .await
             .expect("inspect route resource")
@@ -1502,8 +1488,7 @@ impl RouteFixture {
             json!(payload.get("revision").and_then(Value::as_u64).unwrap_or(1) + 1);
         payload["updatedAt"] = json!("2026-06-27T12:01:00Z");
         let update_invocation = self.write_invocation(key, json!({}));
-        self.deps
-            .engine_host
+        self.host
             .update_resource(UpdateResource {
                 resource_id: resource_id.to_owned(),
                 expected_current_version_id: Some(current_version.version_id.clone()),
@@ -1578,10 +1563,21 @@ impl RouteFixture {
         grant_id: AuthorityGrantId,
         scopes: &[String],
     ) -> Value {
+        let operation = payload["operation"]
+            .as_str()
+            .expect("execute operation is required");
+        let execute_grant_id = derive_operation_bound_execute_grant(
+            &self.capability_deps,
+            &self.session_id,
+            key,
+            operation,
+            &grant_id,
+        )
+        .await;
         let mut context = CausalContext::new(
             ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
             ActorKind::Agent,
-            grant_id,
+            execute_grant_id,
             TraceId::new(format!("trace-{key}")).expect("trace id"),
         )
         .with_session_id(self.session_id.clone())
@@ -1820,7 +1816,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 
     assert_eq!(
         list_capability_binding_request_value(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("list-requests", json!({})),
             &json!({})
         )
@@ -1833,7 +1829,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
     );
     assert_eq!(
         list_capability_binding_decision_value(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("list-decisions", json!({})),
             &json!({})
         )
@@ -1846,7 +1842,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
     );
     assert_eq!(
         list_capability_binding_policy_value(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("list-policies", json!({})),
             &json!({})
         )
@@ -1860,7 +1856,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 
     let request_grant = fixture.exact_read_grant("request-exact", request_id).await;
     let inspected_request = inspect_capability_binding_request_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "inspect-request",
             json!({"capabilityBindingRequestResourceId": request_id}),
@@ -1893,7 +1889,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 
     let policy_grant = fixture.exact_read_grant("policy-exact", policy_id).await;
     let inspected_policy = inspect_capability_binding_policy_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "inspect-policy",
             json!({"capabilityBindingPolicyResourceId": policy_id}),
@@ -1925,7 +1921,7 @@ async fn list_operations_accept_operation_scoped_read_grants() {
     fixture.binding_policy("policy", &decision).await;
 
     let request_grant = derive_grant(
-        &fixture.deps,
+        &fixture.host,
         "request-list-narrow",
         &[READ_SCOPE, RESOURCE_READ_SCOPE],
         &[CAPABILITY_BINDING_REQUEST_KIND],
@@ -1934,7 +1930,7 @@ async fn list_operations_accept_operation_scoped_read_grants() {
     )
     .await;
     let request_list = list_capability_binding_request_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "list-requests-narrow",
             json!({}),
@@ -1955,7 +1951,7 @@ async fn list_operations_accept_operation_scoped_read_grants() {
     );
 
     let decision_grant = derive_grant(
-        &fixture.deps,
+        &fixture.host,
         "decision-list-narrow",
         &[READ_SCOPE, RESOURCE_READ_SCOPE],
         &[CAPABILITY_BINDING_DECISION_KIND],
@@ -1964,7 +1960,7 @@ async fn list_operations_accept_operation_scoped_read_grants() {
     )
     .await;
     let decision_list = list_capability_binding_decision_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "list-decisions-narrow",
             json!({}),
@@ -1985,7 +1981,7 @@ async fn list_operations_accept_operation_scoped_read_grants() {
     );
 
     let policy_grant = derive_grant(
-        &fixture.deps,
+        &fixture.host,
         "policy-list-narrow",
         &[READ_SCOPE, RESOURCE_READ_SCOPE],
         &[CAPABILITY_BINDING_POLICY_KIND],
@@ -1994,7 +1990,7 @@ async fn list_operations_accept_operation_scoped_read_grants() {
     )
     .await;
     let policy_list = list_capability_binding_policy_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "list-policies-narrow",
             json!({}),
@@ -2021,7 +2017,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
 
     let candidate_invocation = fixture.candidate_invocation("candidate").await;
     let candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2058,7 +2054,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         json!(true)
     );
     let replay = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2074,7 +2070,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .exact_read_grant("candidate-read-exact", candidate_id)
         .await;
     let inspected_candidate = inspect_replacement_candidate_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "candidate-inspect",
             json!({"capabilityReplacementCandidateResourceId": candidate_id}),
@@ -2113,7 +2109,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .exact_read_grant("binding-read-exact", binding_id)
         .await;
     let inspected_binding = inspect_route_binding_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "binding-inspect",
             json!({"capabilityRouteBindingResourceId": binding_id}),
@@ -2132,7 +2128,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
 
     assert!(
         active_route_for_git_status(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("route-before-activation", json!({}))
         )
         .await
@@ -2148,7 +2144,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
 
     let active = active_route_for_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-after-activation", json!({})),
     )
     .await
@@ -2157,7 +2153,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     assert_eq!(active.route_version, "git-status-route-v1");
     assert_eq!(active.candidate_owner, "module:git-status-shadow");
     let routed = execute_routed_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-execute", json!({})),
         &active,
     )
@@ -2223,7 +2219,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
 
     let events = list_route_event_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-events", json!({"includeArchived": true})),
         &json!({"includeArchived": true}),
     )
@@ -2264,8 +2260,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         assert!(contains_json_key(event, "versionIdRedacted"));
     }
     let route_event_id = fixture
-        .deps
-        .engine_host
+        .host
         .list_resources(ListResources {
             kind: Some(CAPABILITY_ROUTE_EVENT_KIND.to_owned()),
             scope: Some(EngineResourceScope::Session(fixture.session_id.clone())),
@@ -2280,7 +2275,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .exact_read_grant("event-read-exact", &route_event_id)
         .await;
     let inspected_event = inspect_route_event_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "route-event-inspect",
             json!({"capabilityRouteEventResourceId": route_event_id}),
@@ -2302,7 +2297,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     assert_eq!(disabled["routeEvent"]["event"]["kind"], json!("disabled"));
     assert!(
         active_route_for_git_status(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("route-after-disable", json!({}))
         )
         .await
@@ -2318,7 +2313,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
     assert!(
         active_route_for_git_status(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("route-after-rollback", json!({}))
         )
         .await
@@ -2341,7 +2336,7 @@ async fn route_candidate_accepts_refs_created_by_module_lifecycle_and_runtime_op
         )
         .await;
     let candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2366,7 +2361,7 @@ async fn active_route_lookup_rejects_multiple_active_routes_in_scope() {
 
     let first_candidate_invocation = fixture.candidate_invocation("candidate-one").await;
     let first_candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &first_candidate_invocation,
         &first_candidate_invocation.payload,
         default_operation_at(),
@@ -2379,7 +2374,7 @@ async fn active_route_lookup_rejects_multiple_active_routes_in_scope() {
 
     let second_candidate_invocation = fixture.candidate_invocation("candidate-two").await;
     let second_candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &second_candidate_invocation,
         &second_candidate_invocation.payload,
         default_operation_at(),
@@ -2391,7 +2386,7 @@ async fn active_route_lookup_rejects_multiple_active_routes_in_scope() {
     assert_eq!(second_activation["status"], json!("active"));
 
     let error = active_route_for_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("ambiguous-route-lookup", json!({})),
     )
     .await
@@ -2406,7 +2401,7 @@ async fn active_route_lookup_rejects_multiple_active_routes_in_scope() {
         .disable("disable-second-route", &second_binding, &second_activation)
         .await;
     let active = active_route_for_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-after-ambiguous-disable", json!({})),
     )
     .await
@@ -2426,7 +2421,7 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
 
     let candidate_invocation = fixture.candidate_invocation("candidate-dispatch").await;
     let candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2482,6 +2477,26 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
     assert_eq!(
         routed_details["dynamicReplacement"]["routeEvent"]["event"]["kind"],
         json!("routed_invocation")
+    );
+    let operation_metadata = crate::domains::capability::operation_binding_metadata("git_status")
+        .expect("git status metadata");
+    let routed_operation = &routed_details["dynamicReplacement"]["routeEvent"]["operation"];
+    assert_eq!(
+        routed_operation["name"],
+        json!(operation_metadata.operation)
+    );
+    assert_eq!(routed_operation["family"], json!(operation_metadata.family));
+    assert_eq!(
+        routed_operation["currentBuiltInOwner"],
+        json!(operation_metadata.current_owner)
+    );
+    assert_eq!(
+        routed_operation["ownershipClass"],
+        json!(operation_metadata.ownership_class)
+    );
+    assert_eq!(
+        routed_operation["requestedReplacementTarget"],
+        json!(operation_metadata.replacement_target)
     );
     assert_eq!(routed_details["status"], json!("clean"));
     assert_eq!(routed_details["git"]["worktreeState"], json!("clean"));
@@ -2550,7 +2565,7 @@ async fn capability_execute_dispatch_controls_full_route_lifecycle() {
     assert_eq!(activation["status"], json!("active"));
     assert!(
         active_route_for_git_status(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("dispatch-flow-active-route", json!({}))
         )
         .await
@@ -2574,7 +2589,7 @@ async fn capability_execute_dispatch_controls_full_route_lifecycle() {
     assert_eq!(disabled["routeEvent"]["event"]["kind"], json!("disabled"));
     assert!(
         active_route_for_git_status(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("dispatch-flow-disabled-route", json!({}))
         )
         .await
@@ -2601,7 +2616,7 @@ async fn capability_execute_dispatch_controls_full_route_lifecycle() {
     );
     assert!(
         active_route_for_git_status(
-            &fixture.deps,
+            &fixture.host,
             &fixture.read_invocation("dispatch-flow-rolled-back-route", json!({}))
         )
         .await
@@ -2616,7 +2631,7 @@ async fn active_route_rejects_unsafe_adapter_projection_without_builtin_success_
 
     let candidate_invocation = fixture.candidate_invocation("candidate").await;
     let candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2627,7 +2642,7 @@ async fn active_route_rejects_unsafe_adapter_projection_without_builtin_success_
     fixture.activation("activation", &binding).await;
 
     let mut active = active_route_for_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-after-activation", json!({})),
     )
     .await
@@ -2720,7 +2735,7 @@ async fn assert_failed_closed_lookup_event(
     expected_result: &str,
 ) {
     let events = list_route_event_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(key, json!({"includeArchived": true})),
         &json!({"includeArchived": true}),
     )
@@ -2752,7 +2767,7 @@ async fn activated_route_fixture(label: &str) -> (RouteFixture, ActiveRoute) {
     let fixture = RouteFixture::new(label).await;
     let candidate_invocation = fixture.candidate_invocation("candidate").await;
     let candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2762,7 +2777,7 @@ async fn activated_route_fixture(label: &str) -> (RouteFixture, ActiveRoute) {
     let binding = fixture.binding("binding", &candidate).await;
     fixture.activation("activation", &binding).await;
     let active = active_route_for_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-after-activation", json!({})),
     )
     .await
@@ -2777,7 +2792,7 @@ async fn assert_route_execution_failed_closed(
     key: &str,
 ) -> Value {
     let routed = execute_routed_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(key, json!({})),
         active,
     )
@@ -2860,7 +2875,7 @@ async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
         .candidate_invocation("binding-stale-candidate")
         .await;
     let candidate = record_replacement_candidate_value_at(
-        &binding_fixture.deps,
+        &binding_fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2881,7 +2896,7 @@ async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
         .append_resource_version("binding-stale-update", binding_id, binding_version_id)
         .await;
     let error = active_route_for_git_status(
-        &binding_fixture.deps,
+        &binding_fixture.host,
         &binding_fixture.read_invocation("binding-stale-lookup", json!({})),
     )
     .await
@@ -2903,7 +2918,7 @@ async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
         .candidate_invocation("candidate-stale-candidate")
         .await;
     let candidate = record_replacement_candidate_value_at(
-        &candidate_fixture.deps,
+        &candidate_fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -2926,7 +2941,7 @@ async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
         .append_resource_version("candidate-stale-update", candidate_id, candidate_version_id)
         .await;
     let error = active_route_for_git_status(
-        &candidate_fixture.deps,
+        &candidate_fixture.host,
         &candidate_fixture.read_invocation("candidate-stale-lookup", json!({})),
     )
     .await
@@ -2970,7 +2985,7 @@ async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
         &fixture.session_id,
     );
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &fake_invocation,
         &fake_invocation.payload,
         default_operation_at(),
@@ -3009,7 +3024,7 @@ async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
         &fixture.session_id,
     );
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &stale_invocation,
         &stale_invocation.payload,
         default_operation_at(),
@@ -3030,7 +3045,7 @@ async fn route_candidate_rejects_target_and_authority_spoofing() {
     let mut target_mismatch = fixture.candidate_invocation("target-mismatch").await;
     target_mismatch.payload["replacementTarget"] = json!("different_future_adapter");
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &target_mismatch,
         &target_mismatch.payload,
         default_operation_at(),
@@ -3046,7 +3061,7 @@ async fn route_candidate_rejects_target_and_authority_spoofing() {
     let mut wildcard_selector = fixture.candidate_invocation("wildcard-selector").await;
     wildcard_selector.payload["authorityConstraints"]["resourceSelectors"] = json!(["resource:*"]);
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &wildcard_selector,
         &wildcard_selector.payload,
         default_operation_at(),
@@ -3060,7 +3075,7 @@ async fn route_candidate_rejects_target_and_authority_spoofing() {
     broad_selector.payload["authorityConstraints"]["resourceSelectors"] =
         json!(["kind:git_status_shadow_projection"]);
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &broad_selector,
         &broad_selector.payload,
         default_operation_at(),
@@ -3073,7 +3088,7 @@ async fn route_candidate_rejects_target_and_authority_spoofing() {
     let mut agent_state_kind = fixture.candidate_invocation("agent-state-kind").await;
     agent_state_kind.payload["authorityConstraints"]["resourceKinds"] = json!(["agent_state"]);
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &agent_state_kind,
         &agent_state_kind.payload,
         default_operation_at(),
@@ -3089,7 +3104,7 @@ async fn route_candidate_rejects_target_and_authority_spoofing() {
     let mut agent_state_inherited = fixture.candidate_invocation("agent-state-inherited").await;
     agent_state_inherited.payload["authorityConstraints"]["agentStateInherited"] = json!(true);
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &agent_state_inherited,
         &agent_state_inherited.payload,
         default_operation_at(),
@@ -3107,7 +3122,7 @@ async fn route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs() {
     let mut stale_runtime = fixture.candidate_invocation("stale-runtime-ref").await;
     stale_runtime.payload["moduleRuntimeRef"]["versionId"] = json!("stale-runtime-version");
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &stale_runtime,
         &stale_runtime.payload,
         default_operation_at(),
@@ -3123,7 +3138,7 @@ async fn route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs() {
     let mut stale_lifecycle = fixture.candidate_invocation("stale-lifecycle-ref").await;
     stale_lifecycle.payload["moduleLifecycleRef"]["versionId"] = json!("stale-lifecycle-version");
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &stale_lifecycle,
         &stale_lifecycle.payload,
         default_operation_at(),
@@ -3164,7 +3179,7 @@ async fn route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs() {
         &fixture.session_id,
     );
     let error = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &unauthorized,
         &unauthorized.payload,
         default_operation_at(),
@@ -3251,7 +3266,7 @@ async fn shadow_trial_records_git_status_request_decision_run_and_evidence_witho
         .exact_read_grant("shadow-evidence-exact", evidence_id)
         .await;
     let inspected = inspect_capability_shadow_trial_evidence_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "shadow-evidence-inspect",
             json!({
@@ -3407,7 +3422,7 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
     wrong_target["targetOperation"] = json!("git_diff");
     let wrong_invocation = fixture.write_invocation("wrong-target", wrong_target);
     let error = record_capability_shadow_trial_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &wrong_invocation,
         &wrong_invocation.payload,
         default_operation_at(),
@@ -3425,7 +3440,7 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
     let wildcard_payload_invocation =
         fixture.write_invocation("wildcard-selector", wildcard_payload);
     let error = record_capability_shadow_trial_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &wildcard_payload_invocation,
         &wildcard_payload_invocation.payload,
         default_operation_at(),
@@ -3436,7 +3451,7 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
     assert!(error.contains("non-wildcard token"), "{error}");
 
     let wildcard_grant_id = derive_grant(
-        &fixture.deps,
+        &fixture.host,
         "shadow-wildcard-wide",
         &["*"],
         &["*"],
@@ -3457,7 +3472,7 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
         &fixture.session_id,
     );
     let error = record_capability_shadow_trial_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &wildcard_invocation,
         &wildcard_invocation.payload,
         default_operation_at(),
@@ -3478,7 +3493,7 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
         .as_str()
         .expect("evidence id");
     let selector_denied = inspect_capability_shadow_trial_evidence_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(
             "shadow-selector-denied",
             json!({"capabilityShadowTrialEvidenceResourceId": evidence_id}),
@@ -3497,7 +3512,7 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
         .exact_read_grant("shadow-stale-evidence-exact", evidence_id)
         .await;
     let stale = inspect_capability_shadow_trial_evidence_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "shadow-stale-evidence",
             json!({
@@ -3538,7 +3553,7 @@ async fn shadow_trial_rejects_completed_projection_without_concrete_evidence() {
         .expect("candidate projection")
         .remove("evidenceRef");
     let error = record_capability_shadow_trial_run_value_at(
-        &fixture.deps,
+        &fixture.host,
         &missing,
         &missing.payload,
         default_operation_at(),
@@ -3560,7 +3575,7 @@ async fn shadow_trial_rejects_completed_projection_without_concrete_evidence() {
         "role": "projection"
     });
     let error = record_capability_shadow_trial_run_value_at(
-        &fixture.deps,
+        &fixture.host,
         &placeholder,
         &placeholder.payload,
         default_operation_at(),
@@ -3636,11 +3651,11 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         .map(String::as_str)
         .collect::<Vec<_>>();
     let shadow_fixture = ShadowFixture {
-        deps: fixture.deps.clone(),
+        host: fixture.host.clone(),
         capability_deps: fixture.capability_deps.clone(),
         session_id: fixture.session_id.clone(),
         write_grant_id: derive_grant(
-            &fixture.deps,
+            &fixture.host,
             "capability-cockpit-shadow-write",
             &[
                 READ_SCOPE,
@@ -3654,7 +3669,7 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         )
         .await,
         read_grant_id: derive_grant(
-            &fixture.deps,
+            &fixture.host,
             "capability-cockpit-shadow-read",
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &shadow_kinds,
@@ -3673,7 +3688,7 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(shadow_run["status"], json!("passed"));
 
     let overview = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("cockpit-overview", json!({"limit": 200})),
     )
     .await
@@ -3842,7 +3857,7 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(goal_create["replacement"]["canReplace"], json!(false));
 
     let other_scope = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "cockpit-other-scope",
             json!({"limit": 200}),
@@ -3864,7 +3879,7 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         .as_str()
         .expect("shadow evidence version id");
     let targeted = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(
             "cockpit-targeted-git-status",
             json!({
@@ -3930,7 +3945,7 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     let fixture = RouteFixture::new("capability-cockpit-route").await;
     let candidate_invocation = fixture.candidate_invocation("candidate").await;
     let candidate = record_replacement_candidate_value_at(
-        &fixture.deps,
+        &fixture.host,
         &candidate_invocation,
         &candidate_invocation.payload,
         default_operation_at(),
@@ -3940,14 +3955,14 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     let binding = fixture.binding("binding", &candidate).await;
     let activation = fixture.activation("activation", &binding).await;
     let active = active_route_for_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-after-activation", json!({})),
     )
     .await
     .expect("route lookup after activation")
     .expect("active route");
     execute_routed_git_status(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("route-execute", json!({})),
         &active,
     )
@@ -3955,7 +3970,7 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     .expect("execute routed git_status");
 
     let active_overview = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("cockpit-route-active", json!({"limit": 200})),
     )
     .await
@@ -4003,7 +4018,7 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     let disabled = fixture.disable("disable", &binding, &activation).await;
     assert_eq!(disabled["status"], json!("disabled"));
     let disabled_overview = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("cockpit-route-disabled", json!({"limit": 200})),
     )
     .await
@@ -4024,7 +4039,7 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     let rollback = fixture.rollback("rollback", &binding, &activation).await;
     assert_eq!(rollback["status"], json!("rolled_back"));
     let rolled_back_overview = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("cockpit-route-rolled-back", json!({"limit": 200})),
     )
     .await
@@ -4047,7 +4062,7 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     );
 
     let other_scope = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &invocation(
             "cockpit-route-other-scope",
             json!({"limit": 200}),
@@ -4075,7 +4090,7 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     }
 
     let limited = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("cockpit-overview-limit", json!({"limit": 1})),
     )
     .await
@@ -4101,7 +4116,7 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     );
 
     let full = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation("cockpit-overview-bounded-scan", json!({"limit": 200})),
     )
     .await
@@ -4143,7 +4158,7 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
 async fn cockpit_overview_filters_exact_operation_and_returns_agent_native_path() {
     let fixture = Fixture::new("capability-cockpit-target").await;
     let targeted = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(
             "cockpit-overview-target",
             json!({"targetOperation": "git_status", "limit": 1}),
@@ -4292,7 +4307,7 @@ async fn cockpit_overview_filters_exact_operation_and_returns_agent_native_path(
 async fn cockpit_overview_rejects_unknown_target_operation() {
     let fixture = Fixture::new("capability-cockpit-unknown-target").await;
     let error = cockpit_overview_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(
             "cockpit-overview-unknown-target",
             json!({"targetOperation": "future_unknown_operation"}),
@@ -4319,7 +4334,7 @@ async fn authoritative_target_metadata_rejects_spoofed_locked_replacement() {
     kernel_spoof["bindingMode"] = json!("replace");
     let invocation = fixture.write_invocation("kernel-spoof", kernel_spoof);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4341,7 +4356,7 @@ async fn authoritative_target_metadata_rejects_spoofed_locked_replacement() {
     governance_spoof["bindingMode"] = json!("replace");
     let invocation = fixture.write_invocation("governance-spoof", governance_spoof);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4382,7 +4397,7 @@ async fn authoritative_locked_classes_cannot_request_replacement() {
         payload["bindingMode"] = json!("replace");
         let invocation = fixture.write_invocation(key, payload);
         let error = record_capability_binding_request_value_at(
-            &fixture.deps,
+            &fixture.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -4417,7 +4432,7 @@ async fn adapter_and_module_owned_replacement_paths_require_rollback_metadata() 
         json!("already_module_owned_template_for_supervised_replacement");
     let invocation = fixture.write_invocation("module-owned", module_payload);
     let module_request = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4437,7 +4452,7 @@ async fn adapter_and_module_owned_replacement_paths_require_rollback_metadata() 
     missing_rollback["rollbackRef"] = Value::Null;
     let invocation = fixture.write_invocation("missing-rollback", missing_rollback);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4451,7 +4466,7 @@ async fn adapter_and_module_owned_replacement_paths_require_rollback_metadata() 
     missing_disable["disableRef"] = Value::Null;
     let invocation = fixture.write_invocation("missing-disable", missing_disable);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4470,7 +4485,7 @@ async fn unknown_target_and_owner_or_target_mismatches_are_rejected() {
     unknown["targetOperation"] = json!("future_unknown_operation");
     let invocation = fixture.write_invocation("unknown-target", unknown);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4487,7 +4502,7 @@ async fn unknown_target_and_owner_or_target_mismatches_are_rejected() {
     owner_mismatch["currentBuiltInOwner"] = json!("domains::capability::operations::common");
     let invocation = fixture.write_invocation("owner-mismatch", owner_mismatch);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4504,7 +4519,7 @@ async fn unknown_target_and_owner_or_target_mismatches_are_rejected() {
     target_mismatch["replacementTarget"] = json!("different_future_adapter");
     let invocation = fixture.write_invocation("target-mismatch", target_mismatch);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -4526,7 +4541,7 @@ async fn stale_guards_exact_selectors_and_wildcards_are_rejected() {
     stale_inventory["staleVersionGuard"]["expectedInventoryVersion"] = json!("old-inventory");
     let stale_inventory_invocation = fixture.write_invocation("stale-inventory", stale_inventory);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &stale_inventory_invocation,
         &stale_inventory_invocation.payload,
         default_operation_at(),
@@ -4543,7 +4558,7 @@ async fn stale_guards_exact_selectors_and_wildcards_are_rejected() {
     bad_network["authorityConstraints"]["networkPolicy"] = json!("allowed");
     let bad_network_invocation = fixture.write_invocation("bad-network", bad_network);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &bad_network_invocation,
         &bad_network_invocation.payload,
         default_operation_at(),
@@ -4558,7 +4573,7 @@ async fn stale_guards_exact_selectors_and_wildcards_are_rejected() {
     let wildcard_selector_invocation =
         fixture.write_invocation("wildcard-selector", wildcard_selector);
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &wildcard_selector_invocation,
         &wildcard_selector_invocation.payload,
         default_operation_at(),
@@ -4569,7 +4584,7 @@ async fn stale_guards_exact_selectors_and_wildcards_are_rejected() {
     assert!(error.contains("wildcard resource selectors"), "{error}");
 
     let wildcard_grant_id = derive_grant(
-        &fixture.deps,
+        &fixture.host,
         "wildcard-wide",
         &["*"],
         &["*"],
@@ -4590,7 +4605,7 @@ async fn stale_guards_exact_selectors_and_wildcards_are_rejected() {
         &fixture.session_id,
     );
     let error = record_capability_binding_request_value_at(
-        &fixture.deps,
+        &fixture.host,
         &wildcard_invocation,
         &wildcard_invocation.payload,
         default_operation_at(),
@@ -4605,7 +4620,7 @@ async fn stale_guards_exact_selectors_and_wildcards_are_rejected() {
         .as_str()
         .expect("request id");
     let selector_denied = inspect_capability_binding_request_value(
-        &fixture.deps,
+        &fixture.host,
         &fixture.read_invocation(
             "selector-denied",
             json!({"capabilityBindingRequestResourceId": request_id}),
@@ -4651,7 +4666,7 @@ async fn stale_decision_inputs_and_rejected_decisions_require_evidence() {
         &fixture.session_id,
     );
     let error = record_capability_binding_decision_value_at(
-        &fixture.deps,
+        &fixture.host,
         &stale_request,
         &stale_request.payload,
         default_operation_at(),
@@ -4683,7 +4698,7 @@ async fn stale_decision_inputs_and_rejected_decisions_require_evidence() {
         &fixture.session_id,
     );
     let error = record_capability_binding_decision_value_at(
-        &fixture.deps,
+        &fixture.host,
         &missing_denial,
         &missing_denial.payload,
         default_operation_at(),
@@ -4720,7 +4735,7 @@ async fn stale_decision_inputs_and_rejected_decisions_require_evidence() {
         &fixture.session_id,
     );
     let error = activate_capability_binding_policy_value_at(
-        &fixture.deps,
+        &fixture.host,
         &stale_policy,
         &stale_policy.payload,
         default_operation_at(),
@@ -4756,7 +4771,7 @@ async fn unsafe_payload_material_is_rejected() {
     ] {
         let invocation = fixture.write_invocation("unsafe", payload);
         let error = record_capability_binding_request_value_at(
-            &fixture.deps,
+            &fixture.host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -4774,42 +4789,125 @@ async fn unsafe_payload_material_is_rejected() {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    host: &EngineHostHandle,
     label: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     resource_selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
+    host.derive_authority_grant(DeriveGrant {
+        grant_id: Some(AuthorityGrantId::new(format!("capability-binding-{label}")).unwrap()),
+        parent_grant_id: AuthorityGrantId::new("engine-system").expect("parent grant"),
+        subject_actor_id: Some(ActorId::new(format!("actor:{label}")).expect("actor id")),
+        subject_worker_id: None,
+        subject_invocation_id: None,
+        allowed_capabilities: vec!["capability::execute".to_owned()],
+        allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
+        allowed_authority_scopes: scopes.iter().map(|scope| (*scope).to_owned()).collect(),
+        allowed_resource_kinds: resource_kinds
+            .iter()
+            .map(|kind| (*kind).to_owned())
+            .collect(),
+        resource_selectors: resource_selectors
+            .iter()
+            .map(|selector| (*selector).to_owned())
+            .collect(),
+        file_roots: vec!["/tmp".to_owned()],
+        network_policy: network_policy.to_owned(),
+        max_risk: RiskLevel::Low,
+        budget: json!({"class": "capability_binding_test"}),
+        expires_at: None,
+        can_delegate: false,
+        provenance: json!({"test": label}),
+        trace_id: TraceId::new(format!("trace-capability-binding-{label}")).expect("trace id"),
+    })
+    .await
+    .expect("derive grant")
+    .grant_id
+}
+
+async fn derive_operation_bound_execute_grant(
+    deps: &crate::domains::capability::Deps,
+    session_id: &str,
+    key: &str,
+    operation: &str,
+    source_grant_id: &AuthorityGrantId,
+) -> AuthorityGrantId {
+    let source = deps
+        .engine_host
+        .inspect_authority_grant(source_grant_id)
+        .await
+        .expect("inspect source grant")
+        .expect("source grant exists");
+    let max_risk = match crate::domains::capability::operation_risk(operation) {
+        Some("low") => RiskLevel::Low,
+        Some("medium") => RiskLevel::Medium,
+        Some("high") => RiskLevel::High,
+        other => panic!("unsupported operation risk for {operation}: {other:?}"),
+    };
+    let policy = crate::domains::capability::authority_policy(operation)
+        .expect("operation authority policy");
+    let mut allowed_authority_scopes = source.allowed_authority_scopes;
+    allowed_authority_scopes.extend(
+        policy
+            .base_scope_additions()
+            .iter()
+            .map(|scope| (*scope).to_owned()),
+    );
+    allowed_authority_scopes.sort();
+    allowed_authority_scopes.dedup();
+    let mut allowed_resource_kinds = source.allowed_resource_kinds;
+    allowed_resource_kinds.extend(
+        policy
+            .resource_kind_policy()
+            .base_kinds()
+            .iter()
+            .map(|kind| (*kind).to_owned()),
+    );
+    allowed_resource_kinds.sort();
+    allowed_resource_kinds.dedup();
+    let mut resource_selectors = source.resource_selectors;
+    resource_selectors.extend(
+        policy
+            .resource_kind_policy()
+            .base_kinds()
+            .iter()
+            .map(|kind| format!("kind:{kind}")),
+    );
+    resource_selectors.sort();
+    resource_selectors.dedup();
     deps.engine_host
         .derive_authority_grant(DeriveGrant {
-            grant_id: Some(AuthorityGrantId::new(format!("capability-binding-{label}")).unwrap()),
+            grant_id: Some(
+                AuthorityGrantId::new(format!("capability-binding-execute-{session_id}-{key}"))
+                    .expect("grant id"),
+            ),
             parent_grant_id: AuthorityGrantId::new("engine-system").expect("parent grant"),
-            subject_actor_id: Some(ActorId::new(format!("actor:{label}")).expect("actor id")),
+            subject_actor_id: Some(
+                ActorId::new(format!("agent:{session_id}")).expect("agent actor id"),
+            ),
             subject_worker_id: None,
             subject_invocation_id: None,
-            allowed_capabilities: vec!["capability::execute".to_owned()],
-            allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
-            allowed_authority_scopes: scopes.iter().map(|scope| (*scope).to_owned()).collect(),
-            allowed_resource_kinds: resource_kinds
-                .iter()
-                .map(|kind| (*kind).to_owned())
-                .collect(),
-            resource_selectors: resource_selectors
-                .iter()
-                .map(|selector| (*selector).to_owned())
-                .collect(),
-            file_roots: vec!["/tmp".to_owned()],
-            network_policy: network_policy.to_owned(),
-            max_risk: RiskLevel::Low,
-            budget: json!({"class": "capability_binding_test"}),
-            expires_at: None,
+            allowed_capabilities: source.allowed_capabilities,
+            allowed_namespaces: source.allowed_namespaces,
+            allowed_authority_scopes,
+            allowed_resource_kinds,
+            resource_selectors,
+            file_roots: source.file_roots,
+            network_policy: policy.network_policy().as_str().to_owned(),
+            max_risk,
+            budget: json!({"class": "operation_bound_capability_binding_test"}),
+            expires_at: source.expires_at,
             can_delegate: false,
-            provenance: json!({"test": label}),
-            trace_id: TraceId::new(format!("trace-capability-binding-{label}")).expect("trace id"),
+            provenance: json!({
+                "source": "capability_binding_test",
+                "operation": operation
+            }),
+            trace_id: TraceId::new(format!("trace-execute-grant-{key}")).expect("trace id"),
         })
         .await
-        .expect("derive grant")
+        .expect("derive operation-bound execute grant")
         .grant_id
 }
 
@@ -4836,10 +4934,10 @@ fn request_payload(key: &str) -> Value {
         }],
         "evidenceRefs": [{
             "kind": "evidence",
-            "resourceId": "evidence:scorecard_row",
-            "role": "scorecard"
+            "resourceId": "evidence:source_contract",
+            "role": "source_contract"
         }],
-        "evidenceRequirements": "Provider safe contract and scorecard evidence must exist before any later routing work.",
+        "evidenceRequirements": "Provider-safe contract and source-owned validation evidence must exist before any later routing work.",
         "authorityConstraints": {
             "networkPolicy": "none",
             "authorityScopes": ["capability.execute", "git.read", "resource.read"],
@@ -4897,8 +4995,8 @@ fn shadow_request_payload(key: &str) -> Value {
         }],
         "evidenceRefs": [{
             "kind": "evidence",
-            "resourceId": "evidence:shadow-scorecard",
-            "role": "scorecard"
+            "resourceId": "evidence:shadow-contract",
+            "role": "source_contract"
         }],
         "authorityConstraints": {
             "networkPolicy": "none",

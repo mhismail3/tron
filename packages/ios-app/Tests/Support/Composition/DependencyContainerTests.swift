@@ -6,16 +6,18 @@ import XCTest
 /// installed app's active server or depend on test execution order.
 @MainActor
 final class DependencyContainerTests: XCTestCase {
+    private var testState: IsolatedTestState!
+    private var sharedContainer: DependencyContainer!
 
-    private lazy var sharedContainer = DependencyContainer(
-        pairedServerDefaults: Self.isolatedDefaults()
-    )
+    override func setUp() async throws {
+        testState = IsolatedTestState(label: "dependency-container")
+        testState.registerTeardown(with: self)
+        sharedContainer = testState.makeContainer()
+    }
 
-    private static func isolatedDefaults() -> UserDefaults {
-        let suiteName = "com.tron.tests.dependency-container.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        return defaults
+    override func tearDown() async throws {
+        sharedContainer = nil
+        await testState.cleanup()
     }
 
     private func pairedContainer(
@@ -23,12 +25,27 @@ final class DependencyContainerTests: XCTestCase {
         host: String = "localhost",
         port: Int = 8082
     ) -> (DependencyContainer, PairedServer) {
-        let defaults = Self.isolatedDefaults()
+        let defaults = testState.defaults
         let server = PairedServer(id: id, label: "Test Server", host: host, port: port)
         let data = try! JSONEncoder().encode([server])
         defaults.set(data, forKey: PairedServerStore.serversKey)
         defaults.set(server.id, forKey: PairedServerStore.activeIdKey)
-        return (DependencyContainer(pairedServerDefaults: defaults), server)
+        return (testState.makeContainer(), server)
+    }
+
+    private func yieldUntilAttempt(
+        _ recorder: HostedEngineAttemptRecorder,
+        exceeds count: Int
+    ) async {
+        for _ in 0..<100 where recorder.requests.count <= count {
+            await Task.yield()
+        }
+    }
+
+    private func drainScheduledTasks() async {
+        for _ in 0..<100 {
+            await Task.yield()
+        }
     }
 
     // MARK: - Container Lifecycle Tests (use shared container)
@@ -102,10 +119,107 @@ final class DependencyContainerTests: XCTestCase {
     }
 
     func test_noPairedServerDoesNotUseLocalhostFallback() async throws {
-        let container = DependencyContainer(pairedServerDefaults: Self.isolatedDefaults())
+        let container = testState.makeContainer()
 
         XCTAssertEqual(container.currentServerOrigin, "")
         XCTAssertEqual(container.serverURL.host, "paired-server-required.invalid")
+    }
+
+    func test_hostedContainerRetryAndRepositoryAreHandledBeforeSocketCreation() async {
+        let (container, _) = pairedContainer(host: "127.0.0.1", port: 65528)
+        let recorder = testState.attemptRecorders.last!
+
+        await container.manualRetry()
+        container.engineClient.disconnect()
+        await container.connectionRepository.connect()
+        container.engineClient.disconnect()
+
+        XCTAssertGreaterThanOrEqual(recorder.requests.count, 2)
+        XCTAssertNil(container.engineClient.engineConnection?.urlSession)
+        XCTAssertNil(container.engineClient.engineConnection?.engineConnectionTask)
+        let pairingOutcome = await container.pairingProbe.probe(
+            host: "hosted-tests.invalid",
+            port: 1,
+            token: "fixture"
+        )
+        XCTAssertEqual(pairingOutcome, .ok(serverVersion: nil))
+    }
+
+    func test_rebuiltClientPreservesHandledAttemptPolicy() async {
+        let (container, first) = pairedContainer(host: "127.0.0.1", port: 65527)
+        let recorder = testState.attemptRecorders.last!
+        let second = PairedServer(id: "rebuilt", label: "Rebuilt", host: "127.0.0.1", port: 65526)
+
+        container.replacePairedServers([first, second], activeServer: second)
+        await container.connectionRepository.connect()
+
+        XCTAssertEqual(recorder.requests.last?.url?.port, 65526)
+        XCTAssertNil(container.engineClient.engineConnection?.urlSession)
+        container.engineClient.disconnect()
+    }
+
+    func test_defaultServerSwitchAndForgetNextServerRemainHandled() async throws {
+        let first = PairedServer(id: "first-switch", label: "First", host: "127.0.0.1", port: 65525)
+        let second = PairedServer(id: "second-switch", label: "Second", host: "127.0.0.1", port: 65524)
+        let data = try JSONEncoder().encode([first, second])
+        testState.defaults.set(data, forKey: PairedServerStore.serversKey)
+        testState.defaults.set(first.id, forKey: PairedServerStore.activeIdKey)
+        let container = testState.makeContainer()
+        let recorder = testState.attemptRecorders.last!
+
+        let beforeSwitch = recorder.requests.count
+        container.selectPairedServer(second)
+        await yieldUntilAttempt(recorder, exceeds: beforeSwitch)
+        XCTAssertGreaterThan(recorder.requests.count, beforeSwitch)
+        XCTAssertNil(container.engineClient.engineConnection?.urlSession)
+
+        try container.pairedServerTokenStore.setToken("fixture", forServerId: second.id)
+        let beforeForget = recorder.requests.count
+        _ = try container.forgetPairedServer(second)
+        await yieldUntilAttempt(recorder, exceeds: beforeForget)
+        XCTAssertGreaterThan(recorder.requests.count, beforeForget)
+        XCTAssertEqual(container.pairedServerStore.activeServerId, first.id)
+        XCTAssertNil(container.engineClient.engineConnection?.urlSession)
+        container.engineClient.disconnect()
+    }
+
+    func test_supersededAutoConnectCannotConnectNoConnectGeneration() async throws {
+        let first = PairedServer(id: "generation-a", label: "A", host: "127.0.0.1", port: 65523)
+        let second = PairedServer(id: "generation-b", label: "B", host: "127.0.0.1", port: 65522)
+        let third = PairedServer(id: "generation-c", label: "C", host: "127.0.0.1", port: 65521)
+        let data = try JSONEncoder().encode([first, second, third])
+        testState.defaults.set(data, forKey: PairedServerStore.serversKey)
+        testState.defaults.set(first.id, forKey: PairedServerStore.activeIdKey)
+        let container = testState.makeContainer()
+        let recorder = testState.attemptRecorders.last!
+        let attemptsBeforeSwitch = recorder.requests.count
+
+        container.selectPairedServer(second)
+        container.selectPairedServer(third, connectAfterSwitch: false)
+        await drainScheduledTasks()
+
+        XCTAssertEqual(container.pairedServerStore.activeServerId, third.id)
+        XCTAssertEqual(container.engineClient.serverOrigin, third.origin)
+        XCTAssertEqual(recorder.requests.count, attemptsBeforeSwitch)
+    }
+
+    func test_serverSwitchRetiresReplacedClientBeforeInstallingReplacement() async {
+        let (container, first) = pairedContainer(host: "127.0.0.1", port: 65505)
+        let replacedClient = container.engineClient
+        await replacedClient.connect()
+        XCTAssertNotNil(replacedClient.engineConnection)
+
+        let second = PairedServer(
+            id: "replacement",
+            label: "Replacement",
+            host: "127.0.0.1",
+            port: 65504
+        )
+        container.replacePairedServers([first, second], activeServer: second)
+
+        XCTAssertNil(replacedClient.engineConnection)
+        XCTAssertEqual(replacedClient.connectionState, .disconnected)
+        XCTAssert(container.engineClient !== replacedClient)
     }
 
     // MARK: - Active Server Update Tests
@@ -199,36 +313,42 @@ final class DependencyContainerTests: XCTestCase {
     }
 
     func test_effectiveWorkingDirectory_usesWorkingDirectoryWhenSet() async throws {
-        let container = DependencyContainer()
-        let original = container.workingDirectory
+        let container = testState.makeContainer()
         container.workingDirectory = "/custom/path"
-        defer { container.workingDirectory = original }
         XCTAssertEqual(container.effectiveWorkingDirectory, "/custom/path")
-    }
-
-    // MARK: - Protocol Conformance Tests (use shared container - compile-time checks)
-
-    func test_container_conformsToDependencyProviding() async throws {
-        let _: any DependencyProviding = sharedContainer
-        XCTAssertTrue(true)
-    }
-
-    func test_container_conformsToServerSettingsProvider() async throws {
-        let _: any ServerSettingsProvider = sharedContainer
-        XCTAssertTrue(true)
-    }
-
-    func test_container_conformsToAppSettingsProvider() async throws {
-        let _: any AppSettingsProvider = sharedContainer
-        XCTAssertTrue(true)
     }
 
     // MARK: - Initialization Tests
 
     func test_container_startsNotInitialized() async throws {
         // Fresh container needed to test initial state
-        let container = DependencyContainer()
+        let container = testState.makeContainer()
         XCTAssertFalse(container.isInitialized)
+    }
+
+    func test_storageOwnsDefaultsDocumentsDatabaseAndFallback() {
+        let container = testState.makeContainer()
+        container.workingDirectory = ""
+        container.defaultModel = "fixture-model"
+        container.quickSessionWorkspace = "/fixture/workspace"
+
+        XCTAssertEqual(container.effectiveWorkingDirectory, testState.documentsURL.path)
+        XCTAssertEqual(testState.defaults.string(forKey: "defaultModel"), "fixture-model")
+        XCTAssertEqual(testState.defaults.string(forKey: "quickSessionWorkspace"), "/fixture/workspace")
+        XCTAssertTrue(container.eventDatabase.dbPath.hasPrefix(testState.rootURL.path))
+    }
+
+    func test_productionStorageCanBeCharacterizedWithInjectedResolvers() {
+        let database = testState.makeDatabase(fileName: "characterized.db")
+        let storage = DependencyContainerStorage.production(
+            defaults: { testState.defaults },
+            documentsURL: { testState.documentsURL },
+            eventDatabase: { database }
+        )
+
+        XCTAssertTrue(storage.defaults === testState.defaults)
+        XCTAssertEqual(storage.documentsURL, testState.documentsURL)
+        XCTAssertTrue(storage.eventDatabase === database)
     }
 
 }

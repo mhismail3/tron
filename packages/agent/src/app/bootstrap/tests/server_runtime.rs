@@ -31,9 +31,10 @@ async fn server_boots_and_responds() {
         event_store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         profile_runtime: test_profile_runtime(&home),
         settings_path,
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: std::time::Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
@@ -58,7 +59,6 @@ async fn server_boots_and_responds() {
         orchestrator.subscribe(),
         server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
-        orchestrator.turn_accumulators().clone(),
     );
     let _stream_event_pump = tokio::spawn(pump.run());
 
@@ -95,9 +95,10 @@ async fn server_graceful_shutdown() {
         event_store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         profile_runtime: test_profile_runtime(&home),
         settings_path,
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: std::time::Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),

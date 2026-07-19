@@ -131,13 +131,6 @@ final class CompactionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testCompactionRefreshesContextInBackground() {
-        let result = makeCompactionResult(tokensBefore: 10000, tokensAfter: 5000)
-        coordinator.handleCompaction(result, context: mockContext)
-
-        XCTAssertTrue(mockContext.refreshContextInBackgroundCalled)
-    }
-
     func testNoOpCompactionRetiresInProgressMessageWithoutChatArtifact() {
         let inProgressMsg = ChatMessage.compactionInProgress(reason: "threshold_exceeded")
         mockContext.appendToMessages(inProgressMsg)
@@ -155,7 +148,6 @@ final class CompactionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.isCompacting)
         XCTAssertTrue(mockContext.messages.isEmpty)
         XCTAssertNil(mockContext.compactionInProgressMessageId)
-        XCTAssertTrue(mockContext.refreshContextInBackgroundCalled)
     }
 
     func testCompactionStoresEstimatedContextTokens() {
@@ -219,8 +211,6 @@ final class MockCompactionContext: CompactionContext {
 
     var flushPendingTextUpdatesCalled = false
     var finalizeStreamingMessageCalled = false
-    var resetStreamingManagerCalled = false
-    var refreshContextInBackgroundCalled = false
 
     func flushPendingTextUpdates() {
         flushPendingTextUpdatesCalled = true
@@ -230,20 +220,5 @@ final class MockCompactionContext: CompactionContext {
         finalizeStreamingMessageCalled = true
     }
 
-    func resetStreamingManager() {
-        resetStreamingManagerCalled = true
-    }
-
-    func refreshContextInBackground() {
-        refreshContextInBackgroundCalled = true
-    }
-
-    // MARK: - LoggingContext
-
-    func logVerbose(_ message: String) {}
-    func logDebug(_ message: String) {}
     func logInfo(_ message: String) {}
-    func logWarning(_ message: String) {}
-    func logError(_ message: String) {}
-    func showError(_ message: String) {}
 }

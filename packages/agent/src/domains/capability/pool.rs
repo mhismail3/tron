@@ -1,5 +1,4 @@
-//! Capability-pool classification shared by discovery, cockpit projections, and
-//! scorecard drift tests.
+//! Capability-pool classification shared by discovery and cockpit projections.
 //!
 //! `capability::execute` operations and engine catalog functions are different
 //! surfaces over the same engine fabric. This module keeps that distinction
@@ -14,7 +13,6 @@
 
 use std::borrow::Cow;
 
-use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{
@@ -24,8 +22,7 @@ use super::{
     operations::{OperationEffect, OperationId, operation_effect},
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolSurface {
     AgentOperation,
     CatalogFunction,
@@ -40,8 +37,7 @@ impl CapabilityPoolSurface {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolAudience {
     SessionWork,
     AgentDiagnostics,
@@ -62,8 +58,7 @@ impl CapabilityPoolAudience {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolReplacementClass {
     RuntimeRoutable,
     ProducerExtensible,
@@ -80,8 +75,7 @@ impl CapabilityPoolReplacementClass {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolVisibility {
     DefaultVisible,
     SearchVisible,
@@ -100,8 +94,7 @@ impl CapabilityPoolVisibility {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolMinimalityDecision {
     KeepCore,
     KeepGovernance,
@@ -138,45 +131,25 @@ pub(crate) struct CapabilityPoolMetadata<'a> {
 }
 
 impl<'a> CapabilityPoolMetadata<'a> {
-    pub(crate) fn provider_projection(&self) -> CapabilityPoolProjection<'a> {
-        CapabilityPoolProjection {
-            id: self.id.clone(),
-            surface: self.surface.as_str(),
-            family: self.family.clone(),
-            owner: self.owner.clone(),
-            audience: self.audience.as_str(),
-            replacement_class: self.replacement_class.as_str(),
-            agent_default_visibility: self.agent_default_visibility.as_str(),
-            purpose: self.purpose,
-            effect: self.effect,
-            risk: self.risk,
-            authority_boundary: self.authority_boundary,
-            evidence_boundary: self.evidence_boundary,
-            minimality_decision: self.minimality_decision.as_str(),
-            evolution_path: self.evolution_path,
-            next_action: self.next_action,
-        }
+    pub(crate) fn provider_projection(&self) -> Value {
+        json!({
+            "id": self.id,
+            "surface": self.surface.as_str(),
+            "family": self.family,
+            "owner": self.owner,
+            "audience": self.audience.as_str(),
+            "replacementClass": self.replacement_class.as_str(),
+            "agentDefaultVisibility": self.agent_default_visibility.as_str(),
+            "purpose": self.purpose,
+            "effect": self.effect,
+            "risk": self.risk,
+            "authorityBoundary": self.authority_boundary,
+            "evidenceBoundary": self.evidence_boundary,
+            "minimalityDecision": self.minimality_decision.as_str(),
+            "evolutionPath": self.evolution_path,
+            "nextAction": self.next_action,
+        })
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CapabilityPoolProjection<'a> {
-    id: Cow<'a, str>,
-    surface: &'static str,
-    family: Cow<'a, str>,
-    owner: Cow<'a, str>,
-    audience: &'static str,
-    replacement_class: &'static str,
-    agent_default_visibility: &'static str,
-    purpose: &'static str,
-    effect: &'static str,
-    risk: &'static str,
-    authority_boundary: &'static str,
-    evidence_boundary: &'static str,
-    minimality_decision: &'static str,
-    evolution_path: &'static str,
-    next_action: &'static str,
 }
 
 pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolMetadata<'static>> {
@@ -213,8 +186,8 @@ pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolM
 
 pub(crate) fn operation_agent_usage_projection(operation: &str) -> Option<Value> {
     let binding = operation_binding_metadata(operation)?;
-    let audience = operation_pool_metadata(binding.operation)?
-        .audience
+    let audience = operation_audience_and_visibility(binding.family, binding.ownership_class)
+        .0
         .as_str();
     let effect = operation_effect(operation)?;
     let risk = operation_risk(operation)?;
@@ -735,9 +708,10 @@ fn catalog_replacement_class(namespace: &str) -> CapabilityPoolReplacementClass 
         }
         "context_control" | "memory" | "media" | "import_history" | "repository_tree"
         | "import_preview" | "program_execution" | "prompt_artifacts" | "update_diagnostics"
-        | "device" | "notifications" | "scheduler" | "agent_briefing" | "module_activity"
-        | "web_research" | "message" | "session" | "model" | "settings" | "blob"
-        | "transcription" => CapabilityPoolReplacementClass::ProducerExtensible,
+        | "device" | "notifications" | "scheduler" | "module_activity" | "web_research"
+        | "message" | "session" | "model" | "settings" | "blob" | "transcription" => {
+            CapabilityPoolReplacementClass::ProducerExtensible
+        }
         _ => CapabilityPoolReplacementClass::KernelEvolutionOnly,
     }
 }
@@ -824,7 +798,7 @@ fn catalog_evidence_boundary(namespace: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
 
     use crate::domains::capability::supported_operation_names;
     use crate::engine::{ActorContext, ActorId, ActorKind, AuthorityGrantId, FunctionQuery};
@@ -832,51 +806,76 @@ mod tests {
 
     use super::*;
 
-    #[derive(Debug)]
-    struct InventoryRow<'a> {
-        id: &'a str,
-        surface: &'a str,
-        audience: &'a str,
-        replacement_class: &'a str,
-        visibility: &'a str,
-        minimality: &'a str,
-        evolution_path: &'a str,
-        next_action: &'a str,
-    }
-
-    fn inventory_rows() -> Vec<InventoryRow<'static>> {
-        include_str!("../../../docs/engine-capability-pool-inventory.tsv")
-            .lines()
-            .skip(1)
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                let columns: Vec<_> = line.split('\t').collect();
-                assert_eq!(columns.len(), 16, "inventory row shape changed: {line}");
-                InventoryRow {
-                    id: columns[0],
-                    surface: columns[1],
-                    audience: columns[4],
-                    replacement_class: columns[5],
-                    visibility: columns[6],
-                    minimality: columns[12],
-                    evolution_path: columns[13],
-                    next_action: columns[14],
-                }
-            })
-            .collect()
+    fn assert_kernel_evolution_boundary(metadata: &CapabilityPoolMetadata<'_>) {
+        if metadata.replacement_class != CapabilityPoolReplacementClass::KernelEvolutionOnly {
+            return;
+        }
+        assert_ne!(
+            metadata.agent_default_visibility,
+            CapabilityPoolVisibility::DefaultVisible,
+            "kernel-evolution-only {} must not be default-visible",
+            metadata.id
+        );
+        assert_ne!(
+            metadata.minimality_decision,
+            CapabilityPoolMinimalityDecision::ModuleCandidate,
+            "kernel-evolution-only {} must not be a module candidate",
+            metadata.id
+        );
+        assert_eq!(
+            metadata.evolution_path,
+            "source_candidate_validation_adversarial_review_user_approved_integration",
+            "kernel-evolution-only {} must use the source-level evolution path",
+            metadata.id
+        );
+        assert!(
+            !metadata.next_action.contains("runtime_route")
+                && !metadata.next_action.contains("module_version"),
+            "kernel-evolution-only {} must not imply runtime routing",
+            metadata.id
+        );
     }
 
     #[test]
     fn operation_pool_metadata_covers_supported_operations() {
+        const PROVIDER_FIELDS: [&str; 15] = [
+            "agentDefaultVisibility",
+            "audience",
+            "authorityBoundary",
+            "effect",
+            "evidenceBoundary",
+            "evolutionPath",
+            "family",
+            "id",
+            "minimalityDecision",
+            "nextAction",
+            "owner",
+            "purpose",
+            "replacementClass",
+            "risk",
+            "surface",
+        ];
+        let provider_fields = BTreeSet::from(PROVIDER_FIELDS);
         for operation in supported_operation_names() {
             let metadata = operation_pool_metadata(operation)
                 .unwrap_or_else(|| panic!("missing operation pool metadata for {operation}"));
             assert_eq!(metadata.id.as_ref(), *operation);
             assert_eq!(metadata.surface, CapabilityPoolSurface::AgentOperation);
+            let projection = metadata.provider_projection();
+            assert_eq!(
+                projection
+                    .as_object()
+                    .expect("provider projection object")
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+                provider_fields
+            );
             assert_ne!(
                 metadata.agent_default_visibility,
                 CapabilityPoolVisibility::HiddenUnlessEvolutionMode
             );
+            assert_kernel_evolution_boundary(&metadata);
         }
     }
 
@@ -898,87 +897,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn inventory_rows_are_unique_and_use_allowed_classes() {
-        let rows = inventory_rows();
-        let mut seen = BTreeSet::new();
-        for row in rows {
-            assert!(
-                seen.insert((row.surface, row.id)),
-                "duplicate capability-pool row for {} {}",
-                row.surface,
-                row.id
-            );
-            assert!(
-                matches!(
-                    row.replacement_class,
-                    "runtime_routable" | "producer_extensible" | "kernel_evolution_only"
-                ),
-                "unsupported replacement class in {row:?}"
-            );
-            assert!(
-                matches!(
-                    row.visibility,
-                    "default_visible"
-                        | "search_visible"
-                        | "inspect_only"
-                        | "hidden_unless_evolution_mode"
-                ),
-                "unsupported visibility in {row:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn inventory_covers_every_supported_operation_once() {
-        let rows = inventory_rows();
-        let operation_rows = rows
-            .iter()
-            .filter(|row| row.surface == CapabilityPoolSurface::AgentOperation.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(operation_rows.len(), supported_operation_names().len());
-        let row_ids = operation_rows
-            .into_iter()
-            .map(|row| row.id)
-            .collect::<BTreeSet<_>>();
-        for operation in supported_operation_names() {
-            assert!(
-                row_ids.contains(operation),
-                "engine capability pool inventory missing agent operation {operation}"
-            );
-            let metadata = operation_pool_metadata(operation).expect("metadata");
-            let row = rows
-                .iter()
-                .find(|row| {
-                    row.surface == CapabilityPoolSurface::AgentOperation.as_str()
-                        && row.id == *operation
-                })
-                .expect("operation row");
-            assert_eq!(
-                row.audience,
-                metadata.audience.as_str(),
-                "{operation} audience drifted"
-            );
-            assert_eq!(
-                row.replacement_class,
-                metadata.replacement_class.as_str(),
-                "{operation} replacement class drifted"
-            );
-            assert_eq!(
-                row.visibility,
-                metadata.agent_default_visibility.as_str(),
-                "{operation} visibility drifted"
-            );
-            assert_eq!(
-                row.minimality,
-                metadata.minimality_decision.as_str(),
-                "{operation} minimality drifted"
-            );
-        }
-    }
-
     #[tokio::test]
-    async fn inventory_covers_startup_registered_catalog_functions_once() {
+    async fn startup_registered_catalog_functions_have_pool_metadata() {
         let ctx = make_test_context();
         let mut query = FunctionQuery::default();
         query.include_internal = true;
@@ -996,77 +916,19 @@ mod tests {
             !function_ids.is_empty(),
             "test context must register catalog functions"
         );
-
-        let rows = inventory_rows();
-        let row_ids = rows
-            .iter()
-            .filter(|row| row.surface == CapabilityPoolSurface::CatalogFunction.as_str())
-            .map(|row| row.id.to_owned())
-            .collect::<BTreeSet<_>>();
-        let missing = function_ids
-            .difference(&row_ids)
-            .cloned()
-            .collect::<Vec<_>>();
-        assert!(
-            missing.is_empty(),
-            "engine capability pool inventory missing catalog functions: {missing:?}"
-        );
-        let extras = row_ids
-            .difference(&function_ids)
-            .cloned()
-            .collect::<Vec<_>>();
-        assert!(
-            extras.is_empty(),
-            "engine capability pool inventory has stale catalog functions: {extras:?}"
-        );
-
-        let catalog_rows_by_id = rows
-            .iter()
-            .filter(|row| row.surface == CapabilityPoolSurface::CatalogFunction.as_str())
-            .map(|row| (row.id, row))
-            .collect::<BTreeMap<_, _>>();
         for id in function_ids {
             let metadata =
                 catalog_function_pool_metadata(&id).expect("catalog function classification");
-            let row = catalog_rows_by_id
-                .get(id.as_str())
-                .unwrap_or_else(|| panic!("missing row for catalog function {id}"));
-            assert_eq!(
-                row.audience,
-                metadata.audience.as_str(),
-                "{id} audience drifted"
-            );
-            assert_eq!(
-                row.replacement_class,
-                metadata.replacement_class.as_str(),
-                "{id} replacement class drifted"
-            );
-            assert_eq!(
-                row.visibility,
-                metadata.agent_default_visibility.as_str(),
-                "{id} visibility drifted"
-            );
-            assert_eq!(
-                row.minimality,
-                metadata.minimality_decision.as_str(),
-                "{id} minimality drifted"
-            );
-        }
-    }
-
-    #[test]
-    fn internal_catalog_functions_are_not_default_visible_session_actions() {
-        for row in inventory_rows()
-            .into_iter()
-            .filter(|row| row.surface == CapabilityPoolSurface::CatalogFunction.as_str())
-        {
-            if row.id != "capability::execute" {
+            assert_eq!(metadata.id.as_ref(), id);
+            assert_eq!(metadata.surface, CapabilityPoolSurface::CatalogFunction);
+            if id != "capability::execute" {
                 assert_ne!(
-                    row.visibility, "default_visible",
-                    "catalog function {} must not masquerade as a normal session action",
-                    row.id
+                    metadata.agent_default_visibility,
+                    CapabilityPoolVisibility::DefaultVisible,
+                    "catalog function {id} must not masquerade as a normal session action"
                 );
             }
+            assert_kernel_evolution_boundary(&metadata);
         }
     }
 
@@ -1260,38 +1122,6 @@ mod tests {
                         .expect("default use")
                         .contains("evidence")
             );
-        }
-    }
-
-    #[test]
-    fn kernel_evolution_only_rows_are_not_default_visible_runtime_replacements() {
-        for row in inventory_rows() {
-            if row.replacement_class == "kernel_evolution_only" {
-                assert_ne!(
-                    row.visibility, "default_visible",
-                    "kernel-evolution-only row {} {} must not be default-visible",
-                    row.surface, row.id
-                );
-                assert_ne!(
-                    row.minimality, "module_candidate",
-                    "kernel-evolution-only row {} {} must not be a module candidate",
-                    row.surface, row.id
-                );
-                assert_eq!(
-                    row.evolution_path,
-                    "source_candidate_validation_adversarial_review_user_approved_integration",
-                    "kernel-evolution-only row {} {} must use the source-level evolution path",
-                    row.surface,
-                    row.id
-                );
-                assert!(
-                    !row.next_action.contains("runtime_route")
-                        && !row.next_action.contains("module_version"),
-                    "kernel-evolution-only row {} {} must not imply runtime routing",
-                    row.surface,
-                    row.id
-                );
-            }
         }
     }
 }

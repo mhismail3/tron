@@ -31,8 +31,14 @@
 //! stdout/stderr previews, and raw job/output payloads stay out of those
 //! provider-facing lifecycle projections. `job_log` is the bounded preview
 //! surface for stdout/stderr when the task explicitly needs output text.
-//! On domain startup and before lifecycle reads/cleanup, persisted `running`
-//! job resources from before the current service instance are reconciled:
+//! One runtime state is created by the domain composition root and shared by
+//! both the direct jobs worker and capability execution paths. Construction is
+//! side-effect free; startup reconciliation and shutdown cancellation activate
+//! only after the complete engine setup succeeds, and production reconciliation
+//! is tracked by the shutdown owner. Coordinator-free embeddings skip eager
+//! reconciliation and use the same on-demand path before lifecycle
+//! reads/cancel/cleanup. Persisted `running` job resources from before the
+//! current service instance are reconciled:
 //! owned jobs continue under their runtime handle, while non-owned stale jobs
 //! are marked with inspectable unknown/failure terminal evidence. Reconciliation
 //! uses an internal scoped scan so a newest-first public list page full of live
@@ -46,7 +52,7 @@
 //! evidence, bounded side effects, and rollback/disable metadata before binding
 //! policy may later consider routing.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use chrono::Utc;
 
@@ -74,37 +80,68 @@ pub(crate) const LOG_FUNCTION: &str = "jobs::log";
 pub(crate) const CANCEL_FUNCTION: &str = "jobs::cancel";
 pub(crate) const CLEANUP_FUNCTION: &str = "jobs::cleanup";
 
-static JOB_RUNTIME: LazyLock<runtime::JobRuntime> = LazyLock::new(runtime::JobRuntime::default);
+/// Per-composition jobs process and reconciliation state.
+///
+/// Clones retain the same live-process registry and startup boundary so every
+/// jobs entry point in one server instance observes one lifecycle owner.
+#[derive(Clone)]
+pub(crate) struct RuntimeState {
+    runtime: runtime::JobRuntime,
+    reconcile: service::ReconcileContext,
+}
+
+impl RuntimeState {
+    pub(crate) fn new() -> Self {
+        Self {
+            runtime: runtime::JobRuntime::default(),
+            reconcile: service::ReconcileContext {
+                startup_cutoff: Utc::now(),
+            },
+        }
+    }
+
+    pub(crate) fn runtime(&self) -> runtime::JobRuntime {
+        self.runtime.clone()
+    }
+
+    pub(crate) fn reconcile(&self) -> service::ReconcileContext {
+        self.reconcile.clone()
+    }
+}
 
 /// Jobs dependencies narrowed from server setup.
 #[derive(Clone)]
 pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
-    pub(crate) runtime: runtime::JobRuntime,
-    pub(crate) reconcile: service::ReconcileContext,
+    pub(crate) state: RuntimeState,
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        let runtime = JOB_RUNTIME.clone();
-        let reconcile = service::ReconcileContext {
-            startup_cutoff: Utc::now(),
-        };
-        if let Some(shutdown) = &deps.shutdown_coordinator {
-            let runtime_for_shutdown = runtime.clone();
-            shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs", move || {
-                let runtime = runtime_for_shutdown.clone();
-                async move {
-                    runtime.cancel_all("server_shutdown").await;
-                }
-            });
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext, state: RuntimeState) -> Self {
+        Self {
+            engine_host: deps.engine_host.clone(),
+            shutdown_coordinator: deps.shutdown_coordinator.clone(),
+            state,
         }
+    }
+
+    pub(crate) fn activate_after_registration(self) {
+        let Some(shutdown) = self.shutdown_coordinator else {
+            return;
+        };
+        let runtime_for_shutdown = self.state.runtime();
+        shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs", move || {
+            let runtime = runtime_for_shutdown.clone();
+            async move {
+                runtime.cancel_all("server_shutdown").await;
+            }
+        });
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let engine_host = deps.engine_host.clone();
-            let runtime_for_reconcile = runtime.clone();
-            let reconcile_for_startup = reconcile.clone();
-            handle.spawn(async move {
+            let engine_host = self.engine_host;
+            let runtime_for_reconcile = self.state.runtime();
+            let reconcile_for_startup = self.state.reconcile();
+            let task = handle.spawn(async move {
                 match service::reconcile_stale_running_jobs(
                     &engine_host,
                     runtime_for_reconcile,
@@ -130,28 +167,17 @@ impl Deps {
                     }
                 }
             });
-        }
-        Self {
-            engine_host: deps.engine_host.clone(),
-            shutdown_coordinator: deps.shutdown_coordinator.clone(),
-            runtime,
-            reconcile,
+            shutdown.register_task(task);
         }
     }
 }
 
-pub(crate) fn runtime() -> runtime::JobRuntime {
-    JOB_RUNTIME.clone()
-}
-
 /// Build the domain worker registration.
-pub(crate) fn worker_module(
-    deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
+pub(crate) fn worker_module(deps: Deps) -> crate::engine::Result<DomainWorkerModule> {
     crate::domains::registration::worker::domain_worker_module(
         WORKER,
         &[JOBS_LIFECYCLE_TOPIC],
-        handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        handlers::function_registrations(contract::capabilities()?, deps)?,
     )
 }
 

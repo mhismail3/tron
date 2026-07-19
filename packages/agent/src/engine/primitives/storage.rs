@@ -3,7 +3,8 @@
 //! Storage functions expose the unified `tron.sqlite` runtime as canonical
 //! engine capabilities. They do not bypass the engine ledger: checkpoint,
 //! export, stats, and retention requests are normal invocations with authority,
-//! idempotency, and audit records.
+//! idempotency, and audit records. Retention callers may choose dry-run mode,
+//! but the diagnostic horizon remains storage-owner policy.
 
 use serde_json::{Value, json};
 
@@ -124,8 +125,23 @@ fn retention_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "dryRun": {"type": "boolean"},
-            "verboseRetentionDays": {"type": "integer"}
+            "dryRun": {"type": "boolean"}
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retention_request_exposes_dry_run_not_policy_mutation() {
+        let schema = retention_schema();
+        let properties = schema["properties"].as_object().unwrap();
+
+        assert_eq!(properties.len(), 1);
+        assert!(properties.contains_key("dryRun"));
+        assert!(!properties.contains_key("verboseRetentionDays"));
+        assert!(!properties.contains_key("diagnosticRetentionDays"));
+    }
 }

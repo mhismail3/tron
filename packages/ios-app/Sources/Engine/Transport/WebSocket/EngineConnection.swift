@@ -2,6 +2,13 @@ import Foundation
 
 // MARK: - WebSocket Service
 
+/// Pre-session directive consulted after the upgrade request is complete but
+/// before any URLSession object or task exists.
+enum EngineSessionAttemptDirective: Equatable, Sendable {
+    case openLiveSession
+    case handledFailure
+}
+
 @Observable
 @MainActor
 final class EngineConnection {
@@ -14,6 +21,8 @@ final class EngineConnection {
     let serverURL: URL
     var isConnectedFlag = false
     var reconnectAttempts = 0
+    /// Exact outbound frame budget negotiated through `hello.ok`.
+    var negotiatedMaxMessageSize: Int?
 
     /// Retry while foreground so dev rebuilds and Mac restarts recover centrally.
     let reconnectPolicy = ReconnectProbePolicy()
@@ -26,6 +35,15 @@ final class EngineConnection {
     nonisolated static let automaticReconnectRetryDelay: TimeInterval = ReconnectProbePolicy().retryDelay
     nonisolated static let heartbeatInterval: TimeInterval = 5.0
     nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
+
+    /// WebSocket liveness belongs to the heartbeat, not a fixed resource
+    /// deadline that expires an otherwise healthy long-lived connection.
+    nonisolated static func makeSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = .infinity
+        return configuration
+    }
 
     var reconnectTask: Task<Void, Never>?
     var openedWebSocketTask: URLSessionWebSocketTask?
@@ -55,12 +73,23 @@ final class EngineConnection {
     /// Resolver invoked on every WS upgrade. `nil` sends no Authorization header.
     let bearerTokenProvider: BearerTokenProvider?
 
+    /// Production opens the live session. Tests that exercise connect/retry
+    /// state must inject a deterministic handled result.
+    let sessionAttemptDirective: (URLRequest) -> EngineSessionAttemptDirective
+
     /// Held strongly so delegate lifetime tracks the session.
     var sessionDelegate: EngineConnectionSessionDelegate?
 
-    init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
+    init(
+        serverURL: URL,
+        bearerTokenProvider: BearerTokenProvider? = nil,
+        sessionAttemptDirective: @escaping (URLRequest) -> EngineSessionAttemptDirective = { _ in
+            .openLiveSession
+        }
+    ) {
         self.serverURL = serverURL
         self.bearerTokenProvider = bearerTokenProvider
+        self.sessionAttemptDirective = sessionAttemptDirective
     }
 
     /// Build the URLRequest used for the WS upgrade.
@@ -84,6 +113,7 @@ final class EngineConnection {
         deployRestartExpectedMs = 0
 
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
@@ -129,15 +159,21 @@ final class EngineConnection {
 
         isConnectionInProgress = true
         defer { isConnectionInProgress = false }
+        negotiatedMaxMessageSize = nil
 
         connectionState = stateOnStart
         logger.logWebSocketState("Connecting", details: serverURL.absoluteString)
         logger.info("Connecting to \(self.serverURL.absoluteString)", category: .websocket)
 
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 300
-        logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
+        let request = makeUpgradeRequest()
+        logger.info("WebSocket upgrade request: \(NetworkDiagnosticsFormatter.requestSummary(request))", category: .websocket)
+        guard sessionAttemptDirective(request) == .openLiveSession else {
+            connectionState = stateOnFailure
+            return
+        }
+
+        let configuration = Self.makeSessionConfiguration()
+        logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=unbounded", category: .websocket)
 
         let delegate = EngineConnectionSessionDelegate(owner: self)
         sessionDelegate = delegate
@@ -148,9 +184,6 @@ final class EngineConnection {
             delegateQueue: nil
         )
         urlSession = session
-
-        let request = makeUpgradeRequest()
-        logger.info("WebSocket upgrade request: \(NetworkDiagnosticsFormatter.requestSummary(request))", category: .websocket)
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         let task = session.webSocketTask(with: request)
@@ -188,7 +221,8 @@ final class EngineConnection {
         logger.verbose("Receive loop started", category: .websocket)
 
         do {
-            try await hello()
+            let helloResult = try await hello()
+            negotiatedMaxMessageSize = helloResult.maxMessageSize
         } catch {
             logger.warning("Engine hello failed: \(error.localizedDescription)", category: .websocket)
             cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
@@ -217,17 +251,28 @@ final class EngineConnection {
         await handleDisconnect()
     }
 
-    func markWebSocketOpenFailed(_ task: URLSessionTask, error: Error) {
+    /// Own completion for both an opening and an established WebSocket.
+    /// Completion from a retired task must never tear down its replacement.
+    func handleWebSocketTaskCompletion(_ task: URLSessionTask, error: Error?) async {
         guard let socketTask = task as? URLSessionWebSocketTask,
-              engineConnectionTask === socketTask,
-              openContinuation != nil else {
+              engineConnectionTask === socketTask else {
             return
         }
-        logger.warning("WebSocket open failed: \(NetworkDiagnosticsFormatter.errorSummary(error))", category: .websocket)
-        openTimeoutTask?.cancel()
-        openTimeoutTask = nil
-        openContinuation?.resume(throwing: error)
-        openContinuation = nil
+
+        let completionError = error ?? EngineConnectionError.notConnected
+
+        if openContinuation != nil {
+            logger.warning("WebSocket open failed: \(NetworkDiagnosticsFormatter.errorSummary(completionError))", category: .websocket)
+            openTimeoutTask?.cancel()
+            openTimeoutTask = nil
+            openContinuation?.resume(throwing: completionError)
+            openContinuation = nil
+            return
+        }
+
+        guard isConnectedFlag else { return }
+        logger.warning("Established WebSocket task completed: \(NetworkDiagnosticsFormatter.errorSummary(completionError))", category: .websocket)
+        await handleDisconnect()
     }
 
     func markWebSocketOpenTimedOut(timeout: TimeInterval) {
@@ -253,6 +298,7 @@ final class EngineConnection {
         logger.logWebSocketState("Disconnecting")
         logger.info("Disconnecting from server", category: .websocket)
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         isDeployRestarting = false
         deployRestartExpectedMs = 0
         openedWebSocketTask = nil
@@ -273,6 +319,7 @@ final class EngineConnection {
         engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
+        sessionDelegate = nil
 
         failPendingRequests(error: EngineConnectionError.notConnected)
 
@@ -380,13 +427,14 @@ final class EngineConnection {
         stateAfterCleanup: ConnectionState = .disconnected
     ) {
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         connectionState = stateAfterCleanup
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
         openContinuation?.resume(throwing: error)
         openContinuation = nil
-        engineConnectionTask?.cancel(with: .abnormalClosure, reason: nil)
+        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
         engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil

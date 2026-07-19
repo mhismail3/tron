@@ -13,12 +13,9 @@ pub(super) async fn module_validation_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_validation_deps = crate::domains::module_validation::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_validation::service::record_module_validation_report_value_at(
-            &module_validation_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
             operation_at,
@@ -35,11 +32,8 @@ pub(super) async fn module_validation_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_validation_deps = crate::domains::module_validation::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::module_validation::service::list_module_validation_report_value(
-        &module_validation_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -59,12 +53,9 @@ pub(super) async fn module_validation_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_validation_deps = crate::domains::module_validation::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_validation::service::inspect_module_validation_report_value(
-            &module_validation_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )

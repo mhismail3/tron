@@ -6,8 +6,11 @@ use std::path::PathBuf;
 #[tokio::test]
 async fn factory_unknown_model_returns_unsupported_model_error() {
     let settings = TronSettings::default();
-    let factory = provider_factory::DefaultProviderFactory::new(&settings)
-        .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"));
+    let factory = provider_factory::DefaultProviderFactory::with_client(
+        &settings.api,
+        provider_factory::DefaultProviderFactory::build_http_client(),
+    )
+    .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"));
     let result = factory.create_for_model("unknown-model").await;
     assert!(matches!(
         result,

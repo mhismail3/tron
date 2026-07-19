@@ -8,6 +8,7 @@ struct ServerStatusPollerTests {
         token: String? = nil,
         pingResult: ServerPingResult = .unreachable,
         tailscaleFromSettings: String? = nil,
+        serverPort: Int = 9847,
         launchAgentLoaded: Bool = false,
         serverProcess: ServerProcessInfo? = nil
     ) -> EnvironmentSetup {
@@ -18,14 +19,12 @@ struct ServerStatusPollerTests {
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp,
-            serverHelperBundle: tmp.appendingPathComponent("Tron Server.app"),
-            serverHelperBinary: tmp.appendingPathComponent("Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: tmp,
             onboardedMarkerPath: tmp,
             settingsPath: tmp,
             launchAgentPlistPath: tmp,
             launchAgentLabel: "com.tron.server",
-            serverPort: 9847,
+            serverPort: serverPort,
             canManageLaunchAgent: true,
             wrapperLockPath: tmp.appendingPathComponent(".mac-wrapper.com.tron.mac.lock"),
             onboardedSentinelExists: { false },
@@ -37,26 +36,43 @@ struct ServerStatusPollerTests {
             detectExistingInstall: { .none },
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
-            pingServer: { _ in pingResult },
+            pingServer: { receivedToken in
+                #expect(receivedToken == token)
+                return pingResult
+            },
             launchAgentManager: launchAgentManager,
-            probeServerProcess: { _ in serverProcess },
+            probeServerProcess: { port in
+                #expect(port == serverPort)
+                return serverProcess
+            },
             touchOnboardedSentinel: { }
         )
+    }
+
+    @Test("state tone follows state changes")
+    func stateToneFollowsStateChanges() {
+        var snapshot = ServerStatusSnapshot(state: .checking)
+        #expect(snapshot.state.tone == .attention)
+
+        snapshot.state = .running(version: "0.5.0", port: 9847)
+        #expect(snapshot.state.tone == .running)
+
+        snapshot.state = .failed(reason: "unreachable")
+        #expect(snapshot.state.tone == .failed)
     }
 
     @Test("running: ping succeeds, snapshot is .running with version + port")
     func runningSnapshot() async throws {
         let setup = Self.makeSetup(
             token: "abc123",
-            pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true))
+            pingResult: .success(ServerPingInfo(version: "0.5.0")),
+            tailscaleFromSettings: "100.64.0.1",
+            serverPort: 19047
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .running)
-        #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
-        #expect(snapshot.version == "0.5.0")
-        #expect(snapshot.port == 9847)
+        #expect(snapshot.state.tone == .running)
+        #expect(snapshot.state == .running(version: "0.5.0", port: 19047))
         #expect(snapshot.tailscaleIP == "100.64.0.1")
-        #expect(snapshot.bearerToken == "abc123")
         #expect(snapshot.processID == 16027)
         #expect(snapshot.uptime == "01:07:42")
         #expect(snapshot.isDevServerActive == false)
@@ -66,11 +82,11 @@ struct ServerStatusPollerTests {
     func devTakeoverRuntimeSnapshot() async throws {
         let setup = Self.makeSetup(
             token: "abc123",
-            pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)),
+            pingResult: .success(ServerPingInfo(version: "0.5.0")),
+            tailscaleFromSettings: "100.64.0.1",
             serverProcess: ServerProcessInfo(
                 pid: 24680,
                 uptime: "00:00:09",
-                command: "/Users/example/.tron/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                 isDevServer: true
             )
         )
@@ -86,9 +102,7 @@ struct ServerStatusPollerTests {
         let setup = Self.makeSetup(token: nil, pingResult: .unreachable)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .paused)
-        #expect(snapshot.tone == .paused)
-        #expect(snapshot.version == nil)
-        #expect(snapshot.bearerToken == nil)
+        #expect(snapshot.state.tone == .paused)
     }
 
     @Test("unreachable + launchd loaded: failed")
@@ -96,8 +110,7 @@ struct ServerStatusPollerTests {
         let setup = Self.makeSetup(token: "abc123", pingResult: .unreachable, launchAgentLoaded: true)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .failed(reason: "unreachable"))
-        #expect(snapshot.tone == .failed)
-        #expect(snapshot.bearerToken == "abc123")
+        #expect(snapshot.state.tone == .failed)
     }
 
     @Test("timeout + launchd loaded maps to failed")
@@ -112,8 +125,7 @@ struct ServerStatusPollerTests {
         let setup = Self.makeSetup(token: "abc123", pingResult: .unauthorized)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .unauthorized)
-        #expect(snapshot.tone == .attention)
-        #expect(snapshot.bearerToken == "abc123")
+        #expect(snapshot.state.tone == .attention)
     }
 
     @Test("malformed response + launchd loaded maps to failed")
@@ -127,7 +139,7 @@ struct ServerStatusPollerTests {
     func cachedTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",
-            pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: nil, paired: false)),
+            pingResult: .success(ServerPingInfo(version: "0.5.0")),
             tailscaleFromSettings: "100.99.99.99"
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)

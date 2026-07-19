@@ -7,19 +7,19 @@ use super::service::{
     cancel_module_runtime_value_at, inspect_module_runtime_value, list_module_runtime_value,
     request_module_runtime_value_at,
 };
-use super::{Deps, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
+use super::{MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceLocation, EngineResourceScope, FunctionId, Invocation, InvocationId,
-    MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID, RiskLevel, TraceId,
-    builtin_resource_type_definitions,
+    EngineHostHandle, EngineResourceLocation, EngineResourceScope, FunctionId, Invocation,
+    InvocationId, MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID, RiskLevel,
+    TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-27T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     lifecycle_id: String,
     write_grant_id: AuthorityGrantId,
@@ -29,13 +29,11 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str, lifecycle_state: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let scope = EngineResourceScope::Session(session_id.clone());
         let lifecycle_id = format!("module_lifecycle_state:{label}");
-        deps.engine_host
+        engine_host
             .create_resource(CreateResource {
                 resource_id: Some(lifecycle_id.clone()),
                 kind: MODULE_LIFECYCLE_STATE_KIND.to_owned(),
@@ -59,7 +57,7 @@ impl Fixture {
             .expect("seed lifecycle state");
         let runtime_id = module_runtime_resource_id(&scope, &lifecycle_id, "runtime-request-1");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -77,7 +75,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_RUNTIME_STATE_KIND],
@@ -88,7 +86,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             lifecycle_id,
             write_grant_id,
@@ -123,7 +121,7 @@ impl Fixture {
 
     async fn request(&self, key: &str) -> Value {
         request_module_runtime_value_at(
-            &self.deps,
+            &self.engine_host,
             &self.write_invocation(key, request_payload(&self.lifecycle_id)),
             &request_payload(&self.lifecycle_id),
             default_operation_at(),
@@ -175,7 +173,7 @@ async fn enabled_lifecycle_records_runtime_envelope_and_redacted_projection() {
 
     let resource_id = created["moduleRuntimeResourceId"].as_str().unwrap();
     let inspected = inspect_module_runtime_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation(
             "runtime-inspect",
             json!({"moduleRuntimeResourceId": resource_id}),
@@ -209,7 +207,7 @@ async fn disabled_quarantined_and_rolled_back_lifecycle_states_deny_runtime_befo
     for state in ["disabled", "quarantined", "rolled_back"] {
         let fixture = Fixture::new(&format!("module-runtime-{state}"), state).await;
         let error = request_module_runtime_value_at(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.write_invocation("runtime-denied", request_payload(&fixture.lifecycle_id)),
             &request_payload(&fixture.lifecycle_id),
             default_operation_at(),
@@ -223,7 +221,7 @@ async fn disabled_quarantined_and_rolled_back_lifecycle_states_deny_runtime_befo
             "{error}"
         );
         let list = list_module_runtime_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("runtime-list", json!({})),
             &json!({}),
         )
@@ -242,7 +240,7 @@ async fn runtime_request_is_idempotent_and_cancel_records_bounded_shutdown_metad
     let resource_id = created["moduleRuntimeResourceId"].as_str().unwrap();
     let version_id = created["moduleRuntimeVersionId"].as_str().unwrap();
     let cancel = cancel_module_runtime_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.write_invocation(
             "runtime-cancel",
             json!({
@@ -317,14 +315,13 @@ fn lifecycle_payload(state: &str, lifecycle_id: &str) -> Value {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("module-runtime-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

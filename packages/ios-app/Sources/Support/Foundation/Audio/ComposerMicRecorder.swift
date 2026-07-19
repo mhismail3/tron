@@ -3,6 +3,8 @@ import Foundation
 @Observable
 @MainActor
 final class ComposerMicRecorder {
+    private static let maxRecordingDuration: TimeInterval = 300
+
     enum RecorderError: LocalizedError {
         case permissionDenied
         case startFailed(String)
@@ -18,49 +20,50 @@ final class ComposerMicRecorder {
     }
 
     private(set) var isRecording = false
+    private(set) var audioLevel: Double = 0
     var onFinish: ((URL?, Bool) -> Void)?
 
     private let engine = ComposerMicCaptureEngine()
     private var autoStopTask: Task<Void, Never>?
+    private var meteringTask: Task<Void, Never>?
+    private var levelSmoother = ComposerAudioLevelSmoother()
 
     deinit {
         MainActor.assumeIsolated {
             autoStopTask?.cancel()
+            meteringTask?.cancel()
             engine.cancel()
         }
     }
 
-    func startRecording(maxDuration: TimeInterval) async throws {
+    func startRecording() async throws {
         guard !isRecording else { return }
         try Task.checkCancellation()
         let hasPermission = await engine.requestPermission()
         try Task.checkCancellation()
         guard hasPermission else { throw RecorderError.permissionDenied }
 
-        MicAvailabilityMonitor.shared.isRecordingInProgress = true
         do {
             try await engine.start()
             try Task.checkCancellation()
         } catch is CancellationError {
             isRecording = false
             engine.cancel()
-            MicAvailabilityMonitor.shared.isRecordingInProgress = false
             throw CancellationError()
         } catch {
             if Task.isCancelled {
                 isRecording = false
                 engine.cancel()
-                MicAvailabilityMonitor.shared.isRecordingInProgress = false
                 throw CancellationError()
             }
-            MicAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed(error.localizedDescription)
         }
         isRecording = true
+        startMetering()
 
         autoStopTask?.cancel()
         autoStopTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(maxDuration))
+            try? await Task.sleep(for: .seconds(Self.maxRecordingDuration))
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 let (url, success) = self.stopRecording()
@@ -80,8 +83,8 @@ final class ComposerMicRecorder {
         autoStopTask = nil
         guard isRecording else { return (nil, false) }
         isRecording = false
+        stopMetering()
         let url = engine.stop()
-        MicAvailabilityMonitor.shared.isRecordingInProgress = false
         return (url, url != nil)
     }
 
@@ -89,7 +92,40 @@ final class ComposerMicRecorder {
         autoStopTask?.cancel()
         autoStopTask = nil
         isRecording = false
+        stopMetering()
         engine.cancel()
-        MicAvailabilityMonitor.shared.isRecordingInProgress = false
+    }
+
+    private func startMetering() {
+        stopMetering()
+        meteringTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                audioLevel = levelSmoother.update(target: engine.currentLevel)
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    private func stopMetering() {
+        meteringTask?.cancel()
+        meteringTask = nil
+        levelSmoother.reset()
+        audioLevel = 0
+    }
+}
+
+struct ComposerAudioLevelSmoother {
+    private(set) var value: Double = 0
+
+    mutating func update(target: Double) -> Double {
+        let boundedTarget = min(max(target, 0), 1)
+        let response = boundedTarget > value ? 0.58 : 0.20
+        value += (boundedTarget - value) * response
+        return value
+    }
+
+    mutating func reset() {
+        value = 0
     }
 }

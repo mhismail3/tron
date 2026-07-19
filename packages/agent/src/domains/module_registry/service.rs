@@ -11,9 +11,10 @@ use super::manifest::{
     validate_manifest_payload,
 };
 use super::projection::{detail_projection, side_effect_proof, summary_projection};
-use super::{MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, SCHEMA_VERSION};
-
-const RESOURCE_READ_SCOPE: &str = "resource.read";
+use super::{
+    MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, RESOURCE_READ_SCOPE,
+    SCHEMA_VERSION,
+};
 const READABLE_LIFECYCLES: &[&str] = &["candidate", "validated", "stale"];
 
 pub(crate) async fn list_modules_value(

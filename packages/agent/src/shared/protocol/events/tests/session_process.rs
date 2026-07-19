@@ -20,13 +20,23 @@ fn session_updated_event_type() {
         last_user_prompt: Some("hello".into()),
         last_assistant_response: Some("world".into()),
         parent_session_id: None,
-        activity_lines: None,
+        activity_lines: Some(vec![ActivitySummaryLine {
+            kind: "capability".into(),
+            model_primitive_name: Some("execute".into()),
+            operation_name: Some("filesystem.read".into()),
+            duration_ms: Some(12),
+            ..Default::default()
+        }]),
     };
     assert_eq!(e.event_type(), "session_updated");
     assert_eq!(e.session_id(), "s1");
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["eventCount"], 8);
     assert_eq!(json["turnCount"], 2);
+    assert_eq!(json["activityLines"][0]["modelPrimitiveName"], "execute");
+    assert_eq!(json["activityLines"][0]["operationName"], "filesystem.read");
+    assert_eq!(json["activityLines"][0]["durationMs"], 12);
+    assert!(json["activityLines"][0].get("text").is_none());
 }
 
 #[test]

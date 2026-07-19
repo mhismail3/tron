@@ -203,6 +203,27 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
         Ok(changed > 0)
     }
 
+    /// List ids for active subscriptions so their owning runtime can reconcile
+    /// its own ephemeral namespace without teaching the store owner semantics.
+    pub(crate) fn active_subscription_ids(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT subscription_id
+                 FROM engine_stream_subscriptions
+                 WHERE active = 1
+                 ORDER BY subscription_id",
+            )
+            .map_err(|err| sqlite_err("stream.active_subscription_ids.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|err| sqlite_err("stream.active_subscription_ids.query", err.to_string()))?;
+        rows.map(|row| {
+            row.map_err(|err| sqlite_err("stream.active_subscription_ids.row", err.to_string()))
+        })
+        .collect()
+    }
+
     /// Advance a subscription cursor after client delivery.
     pub fn acknowledge(
         &mut self,
@@ -256,6 +277,27 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
             )));
         }
         let after = after.unwrap_or(subscription.cursor);
+        self.poll_topic(&subscription.topic, after, limit, actor)
+    }
+
+    /// Poll a topic directly from an explicit cursor without durable subscriber state.
+    pub(crate) fn poll_topic(
+        &self,
+        topic: &str,
+        after: StreamCursor,
+        limit: usize,
+        actor: &StreamActorScope,
+    ) -> Result<EngineStreamPage> {
+        if topic.trim().is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "stream topic must not be empty".to_owned(),
+            ));
+        }
+        if limit == 0 {
+            return Err(EngineError::PolicyViolation(
+                "stream poll limit must be greater than zero".to_owned(),
+            ));
+        }
         let mut stmt = self
             .conn
             .prepare(
@@ -277,7 +319,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
         let rows = stmt
             .query_map(
                 params![
-                    subscription.topic,
+                    topic,
                     after.0 as i64,
                     actor.session_id.as_deref(),
                     actor.workspace_id.as_deref(),

@@ -20,18 +20,18 @@ extension Notification.Name {
 /// - Access in views: `@Environment(\.dependencies) var dependencies`
 @Observable
 @MainActor
-final class DependencyContainer: DependencyProviding, ServerSettingsProvider, AppSettingsProvider {
+final class DependencyContainer {
 
     // MARK: - App Settings (Persisted)
 
     @ObservationIgnored
-    @AppStorage("workingDirectory") var workingDirectory = ""
+    @AppStorage var workingDirectory: String
 
     @ObservationIgnored
-    @AppStorage("defaultModel") var defaultModel = ""
+    @AppStorage var defaultModel: String
 
     @ObservationIgnored
-    @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = AppConstants.defaultWorkspace
+    @AppStorage var quickSessionWorkspace: String
 
     // MARK: - Core Services (Created Once)
 
@@ -49,6 +49,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// deduplication; this service only batches the local in-memory buffer.
     private(set) var clientLogIngestionService: ClientLogIngestionService
 
+    /// Owns only the local APNs authorization/token exchange. Server-side
+    /// device registration and delivery remain engine-owned.
+    private(set) var pushNotificationService: PushNotificationService
+
     /// iOS-local paired server list and active selection.
     @ObservationIgnored
     let pairedServerStore: PairedServerStore
@@ -59,19 +63,25 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     private let pairedServerDefaults: UserDefaults
 
-    /// Per-server bearer-token storage backed by Keychain. Owned here because
-    /// the bearer-token resolver closure captures a reference; same instance
-    /// is shared with onboarding and Settings for re-pair flows.
+    /// Documents root selected with the same typed storage input as drafts and
+    /// the database. Empty working-directory fallback must never bypass it.
     @ObservationIgnored
-    let pairedServerTokenStore = PairedServerTokenStore()
+    private let documentsURL: URL
 
-    /// Default pairing probe used by the onboarding PairingStep. Held here
-    /// so tests + previews can swap a `StubPairingProbe` without rebuilding
-    /// the container. Lazy because a fresh probe spins up its own URLSession
-    /// on every call and we don't need one until the user lands on the
-    /// Pairing step.
+    /// Per-server bearer-token storage selected by the composition policy.
     @ObservationIgnored
-    lazy var pairingProbe: any PairingProbing = URLSessionPairingProbe()
+    let pairedServerTokenStore: PairedServerTokenStore
+
+    /// One immutable I/O policy reused by initial and rebuilt server services.
+    @ObservationIgnored
+    private let runtimeIO: DependencyContainerRuntimeIO
+
+    /// Default pairing probe used by the onboarding PairingStep. Held here so
+    /// tests can inject an inert implementation without rebuilding the
+    /// container. Lazy because a fresh production probe spins up its own
+    /// URLSession and we don't need one until the user lands on Pairing.
+    @ObservationIgnored
+    lazy var pairingProbe: any PairingProbing = runtimeIO.makePairingProbe()
 
     // MARK: - Recreatable Services (When Server Changes)
 
@@ -89,6 +99,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     /// Event store manager - updated when engine client changes
     private(set) var eventStoreManager: EventStoreManager
+
+    /// Cancel-and-replace startup for the currently installed server client.
+    /// Client identity, rather than selection metadata, defines the generation.
+    @ObservationIgnored
+    private var activeServerStartupTask: Task<Void, Never>?
 
     // MARK: - Repositories
 
@@ -128,19 +143,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Session context-control repository for Session Briefing.
     private(set) var contextControlRepository: any ContextControlRepository
 
-    var chatSessionServices: ChatSessionServices {
-        ChatSessionServices(
-            connection: connectionRepository,
-            events: sessionEventRepository,
-            sessions: sessionRepository,
-            agent: agentRepository,
-            models: modelRepository,
-            messages: messageRepository,
-            transcription: transcriptionRepository,
-            workerLifecycle: workerLifecycleRepository
-        )
-    }
-
     var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {
         Self.makeDiagnosticsEngineEndpoint(client: engineClient)
     }
@@ -157,7 +159,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Whether the container has been fully initialized
     private(set) var isInitialized = false
 
-    // MARK: - ServerSettingsProvider
+    // MARK: - Active Server Selection
 
     var serverURL: URL {
         guard let server = pairedServerStore.activeServer else {
@@ -170,37 +172,50 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         pairedServerStore.activeServer?.origin ?? ""
     }
 
-    // MARK: - AppSettingsProvider
+    // MARK: - App Settings
 
     var effectiveWorkingDirectory: String {
         if workingDirectory.isEmpty {
-            return FileManager.default.urls(
-                for: .documentDirectory,
-                in: .userDomainMask
-            ).first?.path ?? "~"
+            return documentsURL.path
         }
         return workingDirectory
     }
 
     // MARK: - Initialization
 
-    init(pairedServerDefaults: UserDefaults = .standard) {
+    init(
+        storage: DependencyContainerStorage = .production(),
+        runtimeIO: DependencyContainerRuntimeIO = .production()
+    ) {
+        let pairedServerDefaults = storage.defaults
+        let documentsURL = storage.documentsURL
+        let db = storage.eventDatabase
+        _workingDirectory = AppStorage(
+            wrappedValue: "",
+            "workingDirectory",
+            store: pairedServerDefaults
+        )
+        _defaultModel = AppStorage(
+            wrappedValue: "",
+            "defaultModel",
+            store: pairedServerDefaults
+        )
+        _quickSessionWorkspace = AppStorage(
+            wrappedValue: AppConstants.defaultWorkspace,
+            "quickSessionWorkspace",
+            store: pairedServerDefaults
+        )
         self.pairedServerDefaults = pairedServerDefaults
+        self.documentsURL = documentsURL
+        self.runtimeIO = runtimeIO
+        pairedServerTokenStore = runtimeIO.pairedServerTokenStore
         pairedServerStore = PairedServerStore(defaults: pairedServerDefaults)
 
         // Initialize core services that persist across server changes.
-        guard let documentsURL = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first else {
-            preconditionFailure("Documents directory unavailable; cannot initialize iOS local projection stores")
-        }
-        guard let db = EventDatabase() else {
-            preconditionFailure("Documents directory unavailable; cannot initialize EventDatabase")
-        }
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
         deepLinkRouter = DeepLinkRouter()
+        pushNotificationService = PushNotificationService()
 
         // Build initial server URL from the iOS-local active pairing. With no
         // pair, use a non-routable placeholder so app launch never silently
@@ -222,7 +237,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                     tokenStore: tokenStore,
                     defaults: pairedServerDefaults
                 )
-            }
+            },
+            sessionAttemptDirective: runtimeIO.sessionAttemptDirective
         )
         engineClient = client
         clientLogIngestionService = ClientLogIngestionService(
@@ -242,14 +258,18 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         interactionPolicy = InteractionPolicy(connection: manager)
 
         // Initialize event store manager
-        eventStoreManager = EventStoreManager(eventDB: db, engineClient: client)
+        eventStoreManager = EventStoreManager(
+            eventDB: db,
+            engineClient: client,
+            defaults: pairedServerDefaults
+        )
 
         // Initialize repositories
         connectionRepository = DefaultAppConnectionRepository(client: client)
         sessionEventRepository = DefaultSessionEventRepository(client: client)
         modelRepository = DefaultModelRepository(modelClient: client.model)
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
-        agentRepository = DefaultAgentRepository(agentClient: client.agent)
+        agentRepository = client.agent
         settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
@@ -276,6 +296,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             }
         }
 
+    }
+
+    deinit {
+        activeServerStartupTask?.cancel()
     }
 
     // MARK: - Async Initialization
@@ -310,12 +334,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     func selectPairedServer(_ server: PairedServer, connectAfterSwitch: Bool = true) {
         guard pairedServerStore.activeServer?.id != server.id else { return }
         pairedServerStore.select(server)
-        rebuildServerBoundServices()
-        guard connectAfterSwitch else { return }
-        Task {
-            await connect()
-            await reloadServerSettings()
-        }
+        rebuildServerBoundServices(connectAfterSwitch: connectAfterSwitch)
     }
 
     @discardableResult
@@ -323,47 +342,13 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         try pairedServerTokenStore.remove(serverId: server.id)
         let plan = pairedServerStore.remove(server)
         if plan.removedWasActive {
-            rebuildServerBoundServices()
-            if plan.nextActiveServer != nil {
-                Task {
-                    await connect()
-                    await reloadServerSettings()
-                }
-            }
+            rebuildServerBoundServices(
+                connectAfterSwitch: plan.nextActiveServer != nil
+            )
         } else {
             activeServerSelectionVersion += 1
         }
         return plan
-    }
-
-    // MARK: - Connection Management
-
-    /// Connect to the server
-    func connect() async {
-        guard pairedServerStore.activeServer != nil else { return }
-        await engineClient.connect()
-    }
-
-    /// Disconnect from the server
-    func disconnect() async {
-        await engineClient.disconnect()
-    }
-
-    /// Set background state for battery optimization
-    func setBackgroundState(_ inBackground: Bool) {
-        engineClient.setBackgroundState(inBackground)
-    }
-
-    /// Verify connection is alive
-    func verifyConnection() async -> Bool {
-        guard pairedServerStore.activeServer != nil else { return false }
-        return await engineClient.verifyConnection()
-    }
-
-    /// Manual retry triggered from UI
-    func manualRetry() async {
-        guard pairedServerStore.activeServer != nil else { return }
-        await engineClient.manualRetry()
     }
 
     // MARK: - Settings Reload
@@ -372,7 +357,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Called after server switch to ensure server-backed app globals reflect
     /// the active server's effective settings rather than carrying values from
     /// the previously selected Mac.
-    func reloadServerSettings() async {
+    private func reloadServerSettings() async {
         guard let activeServer = pairedServerStore.activeServer else { return }
         let selectionVersion = activeServerSelectionVersion
         do {
@@ -470,11 +455,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         }
     }
 
-    private func rebuildServerBoundServices() {
+    private func rebuildServerBoundServices(connectAfterSwitch: Bool = false) {
+        activeServerStartupTask?.cancel()
+        activeServerStartupTask = nil
+
         let oldClient = engineClient
-        Task {
-            await oldClient.disconnect()
-        }
+        oldClient.disconnect()
 
         let url = pairedServerStore.activeServer.map {
             Self.buildServerURL(host: $0.host, port: String($0.port))
@@ -488,7 +474,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                     tokenStore: tokenStore,
                     defaults: defaults
                 )
-            }
+            },
+            sessionAttemptDirective: runtimeIO.sessionAttemptDirective
         )
         engineClient = newClient
         clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))
@@ -503,7 +490,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         sessionEventRepository = DefaultSessionEventRepository(client: newClient)
         modelRepository = DefaultModelRepository(modelClient: newClient.model)
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
-        agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
+        agentRepository = newClient.agent
         settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
@@ -516,6 +503,22 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
 
         TronLogger.shared.info("Active paired server changed to \(currentServerOrigin.nilIfEmpty ?? "none")", category: .general)
+
+        guard connectAfterSwitch, pairedServerStore.activeServer != nil else { return }
+        activeServerStartupTask = Task { @MainActor [weak self, newClient] in
+            guard !Task.isCancelled, self?.engineClient === newClient else { return }
+            await newClient.connect()
+            guard !Task.isCancelled, self?.engineClient === newClient else {
+                // A connect can finish after a newer generation has already
+                // disconnected this client. Retire it again after completion.
+                newClient.disconnect()
+                return
+            }
+            await self?.reloadServerSettings()
+            if self?.engineClient === newClient {
+                self?.activeServerStartupTask = nil
+            }
+        }
     }
 
     /// Static helper invoked by the bearer-token provider closure on every WS

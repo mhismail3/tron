@@ -7,16 +7,19 @@ import SQLite3
 final class SyncRepositoryTests: XCTestCase {
 
     var database: EventDatabase!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
-        database = EventDatabase()
+        testState = IsolatedTestState(label: "sync-repository")
+        testState.registerTeardown(with: self)
+        database = testState.makeDatabase()
         try await database.initialize()
         try await database.clearAll()
     }
 
     override func tearDown() async throws {
         try? await database.clearAll()
-        await database.close()
+        await testState.cleanup()
     }
 
     // MARK: - Round Trip

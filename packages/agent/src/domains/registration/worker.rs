@@ -3,7 +3,11 @@
 //! This module is the setup-only boundary between the broad server runtime
 //! context and domain-owned worker modules. Runtime handlers receive the narrow
 //! `Deps` type owned by their domain; this context is only used while building
-//! worker/function registrations at startup.
+//! worker/function registrations at startup. `DomainWorkerModule` is an inert
+//! catalog description; startup tasks and shutdown hooks remain under the
+//! registration lifecycle token until complete engine setup succeeds. Domain
+//! builders may return the opaque description, but only the registration owner
+//! can inspect or mutate its worker, function, and stream-topic contents.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,10 +18,11 @@ use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::registration::catalog;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerDefinition, WorkerKind};
-use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
+use crate::shared::server::context::ServerRuntimeContext;
 
 #[derive(Clone)]
 pub(crate) struct DomainRegistrationContext {
@@ -25,7 +30,8 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) session_manager: Arc<SessionManager>,
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-    pub(crate) agent_deps: Option<AgentDeps>,
+    pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
+    pub(crate) responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     pub(crate) profile_runtime: Arc<ProfileRuntime>,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     pub(crate) origin: String,
@@ -49,7 +55,8 @@ impl DomainRegistrationContext {
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
             transcription_runtime: ctx.transcription_runtime.clone(),
-            agent_deps: ctx.agent_deps.clone(),
+            apns_runtime: ctx.apns_runtime.clone(),
+            responder_factory: ctx.responder_factory.clone(),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
             origin: ctx.origin.clone(),
@@ -70,11 +77,10 @@ pub(crate) struct DomainFunctionRegistration {
     pub(crate) handler: Arc<dyn InProcessFunctionHandler>,
 }
 
-#[derive(Clone)]
 pub(crate) struct DomainWorkerModule {
-    pub(crate) worker: WorkerDefinition,
-    pub(crate) functions: Vec<DomainFunctionRegistration>,
-    pub(crate) stream_topics: &'static [&'static str],
+    pub(super) worker: WorkerDefinition,
+    pub(super) functions: Vec<DomainFunctionRegistration>,
+    pub(super) stream_topics: &'static [&'static str],
 }
 
 pub(crate) fn domain_worker_module(

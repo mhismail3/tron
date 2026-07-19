@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResourceLocation, EngineResourceScope, Invocation, ListResources,
-    UpdateResource,
+    CreateResource, EngineHostHandle, EngineResourceLocation, EngineResourceScope, Invocation,
+    ListResources, UpdateResource,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -26,22 +26,23 @@ use super::resource_store::{
     worker_id,
 };
 use super::validation::*;
-use super::{Deps, MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID};
+use super::{MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID};
 
 pub(crate) async fn request_module_lifecycle_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_write_authority(deps, invocation, "module_lifecycle_request").await?;
+    let grant = ensure_write_authority(engine_host, invocation, "module_lifecycle_request").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let install_decision_resource_id = required_string(payload, "moduleInstallDecisionResourceId")?;
     validate_module_install_decision_resource_id(&install_decision_resource_id)?;
     let install_decision =
-        inspect_install_candidate_prerequisite(deps, &install_decision_resource_id, &scope).await?;
+        inspect_install_candidate_prerequisite(engine_host, &install_decision_resource_id, &scope)
+            .await?;
     let action = lifecycle_action(payload)?;
     let state = "pending";
     let transition_id_input = optional_string(payload, "lifecycleTransitionId")?
@@ -79,8 +80,7 @@ pub(crate) async fn request_module_lifecycle_value_at(
     require_exact_resource_selector(&grant, &resource_id, "module_lifecycle_request")?;
     let now = operation_at.to_rfc3339();
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -156,8 +156,7 @@ pub(crate) async fn request_module_lifecycle_value_at(
                 .unwrap_or(1)
                 .saturating_add(1),
         });
-        let version = deps
-            .engine_host
+        let version = engine_host
             .update_resource(UpdateResource {
                 resource_id: resource_id.clone(),
                 expected_current_version_id: Some(current_version.version_id.clone()),
@@ -176,9 +175,9 @@ pub(crate) async fn request_module_lifecycle_value_at(
             .await
             .map_err(engine_error)?;
         let updated =
-            inspect_resource_required(deps, &resource_id, "module lifecycle state").await?;
+            inspect_resource_required(engine_host, &resource_id, "module lifecycle state").await?;
         publish_lifecycle_event(
-            deps,
+            engine_host,
             invocation,
             "module_lifecycle.requested",
             &updated.resource,
@@ -201,7 +200,7 @@ pub(crate) async fn request_module_lifecycle_value_at(
             "idempotentReplay": false,
             "moduleLifecycleResourceId": resource_id,
             "moduleLifecycleVersionId": version.version_id,
-            "moduleLifecycle": module_lifecycle_summary_for_resource(deps, &updated.resource).await?,
+            "moduleLifecycle": module_lifecycle_summary_for_resource(engine_host, &updated.resource).await?,
             "resourceRefs": [version_ref(&updated.resource, &version, "module_lifecycle_state")]
         }));
     }
@@ -231,8 +230,7 @@ pub(crate) async fn request_module_lifecycle_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_LIFECYCLE_STATE_KIND.to_owned(),
@@ -258,7 +256,7 @@ pub(crate) async fn request_module_lifecycle_value_at(
         invalid("module lifecycle resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_lifecycle.requested",
         &resource,
@@ -279,19 +277,20 @@ pub(crate) async fn request_module_lifecycle_value_at(
         "idempotentReplay": false,
         "moduleLifecycleResourceId": resource.resource_id,
         "moduleLifecycleVersionId": version_id,
-        "moduleLifecycle": module_lifecycle_summary_for_resource(deps, &resource).await?,
+        "moduleLifecycle": module_lifecycle_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_lifecycle_state")]
     }))
 }
 
 pub(crate) async fn decide_module_lifecycle_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_write_authority(deps, invocation, "module_lifecycle_decision").await?;
+    let grant =
+        ensure_write_authority(engine_host, invocation, "module_lifecycle_decision").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let resource_id = required_string(payload, "moduleLifecycleResourceId")?;
@@ -305,7 +304,7 @@ pub(crate) async fn decide_module_lifecycle_value_at(
         ));
     }
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module lifecycle state").await?;
+        inspect_resource_required(engine_host, &resource_id, "module lifecycle state").await?;
     ensure_module_lifecycle_state(&inspection, "module_lifecycle_decision")?;
     ensure_scope(&inspection, &scope, "module_lifecycle_decision")?;
     let (current_version, current) = current_payload(&inspection, "module_lifecycle_decision")?;
@@ -327,11 +326,12 @@ pub(crate) async fn decide_module_lifecycle_value_at(
         .ok_or_else(|| invalid("module lifecycle state is missing install decision ref"))?
         .to_owned();
     let install_decision =
-        inspect_install_candidate_prerequisite(deps, &install_decision_resource_id, &scope).await?;
+        inspect_install_candidate_prerequisite(engine_host, &install_decision_resource_id, &scope)
+            .await?;
     let (approval_request_resource_id, approval_decision_resource_id) =
         validate_approval_refs(payload)?;
     let approval = check_lifecycle_approval(
-        deps,
+        engine_host,
         &scope,
         &resource_id,
         &install_decision_resource_id,
@@ -398,8 +398,7 @@ pub(crate) async fn decide_module_lifecycle_value_at(
             .unwrap_or(1)
             .saturating_add(1),
     });
-    let version = deps
-        .engine_host
+    let version = engine_host
         .update_resource(UpdateResource {
             resource_id: resource_id.clone(),
             expected_current_version_id: Some(current_version.version_id.clone()),
@@ -417,9 +416,10 @@ pub(crate) async fn decide_module_lifecycle_value_at(
         })
         .await
         .map_err(engine_error)?;
-    let updated = inspect_resource_required(deps, &resource_id, "module lifecycle state").await?;
+    let updated =
+        inspect_resource_required(engine_host, &resource_id, "module lifecycle state").await?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_lifecycle.decided",
         &updated.resource,
@@ -441,18 +441,18 @@ pub(crate) async fn decide_module_lifecycle_value_at(
         "idempotentReplay": false,
         "moduleLifecycleResourceId": resource_id,
         "moduleLifecycleVersionId": version.version_id,
-        "moduleLifecycle": module_lifecycle_summary_for_resource(deps, &updated.resource).await?,
+        "moduleLifecycle": module_lifecycle_summary_for_resource(engine_host, &updated.resource).await?,
         "resourceRefs": [version_ref(&updated.resource, &version, "module_lifecycle_state")]
     }))
 }
 
 pub(crate) async fn list_module_lifecycle_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, "module_lifecycle_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "module_lifecycle_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -462,8 +462,7 @@ pub(crate) async fn list_module_lifecycle_value(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_LIFECYCLE_STATE_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -481,8 +480,7 @@ pub(crate) async fn list_module_lifecycle_value(
     let truncated = resources.len() > limit;
     let mut lifecycles = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -514,18 +512,18 @@ pub(crate) async fn list_module_lifecycle_value(
 }
 
 pub(crate) async fn inspect_module_lifecycle_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_lifecycle_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "module_lifecycle_inspect").await?;
     let resource_id = required_string(payload, "moduleLifecycleResourceId")?;
     validate_module_lifecycle_state_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_lifecycle_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module lifecycle state").await?;
+        inspect_resource_required(engine_host, &resource_id, "module lifecycle state").await?;
     ensure_module_lifecycle_state(&inspection, "module_lifecycle_inspect")?;
     ensure_scope(&inspection, &scope, "module_lifecycle_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_lifecycle_inspect")?;
@@ -539,12 +537,13 @@ pub(crate) async fn inspect_module_lifecycle_value(
 }
 
 pub(crate) async fn ensure_runtime_allowed(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     scope: &EngineResourceScope,
     lifecycle_resource_id: &str,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, lifecycle_resource_id, "module lifecycle state").await?;
+        inspect_resource_required(engine_host, lifecycle_resource_id, "module lifecycle state")
+            .await?;
     ensure_module_lifecycle_state(&inspection, "module_runtime_authorization")?;
     ensure_scope(&inspection, scope, "module_runtime_authorization")?;
     let (version, payload) = current_payload(&inspection, "module_runtime_authorization")?;
@@ -567,11 +566,11 @@ pub(crate) async fn ensure_runtime_allowed(
 }
 
 async fn inspect_install_candidate_prerequisite(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource_id: &str,
     scope: &EngineResourceScope,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, resource_id, "module install decision").await?;
+        inspect_resource_required(engine_host, resource_id, "module install decision").await?;
     ensure_install_candidate_prerequisite(&inspection, scope)
 }

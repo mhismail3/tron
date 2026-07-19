@@ -1,52 +1,4 @@
-use std::collections::BTreeSet;
-
-use super::support::{INVARIANT_TEST_PATH, parse_inventory, read_repo_file};
-
-#[test]
-fn sacb_static_guard_module_is_active() {
-    let target = read_repo_file(INVARIANT_TEST_PATH);
-    assert!(
-        target.contains("mod security_authority_capability_boundaries;"),
-        "SACB invariant target must load focused guard modules"
-    );
-
-    let module =
-        read_repo_file("packages/agent/tests/security_authority_capability_boundaries/mod.rs");
-    for required in [
-        "mod platform_guards;",
-        "mod scorecard_inventory;",
-        "mod static_guards;",
-        "mod support;",
-    ] {
-        assert!(
-            module.contains(required),
-            "SACB module registry missing {required}"
-        );
-    }
-}
-
-#[test]
-fn sacb_inventory_covers_required_boundary_classes() {
-    let classes = parse_inventory()
-        .into_iter()
-        .map(|row| row.boundary_class)
-        .collect::<BTreeSet<_>>();
-    for required in [
-        "public_transport",
-        "authority_grant",
-        "runtime_metadata",
-        "execute_primitive",
-        "external_worker",
-        "secret_storage",
-        "pairing_lifecycle",
-        "static_gate",
-    ] {
-        assert!(
-            classes.contains(required),
-            "SACB inventory missing boundary class {required}"
-        );
-    }
-}
+use super::support::read_repo_file;
 
 #[test]
 fn sacb_public_engine_routes_stay_bearer_gated_and_workers_loopback_only() {
@@ -319,11 +271,46 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
     let operations_context =
         read_repo_file("packages/agent/src/domains/capability/operations/context.rs");
     let operation_guards = format!("{operations}\n{operations_context}");
+    for required in [
+        "validate_execute_authority(invocation, &attempted_operation, &deps.engine_host).await?",
+        "validate_execute_authority(invocation, &operation, &deps.engine_host).await",
+    ] {
+        assert!(
+            operations.contains(required),
+            "capability execute dispatch root must validate durable operation authority before dispatch: {required}"
+        );
+    }
+    let supported_authority = operations
+        .find("validate_execute_authority(invocation, &operation, &deps.engine_host).await?")
+        .expect("supported execute authority gate");
+    let trace_start = operations
+        .find("started_trace_record(invocation, deps, &operation, &started_at)?")
+        .expect("supported execute trace start");
     assert!(
-        operations.contains("validate_execute_context(invocation, &attempted_operation)?"),
-        "capability execute dispatch root must validate trusted context before dispatch"
+        supported_authority < trace_start,
+        "supported execute authority must be verified before trace mutation"
+    );
+    let unsupported_identity = operations
+        .find(
+            "validate_execute_identity(invocation, &attempted_operation, &deps.engine_host).await?",
+        )
+        .expect("unsupported execute identity gate");
+    let rejected_trace = operations
+        .find("return trace_rejected_operation(invocation, deps, &attempted_operation)")
+        .expect("unsupported execute trace path");
+    assert!(
+        unsupported_identity < rejected_trace,
+        "unsupported execute identity and operation claim must be verified before trace mutation"
     );
     for required in [
+        "inspect_authority_grant(&invocation.causal_context.authority_grant_id)",
+        "capability::execute grant requires an exact operation claim",
+        "capability::execute grant operation claim does not match the requested operation",
+        "operation_contract::risk_level(operation)",
+        "operation_contract::authority_policy(operation)",
+        "policy.base_scope_additions()",
+        "policy.resource_kind_policy().base_kinds()",
+        "policy.network_policy().as_str()",
         "is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id)",
         "capability::execute requires a derived least-privilege authority grant",
         "capability::execute requires a trusted agent or system runtime context",

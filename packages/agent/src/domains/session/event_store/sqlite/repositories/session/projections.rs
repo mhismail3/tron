@@ -1,21 +1,21 @@
-//! Session-list projection types and queries.
+//! Session-list projection queries that construct shared protocol DTOs.
 
 use std::collections::HashMap;
 
 use rusqlite::{Connection, params};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::SessionRepo;
 use crate::domains::session::event_store::errors::Result;
+use crate::shared::protocol::events::ActivitySummaryLine;
 
 /// Message preview for session list display.
 #[derive(Clone, Debug, Default)]
-pub struct MessagePreview {
+pub(crate) struct MessagePreview {
     /// Last user prompt text.
-    pub last_user_prompt: Option<String>,
+    pub(crate) last_user_prompt: Option<String>,
     /// Last assistant response text.
-    pub last_assistant_response: Option<String>,
+    pub(crate) last_assistant_response: Option<String>,
 }
 
 /// Extract text from a message event payload JSON string.
@@ -41,52 +41,6 @@ pub(super) fn extract_text_from_payload(payload_str: &str) -> String {
         }
         _ => String::new(),
     }
-}
-
-/// Activity summary line for session list display.
-/// Lightweight: iOS enriches primitive operation lines with generic
-/// presentation helpers.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActivitySummaryLine {
-    /// Discriminator for the line type (for example `"userPrompt"`, `"text"`, `"capability"`).
-    pub kind: String,
-    /// Plain-text excerpt, present for prompt and assistant-text lines.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    /// Provider-visible primitive name for capability lines.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_primitive_name: Option<String>,
-    /// Primitive operation requested inside `execute`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub operation_name: Option<String>,
-    /// Trace id for Inspect/debug surfaces.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
-    /// Root invocation id for Inspect/debug surfaces.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub root_invocation_id: Option<String>,
-    /// Runtime-owned theme color.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub theme_color: Option<String>,
-    /// Runtime-owned presentation hints.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presentation_hints: Option<Value>,
-    /// Plain activity summary.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    /// Capability invocation arguments, present for capability lines.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capability_args: Option<Value>,
-    /// Capability invocation time in milliseconds, present for `capability_invocation` lines.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<i64>,
-    /// Whether the capability invocation produced an error, present for `capability_invocation` lines.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_error: Option<bool>,
-    /// Number of agent turns for nested activity summaries.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub turns: Option<i64>,
 }
 
 /// Truncation constants shared with the iOS session list.
@@ -305,7 +259,7 @@ impl SessionRepo {
     ///
     /// Uses a window function to find the most recent message of each type per session.
     /// Returns a map of `session_id → MessagePreview`.
-    pub fn get_message_previews(
+    pub(crate) fn get_message_previews(
         conn: &Connection,
         session_ids: &[&str],
     ) -> Result<std::collections::HashMap<String, MessagePreview>> {
@@ -370,7 +324,7 @@ impl SessionRepo {
     ///
     /// Walks persisted events to produce a compact summary of recent activity.
     /// iOS renders each line with generic primitive presentation helpers.
-    pub fn get_activity_summaries(
+    pub(crate) fn get_activity_summaries(
         conn: &Connection,
         session_id: &str,
     ) -> Result<Vec<ActivitySummaryLine>> {
@@ -395,7 +349,7 @@ impl SessionRepo {
     }
 
     /// Build activity summaries for a bounded session snapshot in one query.
-    pub fn get_activity_summaries_batch(
+    pub(crate) fn get_activity_summaries_batch(
         conn: &Connection,
         session_ids: &[&str],
     ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {

@@ -1,0 +1,9 @@
+// Debug.xcconfig - Shared settings for local debug configurations
+#include "Base.xcconfig"
+
+DEBUG_INFORMATION_FORMAT = dwarf
+GCC_OPTIMIZATION_LEVEL = 0
+SWIFT_OPTIMIZATION_LEVEL = -Onone
+ENABLE_TESTABILITY = YES
+ONLY_ACTIVE_ARCH = YES
+MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE

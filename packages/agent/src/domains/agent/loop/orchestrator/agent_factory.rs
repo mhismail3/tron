@@ -1,9 +1,10 @@
-//! Agent factory for primitive-loop `TronAgent` construction.
+//! Agent factory for primitive-loop `TronAgent` construction with required runtime owners.
 
 use std::sync::Arc;
 
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::context::types::ContextManagerConfig;
+use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::tron_agent::{AgentDeps, TronAgent};
 use crate::domains::agent::r#loop::types::AgentConfig;
 use crate::domains::model::responder::ModelResponder;
@@ -12,24 +13,27 @@ use crate::shared::protocol::messages::Message;
 pub struct CreateAgentOpts {
     pub responder: Arc<dyn ModelResponder>,
     pub initial_messages: Vec<Message>,
-    pub initial_turn_count: u32,
+    pub initial_turn_offset: u32,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
-    pub engine_host: Option<crate::engine::EngineHostHandle>,
+    pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
+    pub engine_host: crate::engine::EngineHostHandle,
 }
 
 impl CreateAgentOpts {
     pub fn primitive(
         responder: Arc<dyn ModelResponder>,
         initial_messages: Vec<Message>,
-        initial_turn_count: u32,
+        initial_turn_offset: u32,
         compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
-        engine_host: Option<crate::engine::EngineHostHandle>,
+        invocation_abort_registry: Arc<InvocationAbortRegistry>,
+        engine_host: crate::engine::EngineHostHandle,
     ) -> Self {
         Self {
             responder,
             initial_messages,
-            initial_turn_count,
+            initial_turn_offset,
             compaction_trigger_config,
+            invocation_abort_registry,
             engine_host,
         }
     }
@@ -43,7 +47,7 @@ impl AgentFactory {
         session_id: String,
         opts: CreateAgentOpts,
     ) -> TronAgent {
-        let initial_turn_count = opts.initial_turn_count;
+        let initial_turn_offset = opts.initial_turn_offset;
         let mut compaction = config.compaction.clone();
         compaction.context_limit = opts.responder.context_window();
         let mut context_manager = ContextManager::new(ContextManagerConfig {
@@ -63,11 +67,12 @@ impl AgentFactory {
                 responder: opts.responder,
                 context_manager,
                 compaction_trigger_config: opts.compaction_trigger_config,
+                invocation_abort_registry: opts.invocation_abort_registry,
                 engine_host: opts.engine_host,
             },
             session_id,
         );
-        agent.set_completed_turn_offset(initial_turn_count);
+        agent.set_turn_offset(initial_turn_offset);
         agent
     }
 }
@@ -107,7 +112,8 @@ mod tests {
             vec![],
             0,
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
-            None,
+            Arc::new(InvocationAbortRegistry::new()),
+            crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
         )
     }
 

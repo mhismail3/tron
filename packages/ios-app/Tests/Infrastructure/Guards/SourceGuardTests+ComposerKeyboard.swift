@@ -18,12 +18,17 @@ extension SourceGuardTests {
         ]
         let requiredLayoutFragments = [
             "Menu {",
+            ".overlay {",
+            "Color.clear",
             "Label(action.title, systemImage: action.systemImage)",
             ".labelStyle(.titleAndIcon)",
             ".controlSize(.small)",
             "NotificationCenter.default.post(name: .attachmentMenuAction, object: action)",
             ".onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction))",
-            ".matchedGeometryEffect(id: \"attachmentMorph\"",
+            "ComposerAttachmentButton(",
+            "ComposerTrailingButton(",
+            ".glassEffect(",
+            ".overlay(alignment: .bottomLeading)",
             "includeRecentInputs: shouldShowRecentInputsMenuAction",
             ".sheet(isPresented: $showCamera)",
             ".sheet(isPresented: $showFilePicker)",
@@ -49,12 +54,16 @@ extension SourceGuardTests {
             "AttachmentMenuPopup",
             "AttachmentMenuSheet",
             "GlassRecentInputsButton",
-            ".overlay(alignment: .bottomLeading)",
             ".popover(isPresented: $showAttachmentMenu",
             ".sheet(isPresented: $showAttachmentMenu",
             "compactHeightSheetPresentation(height: CompactActionSheetLayout.sheetHeight",
             ".font(.system(size: 28",
             ".frame(width: 300, alignment: .leading)",
+            "GlassAttachmentButton(",
+            "GlassActionButton(",
+            "GlassMicButton(",
+            ".matchedGeometryEffect(id: \"attachmentMorph\"",
+            ".matchedGeometryEffect(id: \"actionMorph\"",
         ]
 
         let combined = try checkedPaths.map { relativePath in
@@ -87,16 +96,19 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift"),
             encoding: .utf8
         )
-        let attachmentButtonRange = try #require(source.range(of: "GlassAttachmentButton("))
-        let textFieldRange = try #require(source.range(of: "// Text field with glass background"))
-        let attachmentButtonSource = String(source[attachmentButtonRange.lowerBound..<textFieldRange.lowerBound])
+        let attachmentButtonRange = try #require(source.range(of: "ComposerAttachmentButton("))
+        let dragHintRange = try #require(source.range(
+            of: ".overlay(alignment: .top)",
+            range: attachmentButtonRange.lowerBound..<source.endIndex
+        ))
+        let attachmentButtonSource = String(source[attachmentButtonRange.lowerBound..<dragHintRange.lowerBound])
 
         #expect(
             !attachmentButtonSource.contains("isFocused = false"),
             "Opening the attachment menu must not clear composer text focus or dismiss the keyboard"
         )
         #expect(
-            source.contains("GlassAttachmentButton(") &&
+            source.contains("ComposerAttachmentButton(") &&
                 source.contains("attachmentCapability: config.attachmentCapability") &&
                 source.contains("includeRecentInputs: shouldShowRecentInputsMenuAction"),
             "The attachment action menu should stay attached to the composer plus button with the current model capability"
@@ -106,6 +118,34 @@ extension SourceGuardTests {
                 !source.contains(".sheet(isPresented: $showAttachmentMenu"),
             "The attachment action menu must not use a SwiftUI presentation that steals composer focus"
         )
+    }
+
+    @Test("Composer owns one integrated control surface")
+    func testComposerOwnsOneIntegratedControlSurface() throws {
+        let iosRoot = iosAppRoot()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift"),
+            encoding: .utf8
+        )
+        let glassRange = try #require(source.range(of: ".glassEffect("))
+        let attachmentMenuRange = try #require(source.range(of: "ComposerAttachmentButton("))
+
+        #expect(source.contains("ComposerAttachmentButton("))
+        #expect(source.contains("ContextBriefingButton("))
+        #expect(source.contains("ComposerTrailingButton("))
+        #expect(source.contains("inputField"))
+        #expect(source.components(separatedBy: ".glassEffect(").count - 1 == 1)
+        #expect(glassRange.lowerBound < attachmentMenuRange.lowerBound)
+        #expect(source.contains(".overlay(alignment: .bottomLeading)"))
+        #expect(source.contains("The native Menu itself is overlaid after the material"))
+        #expect(source.contains(".interactive(!config.readOnly)"))
+        #expect(!source.contains("ContextStatusPill("))
+        #expect(!source.contains("shouldShowStatusPills"))
+        #expect(!source.contains("GlassAttachmentButton("))
+        #expect(!source.contains("GlassActionButton("))
+        #expect(!source.contains("GlassMicButton("))
+        #expect(!source.contains("attachmentMorph"))
+        #expect(!source.contains("actionMorph"))
     }
 
     @Test("Composer recent input history stays local and non-routing")
@@ -131,11 +171,13 @@ extension SourceGuardTests {
             "clearHistory()",
             "case .recentInputs:",
             "showRecentInputs = true",
+            "preview(for: input)",
+            ".listRowInsets(EdgeInsets(",
             ".listRowSeparator(.hidden)",
             "actions.onHistoryNavigate?(selected)",
             "onPromptSent?(text)",
             "inputHistory.addToHistory(sentText)",
-            "UserDefaults.standard.removeObject(forKey: storageKey)",
+            "defaults.removeObject(forKey: storageKey)",
         ]
         let forbiddenFragments = [
             "Prompt" + "Library",

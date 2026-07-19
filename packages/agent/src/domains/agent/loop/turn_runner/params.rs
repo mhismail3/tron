@@ -39,10 +39,10 @@ pub struct TurnParams<'a> {
     pub server_origin: Option<&'a str>,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
-    /// Optional per-invocation abort registry. Threaded into `CapabilityInvocationExecutionContext`
-    /// so each in-flight capability invocation registers a child `CancellationToken` that
-    /// `agent.abortCapabilityInvocation` can cancel independently of the turn token.
-    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
-    /// Optional engine host for engine-owned capability invocation.
-    pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
+    /// Orchestrator-owned per-invocation abort registry. Each in-flight capability invocation
+    /// registers a child `CancellationToken` so `agent.abortCapabilityInvocation` can cancel it
+    /// independently of the turn token.
+    pub invocation_abort_registry: &'a InvocationAbortRegistry,
+    /// Required engine host for live primitive discovery and capability invocation.
+    pub engine_host: &'a crate::engine::EngineHostHandle,
 }

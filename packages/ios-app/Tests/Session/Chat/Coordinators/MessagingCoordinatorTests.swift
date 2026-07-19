@@ -10,8 +10,11 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     var coordinator: MessagingCoordinator!
     var mockContext: MockMessagingContext!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
+        testState = IsolatedTestState(label: "messaging-coordinator")
+        testState.registerTeardown(with: self)
         mockContext = MockMessagingContext()
         coordinator = MessagingCoordinator()
     }
@@ -19,6 +22,7 @@ final class MessagingCoordinatorTests: XCTestCase {
     override func tearDown() async throws {
         coordinator = nil
         mockContext = nil
+        await testState.cleanup()
     }
 
     // MARK: - Send Message Validation Tests
@@ -88,9 +92,108 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.inputText, "Stream the response live")
     }
 
+    func testConcurrentSendsAdmitOnlyFirstPrompt() async {
+        mockContext.inputText = "Send exactly once"
+        mockContext.suspendLiveEventSubscription = true
+        let firstSubscriptionSuspended = expectation(description: "first send subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = {
+            firstSubscriptionSuspended.fulfill()
+            self.mockContext.onLiveEventSubscriptionSuspended = nil
+        }
+
+        let firstSend = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [firstSubscriptionSuspended], timeout: 1.0)
+
+        let competingSendReturned = expectation(description: "competing send rejected")
+        let competingSend = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+            competingSendReturned.fulfill()
+        }
+        await fulfillment(of: [competingSendReturned], timeout: 1.0)
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 1)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 0)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+        XCTAssertEqual(mockContext.currentTurn, 0)
+        XCTAssertEqual(mockContext.inputText, "Send exactly once")
+
+        mockContext.resumeAllLiveEventSubscriptions()
+        await competingSend.value
+        await firstSend.value
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 1)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.appendedMessages.count, 1)
+        XCTAssertEqual(mockContext.currentTurn, 1)
+    }
+
+    func testSendAndRetryShareOnePromptAdmission() async {
+        mockContext.inputText = "Original send"
+        mockContext.suspendLiveEventSubscription = true
+        let firstSubscriptionSuspended = expectation(description: "send subscription suspended")
+        mockContext.onLiveEventSubscriptionSuspended = {
+            firstSubscriptionSuspended.fulfill()
+            self.mockContext.onLiveEventSubscriptionSuspended = nil
+        }
+
+        let firstSend = Task { @MainActor in
+            await self.coordinator.sendMessage(context: self.mockContext)
+        }
+        await fulfillment(of: [firstSubscriptionSuspended], timeout: 1.0)
+
+        let retryReturned = expectation(description: "overlapping retry rejected")
+        let retry = Task { @MainActor in
+            await self.coordinator.retryMessage(
+                prompt: "Overlapping retry",
+                attachments: nil,
+                context: self.mockContext
+            )
+            retryReturned.fulfill()
+        }
+        await fulfillment(of: [retryReturned], timeout: 1.0)
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 1)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 0)
+
+        mockContext.resumeAllLiveEventSubscriptions()
+        await retry.value
+        await firstSend.value
+
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.lastSentText, "Original send")
+    }
+
+    func testSendWhileProcessingDoesNotMutateOrSubscribe() async {
+        mockContext.inputText = "Keep this draft"
+        mockContext.agentPhase = .processing
+
+        await coordinator.sendMessage(context: mockContext)
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 0)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 0)
+        XCTAssertFalse(mockContext.clearLocalNotificationsCalled)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+        XCTAssertEqual(mockContext.currentTurn, 0)
+        XCTAssertEqual(mockContext.inputText, "Keep this draft")
+    }
+
+    func testSubscriptionFailureReleasesPromptAdmission() async {
+        mockContext.inputText = "Try after reconnect"
+        mockContext.ensureLiveEventSubscriptionShouldFail = true
+        await coordinator.sendMessage(context: mockContext)
+
+        mockContext.ensureLiveEventSubscriptionShouldFail = false
+        await coordinator.sendMessage(context: mockContext)
+
+        XCTAssertEqual(mockContext.ensureLiveEventSubscriptionCallCount, 2)
+        XCTAssertEqual(mockContext.sendPromptCallCount, 1)
+        XCTAssertEqual(mockContext.lastSentText, "Try after reconnect")
+    }
+
     func testSendMessageDoesNotRecordRecentInputWhenLiveEventSubscriptionFails() async {
         // Given: Valid text, but the live stream cannot be established.
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
         mockContext.inputText = "Stream the response live"
         mockContext.ensureLiveEventSubscriptionShouldFail = true
@@ -110,7 +213,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     func testSendMessageDoesNotRecordRecentInputWhenServerSendFails() async {
         // Given: Valid text, but the server send request fails.
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
         mockContext.inputText = "Prompt that fails to send"
         mockContext.sendPromptShouldFail = true
@@ -131,7 +234,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     func testSendMessageRecordsRecentInputAfterSuccessfulServerSend() async {
         // Given: Valid text with surrounding whitespace.
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
         mockContext.inputText = "  Prompt that sends successfully  "
 
@@ -290,59 +393,29 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     // MARK: - Abort Agent Tests
 
-    func testAbortAgentCallsServerAbort() async {
-        // When: Aborting agent
+    func testAbortAgentIgnoresIdleContext() async {
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: Server abort should be called
-        XCTAssertTrue(mockContext.abortAgentCalled)
+        XCTAssertEqual(mockContext.abortAgentCallCount, 0)
     }
 
-    func testAbortAgentSetsIsProcessingFalse() async {
-        // Given: Currently processing
-        mockContext.isProcessing = true
+    func testAbortAgentWaitsForTerminalEventsAfterServerMatch() async {
+        mockContext.agentPhase = .processing
 
-        // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: isProcessing should be false
-        XCTAssertFalse(mockContext.isProcessing)
-    }
-
-    func testAbortAgentFinalizesStreamingMessage() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Streaming message should be finalized
-        XCTAssertTrue(mockContext.finalizeStreamingMessageCalled)
-    }
-
-    func testAbortAgentAppendsInterruptedMessage() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Interrupted message should be appended
-        XCTAssertTrue(mockContext.appendedInterruptedMessage)
-    }
-
-    func testAbortAgentUpdatesSessionActivityState() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: session activity summary should show interrupted
-        XCTAssertTrue(mockContext.setSessionProcessingCalled)
-        XCTAssertFalse(mockContext.lastSessionProcessingValue ?? true)
-        XCTAssertEqual(mockContext.lastSessionActivityResponse, "Interrupted")
+        XCTAssertEqual(mockContext.abortAgentCallCount, 1)
+        XCTAssertEqual(mockContext.agentPhase, .stopping)
+        XCTAssertNil(mockContext.lastSessionProcessingValue)
     }
 
     func testAbortAgentHandlesServerError() async {
-        // Given: Server abort will fail
+        mockContext.agentPhase = .processing
         mockContext.abortShouldFail = true
 
-        // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: Error should be shown
+        XCTAssertEqual(mockContext.agentPhase, .processing)
         XCTAssertTrue(mockContext.showErrorCalled)
     }
 
@@ -409,16 +482,18 @@ final class MockMessagingContext: MessagingContext {
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
     var agentPhase: AgentPhase = .idle
+    var isProcessing: Bool { agentPhase.isProcessing }
     var draftStore: DraftStore?
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
     // MARK: - Tracking for Assertions
     var sendPromptCalled = false
+    var sendPromptCallCount = 0
     var lastSentText: String?
     var lastSentAttachments: [FileAttachment]?
     var lastSentReasoningLevel: String?
     var appendedMessages: [ChatMessage] = []
-    var appendedInterruptedMessage = false
+    var removedMessageIds: [UUID] = []
     var streamingManagerResetCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
@@ -429,18 +504,27 @@ final class MockMessagingContext: MessagingContext {
     var lastLocalErrorDedupKey: String?
     var lastLocalErrorTitle: String?
     var localErrorDedupKeys: Set<String> = []
-    var abortAgentCalled = false
-    var finalizeStreamingMessageCalled = false
-    var cancelActiveDeviceRequestsCalled = false
+    var abortAgentCallCount = 0
     var showErrorCalled = false
     var ensureLiveEventSubscriptionCalled = false
+    var ensureLiveEventSubscriptionCallCount = 0
     var ensureLiveEventSubscriptionShouldFail = false
+    var suspendLiveEventSubscription = false
+    var liveEventSubscriptionContinuations: [CheckedContinuation<Void, Never>] = []
+    var onLiveEventSubscriptionSuspended: (() -> Void)?
     var clearLocalNotificationsCalled = false
     var callOrder: [String] = []
+    var suspendSendPrompt = false
+    var sendPromptContinuations: [CheckedContinuation<Void, Never>] = []
+    var onSendPromptSuspended: (() -> Void)?
+    var suspendAbort = false
+    var abortContinuations: [CheckedContinuation<Void, Never>] = []
+    var onAbortSuspended: (() -> Void)?
 
     // MARK: - Test Configuration
     var sendPromptShouldFail = false
     var abortShouldFail = false
+    var abortResult = true
 
     // MARK: - Protocol Methods
 
@@ -452,10 +536,17 @@ final class MockMessagingContext: MessagingContext {
     ) async throws {
         callOrder.append("sendPromptToServer")
         sendPromptCalled = true
+        sendPromptCallCount += 1
         lastSentText = text
         lastSentAttachments = attachments
         lastSentReasoningLevel = reasoningLevel
 
+        if suspendSendPrompt {
+            await withCheckedContinuation { continuation in
+                sendPromptContinuations.append(continuation)
+                onSendPromptSuspended?()
+            }
+        }
         if sendPromptShouldFail {
             throw MessagingTestError.serverError
         }
@@ -464,37 +555,65 @@ final class MockMessagingContext: MessagingContext {
     func ensureLiveEventSubscription() async throws {
         callOrder.append("ensureLiveEventSubscription")
         ensureLiveEventSubscriptionCalled = true
+        ensureLiveEventSubscriptionCallCount += 1
         if ensureLiveEventSubscriptionShouldFail {
             throw MessagingTestError.serverError
         }
+        if suspendLiveEventSubscription {
+            await withCheckedContinuation { continuation in
+                liveEventSubscriptionContinuations.append(continuation)
+                onLiveEventSubscriptionSuspended?()
+            }
+        }
     }
 
-    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
-        abortAgentCalled = true
+    func resumeAllLiveEventSubscriptions() {
+        suspendLiveEventSubscription = false
+        let continuations = liveEventSubscriptionContinuations
+        liveEventSubscriptionContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+
+    func resumeAllSendPrompts() {
+        suspendSendPrompt = false
+        let continuations = sendPromptContinuations
+        sendPromptContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
+        abortAgentCallCount += 1
+        if suspendAbort {
+            await withCheckedContinuation { continuation in
+                abortContinuations.append(continuation)
+                onAbortSuspended?()
+            }
+        }
         if abortShouldFail {
             throw MessagingTestError.serverError
         }
+        return abortResult
+    }
+
+    func resumeAllAborts() {
+        suspendAbort = false
+        let continuations = abortContinuations
+        abortContinuations.removeAll()
+        continuations.forEach { $0.resume() }
     }
 
     func appendMessage(_ message: ChatMessage) {
         appendedMessages.append(message)
     }
 
+    func removeMessage(id: UUID) {
+        removedMessageIds.append(id)
+        appendedMessages.removeAll { $0.id == id }
+    }
+
     func clearLocalNotifications() {
         clearLocalNotificationsCalled = true
         localErrorDedupKeys.removeAll()
-    }
-
-    func appendInterruptedMessage() {
-        appendedInterruptedMessage = true
-    }
-
-    func finalizeThinkingMessage() {
-        // No-op for tests
-    }
-
-    func clearThinkingCaption() {
-        // No-op for tests
     }
 
     func flushPendingTextUpdates() {
@@ -503,14 +622,6 @@ final class MockMessagingContext: MessagingContext {
 
     func resetStreamingManager() {
         streamingManagerResetCalled = true
-    }
-
-    func finalizeStreamingMessage() {
-        finalizeStreamingMessageCalled = true
-    }
-
-    func cancelActiveDeviceRequests() {
-        cancelActiveDeviceRequestsCalled = true
     }
 
     func setSessionProcessing(_ isProcessing: Bool) {

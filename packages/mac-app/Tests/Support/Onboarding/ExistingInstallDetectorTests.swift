@@ -80,6 +80,40 @@ struct ExistingInstallDetectorTests {
         }
     }
 
+    @Test("bundled helper validation owns file and signature failures")
+    func bundledHelperValidationOwnsFailures() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let helper = tmp.appendingPathComponent("Tron Server.app", isDirectory: true)
+        let binary = helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
+        let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
+
+        func validate(signatureProblem: String? = nil) -> String? {
+            ExistingInstallDetector.validateBundledHelper(
+                helperBundle: helper,
+                helperBinary: binary,
+                plistPath: plist,
+                signatureProblemResolver: { _ in signatureProblem }
+            )
+        }
+
+        #expect(validate() == "Tron Server.app is missing from the application bundle.")
+
+        try FileManager.default.createDirectory(at: helper, withIntermediateDirectories: true)
+        #expect(validate() == "Tron Server.app is missing its tron executable.")
+
+        try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: binary)
+        #expect(validate() == "The bundled LaunchAgent plist is missing.")
+
+        try Data("<plist/>".utf8).write(to: plist)
+        #expect(validate() == nil)
+        #expect(
+            validate(signatureProblem: "Tron Server.app signature is invalid")
+                == "Tron Server.app signature is invalid"
+        )
+    }
+
     @Test("invalid helper signature is partial")
     func invalidSignatureIsPartial() throws {
         let tmp = TestTempDir.make()
@@ -102,79 +136,47 @@ struct ExistingInstallDetectorTests {
         }
     }
 
-    @Test("release bundle must live at /Applications/Tron.app")
-    func releaseLocationGuard() {
-        let problem = ExistingInstallDetector.validateApplicationLocation(
-            bundleURL: URL(fileURLWithPath: "/Users/example/Downloads/Tron.app", isDirectory: true),
-            bundleIdentifier: "com.tron.mac"
-        )
-        #expect(problem?.contains("/Applications") == true)
-
-        let devProblem = ExistingInstallDetector.validateApplicationLocation(
-            bundleURL: URL(fileURLWithPath: "/tmp/TronMac.app", isDirectory: true),
-            bundleIdentifier: "com.tron.mac.dev"
-        )
-        #expect(devProblem == nil)
-    }
-
-    @Test("unsupported wrapper bundle ids are rejected")
-    func unsupportedWrapperBundleID() {
-        let problem = ExistingInstallDetector.validateApplicationLocation(
-            bundleURL: URL(fileURLWithPath: "/tmp/Tron.app", isDirectory: true),
-            bundleIdentifier: "example.tron"
-        )
-
-        #expect(problem?.contains("Unsupported") == true)
-    }
-
     @Test("LaunchAgent plist requires current BundleProgram and associated wrapper IDs")
-    func launchAgentPlistIsCurrent() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let plist = tmp.appendingPathComponent("com.tron.server.plist")
-        try InstallPlanner.renderPlist(paths: makeTargetPaths(in: tmp)).write(to: plist, atomically: true, encoding: .utf8)
+    func launchAgentPlistIsCurrent() {
+        let plist = trackedLaunchAgentPlist(named: "com.tron.server.plist")
 
         #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(
             plistPath: plist,
             label: "com.tron.server",
             port: 9847,
             bundleProgram: "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
-            environmentVariables: ["RUST_LOG": "info"],
+            environmentVariables: [:],
             associatedBundleIDs: ["com.tron.mac", "com.tron.mac.dev"]
         ))
     }
 
-    @Test("LaunchAgent plist requires current environment variables")
-    func launchAgentPlistRequiresCurrentEnvironment() throws {
+    @Test("LaunchAgent plist rejects retired log environment overrides")
+    func launchAgentPlistRejectsRetiredLogEnvironmentOverride() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let plist = tmp.appendingPathComponent("com.tron.server.plist")
-        try InstallPlanner.renderPlist(
-            paths: makeTargetPaths(in: tmp, environmentVariables: ["RUST_LOG": "debug"])
-        ).write(to: plist, atomically: true, encoding: .utf8)
+        let trackedPlist = trackedLaunchAgentPlist(named: "com.tron.server.plist")
+        let data = try Data(contentsOf: trackedPlist)
+        var decoded = try #require(
+            PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        )
+        decoded["EnvironmentVariables"] = ["RUST_LOG": "debug"]
+        let modifiedData = try PropertyListSerialization.data(
+            fromPropertyList: decoded,
+            format: .xml,
+            options: 0
+        )
+        try modifiedData.write(to: plist)
 
         #expect(!ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
     }
 
     @Test("isolated LaunchAgent plist uses the dev helper and Tron home")
-    func isolatedLaunchAgentPlistIsCurrent() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let plist = tmp.appendingPathComponent("com.tron.server.dev.plist")
+    func isolatedLaunchAgentPlistIsCurrent() {
+        let plist = trackedLaunchAgentPlist(named: "com.tron.server.dev.plist")
         let environment = [
-            "RUST_LOG": "info",
             TronPaths.tronHomeNameEnv: ".tron-dev",
         ]
-        try InstallPlanner.renderPlist(
-            paths: makeTargetPaths(
-                in: tmp,
-                helperName: "Tron Server Dev.app",
-                label: "com.tron.server.dev",
-                port: 9848,
-                environmentVariables: environment,
-                associatedBundleIDs: ["com.tron.mac.dev", "com.tron.mac"]
-            )
-        ).write(to: plist, atomically: true, encoding: .utf8)
 
         #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(
             plistPath: plist,
@@ -204,7 +206,7 @@ struct ExistingInstallDetectorTests {
         Executable=/tmp/Tron Server.app/Contents/MacOS/tron
         Identifier=com.tron.server
         TeamIdentifier=MYGKXH6TY4
-        """, expectedBundleIdentifier: "com.tron.server", helperName: "Tron Server.app")
+        """)
 
         #expect(problem == nil)
     }
@@ -224,24 +226,8 @@ struct ExistingInstallDetectorTests {
         return (helper, binary, plist)
     }
 
-    private func makeTargetPaths(
-        in tmp: URL,
-        helperName: String = "Tron Server.app",
-        label: String = "com.tron.server",
-        port: Int = 9847,
-        environmentVariables: [String: String] = ["RUST_LOG": "info"],
-        associatedBundleIDs: [String] = ["com.tron.mac", "com.tron.mac.dev"]
-    ) -> InstallPlanner.TargetPaths {
-        let app = tmp.appendingPathComponent("Tron.app", isDirectory: true)
-        let helper = app.appendingPathComponent("Contents/Library/LoginItems/\(helperName)", isDirectory: true)
-        return InstallPlanner.TargetPaths(
-            helperBundle: helper,
-            helperBinary: helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false),
-            plistPath: app.appendingPathComponent("Contents/Library/LaunchAgents/\(label).plist", isDirectory: false),
-            label: label,
-            port: port,
-            environmentVariables: environmentVariables,
-            associatedBundleIDs: associatedBundleIDs
-        )
+    private func trackedLaunchAgentPlist(named fileName: String) -> URL {
+        macAppRoot()
+            .appendingPathComponent("Sources/Resources/Library/LaunchAgents/\(fileName)")
     }
 }

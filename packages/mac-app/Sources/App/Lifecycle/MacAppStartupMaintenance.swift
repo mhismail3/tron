@@ -58,64 +58,39 @@ enum MacAppStartupMaintenanceResult: Equatable, Sendable {
 }
 
 enum MacAppStartupMaintenance {
-    static func shouldRestartServerOnLaunch(
-        context: MacAppStartupContext,
-        currentVersion: MacAppVersionIdentity,
-        recordedVersion: MacAppVersionIdentity?,
-        canManageLaunchAgent: Bool,
-        onboarded: Bool,
-        devServerActive: Bool
-    ) -> Bool {
-        guard context == .existingOnboardedLaunch else { return false }
-        guard onboarded else { return false }
-        guard canManageLaunchAgent else { return false }
-        guard !devServerActive else { return false }
-        return recordedVersion != currentVersion
-    }
-
     static func run(
         setup: EnvironmentSetup,
         controller: MenuBarController?,
         context: MacAppStartupContext
     ) async -> MacAppStartupMaintenanceResult {
         let currentVersion = setup.currentAppVersion()
+        if context == .wizardCompletion,
+           setup.canManageLaunchAgent {
+            recordCurrentVersion(currentVersion, setup: setup)
+            return .recordedCurrentVersion
+        }
+
         let recordedVersion = setup.readRecordedAppVersion()
         let onboarded = setup.onboardedSentinelExists()
-
         let devServerActive = await setup.probeServerProcess(setup.serverPort)?.isDevServer == true
-        guard shouldRestartServerOnLaunch(
-            context: context,
+        if let reason = restartSkipReason(
             currentVersion: currentVersion,
             recordedVersion: recordedVersion,
             canManageLaunchAgent: setup.canManageLaunchAgent,
             onboarded: onboarded,
             devServerActive: devServerActive
-        ) else {
-            let reason = skipReason(
-                currentVersion: currentVersion,
-                recordedVersion: recordedVersion,
-                canManageLaunchAgent: setup.canManageLaunchAgent,
-                onboarded: onboarded,
-                devServerActive: devServerActive
-            )
-            if context == .wizardCompletion,
-               setup.canManageLaunchAgent {
-                recordCurrentVersion(currentVersion, setup: setup)
-                return .recordedCurrentVersion
-            }
+        ) {
             return .skipped(reason)
         }
 
         await MainActor.run {
             controller?.applySnapshot(ServerStatusSnapshot(
                 state: .busy(.starting),
-                port: setup.serverPort,
-                tailscaleIP: setup.readTailscaleIPFromSettings(),
-                bearerToken: setup.readBearerToken()
+                tailscaleIP: setup.readTailscaleIPFromSettings()
             ))
         }
 
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: setup.launchAgentManager,
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
@@ -144,18 +119,18 @@ enum MacAppStartupMaintenance {
         return .restarted(outcome)
     }
 
-    private static func skipReason(
+    private static func restartSkipReason(
         currentVersion: MacAppVersionIdentity,
         recordedVersion: MacAppVersionIdentity?,
         canManageLaunchAgent: Bool,
         onboarded: Bool,
         devServerActive: Bool
-    ) -> MacAppStartupSkipReason {
+    ) -> MacAppStartupSkipReason? {
         if !onboarded { return .notOnboarded }
         if !canManageLaunchAgent { return .unmanagedWrapper }
         if devServerActive { return .devServerActive }
         if recordedVersion == currentVersion { return .versionAlreadyRecorded }
-        return .versionAlreadyRecorded
+        return nil
     }
 
     @discardableResult

@@ -13,6 +13,7 @@ use crate::shared::server::failure::{
     ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
     ENGINE_STORED_INVOCATION_ERROR, ENGINE_UNSUPPORTED_DELIVERY_MODE,
     ENGINE_WORKER_TRANSPORT_FAILURE, FailureCategory, FailureEnvelope, FailureOrigin,
+    RUNTIME_CANCELLED,
 };
 use serde_json::Value;
 
@@ -269,6 +270,14 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             FailureOrigin::Engine,
         )
         .with_error_type(Some(ENGINE_WORKER_TRANSPORT_FAILURE.to_owned())),
+        EngineError::InvocationCancelled => FailureEnvelope::new(
+            RUNTIME_CANCELLED,
+            FailureCategory::Cancelled,
+            "Operation cancelled",
+            false,
+            true,
+            FailureOrigin::Capability,
+        ),
         EngineError::HandlerFailed(message) => FailureEnvelope::new(
             ENGINE_HANDLER_FAILED,
             FailureCategory::Capability,

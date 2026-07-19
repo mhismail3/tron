@@ -37,7 +37,6 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // Convenience accessors
-    private var connectionRepository: any AppConnectionRepository { dependencies.connectionRepository }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     private var defaultModel: String { dependencies.defaultModel }
     private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
@@ -110,16 +109,8 @@ struct ContentView: View {
                 processPendingDeepLinkSession()
             }
             .onDisappear {}
-            .onChange(of: connectionRepository.connectionState) { oldState, newState in
-                // Session list refresh on reconnect is now handled by the central
-                // SessionRefreshService via ConnectionManager.runOnReconnect. Other
-                // connection-restored side effects still live here until migrated.
-                if newState.isConnected && !oldState.isConnected {
-                    coordinator?.handleConnectionEstablished(selectedSessionId: selectedSessionId)
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
-                coordinator?.handleServerSettingsChanged()
+                eventStoreManager.requestSessionRefresh(reason: .settingsChanged)
             }
             .onReceive(NotificationCenter.default.publisher(for: .showSettingsAction)) { _ in
                 showSettings = true
@@ -133,7 +124,8 @@ struct ContentView: View {
                 handlePendingShare()
             }
             .onChange(of: selectedSessionId) { _, newValue in
-                coordinator?.handleSessionSelection(newValue)
+                guard let newValue else { return }
+                eventStoreManager.setActiveSession(newValue)
             }
             .onChange(of: deepLinkSessionId) { _, _ in
                 processPendingDeepLinkSession()
@@ -274,7 +266,6 @@ struct ContentView: View {
             }
             .geometryGroup()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: toggleSidebar) {
@@ -303,7 +294,6 @@ struct ContentView: View {
             ChatView(
                 services: dependencies.chatSessionServices,
                 sessionId: sessionId,
-                workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
             )
@@ -312,7 +302,6 @@ struct ContentView: View {
             ChatView(
                 services: dependencies.chatSessionServices,
                 sessionId: sessionId,
-                workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget
             )
             .id(sessionId)
@@ -427,7 +416,6 @@ struct WelcomePage: View {
             }
             .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ShellToolbarContent(
                     title: "Tron",

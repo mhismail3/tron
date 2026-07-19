@@ -2,30 +2,15 @@ import Foundation
 import PhotosUI
 import SwiftUI
 
-/// Protocol for chat contexts that can render temporary local timeline errors.
-@MainActor
-protocol LocalChatNotificationPresenting: AnyObject {
-    func appendLocalError(
-        dedupKey: String,
-        title: String,
-        message: String,
-        suggestion: String?
-    )
-}
-
 /// Protocol defining the context required by MessagingCoordinator.
 ///
 /// This protocol allows MessagingCoordinator to be tested independently from ChatViewModel
 /// by defining the minimum interface it needs to interact with message sending and state.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display (showError)
-/// - SessionIdentifiable: Session ID access
-/// - ProcessingTrackable: Processing state and session list updates
-/// - StreamingManaging: Streaming state management
-/// - SessionActivityUpdating: session activity summary updates
 @MainActor
-protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, SessionActivityUpdating, LocalChatNotificationPresenting {
+protocol MessagingContext: ChatCoordinatorContext, LocalChatNotificationPresenting {
+    var sessionId: String { get }
+    var agentPhase: AgentPhase { get set }
+
     /// The current input text
     var inputText: String { get set }
 
@@ -50,27 +35,20 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// event stream before a prompt starts producing output.
     func ensureLiveEventSubscription() async throws
 
-    /// Abort the agent on the server
-    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws
+    /// Ask the server to cancel the active run. A `true` result means a run
+    /// matched; terminal lifecycle events still own the final outcome.
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws -> Bool
+
+    func setSessionProcessing(_ isProcessing: Bool)
+    func resetStreamingManager()
+    func updateSessionActivitySummary(lastUserPrompt: String?, lastAssistantResponse: String?)
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)
+    /// Remove one optimistic message when the server rejects it before acceptance.
+    func removeMessage(id: UUID)
     /// Clear temporary local notifications after a new user action supersedes them.
     func clearLocalNotifications()
-
-    /// Append the interrupted message
-    func appendInterruptedMessage()
-
-    /// Handle agent error
-    func handleAgentError(_ message: String)
-
-    /// Finalize thinking message (mark as no longer streaming)
-    /// Called on abort to stop the pulsing thinking icon
-    func finalizeThinkingMessage()
-
-    /// Clear the thinking caption state
-    /// Called on abort to remove the thinking caption
-    func clearThinkingCaption()
 
     /// Draft store for clearing persisted drafts after send
     var draftStore: DraftStore? { get }
@@ -80,8 +58,9 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 ///
 /// Responsibilities:
 /// - Sending messages with text, attachments, and reasoning levels
+/// - Admitting only one prompt submission before server acceptance
 /// - Creating appropriate user message UI
-/// - Managing agent abort with proper state cleanup
+/// - Coalescing Stop intent while server lifecycle events own terminal cleanup
 /// - Attachment add/remove operations
 /// - Coordinating state updates (agentPhase, session list, streaming)
 ///
@@ -89,6 +68,17 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 /// making it independently testable while maintaining the same behavior.
 @MainActor
 final class MessagingCoordinator {
+
+    /// Short-lived reservation between a local send/retry action and server
+    /// acceptance. Accepted/running lifecycle state remains owned by
+    /// `MessagingContext.agentPhase`.
+    private var promptSubmissionInFlight = false
+    /// Stop tapped after the UI entered processing but before the prompt RPC
+    /// acknowledged an active run. The intent is issued once after acceptance.
+    private var abortQueuedForPromptAcceptance = false
+    /// Short-lived network reservation. The longer-lived `.stopping` phase
+    /// suppresses more Stop requests until the server terminalizes the run.
+    private var abortRequestInFlight = false
 
     // MARK: - Initialization
 
@@ -108,51 +98,41 @@ final class MessagingCoordinator {
         context: MessagingContext,
         onPromptSent: ((String) -> Void)? = nil
     ) async {
-        let text = context.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !context.attachments.isEmpty else {
+        let submittedInput = context.inputText
+        let submittedAttachments = context.attachments
+        let text = submittedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !submittedAttachments.isEmpty else {
             context.logVerbose("sendMessage() called but no text or attachments to send")
             return
         }
+        guard reservePromptSubmission(context: context) else { return }
+        defer { promptSubmissionInFlight = false }
 
-        context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
+        context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(submittedAttachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
         guard await preparePromptSend(context: context, lastUserPrompt: nil) else { return }
 
-        // Reset browser dismissal for new prompt - browser can auto-open again
-
-        // Create user message with attachments displayed above text
-        let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments
+        let fileAttachments = submittedAttachments.map { FileAttachment(attachment: $0) }
+        let attachmentsToShow = submittedAttachments.isEmpty ? nil : submittedAttachments
+        let optimisticMessage: ChatMessage
+        let incrementsTurn: Bool
 
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow)
-            context.appendMessage(userMessage)
-            context.logDebug("Added user text message with \(context.attachments.count) attachments")
+            optimisticMessage = ChatMessage.user(text, attachments: attachmentsToShow)
+            incrementsTurn = true
+            context.appendMessage(optimisticMessage)
+            context.logDebug("Added user text message with \(submittedAttachments.count) attachments")
             context.currentTurn += 1
-        } else if !context.attachments.isEmpty {
-            // If only attachments (no text), still show them in chat
-            let attachmentMessage = ChatMessage(role: .user, content: .attachments(context.attachments), attachments: context.attachments)
-            context.appendMessage(attachmentMessage)
-            context.logDebug("Added attachment-only message with \(context.attachments.count) attachments")
+        } else {
+            optimisticMessage = ChatMessage(
+                role: .user,
+                content: .attachments(submittedAttachments),
+                attachments: submittedAttachments
+            )
+            incrementsTurn = false
+            context.appendMessage(optimisticMessage)
+            context.logDebug("Added attachment-only message with \(submittedAttachments.count) attachments")
         }
 
-        context.inputText = ""
-        context.isProcessing = true
-
-        // Update session list processing state
-        context.setSessionProcessing(true)
-        context.updateSessionActivitySummary(lastUserPrompt: text, lastAssistantResponse: nil)
-
-        // Reset streaming state before new message
-        context.resetStreamingManager()
-
-        // Prepare file attachments for sending
-        let fileAttachments = context.attachments.map { FileAttachment(attachment: $0) }
-        context.attachments = []
-        context.selectedImages = []
-
-        // Clear persisted draft now that input state is consumed
-        await context.draftStore?.clearDraft(sessionId: context.sessionId)
-
-        // Send to server
         do {
             context.logDebug("Calling sendPromptToServer with \(fileAttachments.count) attachments...")
             try await context.sendPromptToServer(
@@ -162,11 +142,28 @@ final class MessagingCoordinator {
                 idempotencyKey: .userAction("agent.prompt")
             )
             context.logInfo("Prompt sent successfully")
+            context.updateSessionActivitySummary(lastUserPrompt: text, lastAssistantResponse: nil)
+            commitSubmittedComposer(
+                input: submittedInput,
+                attachments: submittedAttachments,
+                context: context
+            )
+            if context.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               context.attachments.isEmpty,
+               context.selectedImages.isEmpty {
+                await context.draftStore?.clearDraft(sessionId: context.sessionId)
+            }
             if !text.isEmpty {
                 onPromptSent?(text)
             }
+            await issueQueuedAbortIfNeeded(context: context)
         } catch {
+            abortQueuedForPromptAcceptance = false
             context.logError("Failed to send prompt: \(error.localizedDescription)")
+            context.removeMessage(id: optimisticMessage.id)
+            if incrementsTurn {
+                context.currentTurn = max(0, context.currentTurn - 1)
+            }
             handlePreAcceptPromptFailure(
                 context: context,
                 dedupKey: "agent.prompt.send.failed",
@@ -175,6 +172,22 @@ final class MessagingCoordinator {
                 suggestion: "Check the connection, then send the message again."
             )
         }
+    }
+
+    /// Commit only the composer values represented by the accepted prompt.
+    /// Any edits made after the user initiated submission remain as the next
+    /// unsent draft.
+    private func commitSubmittedComposer(
+        input submittedInput: String,
+        attachments submittedAttachments: [Attachment],
+        context: MessagingContext
+    ) {
+        if context.inputText.hasPrefix(submittedInput) {
+            context.inputText = String(context.inputText.dropFirst(submittedInput.count))
+        }
+
+        let submittedAttachmentIds = Set(submittedAttachments.map(\.id))
+        context.attachments.removeAll { submittedAttachmentIds.contains($0.id) }
     }
 
     /// Retry a prompt already present in history without consuming composer
@@ -186,6 +199,8 @@ final class MessagingCoordinator {
     ) async {
         context.logInfo("Retrying last turn (\"\(prompt.prefix(50))...\")")
 
+        guard reservePromptSubmission(context: context) else { return }
+        defer { promptSubmissionInFlight = false }
         guard await preparePromptSend(context: context, lastUserPrompt: prompt) else { return }
 
         do {
@@ -195,7 +210,9 @@ final class MessagingCoordinator {
                 reasoningLevel: nil,
                 idempotencyKey: .userAction("agent.prompt.retry")
             )
+            await issueQueuedAbortIfNeeded(context: context)
         } catch {
+            abortQueuedForPromptAcceptance = false
             context.logError("Retry failed: \(error.localizedDescription)")
             handlePreAcceptPromptFailure(
                 context: context,
@@ -205,6 +222,16 @@ final class MessagingCoordinator {
                 suggestion: "Check the connection, then retry the turn again."
             )
         }
+    }
+
+    private func reservePromptSubmission(context: MessagingContext) -> Bool {
+        guard !promptSubmissionInFlight, !context.agentPhase.isActive else {
+            context.logDebug("Ignoring prompt submission while another turn is being admitted or processed")
+            return false
+        }
+        promptSubmissionInFlight = true
+        abortQueuedForPromptAcceptance = false
+        return true
     }
 
     private func preparePromptSend(
@@ -220,7 +247,7 @@ final class MessagingCoordinator {
             return false
         }
 
-        context.isProcessing = true
+        context.agentPhase = .processing
         context.setSessionProcessing(true)
         if let lastUserPrompt {
             context.updateSessionActivitySummary(lastUserPrompt: lastUserPrompt, lastAssistantResponse: nil)
@@ -236,7 +263,7 @@ final class MessagingCoordinator {
         message: String,
         suggestion: String?
     ) {
-        context.isProcessing = false
+        context.agentPhase = .idle
         context.setSessionProcessing(false)
         context.appendLocalError(
             dedupKey: dedupKey,
@@ -248,26 +275,78 @@ final class MessagingCoordinator {
 
     // MARK: - Abort Agent
 
-    /// Abort the currently running agent.
+    /// Request cancellation of the currently running agent.
+    ///
+    /// A successful RPC only proves that the server matched an active run. The
+    /// canonical `agent.turn_failed` / `agent.complete` sequence owns interruption
+    /// presentation, streaming finalization, and the transition back to idle.
     ///
     /// - Parameter context: The context providing access to state and dependencies
     func abortAgent(context: MessagingContext) async {
-        context.logInfo("Aborting agent...")
+        guard context.agentPhase.isActive else {
+            context.logDebug("Ignoring Stop because no agent run is active")
+            return
+        }
+        guard context.agentPhase != .stopping, !abortRequestInFlight else {
+            context.logDebug("Ignoring duplicate Stop while cancellation is pending")
+            return
+        }
+
+        if promptSubmissionInFlight {
+            abortQueuedForPromptAcceptance = true
+            context.logInfo("Queued Stop until prompt admission completes")
+            return
+        }
+
+        await requestAbort(context: context)
+    }
+
+    private func issueQueuedAbortIfNeeded(context: MessagingContext) async {
+        guard abortQueuedForPromptAcceptance else { return }
+        abortQueuedForPromptAcceptance = false
+        await requestAbort(context: context)
+    }
+
+    private func requestAbort(context: MessagingContext) async {
+        guard context.agentPhase.isActive,
+              context.agentPhase != .stopping,
+              !abortRequestInFlight else { return }
+
+        abortRequestInFlight = true
+        context.agentPhase = .stopping
+        defer {
+            abortRequestInFlight = false
+            if Task.isCancelled {
+                // Cancellation of the local waiter is not proof that the
+                // server accepted Stop. Keep the turn active until reconnect
+                // or canonical terminal events establish the outcome.
+                restoreProcessingAfterUnmatchedAbort(context: context)
+            }
+        }
+        context.logInfo("Requesting agent cancellation...")
 
         do {
-            try await context.abortAgentOnServer(idempotencyKey: .userAction("agent.abort"))
-            context.isProcessing = false
-            context.setSessionProcessing(false)
-            context.updateSessionActivitySummary(lastUserPrompt: nil, lastAssistantResponse: "Interrupted")
-            context.finalizeStreamingMessage()
-            context.finalizeThinkingMessage()
-            context.clearThinkingCaption()
-            context.appendInterruptedMessage()
-            context.logInfo("Agent aborted successfully")
+            let matched = try await context.abortAgentOnServer(
+                idempotencyKey: .userAction("agent.abort")
+            )
+            guard !Task.isCancelled else { return }
+            if matched {
+                context.logInfo("Agent cancellation matched an active run; awaiting terminal events")
+            } else {
+                restoreProcessingAfterUnmatchedAbort(context: context)
+                context.logInfo("Agent cancellation matched no active run")
+            }
         } catch {
+            guard !Task.isCancelled else { return }
+            restoreProcessingAfterUnmatchedAbort(context: context)
             context.logError("Failed to abort agent: \(error.localizedDescription)")
             context.showError(error.localizedDescription)
         }
+    }
+
+    private func restoreProcessingAfterUnmatchedAbort(context: MessagingContext) {
+        guard context.agentPhase == .stopping else { return }
+        context.agentPhase = .processing
     }
 
     // MARK: - Attachment Management

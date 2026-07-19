@@ -1,8 +1,8 @@
 #!/bin/bash
 # tron-lib.sh - Shared library for Tron CLI scripts
 #
-# SINGLE SOURCE OF TRUTH for all paths, config, and shared functions.
-# Sourced by: scripts/tron, scripts/tron-cli, scripts/reset-db
+# Shared contributor-shell paths and functions for scripts/tron and tron-cli.
+# Rust foundation owners define the complete runtime home/profile layout.
 #
 # Do NOT execute this file directly.
 
@@ -16,32 +16,17 @@ BIN_DIR="$HOME/.local/bin"
 # Contributor app bundle paths. Production Mac distribution lives at
 # `/Applications/Tron.app` and is registered by the Swift wrapper via SMAppService;
 # these bundles are only for shell-script development flows.
-TRON_BUNDLE_ID="com.tron.agent"
 RUN_DIR="$TRON_HOME/internal/run"
-PROFILES_DIR="$TRON_HOME/profiles"
-USER_PROFILE_DIR="$PROFILES_DIR/user"
-DEFAULT_PROFILE_DIR="$PROFILES_DIR/default"
-NORMAL_PROFILE_DIR="$PROFILES_DIR/normal"
-CHAT_PROFILE_DIR="$PROFILES_DIR/chat"
-LOCAL_PROFILE_DIR="$PROFILES_DIR/local"
-USER_PROFILE_FILE="$USER_PROFILE_DIR/profile.toml"
-WORKSPACE_DIR="$TRON_HOME/workspace"
-WORKSPACE_VAULT_DIR="$WORKSPACE_DIR/vault"
-WORKSPACE_KNOWLEDGE_DIR="$WORKSPACE_DIR/knowledge"
+USER_PROFILE_FILE="$TRON_HOME/profiles/user/profile.toml"
 CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
+DEPLOY_UPDATE_FILE="$RUN_DIR/deploy.in-progress"
 INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
 DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"
 DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 DEV_BACKGROUND_LOG="$RUN_DIR/tron-dev-background.log"
 DEV_BACKGROUND_PID_FILE="$RUN_DIR/tron-dev-background.pid"
-
-# Keychain profile name for xcrun notarytool (see notarize_bundle).
-# One-time setup per developer machine:
-#   xcrun notarytool store-credentials "tron-notarize" \
-#     --apple-id <email> --team-id <TEAM_ID>
-NOTARIZE_PROFILE="tron-notarize"
 
 # Service configuration
 PLIST_NAME="com.tron.server"
@@ -61,70 +46,7 @@ ONBOARDED_MARKER_PATH="$RUN_DIR/.onboarded"
 DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 
 # OAuth
-AUTH_FILE="$PROFILES_DIR/auth.json"
-
-# Anthropic OAuth
-ANTHROPIC_OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-ANTHROPIC_OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
-ANTHROPIC_OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
-ANTHROPIC_OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
-ANTHROPIC_OAUTH_SCOPES="org:create_api_key user:profile user:inference"
-
-# OpenAI OAuth
-OPENAI_OAUTH_CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann"
-OPENAI_OAUTH_AUTH_ENDPOINT="https://auth.openai.com/oauth/authorize"
-OPENAI_OAUTH_TOKEN_ENDPOINT="https://auth.openai.com/oauth/token"
-OPENAI_OAUTH_REDIRECT_URI="http://localhost:1455/auth/callback"
-OPENAI_OAUTH_SCOPES="openid profile email offline_access"
-OPENAI_OAUTH_PORT=1455
-
-tron_version_env_file() {
-    local roots=()
-    [ -n "${PROJECT_DIR:-}" ] && roots+=("$PROJECT_DIR")
-
-    local script_root
-    if script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"; then
-        roots+=("$script_root")
-    fi
-
-    local workspace_root
-    if workspace_root="$(cat "$CONTRIBUTOR_DIR/workspace-path" 2>/dev/null)" && [ -n "$workspace_root" ]; then
-        roots+=("$workspace_root")
-    fi
-
-    local root candidate
-    for root in "${roots[@]}"; do
-        candidate="$root/VERSION.env"
-        if [ -f "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-tron_version_env_value() {
-    local key="$1"
-    local version_file
-    version_file="$(tron_version_env_file)" || return 1
-    awk -F= -v key="$key" '
-        $1 == key {
-            sub(/\r$/, "", $2)
-            print $2
-            found = 1
-            exit
-        }
-        END { if (!found) exit 1 }
-    ' "$version_file"
-}
-
-tron_marketing_version() {
-    local canonical="$1"
-    case "$canonical" in
-        *-*) echo "${canonical%%-*}" ;;
-        *) echo "$canonical" ;;
-    esac
-}
+AUTH_FILE="$TRON_HOME/profiles/auth.json"
 
 #=============================================================================
 # COLORS & PRINT HELPERS
@@ -139,32 +61,35 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-# INVARIANT: every print_* helper writes to stderr (>&2). Stdout is
-# reserved for machine-readable output — `tron install --gui-helper`
-# emits one NDJSON event per line on stdout, and any decorative print
-# from a helper called transitively (codesign_bundle, notarize_bundle,
-# ensure_default_configs, …) would corrupt that stream. Routing to
-# stderr lets us keep the gating-by-flag pattern as a UX nicety while
-# making the stdout contract structurally enforced rather than
-# discipline-enforced.
+# INVARIANT: every print_* helper writes to stderr (>&2). Stdout is reserved
+# for command-owned machine-readable output, so decorative output from a
+# transitive helper (for example, codesign_bundle) must never corrupt it.
 print_status()  { echo -e "${BLUE}▸${NC} $1" >&2; }
 print_success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 print_error()   { echo -e "${RED}✗${NC} $1" >&2; }
 print_warning() { echo -e "${YELLOW}!${NC} $1" >&2; }
-# Neutral informational tone for explanatory CLI output.
-print_info()    { echo -e "${DIM}ℹ${NC} $1" >&2; }
 print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2; }
+
+# Canonical help for commands routed by dispatch_runtime_command. Entrypoints
+# own their workspace/delegation sections but must not duplicate runtime rows.
+show_runtime_command_help() {
+    echo -e "${BOLD}Runtime:${NC}"
+    echo "  status          Show service status"
+    echo "  start           Start launchd service"
+    echo "  stop            Stop service"
+    echo "  restart         Restart service"
+    echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
+    echo "  rollback        Restore previous binary (--yes to skip confirmation)"
+    echo "  login           Authenticate with a provider (--provider <name>, --label <name>)"
+    echo "  auth rotate     Rotate the WebSocket bearer token (forces iOS re-pair)"
+    echo "  logs            Query database logs (use -h for options)"
+    echo "  errors          Show recent errors"
+    echo ""
+}
 
 #=============================================================================
 # UTILITY FUNCTIONS
 #=============================================================================
-
-require_installed() {
-    if [ ! -f "$PLIST_PATH" ]; then
-        print_error "Contributor service is not installed. Run: tron install"
-        exit 1
-    fi
-}
 
 confirm_action() {
     read -p "$1 (y/N) " -n 1 -r
@@ -198,37 +123,6 @@ clear_user_profile_settings() {
     fi
 }
 
-ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/internal/{database,run}
-    mkdir -p "$DEFAULT_PROFILE_DIR" "$NORMAL_PROFILE_DIR" "$CHAT_PROFILE_DIR" "$LOCAL_PROFILE_DIR" "$USER_PROFILE_DIR"
-    mkdir -p "$USER_PROFILE_DIR/prompts"
-    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,providers,context,tools}
-    mkdir -p "$DEFAULT_PROFILE_DIR/prompts/processes"
-    mkdir -p "$TRON_HOME"/memory/{rules,sessions}
-    mkdir -p "$WORKSPACE_DIR"/{projects,plans,reports,renders,screenshots,scratch,labs,archive}
-    mkdir -p "$WORKSPACE_KNOWLEDGE_DIR" "$WORKSPACE_VAULT_DIR"
-}
-
-ensure_default_configs() {
-    # Standalone settings JSON is intentionally not created here. The Rust
-    # profile seeder owns managed defaults in profiles/default/profile.toml,
-    # while settings.update writes sparse [settings] overrides to
-    # profiles/user/profile.toml.
-
-    if [ ! -f "$AUTH_FILE" ]; then
-        mkdir -p "$(dirname "$AUTH_FILE")"
-        cat > "$AUTH_FILE" << 'EOF'
-{
-  "version": 1,
-  "providers": {},
-  "lastUpdated": ""
-}
-EOF
-        chmod 600 "$AUTH_FILE"
-        print_success "Created auth.json"
-    fi
-}
-
 #=============================================================================
 # COMMAND MODULES
 #=============================================================================
@@ -238,3 +132,28 @@ for tron_lib_module in "$TRON_LIB_MODULE_DIR"/*.sh; do
     [ -e "$tron_lib_module" ] && source "$tron_lib_module"
 done
 unset tron_lib_module TRON_LIB_MODULE_DIR
+
+# Shared runtime command ownership. Each entrypoint defines its own cmd_help
+# before calling this dispatcher, so unknown commands retain the local help UX.
+dispatch_runtime_command() {
+    local command="$1"
+    shift
+
+    case "$command" in
+        status)    cmd_status "$@" ;;
+        start)     cmd_start ;;
+        stop)      cmd_stop ;;
+        restart)   cmd_restart ;;
+        uninstall) cmd_uninstall "$@" ;;
+        logs)      query_logs "$@" ;;
+        errors)    query_logs --level error --limit 20 ;;
+        rollback)  cmd_rollback "$@" ;;
+        login)     cmd_login "$@" ;;
+        auth)      cmd_auth "$@" ;;
+        *)
+            print_error "Unknown command: $command"
+            cmd_help
+            return 1
+            ;;
+    esac
+}

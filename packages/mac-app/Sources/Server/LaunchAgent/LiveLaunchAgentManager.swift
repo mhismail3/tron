@@ -148,7 +148,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 }
                 return .alreadyLoaded
             }
-            if currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: resolvedParent) {
+            if currentVariant.canTakeOverRegistration(ownedBy: resolvedParent) {
                 return nil
             }
             return .launchdRefused(
@@ -169,7 +169,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
               runningParentBundleIdentifier != currentVariant.expectedParentBundleIdentifier else {
             return false
         }
-        return currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: runningParentBundleIdentifier)
+        return currentVariant.canTakeOverRegistration(ownedBy: runningParentBundleIdentifier)
     }
 
     static func shouldRefuseExternalServer(
@@ -309,7 +309,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let pid = parsePID(from: result.stdout)
         let uptime: String?
         if let pid {
-            uptime = await processElapsedTime(pid: pid)
+            uptime = await ServerProcessProbe.processElapsedTime(pid: pid)
         } else {
             uptime = nil
         }
@@ -321,7 +321,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 from: result.stdout
             ),
             parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
-            programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout),
             executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
             needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
         )
@@ -359,16 +358,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return value.isEmpty ? nil : value
         }
         return nil
-    }
-
-    private func processElapsedTime(pid: Int) async -> String? {
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-p", "\(pid)", "-o", "etime="]
-        )
-        guard result.exitCode == 0 else { return nil }
-        let uptime = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return uptime.isEmpty ? nil : uptime
     }
 
     private func isPortBound(_ port: Int) async -> Bool {

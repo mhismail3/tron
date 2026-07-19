@@ -38,28 +38,19 @@ final class DispatchableEventPluginTests: XCTestCase {
         XCTAssertFalse(handled)
     }
 
-    func testDispatchablePluginRegistersAsDispatchable() {
-        // Given: A registry with a dispatchable plugin
-        let registry = EventRegistry.shared
-        let originalCount = registry.pluginCount
-
+    func testRegistryDispatchesRegisteredPlugin() {
+        let registry = EventRegistry()
         registry.register(TestDispatchablePlugin.self)
-
-        // When: Looking up the box
-        let box = registry.pluginBox(for: TestDispatchablePlugin.eventType)
-
-        // Then: Box should exist and support dispatch
-        XCTAssertNotNil(box)
 
         let mockContext = MockEventDispatchContext()
         let result = TestDispatchablePlugin.Result(value: "registry-test")
-        let handled = box!.dispatch(result: result, context: mockContext)
-        XCTAssertTrue(handled)
-        XCTAssertEqual(mockContext.logDebugMessage, "TestDispatchable: registry-test")
+        registry.dispatch(
+            type: TestDispatchablePlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
 
-        // Cleanup
-        registry.clearForTesting()
-        registry.registerAll()
+        XCTAssertEqual(mockContext.logDebugMessage, "TestDispatchable: registry-test")
     }
 
     // MARK: - Domain Protocol Conformance

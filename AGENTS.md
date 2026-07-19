@@ -30,21 +30,31 @@ Prefer fast, focused checks while iterating. Escalate to full suites when the ch
 
 ## Settings Parity
 
-Every server setting lives in profile TOML: managed defaults under `[settings]` in `~/.tron/profiles/default/profile.toml`, with sparse user overrides under `[settings]` in `~/.tron/profiles/user/profile.toml`. Each setting must have a 1-to-1 corresponding control in the iOS settings UI. When adding a new setting to the Rust agent (`packages/agent/src/domains/settings/profile/types/`), also add:
-1. Decode in `packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift` (`ServerSettings`)
-2. Update struct in `packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift` (`ServerSettingsUpdate`)
-3. Property in `packages/ios-app/Sources/Session/Chat/State/SettingsState.swift` (load, reset, build reset update)
-4. UI control in the appropriate settings page (`packages/ios-app/Sources/UI/Settings/Pages/`)
+`settings::get` returns the complete validated `TronSettings` profile, including
+server-only provider, retry, runtime, tmux, and TUI configuration. iOS admits an
+explicit product-settings projection from that response. Every field admitted
+into the iOS `ServerSettings` DTO must have 1-to-1 ownership through:
 
-No setting should exist only on the server or only in the iOS UI.
+1. Decode in `packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift`
+2. Projection in `ServerSettingsSnapshot` and state ownership in `SettingsState`
+3. Load/reset/server-switch handling
+4. A read-only row or editable control in `packages/ios-app/Sources/UI/Settings/Pages/`
+
+Editable fields must also have a `SettingsMutation` and matching
+`ServerSettingsUpdate` encoding. Read-only fields must not gain a write path.
+When adding a Rust profile field under
+`packages/agent/src/domains/settings/profile/types/`, first identify its owner:
+server-only provider/runtime/TUI fields remain outside the iOS DTO, while an
+iOS-visible product setting requires every layer above in the same commit. No
+field admitted into the mobile projection may exist in only one layer.
 
 ## Managed Skills
 
 The primitive branch does not ship repo-managed first-party skills under
 `packages/agent/skills/`. Do not reintroduce that directory, skill-copy wiring,
-or built-in skill prompt context during the primitive teardown. Future skills
-belong to a successor self-adapting-agent scorecard and must be agent-authored
-state or generated runtime behavior, not bootstrap harness behavior.
+or built-in skill prompt context. Future skills must be agent-authored state or
+generated runtime behavior with a source-owned contract, not bootstrap harness
+behavior.
 
 ## Deployment
 
@@ -91,8 +101,8 @@ Documentation follows progressive disclosure:
    installation, and release behavior.
 3. Rust `mod.rs` docs, iOS/Mac architecture docs, source contracts, migrations,
    and tests are the implementation-level truth.
-4. Scorecards and evidence manifests record completed audits; they are not
-   copied into the root README.
+4. Git history records completed audits. Current claims must live with their
+   source owner, owning documentation, or focused boundary tests.
 
 Whenever you touch a source-backed surface, update its owning docs in the same
 commit:
@@ -102,7 +112,7 @@ commit:
 | Product purpose, supported clients, setup, or primary developer workflow | `README.md` |
 | Rust module ownership | the nearest `mod.rs`; update `project-reference.md` only if the cross-cutting architecture changed |
 | CLI commands | `scripts/tron --help`, command-owning docs/comments, `CONTRIBUTING.md` when contributor workflow changes, and `project-reference.md` |
-| Capability contracts or provider-visible operations | domain contract docs, capability scorecard/inventory, and `project-reference.md` when the public model surface changes |
+| Capability contracts or provider-visible operations | domain contract docs and tests, plus `project-reference.md` when the public model surface changes |
 | Events, settings, auth, database schema, paths, installation, or release behavior | the source-owning docs/tests and the matching `project-reference.md` section |
 | iOS or Mac top-level architecture | the package architecture docs; update the root README only when the product-level map changes |
 

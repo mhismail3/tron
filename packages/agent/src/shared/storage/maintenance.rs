@@ -101,10 +101,10 @@ pub fn export_snapshot(
 }
 
 /// Compact low-signal verbose diagnostic rows and remove unreferenced blobs.
-pub fn retention_run(
+pub(super) fn retention_run(
     path: &Path,
     dry_run: bool,
-    verbose_retention_days: u64,
+    diagnostic_retention_days: u64,
 ) -> Result<StorageRetentionReport> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -112,7 +112,7 @@ pub fn retention_run(
     ensure_storage_schema(&conn)?;
     let started_at = Utc::now().to_rfc3339();
     let cutoff = Utc::now()
-        - chrono::Duration::days(i64::try_from(verbose_retention_days).unwrap_or(i64::MAX));
+        - chrono::Duration::days(i64::try_from(diagnostic_retention_days).unwrap_or(i64::MAX));
     let cutoff = cutoff.to_rfc3339();
     let now = Utc::now().to_rfc3339();
     let has_logs = table_exists(&conn, "logs")?;
@@ -179,7 +179,7 @@ pub fn retention_run(
                 rows_deleted,
                 blobs_deleted,
                 format!(
-                    "verbose_retention_days={verbose_retention_days};expired_refs_deleted={expired_refs_deleted}"
+                    "diagnostic_retention_days={diagnostic_retention_days};expired_refs_deleted={expired_refs_deleted}"
                 )
             ],
         )
@@ -199,7 +199,7 @@ pub fn retention_run(
     };
     Ok(StorageRetentionReport {
         dry_run,
-        verbose_retention_days,
+        diagnostic_retention_days,
         rows_deleted,
         blobs_deleted,
         payload_refs_deleted: expired_refs_deleted,
@@ -260,10 +260,10 @@ fn count_unowned_blobs(conn: &Connection, has_blobs: bool, has_payload_refs: boo
 }
 
 /// Enforce the active database soft size budget with safe cleanup only.
-pub fn enforce_size_budget(
+pub(super) fn enforce_size_budget(
     path: &Path,
     max_database_mb: u64,
-    verbose_retention_days: u64,
+    diagnostic_retention_days: u64,
 ) -> Result<StorageBudgetReport> {
     let max_database_bytes = max_database_mb.saturating_mul(1024).saturating_mul(1024);
     let before = storage_stats(path)?;
@@ -279,7 +279,7 @@ pub fn enforce_size_budget(
         });
     }
 
-    let retention = retention_run(path, false, verbose_retention_days)?;
+    let retention = retention_run(path, false, diagnostic_retention_days)?;
     let checkpoint = checkpoint_database(path)?;
     let after = storage_stats(path)?;
     Ok(StorageBudgetReport {

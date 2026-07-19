@@ -140,8 +140,7 @@ async fn conformance_report_writes_resource_stream_event_and_does_not_execute_ta
             FunctionId::new(super::CONFORMANCE_REPORT_FUNCTION).unwrap(),
             json!({
                 "namespacePrefix": "demo",
-                "reason": "test report",
-                "idempotencyKey": "catalog-discovery-report-test"
+                "reason": "test report"
             }),
             client_context("catalog-discovery-report")
                 .with_scope(super::WRITE_SCOPE)
@@ -186,27 +185,24 @@ async fn conformance_report_writes_resource_stream_event_and_does_not_execute_ta
 }
 
 #[tokio::test]
-async fn conformance_report_rejects_missing_empty_and_oversized_caller_keys() {
+async fn conformance_report_rejects_missing_empty_and_oversized_invocation_keys() {
     let ctx = make_test_context();
-    for (suffix, payload) in [
-        ("missing", json!({"reason": "missing key"})),
-        (
-            "empty",
-            json!({"reason": "empty key", "idempotencyKey": "  "}),
-        ),
-        (
-            "oversized",
-            json!({"reason": "oversized key", "idempotencyKey": "x".repeat(257)}),
-        ),
+    for (suffix, key) in [
+        ("missing", None),
+        ("empty", Some("  ".to_owned())),
+        ("oversized", Some("x".repeat(257))),
     ] {
+        let mut context = client_context(&format!("catalog-discovery-report-{suffix}"))
+            .with_scope(super::WRITE_SCOPE);
+        if let Some(key) = key {
+            context = context.with_idempotency_key(key);
+        }
         let result = ctx
             .engine_host
             .invoke(Invocation::new_sync(
                 FunctionId::new(super::CONFORMANCE_REPORT_FUNCTION).unwrap(),
-                payload,
-                client_context(&format!("catalog-discovery-report-{suffix}"))
-                    .with_scope(super::WRITE_SCOPE)
-                    .with_idempotency_key(format!("catalog-discovery-report-{suffix}")),
+                json!({"reason": format!("{suffix} key")}),
+                context,
             ))
             .await;
         assert!(

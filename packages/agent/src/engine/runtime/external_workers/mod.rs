@@ -11,8 +11,13 @@
 //! registrations disappear on disconnect or missed heartbeat. Durable local
 //! registrations stay in the catalog but are marked unhealthy until the worker
 //! reconnects and re-registers, so agents never discover stale capabilities as
-//! runnable. Submodules own lifecycle state, registration/stream publication,
-//! validation, and invocation proxying.
+//! runnable. Every accepted connection receives one runtime-owned generation
+//! lease. Inbound socket messages and teardown must match that lease, so
+//! invalid, foreign, duplicate, or stale sockets cannot mutate a different
+//! connection. Retirement closes the connection's invocation transport before
+//! catalog cleanup, so captured proxy handlers cannot admit work after a
+//! heartbeat or runtime disconnect. Submodules own lifecycle state,
+//! registration/stream publication, validation, and invocation proxying.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -31,7 +36,7 @@ use crate::engine::kernel::ids::{
 use crate::engine::kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::kernel::types::{
     DeliveryMode, FunctionDefinition, FunctionHealth, TriggerDefinition, VisibilityScope,
-    WorkerKind, WorkerLifecycleState,
+    WorkerDefinition, WorkerKind, WorkerLifecycleState,
 };
 use crate::engine::runtime::worker_protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
@@ -49,14 +54,17 @@ const WORKER_LIFECYCLE_TOPIC: &str = "worker.lifecycle";
 
 /// Transport client used to invoke a connected local external worker.
 #[async_trait]
-pub trait ExternalWorkerInvoker: Send + Sync {
+pub(crate) trait ExternalWorkerInvoker: Send + Sync {
     /// Send one invocation to the worker and wait for its result.
     async fn invoke(&self, invoke: WorkerInvoke) -> Result<WorkerInvocationResult>;
+
+    /// Close outbound admission and wake calls when the runtime retires the connection.
+    fn retire(&self);
 }
 
 /// Runtime state for one connected local external worker.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ExternalWorkerConnection {
+pub(crate) struct ExternalWorkerConnection {
     /// Worker id.
     pub worker_id: WorkerId,
     /// Owner actor allowed to unregister the worker.
@@ -65,8 +73,6 @@ pub struct ExternalWorkerConnection {
     pub heartbeat_sequence: u64,
     /// Last accepted heartbeat/hello timestamp.
     pub last_heartbeat_at: DateTime<Utc>,
-    /// Protocol is loopback/local only.
-    pub loopback_only: bool,
     /// Registration durability.
     pub registration_mode: WorkerRegistrationMode,
     /// Default visibility for registered entries.
@@ -83,6 +89,60 @@ pub struct ExternalWorkerConnection {
     pub functions: BTreeSet<String>,
     /// Registered trigger ids.
     pub triggers: BTreeSet<String>,
+    /// Runtime-local generation that owns socket mutations and teardown.
+    connection_generation: u64,
+}
+
+/// Opaque ownership proof for one accepted external-worker connection.
+#[derive(Debug)]
+pub(crate) struct ExternalWorkerConnectionLease {
+    worker_id: WorkerId,
+    generation: u64,
+}
+
+impl ExternalWorkerConnectionLease {
+    /// Worker identity accepted for this connection.
+    #[must_use]
+    pub(crate) fn worker_id(&self) -> &WorkerId {
+        &self.worker_id
+    }
+
+    /// Authorize one inbound message against this socket's accepted identity.
+    pub(crate) fn authorize_inbound(&self, message: &WorkerProtocolMessage) -> Result<()> {
+        let claimed_worker = match message {
+            WorkerProtocolMessage::Hello(_) => {
+                return Err(EngineError::PolicyViolation(
+                    "external worker socket already accepted hello".to_owned(),
+                ));
+            }
+            WorkerProtocolMessage::RegisterFunction(message) => {
+                Some(&message.definition.owner_worker)
+            }
+            WorkerProtocolMessage::RegisterTrigger(message) => {
+                Some(&message.definition.owner_worker)
+            }
+            WorkerProtocolMessage::PublishStream(message) => Some(&message.worker_id),
+            WorkerProtocolMessage::Heartbeat(message) => Some(&message.worker_id),
+            WorkerProtocolMessage::Disconnect(message) => Some(&message.worker_id),
+            WorkerProtocolMessage::Result(_) => None,
+            WorkerProtocolMessage::Invoke(_)
+            | WorkerProtocolMessage::CatalogSnapshot(_)
+            | WorkerProtocolMessage::CatalogChange(_) => {
+                return Err(EngineError::PolicyViolation(
+                    "worker sent a server-originated protocol message".to_owned(),
+                ));
+            }
+        };
+        if let Some(claimed_worker) = claimed_worker
+            && claimed_worker != &self.worker_id
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker message for {claimed_worker} does not match socket worker {}",
+                self.worker_id
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// In-process local external-worker runtime.
@@ -90,6 +150,7 @@ pub struct EngineExternalWorkerRuntime {
     host: EngineHostHandle,
     connections: BTreeMap<WorkerId, ExternalWorkerConnection>,
     invokers: BTreeMap<WorkerId, Arc<dyn ExternalWorkerInvoker>>,
+    next_connection_generation: u64,
 }
 
 impl EngineExternalWorkerRuntime {
@@ -100,19 +161,24 @@ impl EngineExternalWorkerRuntime {
             host,
             connections: BTreeMap::new(),
             invokers: BTreeMap::new(),
+            next_connection_generation: 1,
         }
     }
 
-    /// Handle a protocol message.
-    pub async fn handle_message(
+    /// Handle a protocol message owned by one accepted connection.
+    pub(crate) async fn handle_connection_message(
         &mut self,
+        lease: &ExternalWorkerConnectionLease,
         message: WorkerProtocolMessage,
     ) -> Result<Option<WorkerProtocolMessage>> {
+        lease.authorize_inbound(&message)?;
+        if !self.is_current_connection(lease) {
+            return Err(EngineError::PolicyViolation(format!(
+                "external worker connection lease is no longer current for {}",
+                lease.worker_id
+            )));
+        }
         match message {
-            WorkerProtocolMessage::Hello(hello) => {
-                let snapshot = self.hello(*hello).await?;
-                Ok(Some(WorkerProtocolMessage::CatalogSnapshot(snapshot)))
-            }
             WorkerProtocolMessage::RegisterFunction(message) => {
                 let change = self.register_function(*message).await?;
                 Ok(Some(WorkerProtocolMessage::CatalogChange(change)))
@@ -133,10 +199,13 @@ impl EngineExternalWorkerRuntime {
                 self.disconnect(message).await?;
                 Ok(None)
             }
-            WorkerProtocolMessage::Result(_)
+            WorkerProtocolMessage::Result(_) => Err(EngineError::PolicyViolation(
+                "worker result must be consumed by its socket invocation map".to_owned(),
+            )),
+            WorkerProtocolMessage::Hello(_)
             | WorkerProtocolMessage::Invoke(_)
             | WorkerProtocolMessage::CatalogSnapshot(_)
-            | WorkerProtocolMessage::CatalogChange(_) => Ok(None),
+            | WorkerProtocolMessage::CatalogChange(_) => unreachable!("authorized above"),
         }
     }
 

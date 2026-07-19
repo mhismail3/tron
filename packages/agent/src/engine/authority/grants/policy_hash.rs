@@ -3,12 +3,9 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-#[cfg(test)]
-use super::model::TEST_BOOTSTRAP_GRANT_IDS;
-use super::model::{BOOTSTRAP_GRANT_IDS, EngineGrant, EngineGrantLifecycle, bootstrap_grant};
+use super::model::{EngineGrant, EngineGrantLifecycle, bootstrap_grant, is_bootstrap_grant_id};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::AuthorityGrantId;
-use crate::engine::kernel::types::RiskLevel;
 
 /// Hash the authority-relevant fields of an active grant.
 ///
@@ -31,7 +28,7 @@ pub(crate) fn grant_policy_hash(grant: &EngineGrant) -> String {
         "resourceSelectors": sorted_strings(&grant.resource_selectors),
         "fileRoots": sorted_strings(&grant.file_roots),
         "networkPolicy": grant.network_policy,
-        "maxRisk": risk_as_str(grant.max_risk),
+        "maxRisk": grant.max_risk.as_str(),
         "budget": grant.budget,
         "expiresAt": grant.expires_at.map(|value| value.to_rfc3339()),
         "canDelegate": grant.can_delegate,
@@ -44,30 +41,13 @@ pub(crate) fn grant_policy_hash(grant: &EngineGrant) -> String {
 
 /// Compute the policy hash for a first-party bootstrap grant id.
 pub(crate) fn bootstrap_grant_policy_hash(grant_id: &AuthorityGrantId) -> Result<String> {
-    if !BOOTSTRAP_GRANT_IDS
-        .iter()
-        .any(|candidate| *candidate == grant_id.as_str())
-        && !test_bootstrap_grant_ids()
-            .iter()
-            .any(|candidate| *candidate == grant_id.as_str())
-    {
+    if !is_bootstrap_grant_id(grant_id.as_str()) {
         return Err(EngineError::PolicyViolation(format!(
             "authority grant {} is not a bootstrap grant",
             grant_id
         )));
     }
     Ok(grant_policy_hash(&bootstrap_grant(grant_id.as_str())))
-}
-
-fn test_bootstrap_grant_ids() -> &'static [&'static str] {
-    #[cfg(test)]
-    {
-        TEST_BOOTSTRAP_GRANT_IDS
-    }
-    #[cfg(not(test))]
-    {
-        &[]
-    }
 }
 
 fn sorted_strings(values: &[String]) -> Vec<String> {
@@ -80,15 +60,6 @@ fn lifecycle_as_str(lifecycle: &EngineGrantLifecycle) -> &'static str {
     match lifecycle {
         EngineGrantLifecycle::Active => "active",
         EngineGrantLifecycle::Revoked => "revoked",
-    }
-}
-
-fn risk_as_str(risk: RiskLevel) -> &'static str {
-    match risk {
-        RiskLevel::Low => "low",
-        RiskLevel::Medium => "medium",
-        RiskLevel::High => "high",
-        RiskLevel::Critical => "critical",
     }
 }
 

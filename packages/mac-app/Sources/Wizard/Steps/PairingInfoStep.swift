@@ -225,9 +225,9 @@ struct PairingInfoStep: View {
             if Task.isCancelled { return }
         }
 
-        // Fresh installs do not have a user profile yet. Resolve the
-        // current Tailscale address live, then cache it into the profile
-        // only after we know the value is real.
+        // Fresh installs may not have a user profile yet. Prefer live and
+        // current-session state, then fall back to server/settings state;
+        // cache the selected host for later wrapper and server reads.
         let token = setup.readBearerToken()
         guard let token, !token.isEmpty else {
             fail(.noToken)
@@ -235,10 +235,9 @@ struct PairingInfoStep: View {
         }
 
         let pingResult = await setup.pingServer(token)
-        let info: ServerInfo
         switch pingResult {
-        case .success(let serverInfo):
-            info = serverInfo
+        case .success:
+            break
         case .unauthorized:
             fail(.tokenRejected)
             return
@@ -255,7 +254,6 @@ struct PairingInfoStep: View {
         guard let host = firstNonEmpty(
             liveTailscale.displayIP,
             state.tailscaleStatus?.displayIP,
-            info.tailscaleIp,
             setup.readTailscaleIPFromSettings()
         ) else {
             fail(.noTailscaleIP)
@@ -264,7 +262,12 @@ struct PairingInfoStep: View {
 
         setup.cacheTailscaleIP(host)
 
-        let payload = PairingPayload(host: host, port: info.port, token: token, label: LocalComputerName.current())
+        let payload = PairingPayload(
+            host: host,
+            port: setup.serverPort,
+            token: token,
+            label: LocalComputerName.current()
+        )
         guard let url = PairingURLBuilder.makeURL(payload),
               let qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) else {
             fail(.qrGenerationFailed)

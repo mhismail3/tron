@@ -3,14 +3,12 @@ import SwiftUI
 
 /// Dependency injection point for the Mac wrapper.
 ///
-/// All filesystem paths, subprocess invocations, and time sources go
-/// through this struct so tests can substitute pure-value fakes
-/// without touching the host system.
+/// This is the composition seam for wizard/menu dependencies that need host
+/// substitution. Leaf services retain their own bounded filesystem, process,
+/// and timing behavior.
 struct EnvironmentSetup: Sendable {
     var tronHome: URL
     var applicationBundle: URL
-    var serverHelperBundle: URL
-    var serverHelperBinary: URL
     var bearerTokenPath: URL
     var onboardedMarkerPath: URL
     var settingsPath: URL
@@ -108,8 +106,6 @@ struct EnvironmentSetup: Sendable {
     static let live = EnvironmentSetup(
         tronHome: TronPaths.tronHome,
         applicationBundle: TronPaths.applicationBundle,
-        serverHelperBundle: TronPaths.serverHelperBundle,
-        serverHelperBinary: TronPaths.serverHelperBinary,
         bearerTokenPath: TronPaths.bearerTokenPath,
         onboardedMarkerPath: TronPaths.onboardedMarkerPath,
         settingsPath: TronPaths.settingsPath,
@@ -148,7 +144,7 @@ struct EnvironmentSetup: Sendable {
             ExistingInstallDetector.detect()
         },
         validateApplicationLocation: {
-            ExistingInstallDetector.validateApplicationLocation()
+            MacRuntimeVariant.detect().locationProblem
         },
         validateBundledHelper: {
             ExistingInstallDetector.validateBundledHelper()

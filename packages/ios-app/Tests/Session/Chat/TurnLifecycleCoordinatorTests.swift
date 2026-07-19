@@ -24,7 +24,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     func testTurnStartFinalizesStreamingIfNeeded() {
         // Given
         mockContext.hasActiveStreaming = true
-        mockContext.streamingText = "Some text"
 
         // When
         let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
@@ -62,18 +61,14 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testTurnStartClearsPreviousTurnCapabilityTracking() {
         // Given
-        mockContext.currentTurnCapabilityInvocations = [
-            CapabilityInvocationRecord(invocationId: "invocation1", modelPrimitiveName: "execute", arguments: "{}")
-        ]
-        mockContext.currentCapabilityInvocationMessages = [UUID(): makeTextMessage("test")]
+        mockContext.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         let pluginResult = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         coordinator.handleTurnStart(pluginResult, context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(mockContext.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(mockContext.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     func testTurnStartEnqueuesTurnBoundary() {
@@ -154,11 +149,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [
             ChatMessage(id: messageId, role: .assistant, content: .text("response"))
         ]
+        markResponseComplete(turnNumber: 2, hasCapabilityInvocations: false)
 
         // When
         let pluginResult = makeTurnEndPluginResult(
             turnNumber: 2,
             tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 2),
+            model: "server-final-model",
             duration: 1500
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
@@ -167,9 +164,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let msg = mockContext.messages[0]
         XCTAssertEqual(msg.tokenRecord?.source.rawInputTokens, 100)
         XCTAssertEqual(msg.tokenRecord?.source.rawOutputTokens, 50)
-        XCTAssertEqual(msg.model, "claude-3-opus")
+        XCTAssertEqual(msg.model, "server-final-model")
         XCTAssertEqual(msg.latencyMs, 1500)
-        XCTAssertEqual(msg.stopReason, "end_turn")
         XCTAssertEqual(msg.turnNumber, 2)
     }
 
@@ -182,6 +178,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [
             ChatMessage(id: firstTextId, role: .assistant, content: .text("response"))
         ]
+        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: false)
 
         // When
         let pluginResult = makeTurnEndPluginResult(
@@ -202,6 +199,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         mockContext.messages = [
             ChatMessage(id: messageId, role: .assistant, content: .text("response"))
         ]
+        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: false)
 
         // When
         let tokenRecord = makeTokenRecord(
@@ -259,7 +257,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.contextStateCurrentContextWindow, 200000)
     }
 
-    func testTurnEndFallsBackToCapabilityInvocationMessageWhenNoTextExists() {
+    func testCapabilityResponseDoesNotAttachMetadataToInvocation() {
         // Given - intermediate turn: [thinking, capability_invocation] with NO visible text
         // streamingMessageId and firstTextMessageIdForTurn are both nil
         mockContext.streamingMessageId = nil
@@ -272,6 +270,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .running))
         )
         mockContext.messages = [capabilityInvocationMessage]
+        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: true)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 100, outputTokens: 50)
@@ -283,25 +282,33 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
-        // Then - should find the capabilityInvocation message via last-message search
-        XCTAssertNotNil(mockContext.messages[0].tokenRecord)
-        XCTAssertEqual(mockContext.messages[0].tokenRecord?.source.rawInputTokens, 100)
+        // Then - capability items never own a response metadata row.
+        XCTAssertNil(mockContext.messages[0].tokenRecord)
+        XCTAssertNil(mockContext.messages[0].model)
+        XCTAssertNil(mockContext.messages[0].latencyMs)
         XCTAssertEqual(mockContext.messages[0].turnNumber, 1)
     }
 
-    func testTurnEndAssignsMetadataToLastMessageInTurn() {
-        // Given - turn has [capabilityInvocation, text] — last message is text
+    func testFinalResponseMetadataTargetsTextInsteadOfThinking() {
+        // Given - a terminal turn has thinking followed by response text.
         mockContext.streamingMessageId = nil
-        mockContext.firstTextMessageIdForTurn = nil
+        let textId = UUID()
+        mockContext.firstTextMessageIdForTurn = textId
         mockContext.turnStartMessageIndex = 0
         mockContext.currentModel = "claude-opus-4-6"
 
-        let capabilityInvocationMessage = ChatMessage(
+        let thinkingMessage = ChatMessage(
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success))
+            content: .thinking(
+                visible: "Checking the result",
+                isExpanded: false,
+                isStreaming: false,
+                kind: .thinking
+            )
         )
-        let textMessage = ChatMessage(role: .assistant, content: .text("some response"))
-        mockContext.messages = [capabilityInvocationMessage, textMessage]
+        let textMessage = ChatMessage(id: textId, role: .assistant, content: .text("some response"))
+        mockContext.messages = [thinkingMessage, textMessage]
+        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: false)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 200, outputTokens: 100)
@@ -312,14 +319,16 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
-        // Then - stats go on the last message (text at index 1)
+        // Then - only the explicitly marked response text owns metadata.
         XCTAssertNil(mockContext.messages[0].tokenRecord)
         XCTAssertNotNil(mockContext.messages[1].tokenRecord)
+        XCTAssertNil(mockContext.messages[1].model)
+        XCTAssertTrue(mockContext.messages[1].isFinalAssistantResponse)
     }
 
-    func testTurnEndAssignsMetadataToLastCapabilityInParallelCapabilities() {
-        // Given - turn with [text, invocation1, invocation2, invocation3] — parallel capability invocations
-        // This is the bug case: stats must go on the LAST capability, not the text or first capability
+    func testCapabilityBearingResponseSuppressesMetadataEvenWithEndTurnStopReason() {
+        // Given - provider stop reason says end_turn, but the exact response
+        // contract reports capability invocations.
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
         mockContext.turnStartMessageIndex = 0
@@ -330,27 +339,28 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let invocation2 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-2", status: .success)))
         let invocation3 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-3", status: .success)))
         mockContext.messages = [textMessage, invocation1, invocation2, invocation3]
+        markResponseComplete(turnNumber: 1, hasCapabilityInvocations: true, capabilityInvocationCount: 3)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 500, outputTokens: 200)
         let pluginResult = makeTurnEndPluginResult(
             turnNumber: 1,
-            stopReason: "capability_invocation",
+            stopReason: "end_turn",
             tokenRecord: tokenRecord,
             duration: 1200
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
-        // Then - stats must go on the LAST capability (index 3), not text or first capability
-        XCTAssertNil(mockContext.messages[0].tokenRecord)  // text — no stats
-        XCTAssertNil(mockContext.messages[1].tokenRecord)  // invocation1 — no stats
-        XCTAssertNil(mockContext.messages[2].tokenRecord)  // invocation2 — no stats
-        XCTAssertNotNil(mockContext.messages[3].tokenRecord)  // invocation3 — stats here
-        XCTAssertEqual(mockContext.messages[3].model, "claude-opus-4-6")
-        XCTAssertEqual(mockContext.messages[3].latencyMs, 1200)
+        // Then - neither intermediate text nor any invocation gets metadata.
+        for message in mockContext.messages {
+            XCTAssertNil(message.tokenRecord)
+            XCTAssertNil(message.model)
+            XCTAssertNil(message.latencyMs)
+            XCTAssertFalse(message.isFinalAssistantResponse)
+        }
     }
 
-    func testTurnEndAssignsMetadataToLastCapabilityInCapabilityOnlyTurn() {
+    func testCapabilityOnlyTurnHasNoPresentationMetadata() {
         // Given - capability-only turn: [invocation1, invocation2] — no text at all
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
@@ -360,6 +370,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let invocation1 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-1", status: .success)))
         let invocation2 = ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(id: "tc-2", status: .success)))
         mockContext.messages = [invocation1, invocation2]
+        markResponseComplete(turnNumber: 2, hasCapabilityInvocations: true, capabilityInvocationCount: 2)
 
         // When
         let tokenRecord = makeTokenRecord(inputTokens: 300, outputTokens: 100)
@@ -371,10 +382,9 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
-        // Then - stats go on the last capability (index 1)
+        // Then - capability-only turns have no final textual response footer.
         XCTAssertNil(mockContext.messages[0].tokenRecord)
-        XCTAssertNotNil(mockContext.messages[1].tokenRecord)
-        XCTAssertEqual(mockContext.messages[1].tokenRecord?.source.rawInputTokens, 300)
+        XCTAssertNil(mockContext.messages[1].tokenRecord)
     }
 
     func testTurnEndClearsTurnTracking() {
@@ -418,28 +428,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     func testCompleteClearsCapabilityTracking() {
         // Given
-        mockContext.currentCapabilityInvocationMessages = [UUID(): makeTextMessage("test")]
-        mockContext.currentTurnCapabilityInvocations = [
-            CapabilityInvocationRecord(invocationId: "invocation1", modelPrimitiveName: "execute", arguments: "{}")
-        ]
+        mockContext.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         coordinator.handleComplete(streamingText: "", context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.currentCapabilityInvocationMessages.isEmpty)
-        XCTAssertTrue(mockContext.currentTurnCapabilityInvocations.isEmpty)
-    }
-
-    func testCompleteTriggersContextRefresh() async throws {
-        // When
-        coordinator.handleComplete(streamingText: "", context: mockContext)
-
-        // Wait briefly for the async Task to execute
-        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
-
-        // Then
-        XCTAssertTrue(mockContext.refreshContextFromServerCalled)
+        XCTAssertTrue(mockContext.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     // MARK: - Helpers
@@ -450,6 +445,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         tokenRecord: TokenRecord? = nil,
         contextLimit: Int? = nil,
         cost: Double? = nil,
+        model: String? = nil,
         duration: Int? = nil
     ) -> TurnEndPlugin.Result {
         TurnEndPlugin.Result(
@@ -458,7 +454,23 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             tokenRecord: tokenRecord,
             stopReason: stopReason,
             cost: cost,
-            contextLimit: contextLimit
+            contextLimit: contextLimit,
+            model: model
+        )
+    }
+
+    private func markResponseComplete(
+        turnNumber: Int,
+        hasCapabilityInvocations: Bool,
+        capabilityInvocationCount: Int? = nil
+    ) {
+        coordinator.handleResponseComplete(
+            AgentResponseCompletePlugin.Result(
+                turnNumber: turnNumber,
+                hasCapabilityInvocations: hasCapabilityInvocations,
+                capabilityInvocationCount: capabilityInvocationCount ?? (hasCapabilityInvocations ? 1 : 0)
+            ),
+            context: mockContext
         )
     }
 
@@ -505,13 +517,11 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     // MARK: - State
     var messages: [ChatMessage] = []
     let messageIndex = MessageIndex()
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
-    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
+    var currentTurnCapabilityMessageIds: Set<UUID> = []
     var thinkingMessageId: UUID?
     var turnStartMessageIndex: Int?
     var firstTextMessageIdForTurn: UUID?
     var streamingMessageId: UUID?
-    var streamingText: String = ""
     var hasActiveStreaming: Bool = false
     var currentModel: String = "claude-3-sonnet"
     var agentPhase: AgentPhase = .idle
@@ -531,7 +541,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var uiUpdateQueueFlushCalled = false
     var uiUpdateQueueResetCalled = false
     var streamingManagerResetCalled = false
-    var refreshContextFromServerCalled = false
     var thinkingStateEndTurnCalled = false
 
     // MARK: - Protocol Methods
@@ -573,10 +582,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
         streamingManagerResetCalled = true
     }
 
-    func refreshContextFromServer() async {
-        refreshContextFromServerCalled = true
-    }
-
     func updateContextStateFromTokenRecord(_ record: TokenRecord) {
         contextStateUpdateFromTokenRecordCalled = true
     }
@@ -589,11 +594,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
         // No-op for mock
     }
 
-    func updateTotalTokenUsage(contextSize: Int, outputTokens: Int, cacheRead: Int?, cacheCreation: Int?) {
-        // No-op for mock
-    }
-
-    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) throws {
+    func persistAccumulatedSessionTokens(lastTurnInputTokens: Int) async throws {
         // No-op for mock
     }
 

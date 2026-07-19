@@ -14,28 +14,8 @@ final class DefaultAppConnectionRepository: AppConnectionRepository {
         client.connectionState
     }
 
-    var isConnected: Bool {
-        client.isConnected
-    }
-
     func connect() async {
         await client.connect()
-    }
-
-    func disconnect() async {
-        await client.disconnect()
-    }
-
-    func verifyConnection() async -> Bool {
-        await client.verifyConnection()
-    }
-
-    func manualRetry() async {
-        await client.manualRetry()
-    }
-
-    func setBackgroundState(_ inBackground: Bool) {
-        client.setBackgroundState(inBackground)
     }
 }
 
@@ -104,22 +84,6 @@ private extension SettingsMutation {
             return ServerSettingsUpdate(context: .init(compactor: .init(triggerTokenThreshold: threshold)))
         case .compactionPreserveRecentCount(let count):
             return ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: count)))
-        case .observabilityLogLevel(let level):
-            var update = ServerSettingsUpdate()
-            update.observability = .init(logLevel: level)
-            return update
-        case .observabilityVerboseRetentionDays(let days):
-            var update = ServerSettingsUpdate()
-            update.observability = .init(verboseRetentionDays: days)
-            return update
-        case .storageRetentionEnabled(let enabled):
-            var update = ServerSettingsUpdate()
-            update.storage = .init(retentionEnabled: enabled)
-            return update
-        case .storageMaxDatabaseMb(let megabytes):
-            var update = ServerSettingsUpdate()
-            update.storage = .init(maxDatabaseMb: megabytes)
-            return update
         case .transcriptionEnabled(let enabled):
             return ServerSettingsUpdate(server: .init(transcription: .init(enabled: enabled)))
         }
@@ -334,18 +298,6 @@ final class DefaultWorkerLifecycleRepository: WorkerLifecycleRepository {
         workspaceId: String?
     ) async throws -> CapabilityCockpitOverviewDTO {
         try await client.capabilityCockpitOverview(
-            limit: limit,
-            sessionId: sessionId,
-            workspaceId: workspaceId
-        )
-    }
-
-    func agentBriefingOverview(
-        limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> AgentBriefingOverviewDTO {
-        try await client.agentBriefingOverview(
             limit: limit,
             sessionId: sessionId,
             workspaceId: workspaceId

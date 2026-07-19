@@ -30,8 +30,10 @@ struct ChatMessage: Identifiable, Equatable {
     /// Whether extended thinking was used
     var hasThinking: Bool?
 
-    /// Why the turn ended (end_turn, capability_invocation, max_tokens)
-    var stopReason: String?
+    /// Server-backed finality for the textual response that ends a prompt
+    /// cycle. Live events set this from `agent.response_complete`; replay sets
+    /// it from the persisted assistant payload's capability blocks.
+    var isFinalAssistantResponse: Bool
 
     /// Event ID from the server's event store (for deletion, forking, etc.)
     var eventId: String?
@@ -49,7 +51,7 @@ struct ChatMessage: Identifiable, Equatable {
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
         hasThinking: Bool? = nil,
-        stopReason: String? = nil,
+        isFinalAssistantResponse: Bool = false,
         eventId: String? = nil
     ) {
         self.id = id
@@ -64,7 +66,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber
         self.hasThinking = hasThinking
-        self.stopReason = stopReason
+        self.isFinalAssistantResponse = isFinalAssistantResponse
         self.eventId = eventId
     }
 
@@ -90,6 +92,45 @@ struct ChatMessage: Identifiable, Equatable {
         return model.shortModelName
     }
 
+    /// Metadata eligible for display beneath the response marked final by the
+    /// live/replay projection boundary. Visual order and raw stop reason are
+    /// deliberately not consulted here.
+    var finalAssistantResponseMetadata: FinalAssistantResponseMetadata? {
+        guard role == .assistant,
+              case .text = content,
+              isFinalAssistantResponse
+        else {
+            return nil
+        }
+
+        let metadata = FinalAssistantResponseMetadata(
+            tokenRecord: tokenRecord,
+            model: shortModelName,
+            latency: formattedLatency
+        )
+        return metadata.isEmpty ? nil : metadata
+    }
+
+    /// Applies per-response metadata only when the live/replay projection
+    /// boundary marks textual assistant content as terminal for the prompt
+    /// cycle.
+    mutating func applyFinalAssistantResponseMetadata(
+        tokenRecord: TokenRecord?,
+        model: String?,
+        latencyMs: Int?
+    ) {
+        guard role == .assistant,
+              content.isAssistantResponseText,
+              isFinalAssistantResponse
+        else {
+            return
+        }
+
+        self.tokenRecord = tokenRecord
+        self.model = model
+        self.latencyMs = latencyMs
+    }
+
     /// Whether this message can be deleted.
     /// Only user and assistant messages with event IDs can be deleted.
     var canBeDeleted: Bool {
@@ -103,5 +144,16 @@ struct ChatMessage: Identifiable, Equatable {
         guard !isStreaming else { return false }
 
         return true
+    }
+}
+
+/// Display-ready metadata for the final assistant response in a prompt cycle.
+struct FinalAssistantResponseMetadata {
+    let tokenRecord: TokenRecord?
+    let model: String?
+    let latency: String?
+
+    var isEmpty: Bool {
+        tokenRecord == nil && model == nil && latency == nil
     }
 }

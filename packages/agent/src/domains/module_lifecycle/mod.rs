@@ -35,6 +35,8 @@
 //! grant. Disabled and quarantined states fail closed through
 //! `ensure_runtime_allowed` so later runtime slices can consult this domain
 //! without executing modules here.
+//! Service entry points borrow the engine host directly; lifecycle policy and
+//! state ownership remain inside this domain.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -48,11 +50,6 @@ mod records;
 mod resource_store;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{MODULE_LIFECYCLE_STATE_KIND, MODULE_LIFECYCLE_STATE_SCHEMA_ID};
 

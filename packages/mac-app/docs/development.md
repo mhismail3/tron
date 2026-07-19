@@ -1,7 +1,5 @@
 # Mac App Development
 
-> Last verified: 2026-06-12 (RIURD release/install discipline, HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
-
 ## Setup
 
 ### Prerequisites
@@ -9,7 +7,8 @@
 - Xcode 16+ (macOS 15 Sequoia deployment target)
 - XcodeGen (`brew install xcodegen`)
 - Rust toolchain (`rustup`) — for the bundled agent binary
-- Signing: `Apple Development` for Debug so `SMAppService` can spawn the bundled Login Item; `Developer ID Application` for Release/DMG distribution
+- Signing: `Apple Development` for isolated Debug install testing;
+  `Developer ID Application` is supplied by the Release/DMG workflow
 
 ### One-time setup
 
@@ -32,8 +31,6 @@ Use the `TronMac Isolated Install` scheme only when testing first-run or reinsta
 
 The wizard install path validates the bundled helper app + LaunchAgent plist, registers or refreshes the active scheme's LaunchAgent through `SMAppService`, and waits for the server heartbeat. A previously enabled Login Item registration is shown as registered, not ready; the user still has to press Start server and the wizard still waits for `system::ping` before continuing. Release builds must run from `/Applications/Tron.app`; default Debug builds may run from DerivedData for wrapper dogfood but cannot mutate the production Login Item; isolated Debug is the explicit install-test path. The wizard does not copy a server bundle into `~/.tron/internal/`, write `~/Library/LaunchAgents`, stage contributor CLI artifacts under `~/.tron/internal/run/`, or sync managed product assets. Menu-bar startup writes `~/.tron/internal/run/mac-app-version.json` after a successful first-run or update finalization; when that marker does not match the current app build, startup restarts the production helper once and records the marker only after `/health` is reachable.
 
-Contributor `tron manual-deploy` is separate from the Mac wrapper and DMG release path. It uses contributor-only bundles under `~/.tron/internal/run/`, refuses active `tron dev` listeners on port 9847, advances `deployed-commit` only after `/health`, and records `restart-sentinel.json` as completed, rolled back, or failed so preflight can catch interrupted deployments. `tron rollback` is also health-gated: launchd loaded state is not enough to print success.
-
 ## Workflow quick reference
 
 Run these commands from the repo root unless a step says otherwise. The wrapper never builds the Rust agent at install time; every wrapper path below uses whichever `tron` binary was last staged into `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` and `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron`.
@@ -42,20 +39,26 @@ Run these commands from the repo root unless a step says otherwise. The wrapper 
 |---|---|---|
 | Xcode Debug menu/wizard UI dogfood | `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`<br>`cd packages/mac-app && xcodegen generate`<br>Open `TronMac.xcodeproj`, select `TronMac`, Run | Builds `TronMac.app` in DerivedData with bundle id `com.tron.mac.dev`; coexists with `/Applications/Tron.app` and observes the production server without taking over its Login Item |
 | Xcode isolated install/reinstall test | `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`<br>`cd packages/mac-app && xcodegen generate`<br>Open `TronMac.xcodeproj`, select `TronMac Isolated Install`, Run | Runs the first-run wizard against `com.tron.server.dev`, port `9848`, and `~/.tron-dev`; safe while the production DMG app/server remain installed |
-| Local Release install test | `bash packages/mac-app/scripts/bundle-agent.sh`<br>`cd packages/mac-app && xcodegen generate`<br>`xcodebuild -scheme TronMac -destination 'platform=macOS' -configuration Release build`<br>`ditto "$HOME/Library/Developer/Xcode/DerivedData/TronMac-"*/Build/Products/Release/Tron.app /Applications/Tron.app`<br>`open /Applications/Tron.app` | Replaces the single installed-release slot with a local `com.tron.mac` build; exercises the same path and SMAppService registration as the DMG, without notarization/Gatekeeper |
+| Local Release install test | Follow [Local Release install testing](#local-release-install-testing) | Replaces the single installed-release slot with a local `com.tron.mac` build; exercises the same path and SMAppService registration as the DMG, without notarization/Gatekeeper |
 | Rust server iteration only | `./scripts/tron dev` | Stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` in background mode, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then restores `/Applications/Tron.app` through `--tron-start-server-and-quit` on exit. The internal wrapper command exits nonzero if ServiceManagement loads the helper but `/health` never becomes reachable. Background mode is LaunchAgent-backed so non-interactive agents do not own the server process group. Agent automation should prefer `./scripts/tron dev -bd --json --wait <seconds>` and verify with `./scripts/tron status --json`. |
+| Production DMG release | Push a matching `server-v*` tag and let `.github/workflows/release-mac.yml` run with signing credentials | Builds and verifies `Tron.app`, signs and notarizes the app and DMG, then creates a draft or updates an existing release without changing its publish state; manual dispatch never publishes |
 
-The workspace CLI dispatcher is intentionally small. Command families live in
-`scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
-`scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
-`tron install`, `tron setup`, and contributor deploy refreshes.
-| Production DMG release | Push/run the `server-v*` release workflow in `.github/workflows/release-mac.yml` | Builds `tron`, stages it into `Tron.app`, verifies the bundled helper and LaunchAgent, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
+The workspace CLI dispatcher is intentionally small. Command families and
+contributor bundle/signing live in `scripts/tron.d/`; runtime service/log/auth
+helpers shared by the installed `tron-cli` live in `scripts/tron-lib.d/` and
+are copied beside `tron-lib.sh` during `tron install` and contributor deploy
+refreshes. `tron setup` instead links the workspace entrypoint only when no
+installed pair owns it, so rerunning development setup cannot replace an
+installed helper/CLI pair. Contributor `tron install` and `tron manual-deploy`
+locally sign and validate their helper
+bundles but never notarize them; `.github/workflows/release-mac.yml` is the sole
+owner of distribution signing and notarization.
 
 ## Local dev loop
 
 ### Staging the bundled helper binaries
 
-`Tron.app` embeds the Rust agent inside signed helper apps at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/` and `Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/`. `Tron Server.app` has bundle id `com.tron.server` for production/local Release; `Tron Server Dev.app` has bundle id `com.tron.server.dev` for isolated Debug install testing. `tron` is the LaunchAgent entrypoint. The helper binary is gitignored under each helper's `Contents/MacOS/` and produced by:
+`Tron.app` embeds the Rust agent inside signed helper apps at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/` and `Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/`. `Tron Server.app` has bundle id `com.tron.server` for production/local Release; `Tron Server Dev.app` has bundle id `com.tron.server.dev` for isolated Debug install testing. The tracked helper `Info.plist` files own those identifiers and display names, the tracked LaunchAgent plists own registration metadata, and `TronPaths` selects the active release or isolated runtime variant. Each helper bundle identifier must equal its LaunchAgent label so signing and launchd agree, while its `Tron Server` display name stays distinct from the `Tron` wrapper shown for System Settings permissions. `tron` is the sole Cargo helper executable and LaunchAgent entrypoint. Bundled helpers run with `--quiet` and do not inject a logging environment override; database diagnostics remain fixed engine policy. The helper binary is gitignored under each helper's `Contents/MacOS/` and produced by:
 
 ```bash
 # Build + stage the release agent (default)
@@ -70,24 +73,38 @@ packages/mac-app/scripts/bundle-agent.sh --skip-build
 # Or, to use a binary built elsewhere:
 packages/mac-app/scripts/bundle-agent.sh --source /absolute/path/to/tron
 
-# Or, to wipe only the ignored helper executables (for a clean `xcodebuild`):
+# Or, to wipe the ignored generated helper payloads:
 packages/mac-app/scripts/bundle-agent.sh --clean
 ```
 
-`--clean` preserves the tracked helper-resource layout: both LaunchAgent plists,
-both helper `Info.plist` files, and helper icons stay in the repository. It only
-removes ignored payload binaries under each helper's `Contents/MacOS/`.
+`--clean` removes the ignored helper binaries and per-helper icon copies. It
+preserves the single tracked icon source, both LaunchAgent plists, and both
+helper `Info.plist` files. The next staging run recreates both icon copies from
+`Sources/Resources/AppIcon.icns` before Xcode copies and signs the helper apps.
 
-The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. The primitive branch does not bundle managed skills, transcription sidecars, or product capability assets.
+The two helper `Info.plist` files and two LaunchAgent plists under
+`Sources/Resources/Library` are the authoritative packaged metadata.
+`bundle-agent.sh` verifies that those tracked files exist; it does not generate
+or repair them while staging a binary. Edit and review the tracked plist owner
+directly when bundle identity, arguments, ports, or associations change.
 
-After staging, regenerate the Xcode project so it picks up the file reference:
+The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. Managed skills, transcription sidecars, and product capability assets are not bundled.
+
+Generate the Xcode project after clone and after any change to `project.yml`
+(the wrapper/test bundle-identity and shared deployment/Swift/project-shape
+owner), configuration-specific compiler settings under `Configuration/`, or
+the source/resource layout:
 
 ```bash
 cd packages/mac-app
 xcodegen generate
 ```
 
-If you ship the wrapper without either staged helper executable or the bundled LaunchAgent plist for the active workflow, `InstallStep` surfaces a helper validation failure. The wizard refuses to advance past the Install step.
+Restaging the ignored helper executable alone does not require regeneration;
+the post-build script reads the tracked `Sources/Resources/Library` tree
+directly.
+
+If you ship the wrapper without the active staged helper executable or its bundled LaunchAgent plist, `InstallStep` surfaces a helper validation failure. The wizard refuses to advance past the Install step.
 
 Xcode's `Copy Bundled Login Item` script copies the whole `Sources/Resources/Library` tree after compile, signs every nested helper app, then re-signs the outer wrapper so ServiceManagement sees the copied LaunchAgent plists as sealed resources. If that final outer-app re-sign is skipped, `SMAppService.register()` fails with code `-67054` (`a sealed resource is missing or invalid`).
 
@@ -101,25 +118,30 @@ There is no installer cleanup path that edits production artifacts in place: the
 cd packages/mac-app
 
 # Build only (no test run):
-xcodebuild -scheme TronMac -destination 'platform=macOS' -configuration Debug build
+xcodebuild -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug build
 
 # Full test suite:
-xcodebuild test -scheme TronMac -destination 'platform=macOS'
+xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS'
 
-# Release build (signed with Developer ID; required for DMG):
-xcodebuild -scheme TronMac -destination 'platform=macOS' -configuration Release build
+# Local Release build (the release workflow supplies distribution signing/notarization):
+xcodebuild -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Release build
 ```
 
 ### Local Release install testing
 
-To test the same filesystem and ServiceManagement path as the DMG without packaging a DMG, build Release and copy the product into `/Applications/Tron.app`:
+To test the same filesystem and ServiceManagement path as the DMG without
+packaging a DMG, first quit the installed Tron wrapper from its menu. The
+LaunchAgent-owned server keeps running. Then build Release and replace the app
+bundle before reopening it:
 
 ```bash
 bash packages/mac-app/scripts/bundle-agent.sh
 cd packages/mac-app
 xcodegen generate
-xcodebuild -scheme TronMac -destination 'platform=macOS' -configuration Release build
-ditto "$HOME/Library/Developer/Xcode/DerivedData/TronMac-"*/Build/Products/Release/Tron.app /Applications/Tron.app
+xcodebuild -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Release -derivedDataPath build/dd build
+test -d build/dd/Build/Products/Release/Tron.app
+rm -rf /Applications/Tron.app
+ditto build/dd/Build/Products/Release/Tron.app /Applications/Tron.app
 open /Applications/Tron.app
 ```
 
@@ -127,7 +149,7 @@ This is intentionally the same runtime mode as a real DMG install: bundle ID `co
 
 If a real DMG build is already installed, local Release testing replaces that same `/Applications/Tron.app` slot; there is no second side-by-side Release identity. For an update-style test, copy the local Release over `/Applications/Tron.app`, then launch it or run `tron start`/`tron restart`; the wrapper should re-register/repair SMAppService, refresh stale launch constraints such as `needs LWCR update`, and restart the helper once for the new build before reporting success. For a first-run wizard test, choose **Uninstall Tron** from the existing menu bar app first (preserving database/workspace), copy the local Release into `/Applications/Tron.app`, then open it and run the wizard install.
 
-For Rust-agent iteration without rebuilding the wrapper, use `tron dev`. It stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` before declaring a background takeover successful, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then restores the installed `/Applications/Tron.app` helper through the wrapper's internal `--tron-start-server-and-quit` command when the dev process exits. That internal command reuses the wrapper's SMAppService path and exits nonzero if the helper loads but never reaches `/health`; stale installed helpers must be updated or reinstalled instead of masked by a successful launchd load. Background mode uses the transient `com.tron.server.dev-takeover` LaunchAgent so non-interactive agents do not own or accidentally reap the server process group. Machine-driven test loops should use `tron dev -bd --json --wait <seconds>` and treat `tron status --json` as the authoritative post-restart state instead of reading a transient launched child PID from human logs; the JSON status includes stale pid-file fields when a background process has exited.
+For Rust-agent iteration without rebuilding the wrapper, use `tron dev`. It stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` before declaring a background takeover successful, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then delegates every exit or candidate preparation/launch failure restore to the same shared start owner as `tron start`. With `/Applications/Tron.app` installed, that owner invokes the wrapper's internal `--tron-start-server-and-quit` command; contributor-only installs retain their LaunchAgent fallback. The wrapper command reuses the SMAppService path and exits nonzero if the helper loads but never reaches `/health`, while the contributor path is likewise health-gated; stale installed helpers must be updated or reinstalled instead of masked by a successful launchd load. Background mode uses the transient `com.tron.server.dev-takeover` LaunchAgent so non-interactive agents do not own or accidentally reap the server process group. Machine-driven test loops should use `tron dev -bd --json --wait <seconds>` and treat `tron status --json` as the authoritative post-restart state instead of reading a transient launched child PID from human logs; the JSON status includes stale pid-file fields when a background process has exited.
 
 ### Xcode isolated install testing
 
@@ -158,37 +180,50 @@ All tests use **Swift Testing** (`@Test`, `@Suite`, `#expect`) rather than XCTes
 
 Mac wrapper tests run through the `TronMac` scheme so `@testable import TronMac` exercises the real app target. The generated scheme and CI both set `TRON_MAC_TEST_HOST=1`, and the app also recognizes Xcode's test-host environment markers, then renders an inert 1x1 host instead of the onboarding wizard or menu bar. Keep that path side-effect free: CI must never register Login Items, acquire production wrapper locks, or manage a real server just to run unit tests; window configuration must also exit before applying production styling. If Xcode changes its test-host markers, update `TronMacRuntime.isRunningUnderTests` and its test in `MacRuntimeVariantTests.swift` together.
 
-GitHub's Mac CI pins the destination to the runner architecture, uses `xcodebuild build-for-testing` to compile the app plus the full Mac test bundle, then runs focused non-flaky wrapper suites for `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests`. Those suites cover path ownership, server status polling, and Tailscale probing without exercising the hosted runner paths that can wedge before Swift Testing starts. Run the broader app-hosted Mac tests locally from Xcode or with `xcodebuild test` when changing wrapper logic, menu behavior, install planning, or wizard flows.
+GitHub's Mac CI pins the destination to the runner architecture, uses
+`xcodebuild build-for-testing` to compile the app plus the full Mac test
+bundle, then limits hosted execution to the known-stable `TronPathsTests`,
+`ServerStatusPollerTests`, and `TailscaleProbeTests` suites. Run the broader
+app-hosted tests locally when changing wrapper logic, menu behavior, install
+planning, or wizard flows.
 
 ## Running the wizard during dev
 
-1. Stage a debug-profile agent: `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`
-2. `xcodegen generate`
-3. Open `TronMac.xcodeproj`, select `TronMac` scheme.
-4. Run (Cmd+R) — the wizard shows if `~/.tron/internal/run/.onboarded` does NOT exist.
-5. To re-run the wizard: `rm ~/.tron/internal/run/.onboarded && defaults delete com.tron.mac.dev` (for dev) or `com.tron.mac` (for release).
+1. Stage a debug-profile agent: `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`.
+2. Generate the project: `cd packages/mac-app && xcodegen generate`.
+3. Open `TronMac.xcodeproj`.
+4. Select `TronMac` for companion UI dogfood; it can display the wizard but
+   cannot complete production installation. Select `TronMac Isolated Install`
+   for the complete wizard flow against `~/.tron-dev` and port `9848`.
+5. To reset companion wizard state, remove
+   `~/.tron/internal/run/.onboarded`; to reset isolated state, remove
+   `~/.tron-dev/internal/run/.onboarded`. Clear the shared Debug progress suite
+   with `defaults delete com.tron.mac.dev` when needed.
 
-To simulate the menu-bar-only mode without onboarding, just `touch ~/.tron/internal/run/.onboarded` before launching.
+To simulate menu-bar-only mode, create the corresponding `.onboarded` sentinel
+before launching. Release uses `~/.tron`; isolated Debug uses `~/.tron-dev`.
 
-## CI pipeline (Phase 6+)
+## CI pipeline
 
-Defined in `.github/workflows/release-mac.yml`. Broadly:
+Release orchestration remains owned by
+[`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml).
+It verifies the `VERSION.env` mirrors, builds and stages the locked Rust agent,
+generates the Xcode project, archives the wrapper, signs inside-out, notarizes
+the app, then calls [`scripts/package-dmg.sh`](../scripts/package-dmg.sh).
+That package owner copies the complete app, applies the explicit structural or
+release layout, and remounts the image to require the wrapper, helper, and
+`Applications -> /Applications` link. The workflow retains DMG signing,
+notarization, hashing, upload, and release handling; `scripts/tron-release-notes`
+and `scripts/tron-version` own the dynamic release metadata.
 
-1. `scripts/tron version check` validates that `VERSION.env` matches Cargo, Cargo.lock, Mac/iOS XcodeGen settings, custom bundle canonical version keys, and release docs. Tag runs must match `server-v$(TRON_VERSION)`, so manual workflow input cannot create a mismatched artifact.
-2. `cargo build --release --bin tron --locked` on the same `macos-15` runner (cross-compile is avoided for code-signing reasons).
-3. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build` inside `packages/mac-app`, which stages `packages/agent/target/release/tron`.
-4. `xcodegen generate` inside `packages/mac-app/`.
-5. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies the helper Library tree and Constitution defaults.
-6. Export the `.app`, verify the helper executable and LaunchAgent plist are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
-7. Notarize the signed app via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple the app, package it into a DMG via `create-dmg`, sign the DMG, then notarize and staple the DMG separately because notary tickets are artifact-specific.
-8. Keep dSYMs in the archive/release artifacts for Apple crash diagnostics.
-9. `scripts/tron-release-notes` generates a bounded draft changelog body from first-parent git history since the previous release tag, with DMG, SHA256, and full compare-link details included. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta2 release intentionally compares against the historical Mac-scoped beta1 tag so the tag-prefix rename does not turn beta2 into an all-history changelog.
-10. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates or updates a draft pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog.
-11. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
-
-PR builds (no tag) take a dry-run path: same `xcodebuild archive` + DMG assembly but ad-hoc-signed (`-`) so fork PRs without certs still validate the pipeline.
-
-See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml) (added in Phase 6, hardened in Phase 8).
+Manual workflow dispatch defaults to an unsigned dry-run and never publishes a
+GitHub release; with `dry_run=false` and signing credentials, it can exercise
+signed and notarized packaging. Only the explicit manual dry-run may omit the
+five signing/notarization secrets; tag runs and manual `dry_run=false` runs
+reject any missing secret before the build. PR CI compiles the full Mac test
+bundle, runs focused stable suites, and calls the same owner with structural
+layout on an unsigned Debug app.
+Missing build products, helpers, links, or failed packaging are hard failures.
 
 ## Common tasks
 
@@ -198,39 +233,36 @@ See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac
 2. Create a new view file under `Sources/Wizard/Steps/`.
 3. Add a case to the `switch state.step` dispatcher in `WizardView.swift`.
 4. Add tests to `Tests/Wizard/Flow/`, `Tests/Wizard/Steps/`, or `Tests/Wizard/Components/` based on the behavior being pinned; at minimum, verify the step ordering, rendering, and back/next behavior.
-5. Update `packages/mac-app/docs/architecture.md` with the step's role.
+5. Keep the shared 480×440 canvas unless the new page genuinely cannot fit; a canvas-size change belongs in `WizardLayout` and `WizardVisualLayoutTests`, not per-step metadata.
+6. Update `packages/mac-app/docs/architecture.md` with the step's role.
 
 ### Add a new menu-bar item
 
-1. Extend `MenuItemDescriptor` enum in `MenuBarItemBuilder.swift` if the row needs new semantics (most new items are `.action` or `.openLink`; pairing/log detail belongs in dedicated windows).
-2. Add the item to the returned array in `MenuBarItemBuilder.build(snapshot:paths:)`.
-3. Pin the ordering in `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift`.
+1. Add a `MenuBarAction` case and route it in `MenuBarActionHandler.perform(_:)` when the item has side effects; pairing/log detail belongs in dedicated windows.
+2. Add the typed `.action` (or passive `.openLink`) descriptor in `MenuBarItemBuilder.build(snapshot:tronHome:defaultServerPort:canManageLaunchAgent:)`.
+3. Pin the action mapping and ordering in `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift`.
 
 ### Debug the `.onboarded` sentinel logic
 
 `setup.onboardedSentinelExists()` is a single `FileManager.default.fileExists(atPath:)` call. If the wizard keeps re-showing, check:
 
+The terminal **Open menu bar** action writes this sentinel before switching
+modes. If that write fails, the current Done screen remains visible so the
+action can be retried after fixing the filesystem problem.
+
 ```bash
 ls -la ~/.tron/internal/run/.onboarded
-# Should be a 0-or-more-byte file; first line is an ISO8601 timestamp with millis.
+# The current writer creates a nonempty ISO8601 timestamp line with fractional seconds.
 ```
 
 If it's missing, the wizard will re-run. If it's a directory, something is very wrong — remove it.
-
-## Linting + formatting
-
-Run `swiftformat` if installed (same config as iOS):
-
-```bash
-swiftformat packages/mac-app/Sources packages/mac-app/Tests
-```
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| Install reports missing helper executable | The active helper binary (`Tron Server.app` for production/Release or `Tron Server Dev.app` for isolated Debug) was not staged before archive/build. Run `bash packages/mac-app/scripts/bundle-agent.sh`, then `xcodegen generate`. |
-| Install reports invalid LaunchAgent plist | The bundled `Contents/Library/LaunchAgents/<active-label>.plist` is missing `BundleProgram`, the exact active `tron --port <port> --quiet` argv, or the wrapper `AssociatedBundleIdentifiers`. Re-run the bundle script and regenerate. |
+| Install reports missing helper executable | The active helper binary (`Tron Server.app` for production/Release or `Tron Server Dev.app` for isolated Debug) was not staged before archive/build. Run `bash packages/mac-app/scripts/bundle-agent.sh`, then rebuild; restaging alone does not require XcodeGen. |
+| Install reports invalid LaunchAgent plist | The tracked `Sources/Resources/Library/LaunchAgents/<active-label>.plist` is missing `BundleProgram`, the exact active `tron --port <port> --quiet` argv, or the wrapper `AssociatedBundleIdentifiers`. Fix that authoritative plist, validate it with `plutil -lint`, then regenerate the project. |
 | Install fails with `Codesigning failure loading plist ... code: -67054` | The copied `Contents/Library/LaunchAgents/*.plist` resources are not sealed by the outer app signature. Rebuild with the current XcodeGen project so the post-build script re-signs the helper apps and then the outer wrapper. |
 | `SingleInstanceLock.acquire()` returns false on first launch | Another instance of the same wrapper bundle id is already running, or that specific lock file has broken permissions. Release uses `.mac-wrapper.com.tron.mac.lock`; Debug uses `.mac-wrapper.com.tron.mac.dev.lock`. |
 | Tailscale step says not signed in even though `tailscale status` is healthy | Rebuild the wrapper with the latest `TailscaleProbe`; it tries every executable candidate and the "I have Tailscale" button re-probes instead of skipping the gate. |

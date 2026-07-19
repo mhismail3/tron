@@ -51,7 +51,7 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
         .await;
     assert!(missing.error.is_some());
 
-    let records = catalog.invocations();
+    let records = catalog.ledger_invocations().unwrap();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].function_id.as_str(), "alpha::read");
     assert_eq!(records[0].actor_id, actor("agent"));
@@ -600,9 +600,8 @@ async fn engine_invoke_meta_does_not_block_discovery_while_child_runs() {
         json!({"x": 1})
     );
     let host = handle.lock().await;
-    let child_record = host
-        .catalog()
-        .invocations()
+    let records = host.catalog().ledger_invocations().unwrap();
+    let child_record = records
         .iter()
         .find(|record| record.function_id == fid("alpha::slow"))
         .unwrap();
@@ -673,6 +672,121 @@ async fn engine_host_handle_records_panics_and_replays_panic_errors() {
         duplicate.error,
         Some(EngineError::StoredInvocationError { message, .. })
             if message.contains("handler failed")
+    ));
+}
+
+#[tokio::test]
+async fn regular_cancellation_releases_lease_records_compensation_and_replays_typed_error() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("w1", "alpha"), true)
+        .unwrap();
+    let started = Arc::new(Barrier::new(2));
+    handle
+        .register_function_for_setup(
+            write_function("alpha::cancellable", "w1")
+                .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+                    "session",
+                    "session:{sessionId}:cancellable",
+                    30_000,
+                ))
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::ManualOnly,
+                    "cancelled writes retain recovery evidence",
+                )),
+            Some(Arc::new(BlockingHandler {
+                started: Arc::clone(&started),
+                release: Arc::new(Notify::new()),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let invocation = Invocation::new_sync(
+        fid("alpha::cancellable"),
+        json!({"sessionId": "session-a"}),
+        mutating_causal("cancel-key"),
+    );
+    let running = {
+        let handle = handle.clone();
+        let cancellation = cancellation.clone();
+        tokio::spawn(async move {
+            handle
+                .invoke_regular_cancellable(invocation, &cancellation)
+                .await
+                .expect("regular cancellable invocation")
+        })
+    };
+
+    started.wait().await;
+    cancellation.cancel();
+    let first = running.await.unwrap();
+    assert_eq!(first.error, Some(EngineError::InvocationCancelled));
+
+    let first_record = {
+        let host = handle.lock().await;
+        host.catalog()
+            .ledger_invocations()
+            .unwrap()
+            .into_iter()
+            .find(|record| record.invocation_id == first.invocation_id)
+            .expect("cancelled invocation record")
+    };
+    assert!(!first_record.succeeded);
+    assert_eq!(first_record.error, Some(EngineError::InvocationCancelled));
+    assert_eq!(first_record.resource_lease_ids.len(), 1);
+    let lease_id = &first_record.resource_lease_ids[0];
+    let lease = handle
+        .get_resource_lease(lease_id)
+        .await
+        .unwrap()
+        .expect("cancelled invocation lease");
+    assert_eq!(lease.status, EngineResourceLeaseStatus::Released);
+
+    let compensation = handle.list_compensation_records().await.unwrap();
+    assert_eq!(compensation.len(), 1);
+    assert_eq!(compensation[0].invocation_id, first.invocation_id);
+    assert_eq!(compensation[0].resource_lease_ids, vec![lease_id.clone()]);
+    assert!(!compensation[0].succeeded);
+    assert_eq!(
+        compensation[0]
+            .error
+            .as_ref()
+            .map(|error| error.kind.as_str()),
+        Some("invocation_cancelled")
+    );
+
+    let replay = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        handle.invoke(Invocation::new_sync(
+            fid("alpha::cancellable"),
+            json!({"sessionId": "session-a"}),
+            mutating_causal("cancel-key"),
+        )),
+    )
+    .await
+    .expect("idempotent replay must not re-enter the blocking handler");
+    assert_eq!(replay.replayed_from, Some(first.invocation_id));
+    assert_eq!(replay.error, Some(EngineError::InvocationCancelled));
+    assert_eq!(handle.list_compensation_records().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn regular_cancellation_rejects_privileged_host_targets() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let error = handle
+        .invoke_regular_cancellable(
+            Invocation::new_sync(fid("engine::discover"), json!({}), causal()),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect_err("privileged target must not fall back to ordinary invocation");
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("regular in-process function")
     ));
 }
 

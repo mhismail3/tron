@@ -467,6 +467,7 @@ mod tests {
                     Err(ProviderError::RateLimited {
                         retry_after_ms: 50,
                         message: "Rate limited".into(),
+                        code: None,
                     })
                 } else {
                     let stream = futures::stream::iter(vec![

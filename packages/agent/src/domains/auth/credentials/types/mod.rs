@@ -451,9 +451,12 @@ pub fn should_refresh(tokens: &OAuthTokens, buffer_ms: i64) -> bool {
     now_ms() + buffer_ms >= tokens.expires_at
 }
 
-/// Calculate expiration timestamp from `expires_in` seconds.
-pub fn calculate_expires_at(expires_in_seconds: i64, buffer_seconds: i64) -> i64 {
-    now_ms() + (expires_in_seconds - buffer_seconds) * 1000
+/// Calculate the provider's actual expiration timestamp from `expires_in`.
+///
+/// Refresh callers apply their configured safety buffer when deciding whether
+/// to renew. Subtracting it here as well would apply that policy twice.
+pub(crate) fn calculate_expires_at(expires_in_seconds: i64) -> i64 {
+    now_ms() + expires_in_seconds * 1000
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

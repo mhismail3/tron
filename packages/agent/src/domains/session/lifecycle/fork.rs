@@ -1,4 +1,5 @@
 use super::{BaseEvent, Deps, SessionLifecycleService, TronEvent};
+use crate::domains::session::event_store::ForkOptions;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors;
 use crate::shared::server::errors::CapabilityError;
@@ -12,27 +13,43 @@ impl SessionLifecycleService {
         from_event_id: Option<String>,
         title: Option<String>,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_fork = session_id.clone();
-        let title_for_fork = title.clone();
         let (new_session_id, forked_from_event_id, root_event_id) =
             run_blocking_task("session.fork", move || {
-                let result = session_manager
-                    .fork_session(
-                        &session_id_for_fork,
-                        from_event_id.as_deref(),
-                        None,
-                        title_for_fork.as_deref(),
+                let fork_event_id = if let Some(event_id) = from_event_id {
+                    event_id
+                } else {
+                    let session = event_store
+                        .get_session(&session_id_for_fork)
+                        .map_err(|error| CapabilityError::NotFound {
+                            code: errors::SESSION_NOT_FOUND.into(),
+                            message: format!("Persistence error: {error}"),
+                        })?
+                        .ok_or_else(|| CapabilityError::NotFound {
+                            code: errors::SESSION_NOT_FOUND.into(),
+                            message: format!("Session not found: {session_id_for_fork}"),
+                        })?;
+                    session
+                        .head_event_id
+                        .ok_or_else(|| CapabilityError::NotFound {
+                            code: errors::SESSION_NOT_FOUND.into(),
+                            message: "Persistence error: Session has no head event".into(),
+                        })?
+                };
+                let result = event_store
+                    .fork(
+                        &fork_event_id,
+                        &ForkOptions {
+                            model: None,
+                            title: title.as_deref(),
+                        },
                     )
                     .map_err(|error| CapabilityError::NotFound {
                         code: errors::SESSION_NOT_FOUND.into(),
-                        message: error.to_string(),
+                        message: format!("Persistence error: {error}"),
                     })?;
-                Ok((
-                    result.new_session_id,
-                    result.forked_from_event_id,
-                    result.root_event_id,
-                ))
+                Ok((result.session.id, fork_event_id, result.fork_event.id))
             })
             .await?;
 

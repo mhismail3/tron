@@ -1,10 +1,12 @@
 //! Primitive Tron Home layout, recovery, and context block types.
 //!
 //! Normal runtime code reads three constitutional roots: `internal/`,
-//! `profiles/`, and `workspace/`. Source-owned managed defaults are refreshed
-//! from the compiled bundle when their content changes. Mutable install records
-//! such as the active profile, auth sentinels, and sparse user profile are only
-//! created or repaired when invalid.
+//! `profiles/`, and `workspace/`. Server startup calls this owner to complete
+//! that layout and refresh source-owned managed profiles from the compiled
+//! bundle. Contributor shell tools may stage their own payload under
+//! `internal/run/`, but do not preseed the complete layout. Constitution seeds
+//! only a private empty auth sentinel required by profile validation; the auth
+//! domain materializes the full schema through its secure writer.
 
 use std::fs;
 use std::io;
@@ -115,39 +117,31 @@ pub struct SeedReport {
     pub repaired: Vec<PathBuf>,
 }
 
-#[derive(Clone, Copy)]
-enum DefaultKind {
-    Toml,
-    Json,
-}
-
 struct ManagedDefault {
     relative_path: &'static str,
     content: &'static str,
-    kind: DefaultKind,
     repair_if_invalid: bool,
 }
 
 macro_rules! managed_default {
-    ($path:literal, $kind:expr, $repair_if_invalid:expr) => {
+    ($path:literal, $repair_if_invalid:expr) => {
         ManagedDefault {
             relative_path: $path,
             content: include_str!(concat!("../../../defaults/", $path)),
-            kind: $kind,
             repair_if_invalid: $repair_if_invalid,
         }
     };
 }
 
 const MANAGED_DEFAULTS: &[ManagedDefault] = &[
-    managed_default!("profiles/active.toml", DefaultKind::Toml, true),
-    managed_default!("profiles/auth.toml", DefaultKind::Toml, false),
-    managed_default!("profiles/auth.json", DefaultKind::Json, false),
-    managed_default!("profiles/default/profile.toml", DefaultKind::Toml, true),
-    managed_default!("profiles/normal/profile.toml", DefaultKind::Toml, true),
-    managed_default!("profiles/chat/profile.toml", DefaultKind::Toml, true),
-    managed_default!("profiles/local/profile.toml", DefaultKind::Toml, true),
-    managed_default!("profiles/user/profile.toml", DefaultKind::Toml, false),
+    managed_default!("profiles/active.toml", true),
+    managed_default!("profiles/auth.toml", false),
+    managed_default!("profiles/auth.json", false),
+    managed_default!("profiles/default/profile.toml", true),
+    managed_default!("profiles/normal/profile.toml", true),
+    managed_default!("profiles/chat/profile.toml", true),
+    managed_default!("profiles/local/profile.toml", true),
+    managed_default!("profiles/user/profile.toml", false),
 ];
 
 /// Ensure the current Tron Home is recovered and structurally complete.
@@ -208,7 +202,7 @@ fn recover_managed_defaults(home: &Path, report: &mut SeedReport) -> io::Result<
         let path = home.join(default.relative_path);
         let existed_before = path.exists();
         let should_write = if existed_before {
-            let invalid = default.repair_if_invalid && !managed_default_valid(&path, default.kind);
+            let invalid = default.repair_if_invalid && !managed_default_valid(&path);
             invalid
                 || (managed_default_is_source_owned(default.relative_path)
                     && managed_default_content_differs(&path, default.content)?)
@@ -217,11 +211,13 @@ fn recover_managed_defaults(home: &Path, report: &mut SeedReport) -> io::Result<
         };
 
         if should_write {
-            write_managed_default(&path, default.content)?;
-            if existed_before {
-                report.repaired.push(path);
-            } else {
-                report.seeded.push(path);
+            let wrote = write_managed_default(&path, default.content)?;
+            if wrote {
+                if existed_before {
+                    report.repaired.push(path);
+                } else {
+                    report.seeded.push(path);
+                }
             }
         }
     }
@@ -240,55 +236,73 @@ fn managed_default_content_differs(path: &Path, expected: &str) -> io::Result<bo
     Ok(actual != expected)
 }
 
-fn write_managed_default(path: &Path, content: &str) -> io::Result<()> {
+fn write_managed_default(path: &Path, content: &str) -> io::Result<bool> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, content)
+    if path.file_name().and_then(|name| name.to_str()) == Some(files::AUTH_JSON) {
+        return write_private_default_if_absent(path, content);
+    }
+    fs::write(path, content).map(|()| true)
 }
 
-fn managed_default_valid(path: &Path, kind: DefaultKind) -> bool {
+fn write_private_default_if_absent(path: &Path, content: &str) -> io::Result<bool> {
+    use std::io::Write as _;
+
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private managed default path has no parent directory",
+        )
+    })?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".auth.seed.")
+        .tempfile_in(parent)?;
+    temporary.write_all(content.as_bytes())?;
+    temporary.as_file().sync_all()?;
+    match temporary.persist_noclobber(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error.error),
+    }
+}
+
+fn managed_default_valid(path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(path) else {
         return false;
     };
     if content.trim().is_empty() {
         return false;
     }
-    match kind {
-        DefaultKind::Toml => {
-            let Ok(value) = toml::from_str::<toml::Value>(&content) else {
-                return false;
-            };
-            if path.file_name().and_then(|name| name.to_str()) == Some(files::ACTIVE_TOML) {
-                return value
-                    .get("active")
-                    .and_then(toml::Value::as_str)
-                    .is_some_and(|active| !active.trim().is_empty() && active != DEFAULT_PROFILE);
-            }
-            if path.file_name().and_then(|name| name.to_str()) == Some(files::PROFILE_TOML)
-                && let Some(profile_name) = path
-                    .parent()
-                    .and_then(Path::file_name)
-                    .and_then(|name| name.to_str())
-                && [DEFAULT_PROFILE, NORMAL_PROFILE, CHAT_PROFILE, LOCAL_PROFILE]
-                    .contains(&profile_name)
-            {
-                if toml::from_str::<super::profile::ProfileDocument>(&content).is_err() {
-                    return false;
-                }
-                return value
-                    .get("name")
-                    .and_then(toml::Value::as_str)
-                    .is_some_and(|name| name == profile_name)
-                    && value
-                        .get("version")
-                        .and_then(toml::Value::as_str)
-                        .is_some_and(|version| version == super::profile::CURRENT_PROFILE_VERSION);
-            }
-            true
-        }
-        DefaultKind::Json => serde_json::from_str::<serde_json::Value>(&content).is_ok(),
+    let Ok(value) = toml::from_str::<toml::Value>(&content) else {
+        return false;
+    };
+    if path.file_name().and_then(|name| name.to_str()) == Some(files::ACTIVE_TOML) {
+        return value
+            .get("active")
+            .and_then(toml::Value::as_str)
+            .is_some_and(|active| !active.trim().is_empty() && active != DEFAULT_PROFILE);
     }
+    if path.file_name().and_then(|name| name.to_str()) == Some(files::PROFILE_TOML)
+        && let Some(profile_name) = path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+        && [DEFAULT_PROFILE, NORMAL_PROFILE, CHAT_PROFILE, LOCAL_PROFILE].contains(&profile_name)
+    {
+        if toml::from_str::<super::profile::ProfileDocument>(&content).is_err() {
+            return false;
+        }
+        return value
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .is_some_and(|name| name == profile_name)
+            && value
+                .get("version")
+                .and_then(toml::Value::as_str)
+                .is_some_and(|version| version == super::profile::CURRENT_PROFILE_VERSION);
+    }
+    true
 }
 
 fn validate_active_profile(home: &Path) -> io::Result<()> {
@@ -531,19 +545,40 @@ inherits = ["default"]
     }
 
     #[test]
-    fn seeding_creates_empty_auth_json_sentinel() {
+    fn seeding_creates_private_auth_compatibility_sentinel() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
 
         ensure_tron_home_at(&home).unwrap();
 
         let auth_path = home.join(dirs::PROFILES).join(files::AUTH_JSON);
-        let raw = fs::read_to_string(&auth_path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&fs::read(&auth_path).unwrap()).unwrap();
         assert!(
             parsed.as_object().is_some_and(serde_json::Map::is_empty),
-            "fresh Constitution seed must leave auth.json as the pristine install sentinel"
+            "Constitution seed must remain the exact pristine compatibility sentinel"
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                fs::metadata(&auth_path).unwrap().permissions().mode() & 0o777,
+                0o600,
+                "auth sentinel must be private from the moment it appears"
+            );
+        }
+    }
+
+    #[test]
+    fn private_auth_seed_does_not_clobber_an_existing_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles/auth.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let existing = r#"{"version":1,"providers":{},"lastUpdated":"existing"}"#;
+        fs::write(&path, existing).unwrap();
+
+        assert!(!write_private_default_if_absent(&path, "{}").unwrap());
+        assert_eq!(fs::read_to_string(path).unwrap(), existing);
     }
 
     #[test]

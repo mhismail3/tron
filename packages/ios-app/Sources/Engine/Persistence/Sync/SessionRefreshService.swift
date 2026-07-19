@@ -40,6 +40,8 @@ final class SessionRefreshService {
     private var inflightTask: Task<Void, Never>?
     private var pending: Bool = false
     private var foregroundDebounceTask: Task<Void, Never>?
+    private var shutdownTask: Task<Void, Never>?
+    private var isStopped = false
 
     private static let hookLabel = "session-refresh"
 
@@ -59,17 +61,31 @@ final class SessionRefreshService {
         self.connectionManager = connectionManager
     }
 
+    deinit {
+        MainActor.assumeIsolated {
+            connectionManager?.cancelHook(label: Self.hookLabel)
+            foregroundDebounceTask?.cancel()
+            inflightTask?.cancel()
+            shutdownTask?.cancel()
+        }
+    }
+
     // MARK: - Public API
 
     /// Attach a `ConnectionManager` so disconnected requests can be queued for reconnect.
     /// Called lazily by `DependencyContainer` after both services exist.
     func attachConnectionManager(_ manager: ConnectionManager) {
+        connectionManager?.cancelHook(label: Self.hookLabel)
         self.connectionManager = manager
+        if isStopped {
+            manager.cancelHook(label: Self.hookLabel)
+        }
     }
 
     /// Request a session list refresh. The actual engine invocation happens asynchronously and may be
     /// coalesced, debounced, or queued depending on current state.
     func request(reason: RefreshReason) {
+        guard !isStopped else { return }
         // Any non-foreground request cancels the foreground debounce — its slot will be taken.
         if reason != .foreground {
             foregroundDebounceTask?.cancel()
@@ -98,14 +114,40 @@ final class SessionRefreshService {
     /// native socket churn (for example `ECONNABORTED` during foreground return). Waiting for
     /// a future reconnect edge avoids immediately retrying against the same stale socket.
     func deferUntilReconnect() {
+        guard !isStopped else { return }
         foregroundDebounceTask?.cancel()
         foregroundDebounceTask = nil
         registerReconnectHook(fireIfAlreadyConnected: false)
     }
 
+    /// Marks the coordinator terminal, cancels pending ownership, and joins
+    /// every accepted debounce/inflight handle exactly once.
+    func shutdown() async {
+        if let shutdownTask {
+            await shutdownTask.value
+            return
+        }
+
+        isStopped = true
+        pending = false
+        connectionManager?.cancelHook(label: Self.hookLabel)
+        let pendingDebounceTask = foregroundDebounceTask
+        let acceptedInflightTask = inflightTask
+        pendingDebounceTask?.cancel()
+        acceptedInflightTask?.cancel()
+
+        let drain = Task { @MainActor in
+            await pendingDebounceTask?.value
+            await acceptedInflightTask?.value
+        }
+        shutdownTask = drain
+        await drain.value
+    }
+
     // MARK: - Internals
 
     private func registerReconnectHook(fireIfAlreadyConnected: Bool = true) {
+        guard !isStopped else { return }
         guard let manager = connectionManager else {
             // No manager attached — nothing else we can do; caller will try again next time.
             return
@@ -114,12 +156,13 @@ final class SessionRefreshService {
             label: Self.hookLabel,
             fireIfAlreadyConnected: fireIfAlreadyConnected
         ) { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isStopped else { return }
             self.startOrCoalesce()
         }
     }
 
     private func scheduleForegroundDebounce() {
+        guard !isStopped else { return }
         foregroundDebounceTask?.cancel()
         foregroundDebounceTask = Task { [weak self, clock, foregroundDebounce] in
             do {
@@ -127,7 +170,7 @@ final class SessionRefreshService {
             } catch {
                 return
             }
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, !self.isStopped else { return }
             guard self.isConnectedCheck() else {
                 self.registerReconnectHook()
                 return
@@ -137,6 +180,7 @@ final class SessionRefreshService {
     }
 
     private func startOrCoalesce() {
+        guard !isStopped else { return }
         if inflightTask != nil {
             pending = true
             return
@@ -145,8 +189,9 @@ final class SessionRefreshService {
     }
 
     private func spawnInflight() {
+        guard !isStopped else { return }
         inflightTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isStopped else { return }
             await self.performRefresh()
             self.onInflightComplete()
         }
@@ -154,7 +199,9 @@ final class SessionRefreshService {
 
     private func onInflightComplete() {
         inflightTask = nil
-        if pending {
+        if isStopped {
+            pending = false
+        } else if pending {
             pending = false
             spawnInflight()
         }

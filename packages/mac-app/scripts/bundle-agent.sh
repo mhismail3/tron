@@ -15,13 +15,13 @@
 #   bundle-agent.sh --profile debug # build debug profile instead
 #   bundle-agent.sh --skip-build    # assume target/release/tron exists
 #   bundle-agent.sh --source PATH   # explicit path to prebuilt tron
-#   bundle-agent.sh --clean         # remove ignored staged helper binaries
+#   bundle-agent.sh --clean         # remove ignored staged helper payloads
 #
 # Exit codes:
 #   0  — staged binary is up to date
 #   1  — build failed
 #   2  — source binary missing (with --skip-build or --source)
-#   3  — staging path not writable
+#   3  — tracked metadata missing or staging path not writable
 #   64 — invalid arguments
 #
 # The script is idempotent. It refuses to run inside DerivedData / Xcode
@@ -49,8 +49,6 @@ DEV_HELPER_RESOURCES="$DEV_HELPER_CONTENTS/Resources"
 LAUNCH_AGENT_DIR="$LIBRARY_DIR/LaunchAgents"
 STAGING_PATH="$HELPER_MACOS/tron"
 DEV_STAGING_PATH="$DEV_HELPER_MACOS/tron"
-WORKER_STAGING_PATH="$HELPER_MACOS/tron-program-worker"
-DEV_WORKER_STAGING_PATH="$DEV_HELPER_MACOS/tron-program-worker"
 HELPER_INFO_PLIST="$HELPER_CONTENTS/Info.plist"
 DEV_HELPER_INFO_PLIST="$DEV_HELPER_CONTENTS/Info.plist"
 LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.plist"
@@ -80,12 +78,26 @@ done
 # --- clean mode ----------------------------------------------------------
 
 if [ "$do_clean" -eq 1 ]; then
-    rm -f "$STAGING_PATH" "$WORKER_STAGING_PATH" "$DEV_STAGING_PATH" "$DEV_WORKER_STAGING_PATH"
-    echo "cleaned ignored staged helper binaries"
+    rm -f "$STAGING_PATH" "$DEV_STAGING_PATH" \
+        "$HELPER_RESOURCES/AppIcon.icns" "$DEV_HELPER_RESOURCES/AppIcon.icns"
+    echo "cleaned ignored staged helper payloads"
     exit 0
 fi
 
 # --- source resolution ---------------------------------------------------
+
+tracked_plists=(
+    "$HELPER_INFO_PLIST"
+    "$DEV_HELPER_INFO_PLIST"
+    "$LAUNCH_AGENT_PLIST"
+    "$DEV_LAUNCH_AGENT_PLIST"
+)
+for tracked_plist in "${tracked_plists[@]}"; do
+    if [ ! -f "$tracked_plist" ]; then
+        echo "error: tracked helper metadata is missing: $tracked_plist" >&2
+        exit 3
+    fi
+done
 
 resolve_source() {
     if [ -n "$source_override" ]; then
@@ -131,178 +143,13 @@ fi
 
 # --- staging -------------------------------------------------------------
 
-mkdir -p "$HELPER_MACOS" "$HELPER_RESOURCES" "$DEV_HELPER_MACOS" "$DEV_HELPER_RESOURCES" "$LAUNCH_AGENT_DIR" || {
+mkdir -p "$HELPER_MACOS" "$HELPER_RESOURCES" "$DEV_HELPER_MACOS" "$DEV_HELPER_RESOURCES" || {
     echo "error: cannot create helper staging directories" >&2
     exit 3
 }
 
-cat > "$HELPER_INFO_PLIST" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>tron</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.tron.server</string>
-    <key>CFBundleName</key>
-    <string>Tron Server</string>
-    <key>CFBundleDisplayName</key>
-    <string>Tron Server</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon.icns</string>
-    <key>CFBundleIconName</key>
-    <string>AppIcon</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
-    <key>LSUIElement</key>
-    <true/>
-</dict>
-</plist>
-PLIST
-
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_RESOURCES/AppIcon.icns"
-
-cat > "$DEV_HELPER_INFO_PLIST" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>tron</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.tron.server.dev</string>
-    <key>CFBundleName</key>
-    <string>Tron Server Dev</string>
-    <key>CFBundleDisplayName</key>
-    <string>Tron Server Dev</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon.icns</string>
-    <key>CFBundleIconName</key>
-    <string>AppIcon</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
-    <key>LSUIElement</key>
-    <true/>
-</dict>
-</plist>
-PLIST
-
 cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_RESOURCES/AppIcon.icns"
-
-cat > "$LAUNCH_AGENT_PLIST" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.tron.server</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>tron</string>
-        <string>--port</string>
-        <string>9847</string>
-        <string>--quiet</string>
-    </array>
-
-    <key>BundleProgram</key>
-    <string>Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron</string>
-
-    <key>RunAtLoad</key>
-    <true/>
-
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-        <key>Crashed</key>
-        <true/>
-    </dict>
-
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>RUST_LOG</key>
-        <string>info</string>
-    </dict>
-
-    <key>SoftResourceLimits</key>
-    <dict>
-        <key>NumberOfFiles</key>
-        <integer>4096</integer>
-    </dict>
-
-    <key>AssociatedBundleIdentifiers</key>
-    <array>
-        <string>com.tron.mac</string>
-        <string>com.tron.mac.dev</string>
-    </array>
-</dict>
-</plist>
-PLIST
-
-cat > "$DEV_LAUNCH_AGENT_PLIST" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.tron.server.dev</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>tron</string>
-        <string>--port</string>
-        <string>9848</string>
-        <string>--quiet</string>
-    </array>
-
-    <key>BundleProgram</key>
-    <string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>
-
-    <key>RunAtLoad</key>
-    <true/>
-
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-        <key>Crashed</key>
-        <true/>
-    </dict>
-
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>RUST_LOG</key>
-        <string>info</string>
-        <key>TRON_HOME_NAME</key>
-        <string>.tron-dev</string>
-    </dict>
-
-    <key>SoftResourceLimits</key>
-    <dict>
-        <key>NumberOfFiles</key>
-        <integer>4096</integer>
-    </dict>
-
-    <key>AssociatedBundleIdentifiers</key>
-    <array>
-        <string>com.tron.mac.dev</string>
-        <string>com.tron.mac</string>
-    </array>
-</dict>
-</plist>
-PLIST
 
 # Atomic stage: copy to tempfile then rename, matching the pattern used
 # by the Rust agent's own atomic-write helper.

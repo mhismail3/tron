@@ -41,9 +41,11 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
+        XCTAssertNotNil(landscapeContent.range(of: "serversSection"))
         XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
         XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "evidencePolicySection"))
+        XCTAssertNotNil(landscapeContent.range(of: "transcriptionSection"))
+        XCTAssertNil(landscapeContent.range(of: "evidencePolicySection"))
         XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(
             landscapeContent.contains("protected" + "Branches" + "Section"),
@@ -56,7 +58,15 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
 
         XCTAssertTrue(content.contains("defaultsSection"))
         XCTAssertTrue(content.contains("contextSection"))
-        XCTAssertTrue(content.contains("evidencePolicySection"))
+        XCTAssertFalse(content.contains("evidencePolicySection"))
+        XCTAssertFalse(content.contains("Log level"))
+        XCTAssertFalse(content.contains("Verbose days"))
+        XCTAssertFalse(content.contains("label: \"Retention\""))
+        XCTAssertFalse(content.contains("Storage cap"))
+        XCTAssertFalse(content.contains("observabilityLogLevel"))
+        XCTAssertFalse(content.contains("observabilityVerboseRetentionDays"))
+        XCTAssertFalse(content.contains("storageRetentionEnabled"))
+        XCTAssertFalse(content.contains("storageMaxDatabaseMb"))
         XCTAssertFalse(content.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(content.contains("autonomy" + "Section"))
         XCTAssertFalse(content.contains("guard" + "rails" + "Section"))
@@ -67,6 +77,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
 
     @MainActor
     func testEngineSettingsPrimitiveCardsRenderForVisualQA() throws {
+        let testState = IsolatedTestState(label: "engine-settings-render")
+        testState.registerTeardown(with: self)
         let settingsState = SettingsState()
         settingsState.isLoaded = true
         settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -78,7 +90,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             selectedModelDisplayName: "GPT-5.5",
             updateServerSetting: { _ in }
         )
-        .environment(\.dependencies, DependencyContainer())
+        .environment(\.dependencies, testState.makeContainer())
         .frame(width: 430, height: 1_320)
         .background(Color(uiColor: .systemBackground))
 
@@ -103,56 +115,23 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertGreaterThan(image.size.width, 400)
         XCTAssertGreaterThan(image.size.height, 1_200)
 
-        let documentsURL = try XCTUnwrap(
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        )
-        let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
-            .map(URL.init(fileURLWithPath:))
-            ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        let outputURL = artifactRoot.appendingPathComponent("engine-settings-primitive-render.png")
-        try FileManager.default.createDirectory(
-            at: outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        let outputURL = try testState.artifactURL(
+            named: "engine-settings-primitive-render.png"
         )
         try XCTUnwrap(image.pngData()).write(to: outputURL)
         print("TRON_VISUAL_ARTIFACT_PATH=\(outputURL.path)")
         add(XCTAttachment(contentsOfFile: outputURL))
     }
 
-    func testConnectionSettingsUsesIPadLandscapeColumns() throws {
-        let content = try settingsPageSource(named: "ConnectionSettingsPage.swift")
+    func testServerPairingLivesAsFocusedEngineSection() throws {
+        let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
+        let servers = try settingsPageSource(named: "EngineServersSection.swift")
 
-        XCTAssertTrue(
-            content.contains("SettingsAdaptiveLayout.usesIPadLandscapeLayout"),
-            "Server settings should use the shared iPad-landscape branch"
-        )
-        XCTAssertTrue(
-            content.contains("private var landscapeContent: some View"),
-            "Server settings needs a dedicated landscape projection"
-        )
-
-        let landscapeStart = try XCTUnwrap(
-            content.range(of: "private var landscapeContent: some View")?.lowerBound
-        )
-        let landscapeContent = content[landscapeStart..<content.endIndex]
-        XCTAssertNotNil(landscapeContent.range(of: "pairedServersSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "logsSection"))
-        XCTAssertTrue(
-            landscapeContent.contains("logsSection"),
-            "Server landscape should keep redacted local logs available from the right column"
-        )
-        XCTAssertFalse(
-            landscapeContent.contains("updates" + "Section"),
-            "Server landscape should not retain a fixed update-check section"
-        )
-        XCTAssertTrue(
-            landscapeContent.contains(".fixedSize(horizontal: false, vertical: true)"),
-            "Compact left-column server sections should not stretch to the diagnostics column height"
-        )
-        XCTAssertFalse(
-            landscapeContent.contains("trans" + "cription" + "Section"),
-            "Server settings must not retain deleted media sidecar controls"
-        )
+        XCTAssertTrue(engine.contains("EngineServersSection("))
+        XCTAssertTrue(servers.contains("SettingsSectionHeader(title: \"Servers\")"))
+        XCTAssertTrue(servers.contains(".fixedSize(horizontal: false, vertical: true)"))
+        XCTAssertFalse(servers.contains("SettingsPageContainer"))
+        XCTAssertFalse(servers.contains("LogViewer") || servers.contains("Diagnostics"))
     }
 
     func testProvidersSettingsUsesIPadLandscapeColumns() throws {
@@ -180,6 +159,21 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
     }
 
+    func testEngineAndProvidersSheetsDoNotMountSummaryHeroes() throws {
+        let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
+        let providers = try settingsPageSource(named: "ProvidersSettingsPage.swift")
+        let support = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
+
+        XCTAssertFalse(engine.contains("SettingsInfoCard("))
+        XCTAssertFalse(engine.contains("summaryCard"))
+        XCTAssertFalse(engine.contains("EngineSettingsSummary"))
+        XCTAssertFalse(providers.contains("SettingsInfoCard("))
+        XCTAssertFalse(providers.contains("providersInfoCard"))
+        XCTAssertFalse(providers.contains("ProvidersSettingsSummary"))
+        XCTAssertFalse(support.contains("EngineSettingsSummary"))
+        XCTAssertFalse(support.contains("ProvidersSettingsSummary"))
+    }
+
     func testEngineSettingsSurfacesActionableServerOwnedControlsInsideEnginePageOnly() throws {
         let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
@@ -187,24 +181,31 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(engine.contains("label: \"Model\""))
         XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.observabilityLogLevel(newValue))"))
-        XCTAssertTrue(settingsMain.contains("settingsOwnershipSection("))
-        XCTAssertTrue(settingsMain.contains("title: \"Server-Owned\""))
+        XCTAssertTrue(engine.contains("updateServerSetting(.transcriptionEnabled(enabled))"))
+        XCTAssertTrue(engine.contains("EngineSettingsSection.transcription.rawValue"))
+        XCTAssertTrue(settingsMain.contains("MainSettingsGridDestination.order"))
+        XCTAssertFalse(settingsMain.contains("Server-Owned"))
+        XCTAssertFalse(settingsMain.contains("This iPhone"))
     }
 
     func testSettingsMainRowsUseSeparateCardsWithoutChevrons() throws {
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
 
         XCTAssertTrue(
-            settingsMain.contains("ForEach(destinations, id: \\.self)")
+            settingsMain.contains("ForEach(MainSettingsGridDestination.order, id: \\.self)")
                 && settingsMain.contains("SettingsCard {")
                 && settingsMain.contains("mainSettingsDestinationRow(destination)"),
-            "Server-Owned and This iPhone rows should render as separate SettingsCard containers"
+            "The three top-level settings pages should render as separate SettingsCard containers"
         )
         XCTAssertTrue(
             settingsMain.contains("ForEach(SettingsDangerZoneAction.order, id: \\.self)")
-                && settingsMain.contains("SettingsCard(accent: .tronError)"),
-            "Maintenance actions should render as separate danger cards rather than one divided table"
+                && settingsMain.contains("SettingsCard(accent: .tronError)")
+                && settingsMain.contains("SettingsSectionHeader(title: \"Danger Zone\")"),
+            "Danger Zone actions should render as separate cards rather than one divided table"
+        )
+        XCTAssertTrue(
+            settingsMain.contains("spacing: MainSettingsListLayout.sectionSpacing"),
+            "Main settings sections should own spacing separately from row spacing"
         )
         XCTAssertFalse(
             settingsMain.contains("SettingsRowDivider()"),
@@ -216,7 +217,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testSettingsFooterStaysInSheetContentFlow() throws {
+    func testSettingsFooterIsPinnedWithoutAFullWidthBackdrop() throws {
         let settingsView = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
         let pageContainer = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsPageContainer.swift"])
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
@@ -224,14 +225,14 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         let support = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
 
         XCTAssertTrue(
-            settingsView.contains("mainSettingsSection")
-                && settingsView.contains("settingsFooterDockView")
-                && settingsView.range(of: "mainSettingsSection")!.lowerBound < settingsView.range(of: "settingsFooterDockView")!.lowerBound,
-            "The Settings footer should live in the sheet content after actionable rows"
+            settingsView.contains("VStack(spacing: 0)")
+                && settingsView.contains("SettingsPageContainer(")
+                && settingsView.contains("settingsFooterDockView"),
+            "The Settings footer should stay anchored to the sheet bottom at every detent"
         )
         XCTAssertFalse(
             settingsView.contains(".safeAreaInset(edge: .bottom"),
-            "The Settings footer should not be a pinned overlay that can cover Maintenance rows"
+            "A transparent safe-area overlay would allow Danger Zone content to remain legible behind the footer"
         )
         XCTAssertFalse(
             pageContainer.contains("safeAreaInset") || pageContainer.contains("footer:"),
@@ -239,25 +240,21 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
         XCTAssertTrue(
             settingsMain.contains("var settingsFooterDockView: some View")
-                && settingsMain.contains("SettingsFooterBackdrop()"),
-            "The inline footer dock should render through the footer support backdrop"
+                && settingsMain.contains(".padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)")
+                && settingsMain.contains(".padding(.leading, MainSettingsFooterLayout.taglineLeadingPadding)"),
+            "The pinned footer should align its content with the Settings rows"
+        )
+        XCTAssertFalse(
+            settingsMain.contains("SettingsFooterBackdrop()")
+                || footerSupport.contains("struct SettingsFooterBackdrop"),
+            "The footer should sit directly on the sheet instead of painting a rectangular material layer"
         )
         XCTAssertTrue(
-            settingsMain.contains(".frame(height: MainSettingsFooterLayout.dockHeight)"),
-            "The inline footer dock should keep a stable touch and visual region"
-        )
-        XCTAssertTrue(
-            footerSupport.contains("struct SettingsFooterBackdrop"),
-            "The footer blur/fade should live in reusable footer support, not inline in the main settings list"
-        )
-        XCTAssertTrue(
-            footerSupport.contains(".fill(.thinMaterial)")
-                && footerSupport.contains("Color.tronBackground")
-                && footerSupport.contains(".mask("),
-            "The footer backdrop should use a subtle material fade instead of a heavy masking gradient"
-        )
-        XCTAssertTrue(
-            support.contains("static let dockHeight") && !support.contains("contentBottomClearance"),
+            support.contains("static let horizontalPadding")
+                && support.contains("static let taglineLeadingPadding")
+                && support.contains("static let verticalPadding")
+                && !support.contains("textLeadingPadding")
+                && !support.contains("dockHeight"),
             "Footer spacing constants should be centralized with the other Settings layout values"
         )
     }

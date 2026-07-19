@@ -11,11 +11,18 @@
 //! the persisted engine stream row and the neutral payload so observability can
 //! follow an agent turn through streamed UI events, capability invocation, queues, and
 //! downstream capabilities.
-
-use std::sync::Arc;
+//! If the bounded runtime receiver ever lags, the missing records cannot be
+//! inferred from sequence gaps because durable-only events legitimately consume
+//! sequences. The pump therefore publishes a system-scoped
+//! `stream.recovery_required` control record directly to the engine stream. A
+//! scoped client receives that record even through its session filter and must
+//! reconstruct before trusting later live events. If the recovery record itself
+//! cannot be stored, the pump stops instead of continuing with an undisclosed
+//! continuity break.
 
 use crate::engine::{EngineHostHandle, InvocationId, PublishStreamEvent, TraceId, VisibilityScope};
-use crate::shared::protocol::events::{TronEvent, TronEventObserver};
+use crate::shared::protocol::events::TronEvent;
+use crate::shared::server::events::ServerEventPayload;
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -31,11 +38,14 @@ mod streaming;
 mod tron;
 mod turn;
 
+/// System-scoped control event emitted when the live source receiver skips
+/// records. This module owns both detection and the recovery wire contract.
+pub(crate) const STREAM_RECOVERY_REQUIRED_EVENT_TYPE: &str = "stream.recovery_required";
+
 /// Projects orchestrator events into engine streams.
 pub struct EngineStreamEventPump {
     rx: broadcast::Receiver<TronEvent>,
     cancel: CancellationToken,
-    event_observer: Arc<dyn TronEventObserver>,
     engine_streams: EngineHostHandle,
 }
 
@@ -45,12 +55,10 @@ impl EngineStreamEventPump {
         rx: broadcast::Receiver<TronEvent>,
         engine_streams: EngineHostHandle,
         cancel: CancellationToken,
-        event_observer: Arc<dyn TronEventObserver>,
     ) -> Self {
         Self {
             rx,
             cancel,
-            event_observer,
             engine_streams,
         }
     }
@@ -84,10 +92,13 @@ impl EngineStreamEventPump {
                 true
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                tracing::debug!(lagged = n, "stream projection lagged");
+                tracing::warn!(
+                    lagged = n,
+                    "stream projection lagged; requiring client recovery"
+                );
                 metrics::counter!("stream_projection_lagged_events_total", "source" => "engine_stream_event_pump")
                     .increment(n);
-                true
+                self.publish_recovery_required(n).await
             }
             Err(broadcast::error::RecvError::Closed) => {
                 tracing::debug!("stream projection: sender closed, exiting");
@@ -96,9 +107,52 @@ impl EngineStreamEventPump {
         }
     }
 
-    async fn project_tron_event(&self, event: &TronEvent) {
-        self.event_observer.observe_tron_event(event);
+    /// Publish the recovery marker outside the lagged broadcast path. Returning
+    /// `false` stops the pump when even the durable control record cannot be
+    /// stored; silently projecting later events would make the stream look
+    /// continuous when it is not.
+    async fn publish_recovery_required(&self, dropped_event_count: u64) -> bool {
+        let server_event = ServerEventPayload::new(
+            STREAM_RECOVERY_REQUIRED_EVENT_TYPE,
+            None,
+            Some(json!({
+                "reason": "source_lag",
+                "droppedEventCount": dropped_event_count,
+            })),
+        );
+        let result = self
+            .engine_streams
+            .publish_stream_event(PublishStreamEvent {
+                topic: "events.session".to_owned(),
+                payload: json!({
+                    "serverEvent": server_event,
+                    "streamScope": { "kind": "all" },
+                    "sourceEventType": STREAM_RECOVERY_REQUIRED_EVENT_TYPE,
+                    "sourceSequence": null,
+                }),
+                visibility: VisibilityScope::System,
+                session_id: None,
+                workspace_id: None,
+                producer: "agent-runtime".to_owned(),
+                trace_id: None,
+                parent_invocation_id: None,
+            })
+            .await;
 
+        match result {
+            Ok(_) => true,
+            Err(error) => {
+                tracing::error!(
+                    dropped_event_count,
+                    error = %error,
+                    "stream recovery marker publish failed; stopping runtime projection"
+                );
+                false
+            }
+        }
+    }
+
+    async fn project_tron_event(&self, event: &TronEvent) {
         let event_type = event.event_type();
         tracing::debug!(event_type, "projecting event to engine stream");
         let projected = tron_event_to_projected(event);

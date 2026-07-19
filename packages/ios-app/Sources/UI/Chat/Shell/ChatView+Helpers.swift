@@ -39,10 +39,6 @@ extension ChatView {
                         viewModel?.contextState.currentContextWindow = revertModel.contextWindow
                     }
                     viewModel?.appendLocalError(dedupKey: "model.switch.failed", title: "Could not switch model", message: errorMessage)
-                },
-                onContextRefresh: { [weak viewModel] in
-                    // Refresh context from server to ensure accuracy after model switch
-                    await viewModel?.refreshContextFromServer()
                 }
             )
         }
@@ -77,17 +73,17 @@ extension ChatView {
     /// Handle initial message visibility on session load.
     /// Scrolls to bottom while content is hidden, then fades everything in.
     ///
-    /// LazyVStack only materializes cells near the visible viewport, using estimated
-    /// heights (~80pt) for distant cells. Real message heights average ~170pt, so each
-    /// `scrollTo("bottom")` reveals new cells whose true heights push "bottom" further
-    /// away. We iterate until the content height stabilizes.
+    /// LazyVStack only materializes cells near the visible viewport, so each
+    /// `scrollTo("bottom")` can reveal cells whose true heights move the target again.
+    /// We keep the transcript hidden until the bottom anchor reports consecutive
+    /// target-relative samples inside the reveal tolerance.
     ///
     /// Uses Swift concurrency sleeps so view cancellation during rapid
     /// navigation cancels the remaining settling work instead of scheduling
     /// stale scrolls back onto the main queue.
     func handleInitialMessageVisibility(guardedBy ticket: ChatViewTaskTicket? = nil) async {
         let msgCount = viewModel.messages.count
-        logger.debug("[INIT] handleInitialMessageVisibility: messages=\(msgCount) scrollProxy=\(scrollProxy != nil) hasMore=\(viewModel.hasMoreMessages) bottom=\(initDistanceFromBottom)", category: .ui)
+        logger.debug("[INIT] handleInitialMessageVisibility: messages=\(msgCount) scrollProxy=\(scrollProxy != nil) hasMore=\(viewModel.hasMoreMessages) bottom=\(viewportMeasurements.initialDistanceFromBottom)", category: .ui)
 
         guard msgCount > 0 else {
             logger.debug("[INIT] No messages, marking load complete", category: .ui)
@@ -115,33 +111,33 @@ extension ChatView {
             return
         }
 
-        // Scroll to bottom repeatedly until LazyVStack heights converge.
-        // Each scroll materializes cells near the viewport, revealing their true
-        // heights and shifting "bottom". We break early once content height
-        // stabilizes and the measured viewport is actually at the bottom. Height
-        // stability alone is insufficient: SwiftUI can report stable content
-        // while the viewport is still parked above the latest row.
-        var contentHeightStable = false
+        // Scroll to bottom repeatedly while LazyVStack materializes its tail.
+        // Two consecutive target-relative bottom samples prove the viewport stayed
+        // pinned across layout passes without feeding scroll geometry back into layout.
+        var consecutiveBottomSamples = 0
         var bottomSettled = false
         for i in 0..<ChatTranscriptRevealPolicy.initialBottomSettleAttempts {
-            let heightBefore = initContentHeight
             scrollToBottom()
             guard await layoutDelay(milliseconds: ChatTranscriptRevealPolicy.initialSettleDelayMilliseconds) else { return }
             guard isCurrent(ticket), !Task.isCancelled else { return }
-            let heightAfter = initContentHeight
-            contentHeightStable = heightAfter > 0 && heightAfter == heightBefore
+            let distanceFromBottom = viewportMeasurements.initialDistanceFromBottom
+            if ChatTranscriptRevealPolicy.isAtInitialBottom(
+                distanceFromBottom: distanceFromBottom
+            ) {
+                consecutiveBottomSamples += 1
+            } else {
+                consecutiveBottomSamples = 0
+            }
 
             bottomSettled = ChatTranscriptRevealPolicy.isReadyToReveal(
                 hasScrollProxy: scrollProxy != nil,
-                contentHeightStable: contentHeightStable,
-                distanceFromBottom: initDistanceFromBottom
+                consecutiveBottomSamples: consecutiveBottomSamples,
+                distanceFromBottom: distanceFromBottom
             )
 
-            logger.debug("[INIT] scroll \(i): contentH \(heightBefore)→\(heightAfter) stable=\(contentHeightStable) bottom=\(initDistanceFromBottom) settled=\(bottomSettled)", category: .ui)
+            logger.debug("[INIT] scroll \(i): bottom=\(distanceFromBottom) stableSamples=\(consecutiveBottomSamples) settled=\(bottomSettled)", category: .ui)
 
-            // Require at least 2 scrolls so the first scroll has time to trigger
-            // cell materialization before we accept convergence.
-            if bottomSettled && i >= 1 {
+            if bottomSettled {
                 logger.debug("[INIT] bottom converged at iteration \(i)", category: .ui)
                 break
             }
@@ -151,17 +147,25 @@ extension ChatView {
         scrollToBottom()
         guard await layoutDelay(milliseconds: 80) else { return }
         guard isCurrent(ticket), !Task.isCancelled else { return }
+        let finalDistanceFromBottom = viewportMeasurements.initialDistanceFromBottom
+        if ChatTranscriptRevealPolicy.isAtInitialBottom(
+            distanceFromBottom: finalDistanceFromBottom
+        ) {
+            consecutiveBottomSamples += 1
+        } else {
+            consecutiveBottomSamples = 0
+        }
         bottomSettled = ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: scrollProxy != nil,
-            contentHeightStable: contentHeightStable || initContentHeight > 0,
-            distanceFromBottom: initDistanceFromBottom
+            consecutiveBottomSamples: consecutiveBottomSamples,
+            distanceFromBottom: finalDistanceFromBottom
         )
         if !bottomSettled {
-            logger.warning("[INIT] revealing after bounded bottom-settle attempts; distance=\(initDistanceFromBottom) height=\(initContentHeight)", category: .ui)
+            logger.warning("[INIT] revealing after bounded bottom-settle attempts; distance=\(finalDistanceFromBottom) stableSamples=\(consecutiveBottomSamples)", category: .ui)
         }
 
         // Fade in all messages from the correct scroll position
-        logger.debug("[INIT] fading in \(viewModel.messages.count) messages, setting initialLoadComplete=true bottom=\(initDistanceFromBottom)", category: .ui)
+        logger.debug("[INIT] fading in \(viewModel.messages.count) messages, setting initialLoadComplete=true bottom=\(viewportMeasurements.initialDistanceFromBottom)", category: .ui)
         guard isCurrent(ticket), !Task.isCancelled else { return }
         withAnimation(.easeOut(duration: 0.3)) {
             viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
@@ -193,7 +197,19 @@ extension ChatView {
         animation: Animation = .easeOut(duration: 0.2)
     ) {
         guard let scrollProxy else { return }
+        scrollCoordinator.appWillPositionScroll()
+        positionScrollAtBottom(
+            using: scrollProxy,
+            animated: animated,
+            animation: animation
+        )
+    }
 
+    private func positionScrollAtBottom(
+        using scrollProxy: ScrollViewProxy,
+        animated: Bool,
+        animation: Animation
+    ) {
         if animated {
             withAnimation(animation) {
                 scrollProxy.scrollTo("bottom", anchor: .bottom)
@@ -213,12 +229,16 @@ extension ChatView {
         animation: Animation = .easeOut(duration: 0.2),
         reason: String
     ) {
-        guard scrollCoordinator.shouldAutoScroll else {
+        guard let scrollProxy, scrollCoordinator.beginAutomaticBottomScroll() else {
             logger.debug("[SCROLL] suppressed bottom scroll for \(reason)", category: .ui)
             return
         }
 
-        scrollToBottom(animated: animated, animation: animation)
+        positionScrollAtBottom(
+            using: scrollProxy,
+            animated: animated,
+            animation: animation
+        )
     }
 
     private func layoutDelay(milliseconds: Int) async -> Bool {

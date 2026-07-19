@@ -33,57 +33,71 @@ struct SessionListWorkspaceGroup: Identifiable {
     }
 }
 
-struct SessionListWorkspaceExpansion: Equatable {
-    private(set) var collapsedGroupIds: Set<String> = []
-
-    func isExpanded(_ groupId: String) -> Bool {
-        !collapsedGroupIds.contains(groupId)
-    }
-
-    mutating func toggle(_ groupId: String) {
-        if collapsedGroupIds.contains(groupId) {
-            collapsedGroupIds.remove(groupId)
-        } else {
-            collapsedGroupIds.insert(groupId)
-        }
-    }
+enum SessionListWorkspaceDisclosureDirection: Equatable {
+    case collapse
+    case expand
 }
 
-struct SessionListSessionExpansion: Equatable {
-    static let pageSize = 10
+struct SessionListWorkspaceDisclosureTransition: Equatable {
+    let groupId: String
+    let direction: SessionListWorkspaceDisclosureDirection
+    let generation: Int
+}
 
-    private(set) var visibleCountsByGroupId: [String: Int] = [:]
-
-    func visibleCount(for groupId: String, totalCount: Int) -> Int {
-        min(totalCount, visibleCountsByGroupId[groupId] ?? Self.pageSize)
+struct SessionListWorkspaceDisclosure: Equatable {
+    private enum Phase: Equatable {
+        case expanded
+        case collapsing
+        case collapsed
+        case expanding
     }
 
-    func visibleSessions(in group: SessionListWorkspaceGroup) -> [CachedSession] {
-        Array(group.sessions.prefix(visibleCount(for: group.id, totalCount: group.sessions.count)))
-    }
+    private var phaseByGroupId: [String: Phase] = [:]
+    private var generationByGroupId: [String: Int] = [:]
 
-    func canViewMore(groupId: String, totalCount: Int) -> Bool {
-        visibleCount(for: groupId, totalCount: totalCount) < totalCount
-    }
-
-    func canViewLess(groupId: String, totalCount: Int) -> Bool {
-        visibleCountsByGroupId[groupId] != nil && totalCount > Self.pageSize
-    }
-
-    mutating func revealMore(groupId: String, totalCount: Int) {
-        let currentCount = visibleCount(for: groupId, totalCount: totalCount)
-        visibleCountsByGroupId[groupId] = min(totalCount, currentCount + Self.pageSize)
-    }
-
-    mutating func showLess(groupId: String) {
-        visibleCountsByGroupId.removeValue(forKey: groupId)
-    }
-
-    mutating func reconcile(groupCounts: [String: Int]) {
-        let validGroupIds = Set(groupCounts.keys)
-        visibleCountsByGroupId = visibleCountsByGroupId.filter { groupId, _ in
-            validGroupIds.contains(groupId) && (groupCounts[groupId] ?? 0) > Self.pageSize
+    func isExpanded(_ groupId: String) -> Bool {
+        switch phaseByGroupId[groupId] ?? .expanded {
+        case .expanded, .expanding:
+            true
+        case .collapsing, .collapsed:
+            false
         }
+    }
+
+    func shouldRenderRows(_ groupId: String) -> Bool {
+        phaseByGroupId[groupId] != .collapsed
+    }
+
+    func areRowsVisible(_ groupId: String) -> Bool {
+        (phaseByGroupId[groupId] ?? .expanded) == .expanded
+    }
+
+    func toggleDirection(for groupId: String) -> SessionListWorkspaceDisclosureDirection {
+        isExpanded(groupId) ? .collapse : .expand
+    }
+
+    mutating func beginToggle(_ groupId: String) -> SessionListWorkspaceDisclosureTransition {
+        let direction = toggleDirection(for: groupId)
+        let generation = (generationByGroupId[groupId] ?? 0) + 1
+        generationByGroupId[groupId] = generation
+        phaseByGroupId[groupId] = direction == .collapse ? .collapsing : .expanding
+        return SessionListWorkspaceDisclosureTransition(
+            groupId: groupId,
+            direction: direction,
+            generation: generation
+        )
+    }
+
+    @discardableResult
+    mutating func complete(_ transition: SessionListWorkspaceDisclosureTransition) -> Bool {
+        guard generationByGroupId[transition.groupId] == transition.generation else { return false }
+        phaseByGroupId[transition.groupId] = transition.direction == .collapse ? .collapsed : .expanded
+        return true
+    }
+
+    mutating func reconcile(groupIds: Set<String>) {
+        phaseByGroupId = phaseByGroupId.filter { groupIds.contains($0.key) }
+        generationByGroupId = generationByGroupId.filter { groupIds.contains($0.key) }
     }
 }
 
@@ -116,7 +130,43 @@ enum SessionListLayout {
     static let rowTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionControlTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionControlMinimumHeight: CGFloat = 44
-    static let expansionAnimation = Animation.snappy(duration: 0.14)
+    // List row insets already supply the outer margin. These inner anchors
+    // match the session row's status icon and trailing date.
+    static let expansionControlLeadingPadding = rowContentHorizontalPadding
+    static let expansionControlTrailingPadding = rowContentHorizontalPadding
+    static let expansionAnimation = Animation.smooth(duration: 0.18)
+    static let disclosureRowFadeDuration: TimeInterval = 0.13
+    static let disclosureMaximumStaggerDuration: TimeInterval = 0.06
+    static let disclosureLayoutDelay: Duration = .milliseconds(180)
+
+    static func disclosureRowDelay(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> TimeInterval {
+        let boundedCount = max(itemCount, 1)
+        let boundedIndex = min(max(index, 0), boundedCount - 1)
+        let order = isVisible ? boundedIndex : boundedCount - boundedIndex - 1
+        let step = boundedCount > 1
+            ? disclosureMaximumStaggerDuration / Double(boundedCount - 1)
+            : 0
+        return Double(order) * step
+    }
+
+    static func disclosureRowAnimation(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> Animation {
+        .easeOut(duration: disclosureRowFadeDuration)
+            .delay(disclosureRowDelay(index: index, itemCount: itemCount, isVisible: isVisible))
+    }
+
+    static func disclosureCollapseDelay(itemCount: Int) -> Duration {
+        let stagger = itemCount > 1 ? disclosureMaximumStaggerDuration : 0
+        let milliseconds = Int(((disclosureRowFadeDuration + stagger) * 1_000).rounded(.up))
+        return .milliseconds(milliseconds)
+    }
 
     static var headerInsets: EdgeInsets {
         EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
@@ -131,7 +181,7 @@ enum SessionListLayout {
         )
     }
 
-    static var briefingInsets: EdgeInsets {
+    static var dashboardInsets: EdgeInsets {
         EdgeInsets(
             top: 10,
             leading: rowContainerHorizontalInset,
@@ -294,20 +344,12 @@ struct SessionListExpansionControls: View {
     let projectName: String
     let canViewLess: Bool
     let canViewMore: Bool
+    let isEnabled: Bool
     let onViewLess: () -> Void
     let onViewMore: () -> Void
 
     var body: some View {
         HStack(spacing: SessionListLayout.iconTextSpacing) {
-            if canViewLess {
-                expansionButton(
-                    title: "View less",
-                    symbolName: "chevron.up",
-                    hint: "Shows only the latest 10 sessions in \(projectName)",
-                    action: onViewLess
-                )
-            }
-
             if canViewMore {
                 expansionButton(
                     title: "View more",
@@ -316,7 +358,23 @@ struct SessionListExpansionControls: View {
                     action: onViewMore
                 )
             }
+
+            Spacer(minLength: SessionListLayout.iconTextSpacing)
+
+            if canViewLess {
+                expansionButton(
+                    title: "View less",
+                    symbolName: "chevron.up",
+                    hint: "Shows only the latest 10 sessions in \(projectName)",
+                    action: onViewLess
+                )
+                .transition(.opacity)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.leading, SessionListLayout.expansionControlLeadingPadding)
+        .padding(.trailing, SessionListLayout.expansionControlTrailingPadding)
+        .disabled(!isEnabled)
     }
 
     private func expansionButton(
@@ -340,7 +398,7 @@ struct SessionListExpansionControls: View {
                     .accessibilityHidden(true)
             }
             .foregroundStyle(.tronEmerald)
-            .frame(maxWidth: .infinity, minHeight: SessionListLayout.expansionControlMinimumHeight)
+            .frame(minHeight: SessionListLayout.expansionControlMinimumHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

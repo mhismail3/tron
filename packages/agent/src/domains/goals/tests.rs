@@ -564,6 +564,9 @@ async fn derive_execute_grant(
     key: &str,
     question_resource_id: &str,
 ) -> AuthorityGrantId {
+    let operation = "question_answer";
+    let max_risk = crate::domains::capability::operation_risk(operation)
+        .expect("question answer operation risk");
     let file_root = std::env::temp_dir().display().to_string();
     let grant = ctx
         .engine_host
@@ -574,7 +577,13 @@ async fn derive_execute_grant(
                 "subjectActorId": "agent:goals-session",
                 "allowedCapabilities": [EXECUTE_FUNCTION],
                 "allowedNamespaces": ["__no_namespace_authority__"],
-                "allowedAuthorityScopes": ["capability.execute", "goals.read", super::WRITE_SCOPE],
+                "allowedAuthorityScopes": [
+                    "capability.execute",
+                    "goals.read",
+                    super::WRITE_SCOPE,
+                    "resource.read",
+                    "resource.write"
+                ],
                 "allowedResourceKinds": ["goal", super::USER_QUESTION_KIND, super::GOAL_ANSWER_KIND],
                 "resourceSelectors": [
                     "kind:goal",
@@ -584,10 +593,10 @@ async fn derive_execute_grant(
                 ],
                 "fileRoots": [file_root],
                 "networkPolicy": "none",
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": 10},
                 "canDelegate": false,
-                "provenance": {"source": "goals-test"}
+                "provenance": {"source": "goals-test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:goals-test").unwrap(),
@@ -598,7 +607,7 @@ async fn derive_execute_grant(
             .with_scope("grant.write")
             .with_session_id("goals-session")
             .with_workspace_id("workspace-goals")
-            .with_idempotency_key(key),
+            .with_idempotency_key(format!("{key}-{operation}")),
         ))
         .await;
     assert_eq!(

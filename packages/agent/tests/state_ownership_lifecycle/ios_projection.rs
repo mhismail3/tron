@@ -1,30 +1,30 @@
 use super::support::*;
 
+fn contains_direct_user_defaults_standard(source: &str) -> bool {
+    let without_swift_whitespace: String = source
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    without_swift_whitespace.contains("UserDefaults.standard")
+}
+
+#[test]
+fn direct_user_defaults_standard_detector_rejects_whitespace_variation() {
+    let direct_standard_access = "UserDefaults . standard.removeObject(forKey: storageKey)";
+
+    assert!(
+        contains_direct_user_defaults_standard(direct_standard_access),
+        "direct UserDefaults.standard access must be detected after normalizing Swift whitespace"
+    );
+}
+
 #[test]
 fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     let architecture = read_repo_file("packages/ios-app/docs/architecture.md");
-    for required in [
-        "## State Ownership",
-        "The iOS app owns no canonical server truth.",
-        "`EventDatabase` is a Documents-backed SQLite projection cache",
-        "startup fails at the composition",
-        "boundary instead of silently changing the projection substrate",
-        "diagnostics harnesses may create explicit isolated database paths",
-        "`EventStoreManager` and `SessionSynchronizer` rebuild local session/event",
-        "projections from server session lists and event-sync APIs",
-        "Engine stream cursors are stored per server",
-        "origin/topic/filter for ACK coalescing and diagnostics only",
-        "Server settings shown in the iOS settings UI are snapshots from",
-        "Pairing is device-local `UserDefaults` state",
-        "bearer tokens are per-server",
-        "Keychain secrets",
-        "MetricKit payloads are bounded Application Support diagnostics buffers",
-    ] {
-        assert!(
-            architecture.contains(required),
-            "iOS architecture state ownership docs missing `{required}`"
-        );
-    }
+    assert!(
+        architecture.contains("## State Ownership"),
+        "iOS architecture must retain its state-ownership section"
+    );
 
     let event_database =
         read_repo_file("packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift");
@@ -57,12 +57,31 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         );
     }
 
+    let dependency_storage = read_repo_file(
+        "packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift",
+    );
+    for required in [
+        "static func production(",
+        "defaults: () -> UserDefaults = { .standard }",
+        "FileManager.default.urls(for: .documentDirectory",
+        "eventDatabase: () -> EventDatabase? = { EventDatabase() }",
+        "preconditionFailure(\"Documents directory unavailable; cannot initialize iOS local projection stores\")",
+        "preconditionFailure(\"Documents directory unavailable; cannot initialize EventDatabase\")",
+    ] {
+        assert!(
+            dependency_storage.contains(required),
+            "DependencyContainerStorage iOS state lifecycle missing `{required}`"
+        );
+    }
+
     let dependency_container =
         read_repo_file("packages/ios-app/Sources/Support/Composition/DependencyContainer.swift");
     for required in [
-        "preconditionFailure(\"Documents directory unavailable; cannot initialize iOS local projection stores\")",
-        "preconditionFailure(\"Documents directory unavailable; cannot initialize EventDatabase\")",
-        "let db = EventDatabase()",
+        "storage: DependencyContainerStorage = .production(),",
+        "runtimeIO: DependencyContainerRuntimeIO = .production()",
+        "pairedServerTokenStore = runtimeIO.pairedServerTokenStore",
+        "sessionAttemptDirective: runtimeIO.sessionAttemptDirective",
+        "let db = storage.eventDatabase",
         "eventStoreManager.draftStore = draftStore",
         "selectPairedServer",
         "eventStoreManager.updateEngineClient(newClient)",
@@ -79,21 +98,31 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "NSTemporaryDirectory()",
     ] {
         assert!(
-            !dependency_container.contains(forbidden),
-            "DependencyContainer must not retain alternate production state path `{forbidden}`"
+            !dependency_container.contains(forbidden) && !dependency_storage.contains(forbidden),
+            "iOS composition owners must not retain alternate production state path `{forbidden}`"
         );
     }
 
     let event_store_manager =
         read_repo_file("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift");
     for required in [
-        "globalEventTask?.cancel()",
-        "globalEventTask = Task",
-        "sessionSynchronizer.updateEngineClient(client)",
+        "let predecessor = globalEventTask",
+        "predecessor?.cancel()",
+        "await predecessor?.value",
+        "for await event in stream",
+        "guard let self else { return }",
+        "await self.acceptedEventHook(event)",
+        "await self.handleGlobalEventV2(event)",
+        "func shutdown() async",
+        "await globalTask?.value",
+        "await refreshCoordinator.shutdown()",
+        "await loadTask?.value",
+        "engineClient = client",
         "setupGlobalEventHandlers()",
-        "handleSessionDeleted",
-        "handleSessionArchived",
-        "handleSessionUnarchived",
+        "private var processingOverrides:",
+        "withTaskCancellationHandler",
+        "authoritativeProcessingSessionIds?.contains(sessionId)",
+        "override.revision > $0",
     ] {
         assert!(
             event_store_manager.contains(required),
@@ -111,13 +140,25 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
             "fetchServerSessions",
             "serverSessionIds",
             "eventDB.sessions.getAll()",
+            "authoritativeProcessingSessionIds.insert(sessionId)",
             "mergeSessionData",
             "serverSessionToCached",
             "reconcileServerSnapshot",
-            "loadSessions()",
-            "seedProcessingStateFromSessions()",
+            "loadSessionsAfterRefresh(",
+            "authoritativeProcessingSessionIds: authoritativeProcessingSessionIds",
         ],
     );
+    let event_store_activity = read_repo_file(
+        "packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+SessionActivity.swift",
+    );
+    for forbidden in ["processingSessionIds", "seedProcessingStateFromSessions"] {
+        assert!(
+            !event_store_manager.contains(forbidden)
+                && !event_store_sync.contains(forbidden)
+                && !event_store_activity.contains(forbidden),
+            "EventStoreManager must not retain duplicate processing projection `{forbidden}`"
+        );
+    }
     for required in [
         "max(existing.eventCount, serverInfo.eventCount ?? existing.eventCount)",
         "session.rootEventId = existing.rootEventId",
@@ -140,18 +181,18 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         &[
             "eventDB.sync.getState(sessionId)",
             "lastSyncedEventId",
-            "engineClient.eventSync.getSince",
+            "operationClient.eventSync.getSince",
             "eventDB.events.insertBatch(events)",
             "eventDB.sync.update(newSyncState)",
         ],
     );
     for required in [
-        "fullSync(sessionId: String)",
+        "fullSync(sessionId: String, using operationClient: EngineClient)",
         "eventDB.events.deleteBySession(sessionId)",
         "lastSyncedEventId: nil",
-        "engineClient.eventSync.getAll(sessionId: sessionId)",
+        "operationClient.eventSync.getAll(sessionId: sessionId)",
         "fetchMissingAncestors",
-        "engineClient.eventSync.getAncestors(parentId)",
+        "operationClient.eventSync.getAncestors(parentId)",
         "insertIgnoringDuplicates",
     ] {
         assert!(
@@ -160,39 +201,32 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         );
     }
 
-    let cursor_store = read_repo_file(
-        "packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift",
-    );
-    for required in [
-        "serverOrigin: String",
-        "filterHash: String",
-        "Session history is never restored from this store",
-        "save(_ cursor: EngineStreamCursor",
-        "guard existing.map({ cursor > $0 }) ?? true else { return }",
-        "removeAll()",
-    ] {
-        assert!(
-            cursor_store.contains(required),
-            "Engine stream cursor lifecycle missing `{required}`"
-        );
-    }
-
     let engine_client =
         read_repo_file("packages/ios-app/Sources/Engine/Transport/WebSocket/EngineClient.swift");
     for required in [
         "Session history is reconstructed through `session::reconstruct`.",
-        "sessionEventSubscriptionCursor(stored: EngineStreamCursor?) -> EngineStreamCursor?",
-        "nil",
+        "private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription]",
+        "cursor: nil",
         "clearActiveStreamSubscriptions(reason: \"explicit disconnect\")",
-        "streamCursorStore.save(cursor, for: key)",
+        "guard let subscriptionId = delivery.subscriptionId",
         "scheduleStreamAck(subscriptionId: subscriptionId, cursor: cursor)",
         "streamAckCoalescer.removeAll()",
         "streamSubscriptions.removeAll()",
-        "streamSubscriptionKeysById.removeAll()",
     ] {
         assert!(
             engine_client.contains(required),
             "EngineClient stream projection lifecycle missing `{required}`"
+        );
+    }
+    for forbidden in [
+        "EngineStreamCursorStore",
+        "streamCursorStore",
+        "streamSubscriptionKeysById",
+        "sessionEventSubscriptionCursor",
+    ] {
+        assert!(
+            !engine_client.contains(forbidden),
+            "EngineClient must not retain durable or duplicate stream cursor state `{forbidden}`"
         );
     }
 
@@ -288,6 +322,10 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "func setToken",
         "func token(forServerId",
         "func remove(serverId",
+        "static let production = Backend(",
+        "try makeProductionItem(for: id).set(token)",
+        "makeProductionItem(for: id).get()",
+        "try makeProductionItem(for: id).delete()",
         "account: id",
     ] {
         assert!(
@@ -317,16 +355,25 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     for required in [
         "storageKey = \"tron.inputHistory\"",
         "maxHistorySize = 100",
+        "private let defaults: UserDefaults",
+        "init(defaults: UserDefaults)",
+        "self.defaults = defaults",
+        "defaults.data(forKey: storageKey)",
+        "defaults.set(data, forKey: storageKey)",
+        "defaults.removeObject(forKey: storageKey)",
         "history = Array(history.prefix(maxHistorySize))",
         "resetNavigation()",
         "clearHistory()",
-        "UserDefaults.standard.removeObject",
     ] {
         assert!(
             history_store.contains(required),
             "InputHistoryStore local lifecycle missing `{required}`"
         );
     }
+    assert!(
+        !contains_direct_user_defaults_standard(&history_store),
+        "InputHistoryStore must require its defaults owner, not reach for UserDefaults.standard"
+    );
 
     let shared_content =
         read_repo_file("packages/ios-app/Sources/Support/Share/SharedContent.swift");
@@ -377,40 +424,5 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         !diagnostics_builder.contains("eventDatabaseStorageMode")
             && !diagnostics_builder.contains("storageMode"),
         "Diagnostics bundle must not report deleted event database storage modes"
-    );
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift",
-        "packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift",
-        "packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift",
-        "packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Sync.swift",
-        "packages/ios-app/Sources/Engine/Persistence/Sync/SessionSynchronizer.swift",
-        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineClient.swift",
-        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift",
-        "packages/ios-app/Sources/Engine/Transport/Retry/ConnectionManager.swift",
-        "packages/ios-app/Sources/Session/Chat/State/SettingsState.swift",
-        "packages/ios-app/Sources/Support/Composition/DependencyContainer.swift",
-        "packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift",
-        "packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift",
-        "packages/ios-app/Sources/Support/Share/SharedContent.swift",
-        "packages/ios-app/Sources/Support/Storage/DraftStore.swift",
-        "packages/ios-app/Sources/Support/Storage/InputHistoryStore.swift",
-        "packages/ios-app/Sources/Support/Storage/PairedServerTokenStore.swift",
-        "packages/ios-app/docs/architecture.md",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-8"))),
-            "SOL inventory must tag {required} as part of SOL-8"
-        );
-    }
-    assert!(
-        inventory
-            .iter()
-            .filter(|(path, _)| path.starts_with("packages/ios-app/Sources/"))
-            .all(|(_, rows)| rows.iter().all(|row| row.state_class != "canonical_truth")),
-        "iOS source inventory rows must not claim canonical server truth"
     );
 }

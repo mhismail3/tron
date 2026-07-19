@@ -52,11 +52,43 @@ struct ScrollHistoryAutoloadTests {
 
     @Test("Top autoload re-arms from user-driven scroll phases")
     func testTopAutoloadRearmsFromUserDrivenScrollPhases() {
-        #expect(ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.interacting))
-        #expect(ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.tracking))
-        #expect(ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.decelerating))
-        #expect(!ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.idle))
-        #expect(!ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.animating))
+        #expect(ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .interacting,
+            isPositionedByUser: false
+        ))
+        #expect(ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .tracking,
+            isPositionedByUser: false
+        ))
+        #expect(ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .decelerating,
+            isPositionedByUser: false
+        ))
+        #expect(!ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .idle,
+            isPositionedByUser: false
+        ))
+        #expect(!ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .animating,
+            isPositionedByUser: false
+        ))
+    }
+
+    @Test("Native ownership re-arms top autoload during indirect scrolling")
+    func testTopAutoloadRearmsFromNativeOwnership() {
+        #expect(ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .animating,
+            isPositionedByUser: true
+        ))
+    }
+
+    @Test("Geometry-only accessibility pages re-arm repeated top autoload")
+    func testTopAutoloadRearmsFromGeometryOnlyAccessibilityMovement() {
+        #expect(ChatHistoryAutoloadPolicy.shouldRearmTopDetent(
+            phase: .idle,
+            isPositionedByUser: false,
+            movedTowardOlderContent: true
+        ))
     }
 
     @Test("Top autoload policy does not trigger away from top")

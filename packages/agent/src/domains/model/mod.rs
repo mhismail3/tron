@@ -10,6 +10,9 @@
 //! malformed provider capability arguments fail closed at that boundary.
 //! Token normalization, pricing, and token record types live under `tokens/`
 //! because they are canonical model-domain accounting, not provider wiring.
+//! Effective attachment limits live under `routing::attachments`; `model.list`
+//! publishes them and the agent prompt boundary enforces the same policy so
+//! clients never need provider-name heuristics.
 //! Provider reasoning/status evidence is metadata-only and stays in the
 //! responder/audit plus token-accounting boundary; it must not expose hidden
 //! reasoning text, synthesize summaries, or add model-visible tools.

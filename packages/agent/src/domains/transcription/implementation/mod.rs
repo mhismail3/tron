@@ -9,6 +9,6 @@ pub mod types;
 
 pub use runtime::mlx::MlxEngine;
 pub use types::{
-    ResultExt, SharedTranscriptionEngine, TranscriptionEngine, TranscriptionError,
-    TranscriptionResult, TranscriptionRuntimeState, TranscriptionRuntimeStatus,
+    SharedTranscriptionEngine, TranscriptionEngine, TranscriptionError, TranscriptionResult,
+    TranscriptionRuntimeState, TranscriptionRuntimeStatus,
 };

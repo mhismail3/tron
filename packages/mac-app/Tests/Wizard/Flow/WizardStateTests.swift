@@ -1,8 +1,9 @@
 import Foundation
+import os
 import Testing
 @testable import TronMac
 
-/// Tests `WizardState` step persistence + advance/back/skip/complete
+/// Tests `WizardState` step persistence + advance/back/skip
 /// transitions. Each test gets its own UserDefaults suite so they
 /// don't bleed across runs.
 @Suite("WizardState")
@@ -85,16 +86,6 @@ struct WizardStateTests {
         #expect(state.step == .pairingInfo)
     }
 
-    @Test("complete sets the done step + persists onboardingComplete=true")
-    func completeFlips() async {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.complete()
-        #expect(state.step == .done)
-        #expect(defaults.bool(forKey: WizardState.onboardingCompleteKey) == true)
-    }
-
     @Test("step changes persist to UserDefaults")
     func stepPersists() {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -106,36 +97,6 @@ struct WizardStateTests {
         // Re-instantiating from the same defaults resumes there.
         let revived = WizardState(defaults: defaults)
         #expect(revived.step == .install)
-    }
-
-    @Test("reset wipes all transient state and persistent flags")
-    func resetWipes() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance(); state.advance()
-        state.installOutcome = .success
-        state.requestInstall()
-        state.installIsRunning = true
-        state.pairingPayload = PairingPayload(host: "1.2.3.4", port: 9847, token: "x", label: nil)
-        state.tailscaleStatus = .signedIn(ipv4: "100.1.2.3")
-        state.permissionStatuses[.fullDiskAccess] = .granted
-        state.existingInstallStatus = .registered(version: "0.5.0")
-        state.complete()
-
-        state.reset()
-        #expect(state.step == .welcome)
-        #expect(state.installOutcome == nil)
-        #expect(state.installRequestID == 0)
-        #expect(state.handledInstallRequestID == 0)
-        #expect(state.hasUnhandledInstallRequest == false)
-        #expect(state.installIsRunning == false)
-        #expect(state.pairingPayload == nil)
-        #expect(state.tailscaleStatus == nil)
-        #expect(state.permissionStatuses.isEmpty)
-        #expect(state.existingInstallStatus == .none)
-        #expect(defaults.bool(forKey: WizardState.onboardingCompleteKey) == false)
-        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.welcome.rawValue)
     }
 
     @Test("safe-to-resume persisted step rawValue is honored")
@@ -175,8 +136,8 @@ struct WizardStateTests {
     // `pairingPayload`, per-permission probes) that doesn't survive a
     // relaunch. If we honoured those on cold boot the user would land
     // mid-wizard behind a disabled Continue button with no way to recover.
-    // The iOS beta handoff is static and safe to resume; these tests pin
-    // both halves of that contract.
+    // The iOS beta handoff is static and safe to resume. Done clamps because
+    // a missing sentinel must win over stale progress left after uninstall.
 
     @Test("persisted .permissions clamps back to welcome on cold start")
     func persistedPermissionsClamped() {
@@ -255,15 +216,6 @@ struct WizardStateTests {
         #expect(state.slideDirection == .forward)
     }
 
-    @Test("complete sets slideDirection to forward")
-    func completeForwardDirection() async {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.complete()
-        #expect(state.slideDirection == .forward)
-    }
-
     @Test("install does not start until explicitly requested")
     func installRequestIsExplicit() {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -284,36 +236,6 @@ struct WizardStateTests {
         state.requestInstall()
         #expect(state.installRequestID == 2)
         #expect(state.hasUnhandledInstallRequest == true)
-    }
-
-    @Test("resetInstallRunState clears install request replay tracking")
-    func resetInstallRunStateClearsReplayTracking() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.installOutcome = .success
-        state.requestInstall()
-        state.markInstallRequestHandled(state.installRequestID)
-        state.installIsRunning = true
-
-        state.resetInstallRunState()
-        #expect(state.installOutcome == nil)
-        #expect(state.installRequestID == 0)
-        #expect(state.handledInstallRequestID == 0)
-        #expect(state.hasUnhandledInstallRequest == false)
-        #expect(state.installIsRunning == false)
-    }
-
-    @Test("reset returns slideDirection to forward (default)")
-    func resetRestoresForward() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance()
-        state.goBack() // direction now .backward
-        #expect(state.slideDirection == .backward)
-        state.reset()
-        #expect(state.slideDirection == .forward)
     }
 
     @Test("interleaved advance/goBack flips direction each time")
@@ -351,5 +273,29 @@ struct WizardStateTests {
         // After repeatedly going back and bottoming out, direction
         // should still read .backward — last real nav was backward.
         #expect(state.slideDirection == .backward)
+    }
+}
+
+@Suite("Wizard completion")
+@MainActor
+struct WizardCompletionTests {
+    private enum SentinelError: Error, Sendable { case writeFailed }
+
+    @Test("sentinel write gates the single completion notification")
+    func sentinelWriteGatesNotification() throws {
+        let center = NotificationCenter()
+        let notificationCount = OSAllocatedUnfairLock(initialState: 0)
+        let observer = center.addObserver(forName: .tronWizardDidComplete, object: nil, queue: nil) { _ in
+            notificationCount.withLock { $0 += 1 }
+        }
+        defer { center.removeObserver(observer) }
+
+        #expect(throws: SentinelError.self) {
+            try commitWizardCompletion(touchSentinel: { throw SentinelError.writeFailed }, notificationCenter: center)
+        }
+        #expect(notificationCount.withLock { $0 } == 0)
+
+        try commitWizardCompletion(touchSentinel: {}, notificationCenter: center)
+        #expect(notificationCount.withLock { $0 } == 1)
     }
 }

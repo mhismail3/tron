@@ -3,7 +3,6 @@ import Foundation
 struct ServerProcessInfo: Equatable, Sendable {
     var pid: Int
     var uptime: String?
-    var command: String?
     var isDevServer: Bool
 }
 
@@ -24,7 +23,6 @@ enum ServerProcessProbe {
         return ServerProcessInfo(
             pid: pid,
             uptime: resolvedUptime,
-            command: resolvedCommand,
             isDevServer: isDevServerCommand(resolvedCommand)
         )
     }
@@ -42,7 +40,7 @@ enum ServerProcessProbe {
         command?.contains("/Tron-Dev.app/Contents/MacOS/tron") == true
     }
 
-    private static func processElapsedTime(pid: Int) async -> String? {
+    static func processElapsedTime(pid: Int) async -> String? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
             arguments: ["-p", "\(pid)", "-o", "etime="]

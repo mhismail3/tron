@@ -3,6 +3,23 @@ import Testing
 
 @testable import TronMobile
 
+private final class LockedBearerToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    func read() -> String {
+        lock.withLock { value }
+    }
+
+    func replace(with value: String) {
+        lock.withLock { self.value = value }
+    }
+}
+
 /// Behavioral tests for `EngineConnection`'s bearer-token integration —
 /// Pairing bearer auth on the WS upgrade
 /// request, plus the new `.unauthorized` state machine path).
@@ -62,12 +79,12 @@ struct WebSocketAuthTests {
         // .unauthorized CTA, which writes a fresh token into the Keychain.
         // The provider closure must re-read on every connect so the next
         // attempt picks up the rotated token.
-        nonisolated(unsafe) var current = "old-token"
-        let ws = EngineConnection(serverURL: makeURL()) { current }
+        let current = LockedBearerToken("old-token")
+        let ws = EngineConnection(serverURL: makeURL()) { current.read() }
 
         #expect(ws.makeUpgradeRequest().value(forHTTPHeaderField: "Authorization") == "Bearer old-token")
 
-        current = "new-token"
+        current.replace(with: "new-token")
 
         #expect(ws.makeUpgradeRequest().value(forHTTPHeaderField: "Authorization") == "Bearer new-token")
     }
@@ -94,6 +111,27 @@ struct WebSocketAuthTests {
             Issue.record("engine protocol JSON must be sent as a WebSocket text frame")
         @unknown default:
             Issue.record("unexpected WebSocket frame type")
+        }
+    }
+
+    @Test("hello advertises the canonical outbound frame budget")
+    func helloDecodesFrameBudget() throws {
+        let data = Data(#"{"type":"hello.ok","id":"h1","protocolVersion":1,"minimumSupportedVersion":1,"serverId":"tron-engine","maxMessageSize":157286400}"#.utf8)
+
+        let result = try JSONDecoder().decode(EngineHelloResult.self, from: data)
+
+        #expect(result.maxMessageSize == 150 * 1024 * 1024)
+    }
+
+    @Test("outbound requests fail before transport when they exceed the negotiated budget")
+    func outboundFrameBudgetIsEnforced() throws {
+        try EngineConnection.validateOutboundMessageSize(actualBytes: 64, maxBytes: 64)
+
+        do {
+            try EngineConnection.validateOutboundMessageSize(actualBytes: 65, maxBytes: 64)
+            Issue.record("expected an oversized message error")
+        } catch let error as EngineConnectionError {
+            #expect(error == .messageTooLarge(actualBytes: 65, maxBytes: 64))
         }
     }
 
@@ -154,7 +192,15 @@ struct WebSocketAuthTests {
         // state should advance toward .connecting (and then likely fail
         // with .reconnecting since the URL is bogus — that's OK; the assert
         // is that we left .unauthorized).
-        let ws = EngineConnection(serverURL: makeURL())
+        var requests: [URLRequest] = []
+        let ws = EngineConnection(
+            serverURL: makeURL(),
+            sessionAttemptDirective: { request in
+                requests.append(request)
+                return .handledFailure
+            }
+        )
+        ws.setBackgroundState(true)
         ws.markUnauthorized(reason: "Server rejected authentication")
         #expect(ws.connectionState == .unauthorized(reason: "Server rejected authentication"))
 
@@ -163,6 +209,10 @@ struct WebSocketAuthTests {
         if case .unauthorized = ws.connectionState {
             Issue.record("manualRetry left state in .unauthorized")
         }
+        #expect(requests.count == 1)
+        #expect(requests.first?.url == makeURL())
+        #expect(ws.urlSession == nil)
+        #expect(ws.engineConnectionTask == nil)
     }
 
     // MARK: - Unpaired server path
@@ -180,5 +230,149 @@ struct WebSocketAuthTests {
 
         ws.markUnauthorized(reason: "Server rejected authentication (no token)")
         #expect(ws.connectionState == .unauthorized(reason: "Server rejected authentication (no token)"))
+    }
+}
+
+@Suite("EngineConnection request transport")
+@MainActor
+struct WebSocketRequestTransportTests {
+
+    private func makeTask() -> URLSessionWebSocketTask {
+        URLSession.shared.webSocketTask(
+            with: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+    }
+
+    @Test("send failure from a retired socket cannot disconnect its replacement")
+    func staleSendFailureLeavesReplacementConnected() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let retiredTask = makeTask()
+        let replacementTask = makeTask()
+        defer {
+            retiredTask.cancel()
+            replacementTask.cancel()
+        }
+        connection.engineConnectionTask = replacementTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+
+        await connection.handleSendTransportFailure(
+            URLError(.networkConnectionLost),
+            operation: "agent::prompt",
+            failedTask: retiredTask
+        )
+
+        #expect(connection.engineConnectionTask === replacementTask)
+        #expect(connection.isConnectedFlag)
+        #expect(connection.connectionState == .connected)
+    }
+
+    @Test("send failure from the current socket performs terminal cleanup")
+    func currentSendFailureDisconnectsCurrentSocket() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        defer { currentTask.cancel() }
+        connection.engineConnectionTask = currentTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleSendTransportFailure(
+            URLError(.networkConnectionLost),
+            operation: "agent::prompt",
+            failedTask: currentTask
+        )
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
+    }
+
+    @Test("completion from the current established socket retires its transport loops")
+    func currentTaskCompletionRetiresTransportLoops() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        let pingTask = Task<Void, Never> {
+            try? await Task.sleep(for: .seconds(60))
+        }
+        let receiveTask = Task<Void, Never> {
+            try? await Task.sleep(for: .seconds(60))
+        }
+        defer {
+            currentTask.cancel()
+            pingTask.cancel()
+            receiveTask.cancel()
+        }
+        connection.engineConnectionTask = currentTask
+        connection.pingTask = pingTask
+        connection.receiveTask = receiveTask
+        connection.sessionDelegate = EngineConnectionSessionDelegate(owner: connection)
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleWebSocketTaskCompletion(
+            currentTask,
+            error: URLError(.networkConnectionLost)
+        )
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(connection.pingTask == nil)
+        #expect(connection.receiveTask == nil)
+        #expect(connection.sessionDelegate == nil)
+        #expect(pingTask.isCancelled)
+        #expect(receiveTask.isCancelled)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
+    }
+
+    @Test("completion from a retired socket cannot disconnect its replacement")
+    func retiredTaskCompletionLeavesReplacementConnected() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let retiredTask = makeTask()
+        let replacementTask = makeTask()
+        defer {
+            retiredTask.cancel()
+            replacementTask.cancel()
+        }
+        connection.engineConnectionTask = replacementTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+
+        await connection.handleWebSocketTaskCompletion(
+            retiredTask,
+            error: URLError(.networkConnectionLost)
+        )
+
+        #expect(connection.engineConnectionTask === replacementTask)
+        #expect(connection.isConnectedFlag)
+        #expect(connection.connectionState == .connected)
+    }
+
+    @Test("completion without an error still retires the current established socket")
+    func cleanTaskCompletionRetiresCurrentSocket() async {
+        let connection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!
+        )
+        let currentTask = makeTask()
+        defer { currentTask.cancel() }
+        connection.engineConnectionTask = currentTask
+        connection.isConnectedFlag = true
+        connection.connectionState = .connected
+        connection.isInBackground = true
+
+        await connection.handleWebSocketTaskCompletion(currentTask, error: nil)
+
+        #expect(connection.engineConnectionTask == nil)
+        #expect(!connection.isConnectedFlag)
+        #expect(connection.connectionState == .disconnected)
     }
 }

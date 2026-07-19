@@ -5,12 +5,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
+PROJECT="TronMobile.xcodeproj"
 DERIVED_DATA="build/DerivedData"
 SCHEME="${TRON_IOS_SCHEME:-Tron Beta}"
 CONFIG="${TRON_IOS_CONFIGURATION:-Beta}"
 DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
-DESTINATION="${TRON_IOS_DESTINATION:-}"
 LAUNCH_AFTER_INSTALL=1
 LAUNCH_TIMEOUT_SECONDS="${TRON_IOS_LAUNCH_TIMEOUT_SECONDS:-20}"
 
@@ -22,13 +22,9 @@ Usage:
   scripts/tron-ios-beta stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-beta status [--device-id ID] [--device-name NAME]
 
-Aliases:
-  start    Same as install
-
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
-  TRON_IOS_DESTINATION     Full xcodebuild destination, e.g. platform=iOS,id=<id>
   TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron Beta
   TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Beta
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
@@ -145,22 +141,9 @@ resolve_device_id() {
     die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are selectable"
 }
 
-project_selector() {
-    cd "$IOS_DIR"
-    local workspace
-    workspace="$(find . -maxdepth 2 -name "*.xcworkspace" -not -path "*/.build/*" -not -path "*/build/*" -not -path "*.xcodeproj/*" | head -1)"
-    if [ -n "$workspace" ]; then
-        printf '%s\n%s\n' "-workspace" "$workspace"
-    else
-        printf '%s\n%s\n' "-project" "TronMobile.xcodeproj"
-    fi
-}
-
 bundle_id_for_project() {
-    local selector_flag="$1"
-    local selector_path="$2"
     cd "$IOS_DIR"
-    xcodebuild -showBuildSettings "$selector_flag" "$selector_path" \
+    xcodebuild -showBuildSettings -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration "$CONFIG" 2>/dev/null \
         | awk -F' = ' '/^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER/ {print $2; exit}'
@@ -173,7 +156,7 @@ pretty_xcode_output() {
         xcpretty --color
     else
         awk '
-            /[^ ].*:[0-9]+:[0-9]+: (error|warning|note):/ { print; next }
+            /(:[0-9]+:[0-9]+)?: (error|warning|note):/ { print; next }
             /^\*\* (BUILD|CLEAN|TEST) (SUCCEEDED|FAILED|CANCELED) \*\*/ { print; next }
             /^The following build commands failed:/ { print; in_fail=1; next }
             in_fail && /^\([0-9]+ failures?\)$/ { print; in_fail=0; next }
@@ -196,21 +179,8 @@ build_install_launch() {
     cd "$IOS_DIR"
     xcodegen generate
 
-    local selector
-    selector="$(project_selector)"
-    local project_flag project_path
-    project_flag="$(printf '%s\n' "$selector" | sed -n '1p')"
-    project_path="$(printf '%s\n' "$selector" | sed -n '2p')"
-
     local bundle_id
-    bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
-
-    local destination
-    if [ -n "$DESTINATION" ]; then
-        destination="$DESTINATION"
-    else
-        destination="platform=iOS,id=${device_id}"
-    fi
+    bundle_id="$(bundle_id_for_project)"
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -220,10 +190,10 @@ build_install_launch() {
     set +e
     xcodebuild \
         build \
-        "$project_flag" "$project_path" \
+        -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration "$CONFIG" \
-        -destination "$destination" \
+        -destination "platform=iOS,id=${device_id}" \
         -destination-timeout 30 \
         -derivedDataPath "$DERIVED_DATA" \
         -resultBundlePath "$xcresult" \
@@ -240,14 +210,15 @@ build_install_launch() {
         echo "Build failed."
         echo
         echo "-- Errors --"
-        grep -E ':[0-9]+:[0-9]+: (error|warning):' "$log" | awk '!seen[$0]++' | head -20 || true
+        grep -E '(:[0-9]+:[0-9]+)?: (error|warning):' "$log" | awk '!seen[$0]++' | head -20 || true
         echo
         echo "-- Failed commands --"
         sed -n '/^The following build commands failed:/,/^([0-9]\+ failures\?)$/p' "$log" | head -30 || true
         echo
         echo "-- Signing / linker hints --"
-        grep -E 'Undefined symbols|ld: error|Code Sign|provisioning profile|signing identity' "$log" \
-            | grep -iE 'error|failed|not found|does not' | head -10 || true
+        grep -Ei 'Undefined symbols|ld: error|Code Sign|provisioning profile|signing identity|No Accounts|No signing certificate|requires a development team' "$log" \
+            | grep -iE 'error|failed|not found|does not|no accounts|no signing certificate|requires a development team' \
+            | head -10 || true
         echo
         echo "Full log: $log"
         echo "xcresult: $xcresult"
@@ -290,14 +261,9 @@ launch_installed_app() {
 
     cd "$IOS_DIR"
     xcodegen generate >/dev/null
-    local selector
-    selector="$(project_selector)"
-    local project_flag project_path
-    project_flag="$(printf '%s\n' "$selector" | sed -n '1p')"
-    project_path="$(printf '%s\n' "$selector" | sed -n '2p')"
 
     local bundle_id
-    bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
+    bundle_id="$(bundle_id_for_project)"
     [ -n "$bundle_id" ] || die "could not resolve bundle ID"
     launch_app_for_device "$device_id" "$bundle_id"
 }
@@ -357,7 +323,7 @@ main() {
     local cmd="${1:-help}"
     shift || true
     case "$cmd" in
-        install|start)
+        install)
             parse_common_args "$@"
             build_install_launch
             ;;

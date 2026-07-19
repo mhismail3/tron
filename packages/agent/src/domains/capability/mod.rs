@@ -117,7 +117,8 @@
 //! per-record detail after `trace_list` returns an exact `traceRecordId`, which
 //! is deliberately distinct from the causal `traceId`. Unsupported operation
 //! names receive a rejection-only child grant and are persisted as failed trace
-//! records without their raw request before they return; provider-byte budgeting
+//! records without their raw request only after trusted actor/session context and
+//! the grant's exact unsupported-operation claim are verified; provider-byte budgeting
 //! retains a bounded newest-first record subset instead of deleting the complete
 //! records collection, while exact operation/status filters let the agent isolate
 //! omitted failures without guessing record ids. Trace
@@ -186,7 +187,10 @@
 //! runtime supervision state, and trace-redact requests/results so provider
 //! output remains bounded refs/fingerprints/truncation/duration/exit/timeout/
 //! cancellation/cleanup metadata rather than raw command, code, stdio, logs,
-//! paths, env, pids, grant ids, or raw job/output payloads.
+//! paths, env, pids, grant ids, or raw job/output payloads. Direct job and
+//! module-program adapters receive the same composition-owned jobs runtime as
+//! the jobs worker instead of maintaining a second process registry or startup
+//! boundary.
 //! File/Git module-pack activation is metadata and authority only: the existing
 //! `filesystem_*` and selected `git_*` operation values remain inside this
 //! primitive, but derived grants use exact filesystem/Git/resource scopes,
@@ -200,10 +204,14 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `contract` | Single `capability::execute` host contract and compact provider bootstrap schema |
+//! | `contract` | Single fully composed `capability::execute` definition and compact provider bootstrap schema |
 //! | `operations` | Direct primitive operation implementations |
 //! | `operations::operation_contract` | Canonical typed operation registry plus input/output, ownership, effect, context, idempotency, and base-authority contracts for every execute operation |
 //! | `pool` | Operation/catalog-function classification for agent-facing discovery |
+//!
+//! Capability-pool metadata stays typed internally and owns one explicit
+//! provider-safe JSON projection; it does not maintain a parallel serializable
+//! DTO or reload the full pool to derive operation usage guidance.
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
@@ -233,7 +241,8 @@
 //! working directory from trusted `CausalContext` runtime metadata, not from
 //! model-id string parsing, shell aliases, caller-supplied public context, or
 //! process-cwd inference. `capability::execute` rejects bootstrap/root grants and
-//! runs only with derived scoped grants whose file roots, state authority, and
+//! runs only with derived scoped grants whose durable operation claim, maximum
+//! risk, static authority scopes, base resource kinds/selectors, file roots, and
 //! network policy match the requested primitive operation. Working-directory
 //! metadata is required only for file/process operations; catalog discovery must
 //! remain pure metadata inspection or resource-backed report creation. Replay
@@ -250,6 +259,7 @@ pub(crate) mod pool;
 
 pub(crate) use contract::{EXECUTE_MODEL_PRIMITIVE, EXECUTE_MODEL_PRIMITIVE_EFFECT};
 pub(crate) use operations::execute_value;
+use operations::execute_value_cancellable;
 pub(crate) use operations::operation_replays_through_handler;
 pub(crate) use operations::provider_result_text;
 pub(crate) use operations::supported_operation_names;
@@ -257,7 +267,8 @@ pub(crate) use operations::{
     AuthorityPolicy, ConditionalAuthority, OperationBindingMetadata, ResourceKindPolicy,
     SelectorAddition, WorkerPackageKindSource, authority_policy, is_supported_operation,
     operation_binding_metadata, operation_host_request_schema, operation_list_text,
-    operation_required_payload_fields, operation_risk, validate_operation_payload,
+    operation_presentation, operation_required_payload_fields, operation_risk,
+    validate_operation_payload,
 };
 pub(crate) use operations::{OperationEffect, operation_effect};
 
@@ -265,15 +276,14 @@ use std::sync::Arc;
 
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::jobs;
-use crate::domains::registration::catalog::{CapabilitySpec, function_definition_for_capability};
 use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
 use crate::shared::server::error_mapping::capability_error_to_engine;
-use chrono::Utc;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
@@ -282,75 +292,37 @@ pub(crate) struct Deps {
     pub(crate) session_manager: Arc<SessionManager>,
     pub(crate) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
-    pub(crate) jobs_reconcile: jobs::service::ReconcileContext,
+    pub(crate) jobs: jobs::RuntimeState,
+    pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext, jobs: jobs::RuntimeState) -> Self {
         Self {
             engine_host: deps.engine_host.clone(),
             event_store: Arc::clone(&deps.event_store),
             session_manager: Arc::clone(&deps.session_manager),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
-            jobs_reconcile: jobs::service::ReconcileContext {
-                startup_cutoff: Utc::now(),
-            },
+            jobs,
+            apns_runtime: deps.apns_runtime.clone(),
         }
     }
 }
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
+    jobs: jobs::RuntimeState,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    let domain_deps = Deps::from_engine(deps);
-    let mut registrations = function_registrations(contract::capabilities()?, domain_deps)?;
-    for registration in &mut registrations {
-        merge_metadata(
-            &mut registration.definition.metadata,
-            contract::model_metadata(registration.definition.id.as_str()),
-        );
-    }
+    let domain_deps = Deps::from_engine(deps, jobs);
+    let registration = DomainFunctionRegistration {
+        definition: contract::execute_function_definition()?,
+        handler: Arc::new(ExecuteHandler { deps: domain_deps }),
+    };
     crate::domains::registration::worker::domain_worker_module(
         "capability",
         contract::STREAM_TOPICS,
-        registrations,
+        vec![registration],
     )
-}
-
-fn merge_metadata(target: &mut Value, extra: Value) {
-    if extra.is_null() {
-        return;
-    }
-    match (target, extra) {
-        (Value::Object(target), Value::Object(extra)) => {
-            for (key, value) in extra {
-                let _ = target.insert(key, value);
-            }
-        }
-        (target, extra) => {
-            *target = extra;
-        }
-    }
-}
-
-fn function_registrations(
-    specs: Vec<CapabilitySpec>,
-    deps: Deps,
-) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    let mut registrations = Vec::with_capacity(specs.len());
-    for spec in specs {
-        if spec.operation_key != "execute" {
-            return Err(EngineError::PolicyViolation(format!(
-                "unexpected capability operation '{}'",
-                spec.operation_key
-            )));
-        }
-        registrations.push(DomainFunctionRegistration {
-            definition: function_definition_for_capability(&spec),
-            handler: Arc::new(ExecuteHandler { deps: deps.clone() }),
-        });
-    }
-    Ok(registrations)
 }
 
 struct ExecuteHandler {
@@ -363,5 +335,13 @@ impl InProcessFunctionHandler for ExecuteHandler {
         execute_value(&invocation, &self.deps)
             .await
             .map_err(capability_error_to_engine)
+    }
+
+    async fn invoke_cancellable(
+        &self,
+        invocation: Invocation,
+        cancellation: &CancellationToken,
+    ) -> Result<Value, EngineError> {
+        execute_value_cancellable(&invocation, &self.deps, cancellation).await
     }
 }

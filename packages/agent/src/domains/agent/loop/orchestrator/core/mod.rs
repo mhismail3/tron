@@ -24,9 +24,10 @@
 //!
 //! - The active-run registry enforces [`MAX_CONCURRENT_SESSIONS`].
 //! - Dropping [`StartedRun`] releases both cancellation state and the semaphore
-//!   permit.
+//!   permit, and removes only its matching reconstruction projection.
 //! - Runtime sequence assignment stays synchronized with durable event-store
-//!   sequence truth.
+//!   sequence truth; one active run owns sequenced completion through the final
+//!   session metadata event.
 //!
 //! ## Test Ownership
 //!
@@ -55,8 +56,10 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::capability_invocation_tracker::CapabilityInvocationTracker;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
-use crate::domains::agent::r#loop::orchestrator::session_manager::{SessionFilter, SessionManager};
-use crate::domains::agent::r#loop::orchestrator::turn_accumulator::TurnAccumulatorMap;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::orchestrator::turn_accumulator::{
+    TurnAccumulatorMap, TurnReconstructionSnapshot,
+};
 
 /// Tracks an active agent run within a session.
 struct ActiveRun {
@@ -76,13 +79,6 @@ impl RunRegistry {
             active_runs: Mutex::new(HashMap::new()),
         }
     }
-
-    fn remove(&self, session_id: &str) {
-        let mut runs = self.active_runs.lock();
-        let _ = runs.remove(session_id);
-        #[allow(clippy::cast_precision_loss)]
-        gauge!("agent_runs_active").set(runs.len() as f64);
-    }
 }
 
 /// Active run registration guard.
@@ -91,8 +87,10 @@ impl RunRegistry {
 /// releases its concurrency permit, even if the owning task exits early.
 pub struct StartedRun {
     session_id: String,
+    run_id: String,
     cancel: CancellationToken,
     registry: Arc<RunRegistry>,
+    turn_accumulators: Arc<TurnAccumulatorMap>,
     permit: Option<OwnedSemaphorePermit>,
 }
 
@@ -101,12 +99,47 @@ impl StartedRun {
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()
     }
+
+    /// Finish the matching run while serializing its terminal publication with
+    /// admission of the next run for this session.
+    ///
+    /// `before_release` runs while the active-run registry is locked. A client
+    /// awakened by those terminal events can begin admission on another thread,
+    /// but that admission cannot observe `SessionBusy`: it waits for this method
+    /// to remove the old run and release its concurrency permit first.
+    pub(in crate::domains::agent) fn finish_with(&mut self, before_release: impl FnOnce()) -> bool {
+        let removed = {
+            let mut runs = self.registry.active_runs.lock();
+            let matches = runs
+                .get(&self.session_id)
+                .is_some_and(|run| run.run_id == self.run_id);
+            if matches {
+                before_release();
+                let _ = runs.remove(&self.session_id);
+                // Release the global capacity slot before another same-session
+                // admission can acquire the registry lock.
+                let _ = self.permit.take();
+            }
+            #[allow(clippy::cast_precision_loss)]
+            gauge!("agent_runs_active").set(runs.len() as f64);
+            matches
+        };
+
+        if removed {
+            self.turn_accumulators
+                .finish_run(&self.session_id, &self.run_id);
+        } else {
+            // Shutdown may have cleared the registry first. The guard still
+            // owns its semaphore permit and must release it exactly once.
+            let _ = self.permit.take();
+        }
+        removed
+    }
 }
 
 impl Drop for StartedRun {
     fn drop(&mut self) {
-        self.registry.remove(&self.session_id);
-        let _ = self.permit.take();
+        let _ = self.finish_with(|| {});
     }
 }
 
@@ -172,12 +205,13 @@ pub struct Orchestrator {
 impl Orchestrator {
     /// Create a new orchestrator.
     pub fn new(session_manager: Arc<SessionManager>) -> Self {
+        let turn_accumulators = Arc::new(TurnAccumulatorMap::new());
         Self {
             session_manager,
-            broadcast: Arc::new(EventEmitter::new()),
+            broadcast: Arc::new(EventEmitter::with_observer(turn_accumulators.clone())),
             run_registry: Arc::new(RunRegistry::new()),
             capability_invocation_tracker: Mutex::new(CapabilityInvocationTracker::new()),
-            turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
+            turn_accumulators,
             sequence_counters: Arc::new(DashMap::new()),
             compaction_handlers: Arc::new(DashMap::new()),
             retain_in_flight: Arc::new(DashMap::new()),
@@ -188,11 +222,6 @@ impl Orchestrator {
     /// Get a shared reference to the per-invocation abort registry.
     pub fn invocation_abort_registry(&self) -> &Arc<InvocationAbortRegistry> {
         &self.invocation_abort_registry
-    }
-
-    /// Get the session manager.
-    pub fn session_manager(&self) -> &Arc<SessionManager> {
-        &self.session_manager
     }
 
     /// Get the broadcast emitter.
@@ -269,7 +298,19 @@ impl Orchestrator {
                 "sequence counter not initialized for session {session_id}"
             ))
         })?;
-        let seq = entry.value().fetch_add(1, Ordering::SeqCst) + 1;
+        let counter = entry.value();
+        let mut current = counter.load(Ordering::SeqCst);
+        let seq = loop {
+            let next = current.checked_add(1).ok_or_else(|| {
+                RuntimeError::Persistence(format!(
+                    "event sequence exhausted for session {session_id}"
+                ))
+            })?;
+            match counter.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break next,
+                Err(observed) => current = observed,
+            }
+        };
         trace!(session_id, seq, "sequence assigned");
         Ok(seq)
     }
@@ -283,7 +324,10 @@ impl Orchestrator {
             .map(|entry| entry.value().load(Ordering::SeqCst))
     }
 
-    /// Remove the sequence counter for a session (cleanup on session end).
+    /// Remove the sequence counter after permanent session deletion.
+    ///
+    /// Reversible archive preserves this live ordering projection so an
+    /// unarchived session cannot reuse a provider-visible sequence.
     pub fn remove_sequence_counter(&self, session_id: &str) {
         if self.sequence_counters.remove(session_id).is_some() {
             trace!(session_id, "sequence counter removed");
@@ -382,13 +426,16 @@ impl Orchestrator {
                 cancel: cancel.clone(),
             },
         );
+        self.turn_accumulators.begin_run(session_id, run_id);
         #[allow(clippy::cast_precision_loss)]
         gauge!("agent_runs_active").set(runs.len() as f64);
         debug!(session_id, run_id, "run started");
         Ok(StartedRun {
             session_id: session_id.to_string(),
+            run_id: run_id.to_string(),
             cancel,
             registry: Arc::clone(&self.run_registry),
+            turn_accumulators: Arc::clone(&self.turn_accumulators),
             permit: Some(permit),
         })
     }
@@ -400,6 +447,62 @@ impl Orchestrator {
             .lock()
             .get(session_id)
             .map(|r| r.run_id.clone())
+    }
+
+    /// Atomically pair the active run identity with its reconstruction
+    /// projection. `begin_run` takes these locks in the same order.
+    pub(crate) fn active_reconstruction_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Option<(String, Option<TurnReconstructionSnapshot>)> {
+        let runs = self.run_registry.active_runs.lock();
+        let run_id = runs.get(session_id)?.run_id.clone();
+        let snapshot = self
+            .turn_accumulators
+            .reconstruction_snapshot(session_id, &run_id);
+        Some((run_id, snapshot))
+    }
+
+    /// Atomically pair status run identity with its current capability.
+    pub(crate) fn agent_status_snapshot(
+        &self,
+        session_id: &str,
+    ) -> (
+        Option<String>,
+        Option<
+            crate::domains::agent::r#loop::orchestrator::turn_accumulator::CurrentCapabilitySnapshot,
+        >,
+    ){
+        let runs = self.run_registry.active_runs.lock();
+        let Some(run_id) = runs.get(session_id).map(|run| run.run_id.clone()) else {
+            return (None, None);
+        };
+        let capability = self
+            .turn_accumulators
+            .current_running_capability(session_id, &run_id);
+        (Some(run_id), capability)
+    }
+
+    /// Commit the durable prompt-admission row into the matching run's
+    /// reconstruction cut.
+    pub(crate) fn commit_run_admission(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        sequence: i64,
+    ) -> bool {
+        self.turn_accumulators
+            .commit_admission(session_id, run_id, sequence)
+    }
+
+    /// Observe when the matching run's durable prompt-admission row commits.
+    pub(crate) fn run_admission_receiver(
+        &self,
+        session_id: &str,
+        run_id: &str,
+    ) -> Option<tokio::sync::watch::Receiver<bool>> {
+        self.turn_accumulators
+            .admission_receiver(session_id, run_id)
     }
 
     /// Check if a session has an active run.
@@ -429,29 +532,13 @@ impl Orchestrator {
         }
     }
 
-    /// Check if a session is busy (currently processing).
+    /// Number of reconstructed session projections currently cached.
     ///
-    /// This is an **advisory** check — it reads from two independent data stores
-    /// (`active_runs` and `session_manager`) without a single atomic transaction.
-    /// Callers should tolerate stale results. The authoritative guard is
-    /// `begin_run()`, which rejects duplicate runs under its own lock.
-    pub fn is_session_busy(&self, session_id: &str) -> bool {
-        self.has_active_run(session_id) || self.session_manager.is_active(session_id)
-    }
-
-    /// Active session count.
-    pub fn active_session_count(&self) -> usize {
-        self.session_manager.active_count()
-    }
-
-    /// Maximum concurrent session limit.
-    pub fn max_concurrent_sessions(&self) -> usize {
-        MAX_CONCURRENT_SESSIONS
-    }
-
-    /// Whether we can accept another concurrent session.
-    pub fn can_accept_session(&self) -> bool {
-        self.session_manager.active_count() < MAX_CONCURRENT_SESSIONS
+    /// The health and `system.info` wire contracts retain their historical
+    /// `active_sessions` / `activeSessions` names for this cache-residency value.
+    /// Active run truth lives in `RunRegistry` and is exposed separately.
+    pub(crate) fn cached_session_count(&self) -> usize {
+        self.session_manager.cached_count()
     }
 
     /// Register a capability invocation, returning a receiver for the result.
@@ -482,7 +569,7 @@ impl Orchestrator {
             .has_pending(invocation_id)
     }
 
-    /// Graceful shutdown — end all active sessions.
+    /// Graceful shutdown — cancel runtime work and end all unarchived durable sessions.
     #[instrument(skip(self))]
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         info!("orchestrator shutdown initiated");
@@ -501,6 +588,10 @@ impl Orchestrator {
                 #[allow(clippy::cast_precision_loss)]
                 gauge!("agent_runs_active").set(0.0);
             }
+            // Keep the established registry -> projection lock order. Late run
+            // events cannot recreate entries because `begin_run` is the
+            // projection's sole creator.
+            self.turn_accumulators.clear();
         }
 
         // Cancel all pending capability invocations
@@ -510,17 +601,7 @@ impl Orchestrator {
         self.sequence_counters.clear();
         self.compaction_handlers.clear();
 
-        // List all active sessions and end them
-        let sessions = self
-            .session_manager
-            .list_sessions(&SessionFilter::default())
-            .unwrap_or_default();
-
-        for session in sessions {
-            if let Err(e) = self.session_manager.end_session(&session.id).await {
-                warn!(session_id = %session.id, error = %e, "failed to end session during shutdown");
-            }
-        }
+        self.session_manager.end_unarchived_sessions_for_shutdown();
 
         Ok(())
     }

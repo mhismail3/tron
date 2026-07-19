@@ -1,20 +1,17 @@
-use super::{ActivitySummaryLine, Duration, EventPersister, MessagePreview, ReconstructedState};
+use super::{Duration, ReconstructedState};
+use crate::domains::agent::r#loop::errors::RuntimeError;
+use crate::domains::agent::r#loop::event_emitter::EventEmitter;
+use crate::domains::agent::r#loop::orchestrator::recovery::recover_incomplete_turns_for_session;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::turn_runner::emit_persisted_capability_invocation_completed;
 use crate::domains::session::event_store::EventStore;
+use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::failure::{
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_PERSISTENCE_ERROR,
+};
 use std::sync::Arc;
-
-pub struct ResumedPromptSession {
-    pub state: ReconstructedState,
-    pub persister: Arc<EventPersister>,
-}
-
-pub struct SessionUpdateData {
-    pub session: crate::domains::session::event_store::SessionRow,
-    pub preview: Option<MessagePreview>,
-    pub activity_lines: Vec<ActivitySummaryLine>,
-}
 
 const SESSION_UPDATE_LOAD_ATTEMPTS: usize = 40;
 const SESSION_UPDATE_LOAD_RETRY_DELAY: Duration = Duration::from_millis(25);
@@ -25,35 +22,73 @@ fn session_update_read_error_is_busy(
     error.is_busy()
 }
 
-pub async fn resume_prompt_session(
+pub(in crate::domains::agent::runtime) async fn resume_prompt_session(
     session_manager: Arc<SessionManager>,
+    event_store: Arc<EventStore>,
+    emitter: Arc<EventEmitter>,
     session_id: String,
-) -> Result<ResumedPromptSession, CapabilityError> {
+) -> Result<Arc<ReconstructedState>, CapabilityError> {
     run_blocking_task("agent.prompt.resume", move || {
-        let active = session_manager
-            .resume_session(&session_id)
-            .map_err(|error| CapabilityError::Internal {
-                message: error.to_string(),
-            })?;
-        Ok(ResumedPromptSession {
-            state: active.state.clone(),
-            persister: active.context.persister.clone(),
-        })
+        let repaired = recover_incomplete_turns_for_session(&event_store, &session_id)
+            .map_err(|error| map_prompt_recovery_error(error, &session_id))?;
+        if !repaired.is_empty() {
+            session_manager.invalidate_session(&session_id);
+            for (row, payload) in repaired {
+                emit_persisted_capability_invocation_completed(&emitter, &row, &payload);
+            }
+        }
+        session_manager
+            .resume_session_for_prompt(&session_id)
+            .map_err(|error| map_prompt_resume_error(error, &session_id))
     })
     .await
 }
 
-pub async fn load_session_update_data(
-    _session_manager: Arc<SessionManager>,
+fn map_prompt_recovery_error(error: String, session_id: &str) -> CapabilityError {
+    tracing::warn!(
+        session_id,
+        error,
+        "prior capability lifecycle could not be repaired before prompt admission"
+    );
+    CapabilityError::from_failure(
+        FailureEnvelope::new(
+            RUNTIME_PERSISTENCE_ERROR,
+            FailureCategory::Persistence,
+            "Prior capability lifecycle could not be durably repaired",
+            false,
+            true,
+            FailureOrigin::AgentRuntime,
+        )
+        .with_session_id(Some(session_id.to_owned())),
+    )
+}
+
+fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> CapabilityError {
+    let failure = match error {
+        RuntimeError::Persistence(_) => FailureEnvelope::new(
+            RUNTIME_PERSISTENCE_ERROR,
+            FailureCategory::Persistence,
+            "Session history could not be reconstructed",
+            false,
+            false,
+            FailureOrigin::AgentRuntime,
+        )
+        .with_session_id(Some(session_id.to_owned())),
+        other => other.to_failure(),
+    };
+    CapabilityError::from_failure(failure)
+}
+
+pub(in crate::domains::agent::runtime) async fn load_session_update_event(
     event_store: Arc<EventStore>,
     session_id: String,
-) -> Result<Option<SessionUpdateData>, CapabilityError> {
+) -> Result<Option<TronEvent>, CapabilityError> {
     run_blocking_task("agent.prompt.session_update", move || {
         let mut last_busy_error = None;
 
         for attempt in 1..=SESSION_UPDATE_LOAD_ATTEMPTS {
-            match load_session_update_data_once(&event_store, &session_id) {
-                Ok(data) => return Ok(data),
+            match load_session_update_event_once(&event_store, &session_id) {
+                Ok(event) => return Ok(event),
                 Err(error)
                     if session_update_read_error_is_busy(&error)
                         && attempt < SESSION_UPDATE_LOAD_ATTEMPTS =>
@@ -78,10 +113,10 @@ pub async fn load_session_update_data(
     .await
 }
 
-fn load_session_update_data_once(
+fn load_session_update_event_once(
     event_store: &EventStore,
     session_id: &str,
-) -> crate::domains::session::event_store::Result<Option<SessionUpdateData>> {
+) -> crate::domains::session::event_store::Result<Option<TronEvent>> {
     let Some(session) = event_store.get_session(session_id)? else {
         return Ok(None);
     };
@@ -98,16 +133,39 @@ fn load_session_update_data_once(
         Err(_) => Vec::new(),
     };
 
-    Ok(Some(SessionUpdateData {
-        session,
-        preview,
-        activity_lines,
+    let (last_user_prompt, last_assistant_response) = preview.map_or((None, None), |preview| {
+        (preview.last_user_prompt, preview.last_assistant_response)
+    });
+
+    Ok(Some(TronEvent::SessionUpdated {
+        base: BaseEvent::now(session_id),
+        title: session.title,
+        model: Some(session.latest_model),
+        event_count: Some(session.event_count),
+        turn_count: Some(session.turn_count),
+        message_count: Some(session.message_count),
+        input_tokens: Some(session.total_input_tokens),
+        output_tokens: Some(session.total_output_tokens),
+        last_turn_input_tokens: Some(session.last_turn_input_tokens),
+        cache_read_tokens: Some(session.total_cache_read_tokens),
+        cache_creation_tokens: Some(session.total_cache_creation_tokens),
+        cost: Some(session.total_cost),
+        last_activity: session.last_activity_at,
+        is_active: false,
+        last_user_prompt,
+        last_assistant_response,
+        parent_session_id: session.parent_session_id,
+        activity_lines: Some(activity_lines),
     }))
 }
 
 #[cfg(test)]
-mod session_update_data_tests {
+mod session_update_event_tests {
     use super::*;
+    use crate::domains::session::event_store::{
+        AppendOptions, ConnectionConfig, EventType, new_in_memory, run_migrations,
+    };
+    use crate::shared::protocol::messages::Message;
 
     #[test]
     fn session_update_busy_detection_covers_busy_and_locked_reads() {
@@ -141,5 +199,106 @@ mod session_update_data_tests {
             SESSION_UPDATE_LOAD_RETRY_DELAY * SESSION_UPDATE_LOAD_ATTEMPTS as u32
                 <= Duration::from_secs(2)
         );
+    }
+
+    #[tokio::test]
+    async fn prompt_resume_broadcasts_ordered_repairs_and_reconstructs_cached_state() {
+        let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
+        for (event_type, payload) in [
+            (EventType::StreamTurnStart, serde_json::json!({"turn": 1})),
+            (
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "turn": 1,
+                    "content": [
+                        {
+                            "type": "capability_invocation",
+                            "id": "call-a",
+                            "name": "execute",
+                            "arguments": {"operation": "observe"}
+                        },
+                        {
+                            "type": "capability_invocation",
+                            "id": "call-b",
+                            "name": "execute",
+                            "arguments": {"operation": "observe"}
+                        }
+                    ],
+                    "model": "m",
+                    "stopReason": "capability_invocation"
+                }),
+            ),
+            (
+                EventType::CapabilityInvocationStarted,
+                serde_json::json!({
+                    "turn": 1,
+                    "invocationId": "call-a",
+                    "name": "execute",
+                    "arguments": {"operation": "observe"}
+                }),
+            ),
+            (
+                EventType::CapabilityInvocationStarted,
+                serde_json::json!({
+                    "turn": 1,
+                    "invocationId": "call-b",
+                    "name": "execute",
+                    "arguments": {"operation": "observe"}
+                }),
+            ),
+            (
+                EventType::TurnFailed,
+                serde_json::json!({"turn": 1, "error": "terminal batch failed"}),
+            ),
+        ] {
+            store
+                .append(&AppendOptions {
+                    session_id: &session.session.id,
+                    event_type,
+                    payload,
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let manager = Arc::new(SessionManager::new(store.clone()));
+        let stale = manager.resume_session(&session.session.id).unwrap();
+        assert!(manager.is_cached(&session.session.id));
+        let emitter = Arc::new(EventEmitter::new());
+        let mut events = emitter.subscribe();
+
+        let refreshed = resume_prompt_session(manager, store, emitter, session.session.id.clone())
+            .await
+            .expect("repair and prompt resume");
+
+        assert!(
+            !Arc::ptr_eq(&stale, &refreshed),
+            "repair must invalidate the stale reconstructed projection"
+        );
+        let result_ids = refreshed
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::CapabilityResult { invocation_id, .. } => Some(invocation_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(result_ids, vec!["call-a", "call-b"]);
+        let live_ids = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| match event {
+                TronEvent::CapabilityInvocationCompleted { invocation_id, .. } => {
+                    Some(invocation_id)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(live_ids, vec!["call-a", "call-b"]);
     }
 }

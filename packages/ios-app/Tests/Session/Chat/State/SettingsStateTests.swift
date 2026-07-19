@@ -10,16 +10,11 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         XCTAssertEqual(state.defaultModel, "")
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
+        XCTAssertNil(state.tailscaleIp)
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertFalse(state.isLoaded)
-        XCTAssertTrue(state.availableModels.isEmpty)
-        XCTAssertFalse(state.isLoadingModels)
         XCTAssertNil(state.loadError)
-        XCTAssertEqual(state.observabilityLogLevel, "info")
-        XCTAssertEqual(state.observabilityVerboseRetentionDays, 7)
-        XCTAssertTrue(state.storageRetentionEnabled)
-        XCTAssertEqual(state.storageMaxDatabaseMb, 512)
         XCTAssertFalse(state.transcriptionEnabled)
     }
 
@@ -40,30 +35,16 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.displayQuickSessionWorkspace, "/tmp/workspace")
     }
 
-    func testApplyServerSettingsLoadsDiagnosticsFields() throws {
+    func testApplyServerSettingsLoadsTranscriptionChoice() throws {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
-          "observability": {
-            "logLevel": "debug",
-            "verboseRetentionDays": 3
-          },
-          "storage": {
-            "retentionEnabled": false,
-            "maxDatabaseMb": 256
-          },
-          "server": {
-            "transcription": { "enabled": true }
-          }
+          "server": { "transcription": { "enabled": true } }
         }
         """))
 
         state.applyServerSettings(ServerSettingsSnapshot(settings))
 
-        XCTAssertEqual(state.observabilityLogLevel, "debug")
-        XCTAssertEqual(state.observabilityVerboseRetentionDays, 3)
-        XCTAssertFalse(state.storageRetentionEnabled)
-        XCTAssertEqual(state.storageMaxDatabaseMb, 256)
         XCTAssertTrue(state.transcriptionEnabled)
     }
 
@@ -83,26 +64,26 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(
             ServerSettings.self,
-            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6"}}"#)
+            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6","tailscaleIp":"100.64.0.7"}}"#)
         )
 
         state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         XCTAssertEqual(state.defaultModel, "claude-opus-4-6")
+        XCTAssertEqual(state.tailscaleIp, "100.64.0.7")
     }
 
     func testClearServerSnapshotHidesServerSettingsDuringSwitch() {
         let state = SettingsState()
         state.isLoaded = true
         state.loadError = "old error"
-        state.isLoadingModels = true
+        state.tailscaleIp = "100.64.0.7"
 
         state.clearServerSnapshot()
 
         XCTAssertFalse(state.isLoaded)
         XCTAssertNil(state.loadError)
-        XCTAssertTrue(state.availableModels.isEmpty)
-        XCTAssertFalse(state.isLoadingModels)
+        XCTAssertNil(state.tailscaleIp)
     }
 
     func testClearServerSnapshotClearsRollbackAnchor() throws {

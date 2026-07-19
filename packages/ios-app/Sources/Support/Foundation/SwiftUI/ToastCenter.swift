@@ -10,7 +10,7 @@ import Foundation
 /// - Optional retry handler → toast shows a Retry button and is sticky by default.
 ///
 /// Use `ToastCenter.shared` from production code. Tests create their own instance with an
-/// injected `MockAsyncClock`.
+/// injected clock and exercise the same dismissal lifecycle as production.
 @Observable
 @MainActor
 final class ToastCenter {
@@ -182,14 +182,6 @@ final class ToastCenter {
         dismissTasks.removeAll()
         toasts.removeAll()
     }
-
-    // MARK: - Test helper
-
-    #if DEBUG
-    func clearForTesting() {
-        dismissAll()
-    }
-    #endif
 
     // MARK: - Private
 

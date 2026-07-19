@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Wizard visual layout tokens")
 struct WizardVisualLayoutTests {
+    @Test("wizard canvas has one fixed layout owner")
+    func wizardCanvasIsFixed() throws {
+        #expect(WizardLayout.width == 480)
+        #expect(WizardLayout.height == 440)
+
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
+        let source = try String(contentsOf: wizardView, encoding: .utf8)
+
+        #expect(source.contains(".frame(width: WizardLayout.width, height: WizardLayout.height)"))
+        #expect(!source.contains("animateHostingWindow"))
+        #expect(!source.contains("preferredHeight"))
+    }
+
     @Test("welcome page shows only centered intro copy")
     func welcomePageShowsOnlyCenteredIntroCopy() throws {
         let packageRoot = macAppRoot()
@@ -243,6 +257,10 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("if state.permissionStatuses.isEmpty"))
         #expect(source.contains("PermissionsStepContent.initialProbeDelayNanoseconds"))
         #expect(source.contains("if Task.isCancelled { return }"))
+        #expect(source.contains(".task { await startPolling() }"))
+        #expect(!source.contains("@State private var pollTask"))
+        #expect(!source.contains("pollTask = Task"))
+        #expect(source.contains("guard !Task.isCancelled else { return }"))
         #expect(source.contains("Button {"))
         #expect(source.contains("Task { await refreshAll(showActivity: true) }"))
         #expect(source.contains("startSettingsGrantWatch(for: permission)"))
@@ -274,18 +292,34 @@ struct WizardVisualLayoutTests {
         #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
     }
 
+    @Test("wizard poll loops are owned by view-scoped SwiftUI tasks")
+    func wizardPollLoopsAreViewScoped() throws {
+        let packageRoot = macAppRoot()
+        let tailscale = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/TailscaleStep.swift"),
+            encoding: .utf8
+        )
+
+        #expect(tailscale.contains(".task { await probeUntilReady() }"))
+        #expect(tailscale.contains("private func probeUntilReady() async"))
+        #expect(tailscale.contains("guard !Task.isCancelled else { return }"))
+        #expect(!tailscale.contains("@State private var pollTask"))
+        #expect(!tailscale.contains("pollTask = Task"))
+        #expect(!tailscale.contains(".onDisappear"))
+    }
+
     @Test("pairing page resolves Tailscale live and treats profile settings as cache")
     func pairingPageResolvesTailscaleLiveAndCachesSettings() throws {
         let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PairingInfoStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
-        #expect(source.contains("Fresh installs do not have a user profile yet"))
         #expect(source.contains("setup.probeTailscale()"))
         #expect(source.contains("state.tailscaleStatus = liveTailscale"))
         #expect(source.contains("state.tailscaleStatus?.displayIP"))
         #expect(source.contains("setup.cacheTailscaleIP(host)"))
         #expect(source.contains("setup.readTailscaleIPFromSettings()"))
+        #expect(source.contains("port: setup.serverPort"))
         #expect(source.contains("@State private var resolvedQRCode: NSImage?"))
         #expect(source.contains("private var shouldShowLoading"))
         #expect(source.contains("private var shouldShowResolvedPairing"))
@@ -342,7 +376,7 @@ struct WizardVisualLayoutTests {
         let source = try String(contentsOf: step, encoding: .utf8)
 
         #expect(source.contains("openPermissionSettings"))
-        #expect(source.contains("NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))"))
+        #expect(source.contains("NSWorkspace.shared.open(permission.systemSettingsURL)"))
         #expect(!source.contains("setup.requestWrapperPermission"))
         #expect(!source.contains("CGRequestScreenCaptureAccess"))
         #expect(!source.contains("AXIsProcessTrustedWithOptions"))

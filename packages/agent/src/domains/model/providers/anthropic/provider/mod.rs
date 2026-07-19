@@ -357,6 +357,7 @@ impl AnthropicProvider {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
                     message: err_info.message,
+                    code: err_info.code,
                 });
             }
             return Err(ProviderError::Api {
@@ -376,7 +377,7 @@ impl AnthropicProvider {
                 response,
                 &SSE_OPTIONS,
                 create_stream_state(),
-                process_sse_event,
+                |event, state| Ok(process_sse_event(event, state)),
             ),
         )
     }

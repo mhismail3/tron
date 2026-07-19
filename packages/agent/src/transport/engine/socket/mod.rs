@@ -1,25 +1,35 @@
 //! `/engine` WebSocket protocol over the canonical engine transport envelope.
 //!
 //! This module owns only WebSocket framing, protocol validation, correlation
-//! ids, heartbeat, and stream cursor subscription state. Worker/client
+//! ids, server-driven heartbeat, and stream cursor subscription state. One
+//! stack-owned connection lease covers registry accounting, while one bounded
+//! child-task set owns the socket writer and subscription pump. Worker/client
 //! discover/inspect/watch/invoke/promote messages are translated into
 //! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
 //! through the canonical engine transport path. Public context is limited to
 //! session/workspace/trace correlation; authority scopes and runtime metadata
 //! are not accepted on the wire. Model providers do not receive this transport
 //! surface; they receive only the capability-domain `execute` orchestrator.
+//!
+//! A peer remains live while it returns Pong or any other inbound activity.
+//! Missing activity after a sent Ping retires the socket; teardown cancels its
+//! pumps, drops connection-local stream cursors, and bounds child-task drain.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use metrics::counter;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
+use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
+use crate::engine::EngineHostHandle;
 #[cfg(test)]
 use crate::engine::{StreamActorScope, StreamCursor};
 use crate::shared::server::context::ServerRuntimeContext;
@@ -33,11 +43,13 @@ use crate::transport::engine::{
 
 const PROTOCOL_VERSION: u64 = 1;
 const MIN_PROTOCOL_VERSION: u64 = 1;
-pub(crate) const MAX_ENGINE_WS_FRAME_BYTES: usize = 1024 * 1024;
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+const CONTROL_QUEUE_CAPACITY: usize = 1;
+const CHILD_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const LEGACY_SOCKET_SUBSCRIPTION_PREFIXES: [&str; 2] = ["engine-ws:", "engine-ws-stateless:"];
 
 mod outbound;
 mod stream_projection;
@@ -46,12 +58,53 @@ mod wire;
 
 use outbound::{send_engine_ws_value, send_engine_ws_value_async};
 #[cfg(test)]
-use stream_projection::{server_payload_from_stream_event, stream_event_matches_filters};
+use stream_projection::stream_event_matches_filters;
 use subscriptions::{SubscriptionState, push_subscription_events};
 use wire::{
     HeartbeatMessage, HelloMessage, InvokeMessage, PromoteMessage, RequestMessage, WireContext,
     now_timestamp, optional_id, protocol_error,
 };
+
+/// Retire durable rows created by older `/engine` versions before socket
+/// subscriptions became connection-local. Exact UUIDv7 shapes avoid claiming
+/// caller-owned durable ids that only happen to share a textual prefix.
+pub(crate) async fn retire_legacy_socket_subscriptions(
+    engine_host: &EngineHostHandle,
+) -> crate::engine::Result<usize> {
+    let subscription_ids = engine_host.active_stream_subscription_ids().await?;
+    let mut retired = 0;
+    for subscription_id in subscription_ids
+        .iter()
+        .filter(|subscription_id| is_legacy_socket_subscription_id(subscription_id))
+    {
+        if engine_host.unsubscribe_stream(subscription_id).await? {
+            retired += 1;
+        }
+    }
+    Ok(retired)
+}
+
+fn is_legacy_socket_subscription_id(subscription_id: &str) -> bool {
+    let Some(suffix) = LEGACY_SOCKET_SUBSCRIPTION_PREFIXES
+        .iter()
+        .find_map(|prefix| subscription_id.strip_prefix(prefix))
+    else {
+        return false;
+    };
+    let mut segments = suffix.split(':');
+    let (Some(client_id), Some(instance_id), None) =
+        (segments.next(), segments.next(), segments.next())
+    else {
+        return false;
+    };
+    [client_id, instance_id].into_iter().all(|value| {
+        uuid::Uuid::parse_str(value).is_ok_and(|id| {
+            id.get_version() == Some(uuid::Version::SortRand)
+                && id.get_variant() == uuid::Variant::RFC4122
+                && id.to_string() == value
+        })
+    })
+}
 
 /// Tracks connected `/engine` clients.
 #[derive(Default)]
@@ -83,55 +136,151 @@ impl EngineClientRegistry {
     }
 }
 
+/// Exact connection-count ownership for one upgraded `/engine` socket.
+///
+/// The lease is intentionally stack-owned by `run_engine_ws_session`: normal
+/// return, panic unwinding, and task cancellation all retire the registry entry.
+struct EngineClientLease {
+    clients: Arc<EngineClientRegistry>,
+}
+
+impl EngineClientLease {
+    fn acquire(clients: Arc<EngineClientRegistry>) -> Self {
+        clients.add();
+        counter!("engine_ws_connections_total").increment(1);
+        Self { clients }
+    }
+}
+
+impl Drop for EngineClientLease {
+    fn drop(&mut self) {
+        self.clients.remove();
+        counter!("engine_ws_disconnections_total").increment(1);
+    }
+}
+
 /// Run one authenticated `/engine` client WebSocket connection.
 pub async fn run_engine_ws_session(
     ws: WebSocket,
     client_id: String,
     ctx: Arc<ServerRuntimeContext>,
     clients: Arc<EngineClientRegistry>,
+    shutdown: CancellationToken,
+    max_frame_bytes: usize,
+    heartbeat_interval: Duration,
+    heartbeat_timeout: Duration,
 ) {
-    clients.add();
-    counter!("engine_ws_connections_total").increment(1);
+    let _client_lease = EngineClientLease::acquire(clients);
     let (mut ws_tx, mut ws_rx) = ws.split();
     let (out_tx, mut out_rx) = mpsc::channel::<String>(OUTBOUND_QUEUE_CAPACITY);
-    let writer = tokio::spawn(async move {
-        while let Some(text) = out_rx.recv().await {
-            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+    let (control_tx, mut control_rx) = mpsc::channel::<Message>(CONTROL_QUEUE_CAPACITY);
+    let cancel = CancellationToken::new();
+    let writer_cancel = cancel.clone();
+    let mut child_tasks = JoinSet::new();
+    child_tasks.spawn(async move {
+        loop {
+            let message = tokio::select! {
+                biased;
+                Some(message) = control_rx.recv() => message,
+                Some(text) = out_rx.recv() => Message::Text(text.into()),
+                else => break,
+            };
+            if ws_tx.send(message).await.is_err() {
                 break;
             }
         }
+        writer_cancel.cancel();
     });
 
     let subscriptions = Arc::new(tokio::sync::Mutex::new(BTreeMap::new()));
-    let cancel = CancellationToken::new();
-    let push_task = tokio::spawn(push_subscription_events(
+    child_tasks.spawn(push_subscription_events(
         ctx.clone(),
         out_tx.clone(),
         subscriptions.clone(),
         cancel.clone(),
     ));
-    let mut session = EngineWsSession::new(client_id, ctx, out_tx, subscriptions, cancel.clone());
-    while let Some(frame) = ws_rx.next().await {
-        match frame {
-            Ok(Message::Text(text)) => {
-                if !session.handle_text(&text).await {
-                    break;
+    let mut session = EngineWsSession::new(
+        client_id,
+        ctx,
+        out_tx,
+        subscriptions,
+        cancel.clone(),
+        max_frame_bytes,
+    );
+
+    let mut heartbeat = tokio::time::interval(heartbeat_interval);
+    heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let _ = heartbeat.tick().await;
+    let mut first_unanswered_ping_at: Option<Instant> = None;
+
+    loop {
+        tokio::select! {
+            biased;
+            () = shutdown.cancelled() => break,
+            () = cancel.cancelled() => break,
+            frame = ws_rx.next() => {
+                let Some(frame) = frame else { break };
+                match frame {
+                    Ok(Message::Text(text)) => {
+                        first_unanswered_ping_at = None;
+                        if !session.handle_text(&text).await {
+                            break;
+                        }
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Binary(_)) => {
+                        first_unanswered_ping_at = None;
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "engine WebSocket receive failed");
+                        break;
+                    }
                 }
             }
-            Ok(Message::Close(_)) => break,
-            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Binary(_)) => {}
-            Err(error) => {
-                tracing::debug!(%error, "engine WebSocket receive failed");
-                break;
+            _ = heartbeat.tick() => {
+                if let Some(sent_at) = first_unanswered_ping_at {
+                    if sent_at.elapsed() >= heartbeat_timeout {
+                        tracing::debug!(
+                            timeout_ms = heartbeat_timeout.as_millis(),
+                            "engine WebSocket heartbeat timed out"
+                        );
+                        break;
+                    }
+                    continue;
+                }
+                match control_tx.try_send(Message::Ping(Vec::new().into())) {
+                    Ok(()) => first_unanswered_ping_at = Some(Instant::now()),
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        // An earlier Ping can still be queued when inbound
+                        // activity clears its prior deadline. Give that queued
+                        // probe the full timeout rather than treating one busy
+                        // writer interval as a dead connection.
+                        first_unanswered_ping_at = Some(Instant::now());
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => break,
+                }
             }
         }
     }
+
     cancel.cancel();
+    drop(ws_rx);
     session.cleanup().await;
     drop(session);
-    let _ = push_task.await;
-    let _ = writer.await;
-    clients.remove();
+    drop(control_tx);
+    drain_child_tasks(&mut child_tasks).await;
+}
+
+async fn drain_child_tasks(child_tasks: &mut JoinSet<()>) {
+    let drained = tokio::time::timeout(CHILD_TASK_DRAIN_TIMEOUT, async {
+        while child_tasks.join_next().await.is_some() {}
+    })
+    .await;
+    if drained.is_err() {
+        tracing::warn!("engine WebSocket child tasks exceeded drain timeout; aborting");
+        child_tasks.abort_all();
+        while child_tasks.join_next().await.is_some() {}
+    }
 }
 
 struct EngineWsSession {
@@ -140,6 +289,7 @@ struct EngineWsSession {
     out_tx: mpsc::Sender<String>,
     subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
     cancel: CancellationToken,
+    max_frame_bytes: usize,
     hello: Option<HelloState>,
 }
 
@@ -156,6 +306,7 @@ impl EngineWsSession {
         out_tx: mpsc::Sender<String>,
         subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
         cancel: CancellationToken,
+        max_frame_bytes: usize,
     ) -> Self {
         Self {
             client_id,
@@ -163,25 +314,12 @@ impl EngineWsSession {
             out_tx,
             subscriptions,
             cancel,
+            max_frame_bytes,
             hello: None,
         }
     }
 
     async fn handle_text(&mut self, text: &str) -> bool {
-        if text.len() > MAX_ENGINE_WS_FRAME_BYTES {
-            return self.send_error(
-                None,
-                protocol_error(
-                    INVALID_PARAMS,
-                    format!(
-                        "engine WebSocket frame exceeds maximum size ({} > {} bytes)",
-                        text.len(),
-                        MAX_ENGINE_WS_FRAME_BYTES
-                    ),
-                    None,
-                ),
-            );
-        }
         let value = match serde_json::from_str::<Value>(text) {
             Ok(value) => value,
             Err(error) => {
@@ -191,9 +329,6 @@ impl EngineWsSession {
                 );
             }
         };
-        if let Err(error) = validate_json_depth(&value, MAX_JSON_DEPTH) {
-            return self.send_error(None, error);
-        }
         let Some(object) = value.as_object() else {
             return self.send_error(
                 None,
@@ -204,6 +339,23 @@ impl EngineWsSession {
             Ok(id) => id,
             Err(error) => return self.send_error(None, error),
         };
+        if text.len() > self.max_frame_bytes {
+            return self.send_error(
+                id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    format!(
+                        "engine WebSocket frame exceeds maximum size ({} > {} bytes)",
+                        text.len(),
+                        self.max_frame_bytes
+                    ),
+                    None,
+                ),
+            );
+        }
+        if let Err(error) = validate_json_depth(&value, MAX_JSON_DEPTH) {
+            return self.send_error(id, error);
+        }
         let message_type = match object.get("type").and_then(Value::as_str) {
             Some(value) if !value.trim().is_empty() => value,
             _ => {
@@ -280,6 +432,7 @@ impl EngineWsSession {
             "protocolVersion": PROTOCOL_VERSION,
             "minimumSupportedVersion": MIN_PROTOCOL_VERSION,
             "serverId": "tron-engine",
+            "maxMessageSize": self.max_frame_bytes,
         }))
     }
 
@@ -490,14 +643,7 @@ impl EngineWsSession {
 
     async fn cleanup(&mut self) {
         self.cancel.cancel();
-        let subscriptions = std::mem::take(&mut *self.subscriptions.lock().await);
-        for subscription_id in subscriptions.keys() {
-            let _ = self
-                .ctx
-                .engine_host
-                .unsubscribe_stream(subscription_id)
-                .await;
-        }
+        self.subscriptions.lock().await.clear();
     }
 }
 

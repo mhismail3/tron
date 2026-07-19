@@ -7,57 +7,39 @@ struct EngineSettingsOwnershipTests {
 
     @Test("server settings categories expose only primitive settings groups")
     func serverSettingsCategoriesExposeOnlyPrimitiveGroups() {
-        #expect(ServerSettingsCategory.serverBackedOrder == [
+        #expect(ServerSettingsCategory.allCases == [
             .engine,
             .providers,
-            .server,
         ])
 
         #expect(ServerSettingsCategory.engine.title == "Engine")
-        #expect(ServerSettingsCategory.engine.subtitle == "Server-owned defaults, context, and evidence policy")
-        #expect(ServerSettingsCategory.server.title == "Servers")
-        #expect(ServerSettingsCategory.server.subtitle == "Pairing and connection")
+        #expect(ServerSettingsCategory.engine.subtitle == "Servers, session defaults, context")
         #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
-        #expect(ServerSettingsCategory.providers.title == "Accounts")
+        #expect(ServerSettingsCategory.providers.title == "Providers")
 
-        #expect(MainSettingsGridDestination.serverOwned == [
+        #expect(MainSettingsGridDestination.order == [
             .engine,
             .providers,
-        ])
-        #expect(MainSettingsGridDestination.serverOwned.map(\.description) == [
-            "Server-owned defaults, context, and evidence policy",
-            "OAuth login and API keys",
-        ])
-        #expect(MainSettingsGridDestination.deviceOwned == [
-            .server,
             .app,
         ])
-        #expect(MainSettingsGridDestination.deviceOwned.map(\.description) == [
-            "Pairing and connection",
-            "Appearance, notifications, local behavior",
+        #expect(MainSettingsGridDestination.order.map(\.description) == [
+            "Servers, session defaults, context",
+            "OAuth and API keys",
+            "Appearance, notifications, behavior",
         ])
-        #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: false) == [
-            .engine,
-            .providers,
-            .server,
-            .app,
-        ])
-        #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: true) == [
-            .server,
-            .app,
-        ])
+        #expect(MainSettingsGridDestination.engine.description.contains("transcription") == false)
         let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
         #expect(ServerSettingsCategory.allCases.map(\.title).allSatisfy { title in
             !deletedTitles.contains(title)
         })
     }
 
-    @Test("engine sheet keeps server-owned settings in one progressive page")
-    func engineSheetKeepsServerOwnedSettingsTogether() {
+    @Test("engine sheet owns user-configurable Engine settings")
+    func engineSheetOwnsUserConfigurableEngineSettings() {
         #expect(EngineSettingsSection.allCases == [
             .defaults,
             .context,
-            .evidence,
+            .transcription,
         ])
     }
 
@@ -96,22 +78,4 @@ struct EngineSettingsOwnershipTests {
         ))
     }
 
-    @Test("engine summary describes server owned settings")
-    func engineSummaryDescribesServerOwnedSettings() {
-        let unloaded = EngineSettingsSummary.Context(
-            isLoaded: false,
-            triggerTokenThreshold: 0.70,
-            preserveRecentCount: 5
-        )
-        #expect(EngineSettingsSummary.title(for: unloaded) == "Load engine settings")
-        #expect(EngineSettingsSummary.description(for: unloaded) == "Loading model defaults, context, and evidence policy from the active server.")
-
-        let loaded = EngineSettingsSummary.Context(
-            isLoaded: true,
-            triggerTokenThreshold: 0.65,
-            preserveRecentCount: 4
-        )
-        #expect(EngineSettingsSummary.title(for: loaded) == "Server-owned engine policy")
-        #expect(EngineSettingsSummary.description(for: loaded) == "Defaults, compaction at 65%, and evidence retention are mirrored from the server.")
-    }
 }

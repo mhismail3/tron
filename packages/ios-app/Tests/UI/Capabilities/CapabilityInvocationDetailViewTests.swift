@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class CapabilityInvocationDetailViewTests: XCTestCase {
+    private var testState: IsolatedTestState!
+
+    override func setUp() async throws {
+        testState = IsolatedTestState(label: "capability-detail-render")
+        testState.registerTeardown(with: self)
+    }
+
+    override func tearDown() async throws {
+        await testState.cleanup()
+        testState = nil
+    }
+
     func testCapabilityInvocationDetailSourceUsesEvidencePresentationMapper() throws {
         let source = try source(pathComponents: ["Sources", "UI", "Capabilities", "CapabilityInvocationViews.swift"])
 
@@ -224,13 +236,7 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
     }
 
     private func visualArtifactURL(outputName: String) throws -> URL {
-        let documentsURL = try XCTUnwrap(
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        )
-        let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
-            .map(URL.init(fileURLWithPath:))
-            ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        return artifactRoot.appendingPathComponent(outputName)
+        try testState.artifactURL(named: outputName)
     }
 
     private func source(pathComponents: [String]) throws -> String {

@@ -8,10 +8,27 @@ use crate::engine::EngineGrantLifecycle;
 use crate::engine::authority::grants::grant_policy_hash;
 
 impl EngineExternalWorkerRuntime {
-    /// Accept a worker hello and return a catalog snapshot visible to the
-    /// worker. Non-loopback workers are rejected until the remote-worker
-    /// identity and authorization model is complete.
-    pub async fn hello(&mut self, hello: WorkerHello) -> Result<CatalogSnapshot> {
+    /// Test one worker hello without attaching a socket invocation transport.
+    #[cfg(test)]
+    pub(crate) async fn hello(&mut self, hello: WorkerHello) -> Result<CatalogSnapshot> {
+        self.accept_hello(hello).await.map(|(_, snapshot)| snapshot)
+    }
+
+    /// Accept one socket connection and attach its invocation transport.
+    pub(crate) async fn accept_connection(
+        &mut self,
+        hello: WorkerHello,
+        invoker: Arc<dyn ExternalWorkerInvoker>,
+    ) -> Result<(ExternalWorkerConnectionLease, CatalogSnapshot)> {
+        let (lease, snapshot) = self.accept_hello(hello).await?;
+        self.invokers.insert(lease.worker_id.clone(), invoker);
+        Ok((lease, snapshot))
+    }
+
+    async fn accept_hello(
+        &mut self,
+        hello: WorkerHello,
+    ) -> Result<(ExternalWorkerConnectionLease, CatalogSnapshot)> {
         if hello.protocol_version != WORKER_PROTOCOL_VERSION {
             return Err(EngineError::PolicyViolation(format!(
                 "unsupported worker protocol version {}",
@@ -34,16 +51,16 @@ impl EngineExternalWorkerRuntime {
             ));
         }
         let worker_id = hello.worker.id.clone();
+        if self.connections.contains_key(&worker_id) {
+            return Err(EngineError::PolicyViolation(format!(
+                "external worker {worker_id} already has an active connection"
+            )));
+        }
         if hello.identity.worker_id != worker_id {
             return Err(EngineError::PolicyViolation(format!(
                 "worker identity {} does not match definition {}",
                 hello.identity.worker_id, worker_id
             )));
-        }
-        if hello.registration_mode == WorkerRegistrationMode::Durable && !hello.loopback_only {
-            return Err(EngineError::PolicyViolation(
-                "durable workers must be authenticated local workers".to_owned(),
-            ));
         }
         if hello.default_visibility == WorkerVisibility::Workspace && hello.workspace_id.is_none() {
             return Err(EngineError::PolicyViolation(
@@ -54,35 +71,68 @@ impl EngineExternalWorkerRuntime {
         self.validate_worker_grant(&hello).await?;
         let owner_actor = hello.worker.owner_actor.clone();
         let volatile = hello.registration_mode == WorkerRegistrationMode::Volatile;
+        let previous_registration = match self.host.inspect_worker(&worker_id).await {
+            Ok(worker) => Some((
+                worker,
+                self.host
+                    .worker_is_volatile(&worker_id)
+                    .await
+                    .ok_or_else(|| {
+                        EngineError::HandlerFailed(format!(
+                            "worker {worker_id} disappeared while accepting external connection"
+                        ))
+                    })?,
+            )),
+            Err(EngineError::NotFound { .. }) => None,
+            Err(error) => return Err(error),
+        };
+        let generation = self.next_connection_generation;
+        let next_generation = self
+            .next_connection_generation
+            .checked_add(1)
+            .ok_or_else(|| {
+                EngineError::HandlerFailed(
+                    "external worker connection generation exhausted".to_owned(),
+                )
+            })?;
         self.host.register_worker(hello.worker, volatile).await?;
-        self.connections.insert(
-            worker_id.clone(),
-            ExternalWorkerConnection {
-                worker_id: worker_id.clone(),
-                owner_actor,
-                heartbeat_sequence: 0,
-                last_heartbeat_at: Utc::now(),
-                loopback_only: true,
-                registration_mode: hello.registration_mode,
-                default_visibility: hello.default_visibility,
-                session_id: hello.session_id,
-                workspace_id: hello.workspace_id,
-                worker_token: hello.worker_token,
-                health: WorkerHealth::Healthy,
-                functions: BTreeSet::new(),
-                triggers: BTreeSet::new(),
-            },
-        );
-        let snapshot = self.catalog_snapshot_for(&worker_id).await;
-        let connection = self.connection_mut(&worker_id)?.clone();
-        self.publish_lifecycle_event(
-            "worker.connected",
-            &connection,
-            None,
-            self.host.catalog_revision().await.0,
-        )
-        .await?;
-        Ok(snapshot)
+        self.next_connection_generation = next_generation;
+        let lease = ExternalWorkerConnectionLease {
+            worker_id: worker_id.clone(),
+            generation,
+        };
+        let connection = ExternalWorkerConnection {
+            worker_id: worker_id.clone(),
+            owner_actor,
+            heartbeat_sequence: 0,
+            last_heartbeat_at: Utc::now(),
+            registration_mode: hello.registration_mode,
+            default_visibility: hello.default_visibility,
+            session_id: hello.session_id,
+            workspace_id: hello.workspace_id,
+            worker_token: hello.worker_token,
+            health: WorkerHealth::Healthy,
+            functions: BTreeSet::new(),
+            triggers: BTreeSet::new(),
+            connection_generation: generation,
+        };
+        self.connections
+            .insert(worker_id.clone(), connection.clone());
+        let snapshot = self.catalog_snapshot_for(&connection).await;
+        if let Err(error) = self
+            .publish_lifecycle_event(
+                "worker.connected",
+                &connection,
+                None,
+                self.host.catalog_revision().await.0,
+            )
+            .await
+        {
+            self.rollback_failed_hello(&connection, previous_registration)
+                .await;
+            return Err(error);
+        }
+        Ok((lease, snapshot))
     }
 
     /// Record worker heartbeat.
@@ -132,10 +182,13 @@ impl EngineExternalWorkerRuntime {
 
     /// Disconnect a worker and unregister its volatile registrations.
     pub async fn disconnect(&mut self, disconnect: WorkerDisconnect) -> Result<()> {
-        let Some(connection) = self.connections.remove(&disconnect.worker_id) else {
+        let Some(connection) = self.connections.get(&disconnect.worker_id).cloned() else {
             return Ok(());
         };
-        self.invokers.remove(&disconnect.worker_id);
+        if let Some(invoker) = self.invokers.remove(&disconnect.worker_id) {
+            invoker.retire();
+        }
+        self.connections.remove(&disconnect.worker_id);
         if connection.registration_mode == WorkerRegistrationMode::Volatile {
             self.host
                 .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
@@ -181,10 +234,60 @@ impl EngineExternalWorkerRuntime {
         Ok(())
     }
 
+    /// Whether a lease still owns the current connection for its worker.
+    #[must_use]
+    pub(crate) fn is_current_connection(&self, lease: &ExternalWorkerConnectionLease) -> bool {
+        self.connections
+            .get(&lease.worker_id)
+            .is_some_and(|connection| connection.connection_generation == lease.generation)
+    }
+
+    /// Disconnect only when the supplied lease still owns the connection.
+    pub(crate) async fn disconnect_connection(
+        &mut self,
+        lease: &ExternalWorkerConnectionLease,
+        reason: &str,
+    ) -> Result<()> {
+        if !self.is_current_connection(lease) {
+            return Ok(());
+        }
+        self.disconnect(WorkerDisconnect {
+            worker_id: lease.worker_id.clone(),
+            reason: reason.to_owned(),
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Return current connection ids.
     #[must_use]
     pub fn connections(&self) -> Vec<WorkerId> {
         self.connections.keys().cloned().collect()
+    }
+
+    async fn rollback_failed_hello(
+        &mut self,
+        connection: &ExternalWorkerConnection,
+        previous_registration: Option<(WorkerDefinition, bool)>,
+    ) {
+        self.connections.remove(&connection.worker_id);
+        let rollback = if let Some((worker, volatile)) = previous_registration {
+            self.host
+                .register_worker(worker, volatile)
+                .await
+                .map(|_| ())
+        } else {
+            self.host
+                .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
+                .await
+        };
+        if let Err(error) = rollback {
+            tracing::warn!(
+                worker_id = %connection.worker_id,
+                %error,
+                "failed to roll back rejected external worker hello"
+            );
+        }
     }
 
     /// Test helper for deterministic heartbeat-expiry coverage.
@@ -265,16 +368,12 @@ impl EngineExternalWorkerRuntime {
         Ok(())
     }
 
-    async fn catalog_snapshot_for(&self, worker_id: &WorkerId) -> CatalogSnapshot {
-        let authority_grant = self
-            .connections
-            .get(worker_id)
-            .map(|connection| connection.worker_token.authority_grant_id.clone())
-            .unwrap_or_else(|| AuthorityGrantId::new("worker-runtime").expect("valid grant id"));
+    async fn catalog_snapshot_for(&self, connection: &ExternalWorkerConnection) -> CatalogSnapshot {
         let actor = ActorContext::new(
-            ActorId::new(format!("worker:{worker_id}")).expect("valid worker actor id"),
+            ActorId::new(format!("worker:{}", connection.worker_id))
+                .expect("valid worker actor id"),
             ActorKind::Worker,
-            authority_grant,
+            connection.worker_token.authority_grant_id.clone(),
         );
         let functions = self
             .host

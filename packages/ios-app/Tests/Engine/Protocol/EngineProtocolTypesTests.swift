@@ -353,7 +353,7 @@ final class ModelTypesExtendedTests: XCTestCase {
     func testModelInfoSortOrderDecoding() throws {
         // I8: the five required fields must be present on the wire.
         let json = """
-        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "tier": "opus", "isLegacy": false, "sortOrder": 0}
+        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "attachmentPolicy": {"supportsPdfContent": true, "supportsTextFiles": true, "maxImageDimension": 1568, "maxImageBytes": 1400000, "maxDocumentBytes": 20971520, "supportedImageMimeTypes": ["image/jpeg", "image/png"]}, "tier": "opus", "isLegacy": false, "sortOrder": 0}
         """.data(using: .utf8)!
         let model = try JSONDecoder().decode(ModelInfo.self, from: json)
         XCTAssertEqual(model.sortOrder, 0)

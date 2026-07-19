@@ -37,9 +37,6 @@ pub const MAX_PARAM_LENGTH: usize = 8_192;
 /// [`json_depth_matches_serde_default`]: tests::json_depth_matches_serde_default
 pub const MAX_JSON_DEPTH: usize = 128;
 
-/// Maximum decoded size per attachment (50 MB — covers the largest provider limit).
-pub const MAX_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
-
 /// Validate that a string parameter does not exceed `max_len` bytes.
 pub fn validate_string_param(
     value: &str,
@@ -94,15 +91,18 @@ pub fn validate_json_depth(
     })
 }
 
-/// Validate that a base64-encoded attachment does not exceed [`MAX_ATTACHMENT_BYTES`] decoded.
-pub fn validate_attachment_size(base64_data: &str) -> Result<(), CapabilityError> {
+/// Validate a base64 attachment against a model-specific decoded byte limit.
+pub fn validate_attachment_size_with_limit(
+    base64_data: &str,
+    max_bytes: usize,
+) -> Result<(), CapabilityError> {
     // base64 encodes 3 bytes into 4 chars; approximate decoded size.
     let decoded_size = base64_data.len() * 3 / 4;
-    if decoded_size > MAX_ATTACHMENT_BYTES {
+    if decoded_size > max_bytes {
         return Err(CapabilityError::InvalidParams {
             message: format!(
                 "Attachment exceeds maximum size of {}MB (got ~{}MB)",
-                MAX_ATTACHMENT_BYTES / (1024 * 1024),
+                max_bytes / (1024 * 1024),
                 decoded_size / (1024 * 1024),
             ),
         });
@@ -154,6 +154,15 @@ mod tests {
     fn validate_normal_prompt_succeeds() {
         let prompt = "Write me a poem about Rust.";
         assert!(validate_string_param(prompt, "prompt", MAX_PROMPT_LENGTH).is_ok());
+    }
+
+    #[test]
+    fn attachment_limit_accepts_boundary_and_rejects_oversize() {
+        let encoded_at_limit = "a".repeat(400);
+        assert!(validate_attachment_size_with_limit(&encoded_at_limit, 300).is_ok());
+
+        let encoded_over_limit = "a".repeat(404);
+        assert!(validate_attachment_size_with_limit(&encoded_over_limit, 300).is_err());
     }
 
     #[test]
@@ -297,38 +306,5 @@ mod tests {
              raised beyond {MAX_JSON_DEPTH}. Reconcile by bumping MAX_JSON_DEPTH or document \
              the new asymmetry."
         );
-    }
-
-    // ── Attachment size validation tests ────────────────────────────
-
-    #[test]
-    fn attachment_under_limit_passes() {
-        // ~1 MB of base64 ≈ 750 KB decoded
-        let data = "A".repeat(1_000_000);
-        assert!(validate_attachment_size(&data).is_ok());
-    }
-
-    #[test]
-    fn attachment_empty_passes() {
-        assert!(validate_attachment_size("").is_ok());
-    }
-
-    #[test]
-    fn attachment_over_limit_fails() {
-        // 70 MB of base64 ≈ 52.5 MB decoded → over 50 MB limit
-        let data = "A".repeat(70 * 1024 * 1024);
-        let result = validate_attachment_size(&data);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
-        assert!(err.to_string().contains("50MB"));
-    }
-
-    #[test]
-    fn attachment_at_limit_passes() {
-        // Exactly 50 MB decoded ≈ 66.67 MB base64
-        // Use slightly under to account for rounding
-        let data = "A".repeat(66 * 1024 * 1024);
-        assert!(validate_attachment_size(&data).is_ok());
     }
 }

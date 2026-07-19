@@ -7,16 +7,17 @@ import XCTest
 final class InputHistoryStoreTests: XCTestCase {
 
     var store: InputHistoryStore!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
-        // Clear any existing history
-        UserDefaults.standard.removeObject(forKey: "tron.inputHistory")
-        store = InputHistoryStore()
+        testState = IsolatedTestState(label: "input-history")
+        testState.registerTeardown(with: self)
+        store = InputHistoryStore(defaults: testState.defaults)
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: "tron.inputHistory")
         store = nil
+        await testState.cleanup()
     }
 
     // MARK: - Add to History Tests
@@ -261,13 +262,13 @@ final class InputHistoryStoreTests: XCTestCase {
     func test_clearHistory_removesLocalUserDefaultsPayload() {
         // Given
         store.addToHistory("Private local prompt")
-        XCTAssertNotNil(UserDefaults.standard.data(forKey: "tron.inputHistory"))
+        XCTAssertNotNil(testState.defaults.data(forKey: "tron.inputHistory"))
 
         // When
         store.clearHistory()
 
         // Then
-        XCTAssertNil(UserDefaults.standard.data(forKey: "tron.inputHistory"))
+        XCTAssertNil(testState.defaults.data(forKey: "tron.inputHistory"))
     }
 
     // MARK: - Persistence Tests
@@ -277,7 +278,7 @@ final class InputHistoryStoreTests: XCTestCase {
         store.addToHistory("Persistent item")
 
         // When - create new instance
-        let newStore = InputHistoryStore()
+        let newStore = InputHistoryStore(defaults: testState.defaults)
 
         // Then
         XCTAssertEqual(newStore.history.first, "Persistent item")

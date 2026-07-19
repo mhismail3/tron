@@ -57,14 +57,12 @@ final class SessionSwitchingTests: XCTestCase {
         XCTAssertFalse(viewModel.isProcessing)
     }
 
-    func testNewChatViewModelHasDisconnectedState() {
-        // Given: A fresh ChatViewModel
+    func testNewChatViewModelUsesDisconnectedConnectionRepository() {
         let mockURL = URL(string: "ws://localhost:8080/engine")!
         let engineClient = EngineClient(serverURL: mockURL)
         let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
-        // Then: Connection state should be disconnected
-        XCTAssertEqual(viewModel.connectionState, .disconnected)
+        XCTAssertEqual(viewModel.services.connection.connectionState, .disconnected)
     }
 
     func testNewChatViewModelHasEmptyInputState() {
@@ -90,7 +88,7 @@ final class SessionSwitchingTests: XCTestCase {
 
         // When: Modifying state on viewModel1
         viewModel1.inputText = "Hello from session A"
-        viewModel1.isProcessing = true
+        viewModel1.agentPhase = .processing
         viewModel1.messages.append(ChatMessage(id: UUID(), role: .user, content: .text("Test message")))
 
         // Then: viewModel2 state should be unaffected
@@ -107,7 +105,7 @@ final class SessionSwitchingTests: XCTestCase {
             connection: DefaultAppConnectionRepository(client: engineClient),
             events: DefaultSessionEventRepository(client: engineClient),
             sessions: DefaultSessionRepository(sessionClient: engineClient.session),
-            agent: DefaultAgentRepository(agentClient: engineClient.agent),
+            agent: engineClient.agent,
             models: DefaultModelRepository(modelClient: engineClient.model),
             messages: DefaultMessageRepository(messageClient: engineClient.message),
             transcription: DefaultTranscriptionRepository(client: engineClient.transcription),

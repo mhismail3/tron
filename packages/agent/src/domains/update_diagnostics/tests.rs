@@ -7,10 +7,10 @@ use super::service::{
     inspect_update_diagnostics_value, list_update_diagnostics_value,
     record_update_diagnostic_value_at,
 };
-use super::{Deps, UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID};
+use super::{UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, ListResources, RiskLevel, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, ListResources, RiskLevel, TraceId,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -21,7 +21,7 @@ const IDEMPOTENCY_LEAK_PREFIX: &str = "UPDATE_DIAGNOSTIC_IDEMPOTENCY_LEAK_PREFIX
 const IDEMPOTENCY_LEAK_SUFFIX: &str = "UPDATE_DIAGNOSTIC_IDEMPOTENCY_LEAK_SUFFIX";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -30,12 +30,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -49,7 +47,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[UPDATE_DIAGNOSTIC_RECORD_KIND],
@@ -58,7 +56,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -67,7 +65,7 @@ impl Fixture {
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
         let read_grant_id = derive_grant(
-            &self.deps,
+            &self.engine_host,
             &format!("{session_id}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[UPDATE_DIAGNOSTIC_RECORD_KIND],
@@ -76,7 +74,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps: self.deps.clone(),
+            engine_host: self.engine_host.clone(),
             session_id: session_id.to_owned(),
             write_grant_id: self.write_grant_id.clone(),
             read_grant_id,
@@ -90,7 +88,7 @@ impl Fixture {
     async fn record_at(&self, key: &str, payload: Value, operation_at: DateTime<Utc>) -> Value {
         let invocation = self.write_invocation(key, payload);
         record_update_diagnostic_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             operation_at,
@@ -102,7 +100,7 @@ impl Fixture {
     async fn record_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.write_invocation(key, payload);
         record_update_diagnostic_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -114,7 +112,7 @@ impl Fixture {
 
     async fn list(&self, key: &str, payload: Value) -> Value {
         let invocation = self.read_invocation(key, payload);
-        list_update_diagnostics_value(&self.deps, &invocation, &invocation.payload)
+        list_update_diagnostics_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("list update diagnostics")
     }
@@ -122,7 +120,7 @@ impl Fixture {
     async fn inspect(&self, key: &str, resource_id: &str) -> Value {
         let invocation =
             self.read_invocation(key, json!({"updateDiagnosticResourceId": resource_id}));
-        inspect_update_diagnostics_value(&self.deps, &invocation, &invocation.payload)
+        inspect_update_diagnostics_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("inspect update diagnostic")
     }
@@ -130,7 +128,7 @@ impl Fixture {
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
         let invocation =
             self.read_invocation(key, json!({"updateDiagnosticResourceId": resource_id}));
-        inspect_update_diagnostics_value(&self.deps, &invocation, &invocation.payload)
+        inspect_update_diagnostics_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
@@ -138,7 +136,6 @@ impl Fixture {
 
     async fn raw_current_payload(&self, resource_id: &str) -> Value {
         let inspection = self
-            .deps
             .engine_host
             .inspect_resource(resource_id)
             .await
@@ -162,7 +159,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             scopes,
             &[UPDATE_DIAGNOSTIC_RECORD_KIND],
@@ -218,7 +215,6 @@ async fn record_list_inspect_update_diagnostic_resource_schema_and_lifecycle() {
     let resource_id = recorded["updateDiagnosticResourceId"].as_str().unwrap();
 
     let stored = fixture
-        .deps
         .engine_host
         .inspect_resource(resource_id)
         .await
@@ -267,7 +263,6 @@ async fn record_list_inspect_update_diagnostic_resource_schema_and_lifecycle() {
     );
 
     let streams = fixture
-        .deps
         .engine_host
         .replay_snapshot(&fixture.session_id)
         .await
@@ -412,7 +407,7 @@ async fn update_diagnostic_idempotency_evidence_is_fingerprinted_without_raw_key
         TraceId::new("trace-update-diagnostic-record").expect("trace id");
 
     let created = record_update_diagnostic_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -427,7 +422,6 @@ async fn update_diagnostic_idempotency_evidence_is_fingerprinted_without_raw_key
     let inspected = fixture.inspect("idempotency-inspect", resource_id).await;
     let stream_payloads = Value::Array(
         fixture
-            .deps
             .engine_host
             .replay_snapshot(&fixture.session_id)
             .await
@@ -454,7 +448,7 @@ async fn update_diagnostic_authority_scope_and_replay_are_fail_closed() {
     let fixture = Fixture::new("update-diagnostics-authority").await;
     let read_only = fixture.read_invocation("read-only-record", update_payload());
     let read_only_error = record_update_diagnostic_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &read_only,
         &read_only.payload,
         default_operation_at(),
@@ -489,7 +483,7 @@ async fn update_diagnostic_authority_scope_and_replay_are_fail_closed() {
         ],
     );
     let wildcard_error = record_update_diagnostic_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &wildcard,
         &wildcard.payload,
         default_operation_at(),
@@ -527,7 +521,7 @@ async fn update_diagnostic_authority_scope_and_replay_are_fail_closed() {
         ],
     );
     let network_error = record_update_diagnostic_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &network,
         &network.payload,
         default_operation_at(),
@@ -559,7 +553,6 @@ async fn update_diagnostic_authority_scope_and_replay_are_fail_closed() {
     );
 
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(UPDATE_DIAGNOSTIC_RECORD_KIND.to_owned()),
@@ -610,15 +603,14 @@ fn id_token_like_idempotency_key(label: &str) -> String {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("update-diagnostics-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

@@ -9,6 +9,7 @@ import SwiftUI
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let setup: EnvironmentSetup
     private let poller: ServerStatusPoller
+    private let actionHandler: MenuBarActionHandler
     private var statusItem: NSStatusItem?
     private var pollerTask: Task<Void, Never>?
     private var pairingInfoWindowController: NSWindowController?
@@ -21,8 +22,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     init(setup: EnvironmentSetup) {
         self.setup = setup
         self.poller = ServerStatusPoller(setup: setup)
+        self.actionHandler = MenuBarActionHandler(setup: setup)
         self.snapshot = ServerStatusSnapshot.checking
         super.init()
+        self.actionHandler.menuBarController = self
     }
 
     func install() {
@@ -41,7 +44,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // Start polling - emits a snapshot every 30 s.
         pollerTask = Task { [weak self] in
             guard let self else { return }
-            for await snapshot in await self.poller.snapshots() {
+            for await snapshot in self.poller.snapshots() {
                 await MainActor.run {
                     self.applyPolledSnapshot(snapshot)
                 }
@@ -88,7 +91,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    func showPairingInfoWindow(setup: EnvironmentSetup) {
+    func showPairingInfoWindow() {
         if let pairingInfoWindowController {
             pairingInfoWindowController.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -114,7 +117,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func showLogsWindow(setup: EnvironmentSetup) {
+    func showLogsWindow() {
         if let logsWindowController {
             logsWindowController.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -143,7 +146,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let menu = statusItem?.menu else { return }
         let items = MenuBarItemBuilder.build(
             snapshot: snapshot,
-            paths: setup
+            tronHome: setup.tronHome,
+            defaultServerPort: setup.serverPort,
+            canManageLaunchAgent: setup.canManageLaunchAgent
         )
         menu.removeAllItems()
         for descriptor in items {
@@ -163,8 +168,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.isEnabled = false
             item.image = nil
             return item
-        case .action(let title, let isEnabled, let handler):
-            let wrapper = ActionWrapper(handler: handler)
+        case .action(let title, let isEnabled, let action):
+            let wrapper = ActionWrapper { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.actionHandler.perform(action)
+                }
+            }
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
             item.representedObject = wrapper // keep alive
@@ -249,7 +259,7 @@ private final class MenuBarHeaderView: NSView {
         addressField.lineBreakMode = .byTruncatingMiddle
         addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let status = diagnosticField(prefix: "Status: ", value: content.status, valueColor: color(for: content.health))
+        let status = diagnosticField(prefix: "Status: ", value: content.status, valueColor: color(for: content.tone))
         status.lineBreakMode = .byTruncatingTail
 
         var rows: [NSView] = [title, addressField, status]
@@ -286,15 +296,15 @@ private final class MenuBarHeaderView: NSView {
         ])
     }
 
-    private func color(for health: MenuHeaderContent.Health) -> NSColor {
-        switch health {
-        case .healthy:
+    private func color(for tone: MenuBarTone) -> NSColor {
+        switch tone {
+        case .running:
             return NSColor.systemGreen
         case .attention:
             return NSColor.systemYellow
         case .paused:
             return NSColor.secondaryLabelColor
-        case .stopped:
+        case .failed:
             return NSColor.systemRed
         }
     }
@@ -397,14 +407,6 @@ private final class MenuBarWindowController: NSWindowController, NSWindowDelegat
     func windowWillClose(_ notification: Notification) {
         onClose()
     }
-}
-
-/// Tone for the menu-bar icon - drives logo tint.
-enum MenuBarTone: Equatable {
-    case running
-    case attention
-    case paused
-    case failed
 }
 
 enum MenuBarIcon {

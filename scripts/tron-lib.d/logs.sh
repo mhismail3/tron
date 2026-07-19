@@ -189,29 +189,3 @@ query_logs() {
         echo -e "${DIM}Showing $count logs (limit: $limit)${NC}"
     fi
 }
-
-write_deployment_result() {
-    local status="$1"
-    local error_msg="${2:-null}"
-    local commit
-    local previous_commit
-
-    commit="${TRON_DEPLOYMENT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}"
-    previous_commit="${TRON_DEPLOYMENT_PREVIOUS_COMMIT:-$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")}"
-
-    if [ "$error_msg" = "null" ]; then
-        error_msg="null"
-    else
-        error_msg="\"$error_msg\""
-    fi
-
-    cat > "$CONTRIBUTOR_DIR/last-deployment.json" << RESULT
-{
-  "status": "$status",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "commit": "$commit",
-  "previousCommit": "$previous_commit",
-  "error": $error_msg
-}
-RESULT
-}

@@ -1,6 +1,27 @@
 use super::*;
 use crate::shared::protocol::content::ThinkingContentKind;
-use crate::shared::protocol::events::BaseEvent;
+use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity};
+
+const EMPTY_IDENTITY: CapabilityEventIdentity = CapabilityEventIdentity {
+    model_primitive_name: None,
+    operation_name: None,
+    trace_id: None,
+    root_invocation_id: None,
+    theme_color: None,
+    presentation_hints: None,
+};
+
+fn begin(map: &TurnAccumulatorMap, session_id: &str) {
+    map.begin_run(session_id, &format!("run-{session_id}"));
+}
+
+fn state(map: &TurnAccumulatorMap, session_id: &str) -> Option<(String, Value, Value)> {
+    map.accumulators
+        .lock()
+        .get(session_id)
+        .and_then(|session| session.turn.as_ref())
+        .map(TurnAccumulator::to_json)
+}
 
 // ── TurnAccumulator unit tests ──
 
@@ -74,6 +95,7 @@ fn finish_thinking_replaces_current_thinking_snapshot() {
 #[test]
 fn thinking_end_event_replaces_accumulated_thinking() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -89,7 +111,7 @@ fn thinking_end_event_replaces_accumulated_thinking() {
         kind: ThinkingContentKind::Thinking,
     });
 
-    let (_, _, sequence) = map.get_state("s1").unwrap();
+    let (_, _, sequence) = state(&map, "s1").unwrap();
     assert_eq!(sequence[0]["thinking"], "full final thinking");
 }
 
@@ -112,7 +134,7 @@ fn interleaved_text_and_thinking_creates_separate_sequence_items() {
 #[test]
 fn add_capability_invocation_generating() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
     assert_eq!(acc.capability_invocations.len(), 1);
     assert_eq!(acc.capability_invocations[0].invocation_id, "tc_1");
     assert_eq!(
@@ -130,8 +152,12 @@ fn add_capability_invocation_generating() {
 #[test]
 fn update_capability_started() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
-    acc.update_capability_started("tc_1", Some(&serde_json::json!({"command": "ls"})));
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.update_capability_started(
+        "tc_1",
+        Some(&serde_json::json!({"command": "ls"})),
+        &EMPTY_IDENTITY,
+    );
     assert_eq!(acc.capability_invocations[0].status, "running");
     assert!(acc.capability_invocations[0].arguments.is_some());
     assert!(acc.capability_invocations[0].started_at.is_some());
@@ -140,9 +166,9 @@ fn update_capability_started() {
 #[test]
 fn update_capability_completed_success() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
-    acc.update_capability_started("tc_1", None);
-    acc.update_capability_completed("tc_1", Some("output"), false);
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.update_capability_completed("tc_1", Some("output"), false, &EMPTY_IDENTITY);
     assert_eq!(acc.capability_invocations[0].status, "completed");
     assert_eq!(
         acc.capability_invocations[0].result.as_deref(),
@@ -155,9 +181,9 @@ fn update_capability_completed_success() {
 #[test]
 fn update_capability_completed_error() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
-    acc.update_capability_started("tc_1", None);
-    acc.update_capability_completed("tc_1", Some("command not found"), true);
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.update_capability_completed("tc_1", Some("command not found"), true, &EMPTY_IDENTITY);
     assert_eq!(acc.capability_invocations[0].status, "error");
     assert!(acc.capability_invocations[0].is_error);
 }
@@ -165,19 +191,19 @@ fn update_capability_completed_error() {
 #[test]
 fn update_capability_unknown_id_is_noop() {
     let mut acc = TurnAccumulator::new();
-    acc.update_capability_started("unknown", None);
-    acc.update_capability_completed("unknown", None, false);
+    acc.update_capability_started("unknown", None, &EMPTY_IDENTITY);
+    acc.update_capability_completed("unknown", None, false, &EMPTY_IDENTITY);
     assert!(acc.capability_invocations.is_empty());
 }
 
 #[test]
 fn multiple_capability_invocations_tracked_independently() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
-    acc.add_capability_generating("tc_2", "inspect");
-    acc.update_capability_started("tc_1", None);
-    acc.update_capability_completed("tc_1", Some("ok"), false);
-    acc.update_capability_started("tc_2", None);
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.add_capability_generating("tc_2", "inspect", &EMPTY_IDENTITY);
+    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
+    acc.update_capability_completed("tc_1", Some("ok"), false, &EMPTY_IDENTITY);
+    acc.update_capability_started("tc_2", None, &EMPTY_IDENTITY);
 
     assert_eq!(acc.capability_invocations.len(), 2);
     assert_eq!(acc.capability_invocations[0].status, "completed");
@@ -188,7 +214,7 @@ fn multiple_capability_invocations_tracked_independently() {
 fn text_after_capability_creates_new_text_item() {
     let mut acc = TurnAccumulator::new();
     acc.append_text("before ");
-    acc.add_capability_generating("tc_1", "execute");
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
     acc.append_text("after");
     assert_eq!(acc.content_sequence.len(), 3);
     assert!(matches!(
@@ -209,7 +235,7 @@ fn text_after_capability_creates_new_text_item() {
 fn to_json_produces_expected_format() {
     let mut acc = TurnAccumulator::new();
     acc.append_text("hello");
-    acc.add_capability_generating("tc_1", "execute");
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
     let (text, capabilities, sequence) = acc.to_json();
     assert_eq!(text, "hello");
     assert!(capabilities.is_array());
@@ -267,8 +293,8 @@ fn to_json_capability_ref_uses_snake_case_type() {
 #[test]
 fn capability_streaming_output_accumulates() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
-    acc.update_capability_started("tc_1", None);
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
     let tc = &mut acc.capability_invocations[0];
     let streaming = tc.streaming_output.get_or_insert_with(String::new);
     streaming.push_str("line 1\n");
@@ -282,8 +308,8 @@ fn capability_streaming_output_accumulates() {
 #[test]
 fn capability_streaming_output_included_in_json() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
-    acc.update_capability_started("tc_1", None);
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
+    acc.update_capability_started("tc_1", None, &EMPTY_IDENTITY);
     acc.capability_invocations[0].streaming_output = Some("partial output".into());
     let (_, capabilities, _) = acc.to_json();
     assert_eq!(capabilities[0]["streamingOutput"], "partial output");
@@ -292,7 +318,7 @@ fn capability_streaming_output_included_in_json() {
 #[test]
 fn capability_streaming_output_omitted_when_none() {
     let mut acc = TurnAccumulator::new();
-    acc.add_capability_generating("tc_1", "execute");
+    acc.add_capability_generating("tc_1", "execute", &EMPTY_IDENTITY);
     let (_, capabilities, _) = acc.to_json();
     assert!(capabilities[0].get("streamingOutput").is_none());
 }
@@ -302,65 +328,139 @@ fn capability_streaming_output_omitted_when_none() {
 #[test]
 fn map_create_and_get() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    let state = map.get_state("s1");
+    begin(&map, "s1");
+    map.handle_turn_start("s1", None);
+    let state = state(&map, "s1");
     assert!(state.is_some());
+}
+
+#[test]
+fn map_snapshot_pairs_projected_state_with_emitted_sequence() {
+    let map = TurnAccumulatorMap::new();
+    map.begin_run("s1", "run-1");
+    map.update_from_event(&TronEvent::TurnStart {
+        base: BaseEvent::now("s1").with_sequence(40),
+        turn: 1,
+    });
+    map.update_from_event(&TronEvent::MessageUpdate {
+        base: BaseEvent::now("s1").with_sequence(42),
+        content: "covered text".into(),
+    });
+
+    let (text, _, _) = state(&map, "s1").unwrap();
+    assert_eq!(text, "covered text");
+    let snapshot = map.reconstruction_snapshot("s1", "run-1").unwrap();
+    assert_eq!(snapshot.last_sequence, Some(42));
+    assert_eq!(snapshot.generation, 1);
+    assert!(snapshot.state.is_some());
+}
+
+#[test]
+fn out_of_order_observation_invalidates_reconstruction_cursor() {
+    let map = TurnAccumulatorMap::new();
+    map.begin_run("s1", "run-1");
+    map.update_from_event(&TronEvent::TurnStart {
+        base: BaseEvent::now("s1").with_sequence(40),
+        turn: 1,
+    });
+    map.update_from_event(&TronEvent::MessageUpdate {
+        base: BaseEvent::now("s1").with_sequence(42),
+        content: "newer".into(),
+    });
+    map.update_from_event(&TronEvent::AgentStart {
+        base: BaseEvent::now("s1").with_sequence(41),
+    });
+
+    let snapshot = map.reconstruction_snapshot("s1", "run-1").unwrap();
+    assert_eq!(snapshot.last_sequence, None);
+}
+
+#[test]
+fn response_complete_is_part_of_atomic_turn_snapshot() {
+    let map = TurnAccumulatorMap::new();
+    map.begin_run("s1", "run-1");
+    map.update_from_event(&TronEvent::TurnStart {
+        base: BaseEvent::now("s1").with_sequence(1),
+        turn: 1,
+    });
+    map.update_from_event(&TronEvent::MessageUpdate {
+        base: BaseEvent::now("s1").with_sequence(2),
+        content: "done".into(),
+    });
+    map.update_from_event(&TronEvent::ResponseComplete {
+        base: BaseEvent::now("s1").with_sequence(3),
+        turn: 1,
+        stop_reason: "end_turn".into(),
+        token_usage: None,
+        has_capability_invocations: false,
+        capability_invocation_count: 0,
+        token_record: None,
+        model: None,
+    });
+
+    let snapshot = map.reconstruction_snapshot("s1", "run-1").unwrap();
+    assert_eq!(snapshot.last_sequence, Some(3));
+    assert!(snapshot.state.unwrap().3);
 }
 
 #[test]
 fn map_get_nonexistent_returns_none() {
     let map = TurnAccumulatorMap::new();
-    assert!(map.get_state("missing").is_none());
+    assert!(state(&map, "missing").is_none());
 }
 
 #[test]
 fn map_turn_start_resets_existing() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_text_delta("s1", "old text");
-    map.handle_turn_start("s1");
-    let (text, _, _) = map.get_state("s1").unwrap();
+    begin(&map, "s1");
+    map.handle_turn_start("s1", None);
+    map.handle_text_delta("s1", "old text", None);
+    map.handle_turn_start("s1", None);
+    let (text, _, _) = state(&map, "s1").unwrap();
     assert!(text.is_empty());
 }
 
 #[test]
 fn map_agent_end_removes_accumulator() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_text_delta("s1", "hello");
-    map.handle_agent_end("s1");
-    assert!(map.get_state("s1").is_none());
+    begin(&map, "s1");
+    map.handle_turn_start("s1", None);
+    map.handle_text_delta("s1", "hello", None);
+    map.handle_agent_end("s1", None);
+    assert!(state(&map, "s1").is_none());
 }
 
 #[test]
 fn map_turn_end_removes_accumulator() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_text_delta("s1", "hello");
-    map.handle_turn_end("s1");
-    assert!(map.get_state("s1").is_none());
+    begin(&map, "s1");
+    map.handle_turn_start("s1", None);
+    map.handle_text_delta("s1", "hello", None);
+    map.handle_turn_end("s1", None);
+    assert!(state(&map, "s1").is_none());
 }
 
 #[test]
 fn map_text_delta_without_turn_start_is_noop() {
     let map = TurnAccumulatorMap::new();
-    map.handle_text_delta("s1", "orphan");
-    assert!(map.get_state("s1").is_none());
+    map.handle_text_delta("s1", "orphan", None);
+    assert!(state(&map, "s1").is_none());
 }
 
 #[test]
 fn map_full_event_sequence() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_thinking_delta("s1", "let me think...", ThinkingContentKind::Thinking);
-    map.handle_text_delta("s1", "The answer is ");
-    map.handle_text_delta("s1", "42");
-    map.handle_capability_generating("s1", "tc_1", "execute");
-    map.handle_capability_started("s1", "tc_1", None);
-    map.handle_capability_completed("s1", "tc_1", Some("output"), false);
-    map.handle_text_delta("s1", " and more");
+    begin(&map, "s1");
+    map.handle_turn_start("s1", None);
+    map.handle_thinking_delta("s1", "let me think...", ThinkingContentKind::Thinking, None);
+    map.handle_text_delta("s1", "The answer is ", None);
+    map.handle_text_delta("s1", "42", None);
+    map.handle_capability_generating("s1", "tc_1", "execute", &EMPTY_IDENTITY, None);
+    map.handle_capability_started("s1", "tc_1", None, &EMPTY_IDENTITY, None);
+    map.handle_capability_completed("s1", "tc_1", Some("output"), false, &EMPTY_IDENTITY, None);
+    map.handle_text_delta("s1", " and more", None);
 
-    let (text, capabilities, sequence) = map.get_state("s1").unwrap();
+    let (text, capabilities, sequence) = state(&map, "s1").unwrap();
     assert_eq!(text, "The answer is 42 and more");
     assert_eq!(capabilities.as_array().unwrap().len(), 1);
     assert_eq!(capabilities[0]["status"], "completed");
@@ -371,25 +471,28 @@ fn map_full_event_sequence() {
 #[test]
 fn map_capability_streaming_output() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_capability_generating("s1", "tc_1", "execute");
-    map.handle_capability_started("s1", "tc_1", None);
-    map.handle_capability_output("s1", "tc_1", "partial ");
-    map.handle_capability_output("s1", "tc_1", "output");
-    let (_, capabilities, _) = map.get_state("s1").unwrap();
+    begin(&map, "s1");
+    map.handle_turn_start("s1", None);
+    map.handle_capability_generating("s1", "tc_1", "execute", &EMPTY_IDENTITY, None);
+    map.handle_capability_started("s1", "tc_1", None, &EMPTY_IDENTITY, None);
+    map.handle_capability_output("s1", "tc_1", "partial ", None);
+    map.handle_capability_output("s1", "tc_1", "output", None);
+    let (_, capabilities, _) = state(&map, "s1").unwrap();
     assert_eq!(capabilities[0]["streamingOutput"], "partial output");
 }
 
 #[test]
 fn map_independent_sessions() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_turn_start("s2");
-    map.handle_text_delta("s1", "session 1");
-    map.handle_text_delta("s2", "session 2");
+    begin(&map, "s1");
+    begin(&map, "s2");
+    map.handle_turn_start("s1", None);
+    map.handle_turn_start("s2", None);
+    map.handle_text_delta("s1", "session 1", None);
+    map.handle_text_delta("s2", "session 2", None);
 
-    let (text1, _, _) = map.get_state("s1").unwrap();
-    let (text2, _, _) = map.get_state("s2").unwrap();
+    let (text1, _, _) = state(&map, "s1").unwrap();
+    let (text2, _, _) = state(&map, "s2").unwrap();
     assert_eq!(text1, "session 1");
     assert_eq!(text2, "session 2");
 }
@@ -397,14 +500,16 @@ fn map_independent_sessions() {
 #[test]
 fn map_agent_end_one_session_doesnt_affect_other() {
     let map = TurnAccumulatorMap::new();
-    map.handle_turn_start("s1");
-    map.handle_turn_start("s2");
-    map.handle_text_delta("s1", "s1");
-    map.handle_text_delta("s2", "s2");
-    map.handle_agent_end("s1");
+    begin(&map, "s1");
+    begin(&map, "s2");
+    map.handle_turn_start("s1", None);
+    map.handle_turn_start("s2", None);
+    map.handle_text_delta("s1", "s1", None);
+    map.handle_text_delta("s2", "s2", None);
+    map.handle_agent_end("s1", None);
 
-    assert!(map.get_state("s1").is_none());
-    assert!(map.get_state("s2").is_some());
+    assert!(state(&map, "s1").is_none());
+    assert!(state(&map, "s2").is_some());
 }
 
 // ── Integration: update_from_event tests ──
@@ -412,17 +517,19 @@ fn map_agent_end_one_session_doesnt_affect_other() {
 #[test]
 fn update_from_turn_start_event() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     let event = TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
     };
     map.update_from_event(&event);
-    assert!(map.get_state("s1").is_some());
+    assert!(state(&map, "s1").is_some());
 }
 
 #[test]
 fn update_from_message_update_event() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -431,13 +538,14 @@ fn update_from_message_update_event() {
         base: BaseEvent::now("s1"),
         content: "hello".into(),
     });
-    let (text, _, _) = map.get_state("s1").unwrap();
+    let (text, _, _) = state(&map, "s1").unwrap();
     assert_eq!(text, "hello");
 }
 
 #[test]
 fn update_from_thinking_delta_event() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -447,7 +555,7 @@ fn update_from_thinking_delta_event() {
         delta: "hmm".into(),
         kind: ThinkingContentKind::Thinking,
     });
-    let (_, _, sequence) = map.get_state("s1").unwrap();
+    let (_, _, sequence) = state(&map, "s1").unwrap();
     let seq = sequence.as_array().unwrap();
     assert_eq!(seq.len(), 1);
     assert_eq!(seq[0]["type"], "thinking");
@@ -456,6 +564,7 @@ fn update_from_thinking_delta_event() {
 #[test]
 fn update_from_capability_lifecycle_events() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -482,13 +591,14 @@ fn update_from_capability_lifecycle_events() {
         result: None,
         capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
-    let (_, capabilities, _) = map.get_state("s1").unwrap();
+    let (_, capabilities, _) = state(&map, "s1").unwrap();
     assert_eq!(capabilities[0]["status"], "completed");
 }
 
 #[test]
 fn update_from_capability_invocation_output_event() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -516,13 +626,14 @@ fn update_from_capability_invocation_output_event() {
         invocation_id: "tc_1".into(),
         update: "line 2\n".into(),
     });
-    let (_, capabilities, _) = map.get_state("s1").unwrap();
+    let (_, capabilities, _) = state(&map, "s1").unwrap();
     assert_eq!(capabilities[0]["streamingOutput"], "line 1\nline 2\n");
 }
 
 #[test]
 fn update_from_agent_end_clears() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -535,12 +646,13 @@ fn update_from_agent_end_clears() {
         base: BaseEvent::now("s1"),
         error: None,
     });
-    assert!(map.get_state("s1").is_none());
+    assert!(state(&map, "s1").is_none());
 }
 
 #[test]
 fn update_from_turn_end_clears() {
     let map = TurnAccumulatorMap::new();
+    begin(&map, "s1");
     map.update_from_event(&TronEvent::TurnStart {
         base: BaseEvent::now("s1"),
         turn: 1,
@@ -560,7 +672,119 @@ fn update_from_turn_end_clears() {
         context_limit: None,
         model: None,
     });
-    assert!(map.get_state("s1").is_none());
+    assert!(state(&map, "s1").is_none());
+}
+
+#[test]
+fn terminal_markers_clear_state_until_matching_run_release() {
+    let map = TurnAccumulatorMap::new();
+    map.begin_run("s1", "run-1");
+    assert!(map.commit_admission("s1", "run-1", 0));
+    map.update_from_event(&TronEvent::CompactionStart {
+        base: BaseEvent::now("s1").with_sequence(1),
+        reason: crate::shared::protocol::events::CompactionReason::Manual,
+        tokens_before: 1_000,
+    });
+
+    let compacting = map.reconstruction_snapshot("s1", "run-1").unwrap();
+    assert!(compacting.admission_committed);
+    assert_eq!(compacting.compaction_reason.as_deref(), Some("manual"));
+    assert_eq!(compacting.last_sequence, Some(1));
+
+    map.update_from_event(&TronEvent::AgentEnd {
+        base: BaseEvent::now("s1").with_sequence(2),
+        error: None,
+    });
+    let terminal = map.reconstruction_snapshot("s1", "run-1").unwrap();
+    assert!(terminal.compaction_reason.is_none());
+    assert!(terminal.state.is_none());
+    assert_eq!(terminal.last_sequence, Some(2));
+
+    map.finish_run("s1", "run-1");
+    assert!(map.reconstruction_snapshot("s1", "run-1").is_none());
+}
+
+#[test]
+fn capability_progress_and_run_status_are_reconstructed() {
+    let map = TurnAccumulatorMap::new();
+    map.begin_run("s1", "run-1");
+    map.handle_turn_start("s1", Some(1));
+    let identity = CapabilityEventIdentity {
+        model_primitive_name: Some("execute".into()),
+        operation_name: Some("process_run".into()),
+        trace_id: Some("trace-1".into()),
+        root_invocation_id: Some("root-1".into()),
+        theme_color: Some("#00ffff".into()),
+        presentation_hints: Some(serde_json::json!({"chipTitle": "Process"})),
+    };
+    map.handle_capability_generating("s1", "cap-1", "execute", &identity, Some(2));
+    map.update_from_event(&TronEvent::CapabilityInvocationProgress {
+        base: BaseEvent::now("s1").with_sequence(3),
+        invocation_id: "cap-1".into(),
+        message: Some("Halfway".into()),
+        percent: Some(0.5),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+    });
+    map.update_from_event(&TronEvent::CapabilityRunStatus {
+        base: BaseEvent::now("s1").with_sequence(4),
+        run_id: "async-1".into(),
+        invocation_id: "cap-1".into(),
+        status: "paused".into(),
+        stream_topic: Some("topic-1".into()),
+        child_invocations: vec!["child-1".into()],
+        details: Some(serde_json::json!({ "reason": "approval" })),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
+    });
+
+    let (_, capabilities, _, _) = map
+        .reconstruction_snapshot("s1", "run-1")
+        .unwrap()
+        .state
+        .unwrap();
+    assert_eq!(capabilities[0]["status"], "paused");
+    assert_eq!(capabilities[0]["progressMessage"], "Run paused");
+    assert_eq!(capabilities[0]["progressPercent"], 0.5);
+    assert_eq!(capabilities[0]["operationName"], "process_run");
+    assert_eq!(capabilities[0]["traceId"], "trace-1");
+    assert_eq!(capabilities[0]["rootInvocationId"], "root-1");
+    assert_eq!(capabilities[0]["themeColor"], "#00ffff");
+    assert_eq!(capabilities[0]["presentationHints"]["chipTitle"], "Process");
+    assert_eq!(capabilities[0]["details"]["runId"], "async-1");
+    assert_eq!(
+        capabilities[0]["details"]["runDetails"]["reason"],
+        "approval"
+    );
+
+    map.update_from_event(&TronEvent::CapabilityRunStatus {
+        base: BaseEvent::now("s1").with_sequence(5),
+        run_id: "async-1".into(),
+        invocation_id: "cap-1".into(),
+        status: "failed".into(),
+        stream_topic: Some("topic-1".into()),
+        child_invocations: vec![],
+        details: Some(serde_json::json!({ "reason": "exit" })),
+        capability_identity: identity,
+    });
+    let (_, failed, _, _) = map
+        .reconstruction_snapshot("s1", "run-1")
+        .unwrap()
+        .state
+        .unwrap();
+    assert_eq!(failed[0]["status"], "error");
+    assert_eq!(failed[0]["isError"], true);
+    assert!(failed[0].get("progressMessage").is_none());
+    assert!(failed[0].get("progressPercent").is_none());
+}
+
+#[test]
+fn finishing_stale_run_does_not_remove_replacement_projection() {
+    let map = TurnAccumulatorMap::new();
+    map.begin_run("s1", "run-1");
+    map.begin_run("s1", "run-2");
+
+    map.finish_run("s1", "run-1");
+
+    assert!(map.reconstruction_snapshot("s1", "run-2").is_some());
 }
 
 #[test]
@@ -572,5 +796,5 @@ fn update_ignores_irrelevant_events() {
     map.update_from_event(&TronEvent::AgentReady {
         base: BaseEvent::now("s1"),
     });
-    assert!(map.get_state("s1").is_none());
+    assert!(state(&map, "s1").is_none());
 }

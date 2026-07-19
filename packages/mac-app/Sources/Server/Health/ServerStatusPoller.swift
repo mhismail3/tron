@@ -2,11 +2,7 @@ import Foundation
 
 /// Periodic `system::ping` poller that drives the menu bar's status
 /// icon. Emits a `ServerStatusSnapshot` every 30 s (configurable).
-///
-/// Marked actor so multiple readers can `snapshots()` safely (in
-/// practice only the menu bar consumes it; the actor is for
-/// future-proofing the diagnostics page).
-actor ServerStatusPoller {
+struct ServerStatusPoller: Sendable {
     private let setup: EnvironmentSetup
     private let interval: TimeInterval
 
@@ -15,13 +11,13 @@ actor ServerStatusPoller {
         self.interval = interval
     }
 
-    /// Returns an `AsyncStream` that emits an immediate snapshot on
-    /// subscription, then one snapshot per `interval`. Cancellation
-    /// stops the timer.
+    /// Returns a latest-only `AsyncStream` that emits an immediate snapshot on
+    /// subscription, then one snapshot per `interval`. A stalled menu consumer
+    /// retains only the newest status, and cancellation stops the timer.
     func snapshots() -> AsyncStream<ServerStatusSnapshot> {
         let setup = self.setup
         let interval = self.interval
-        return AsyncStream { continuation in
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 while !Task.isCancelled {
                     let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
@@ -44,14 +40,14 @@ actor ServerStatusPoller {
         let result = await setup.pingServer(token)
         switch result {
         case .success(let info):
+            let port = setup.serverPort
             async let launchAgentRuntime = setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
-            async let portProcess = setup.probeServerProcess(info.port)
+            async let portProcess = setup.probeServerProcess(port)
             let runtimeInfo = await launchAgentRuntime
             let serverProcess = await portProcess
             return ServerStatusSnapshot(
-                state: .running(version: info.version, port: info.port),
-                tailscaleIP: info.tailscaleIp ?? setup.readTailscaleIPFromSettings(),
-                bearerToken: token,
+                state: .running(version: info.version, port: port),
+                tailscaleIP: setup.readTailscaleIPFromSettings(),
                 processID: serverProcess?.pid ?? runtimeInfo?.pid,
                 uptime: serverProcess?.uptime ?? runtimeInfo?.uptime,
                 isDevServerActive: serverProcess?.isDevServer == true
@@ -59,30 +55,22 @@ actor ServerStatusPoller {
         case .unauthorized:
             return ServerStatusSnapshot(
                 state: .unauthorized,
-                port: setup.serverPort,
-                tailscaleIP: setup.readTailscaleIPFromSettings(),
-                bearerToken: token
+                tailscaleIP: setup.readTailscaleIPFromSettings()
             )
         case .unreachable:
-            return await launchdStateSnapshot(setup: setup, token: token, reason: "unreachable")
+            return await launchdStateSnapshot(setup: setup, reason: "unreachable")
         case .timeout:
-            return await launchdStateSnapshot(setup: setup, token: token, reason: "timeout")
+            return await launchdStateSnapshot(setup: setup, reason: "timeout")
         case .malformedResponse:
-            return await launchdStateSnapshot(setup: setup, token: token, reason: "malformed response")
+            return await launchdStateSnapshot(setup: setup, reason: "malformed response")
         }
     }
 
-    private static func launchdStateSnapshot(
-        setup: EnvironmentSetup,
-        token: String?,
-        reason: String
-    ) async -> ServerStatusSnapshot {
+    private static func launchdStateSnapshot(setup: EnvironmentSetup, reason: String) async -> ServerStatusSnapshot {
         let isLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
         return ServerStatusSnapshot(
             state: isLoaded ? .failed(reason: reason) : .paused,
-            port: setup.serverPort,
-            tailscaleIP: setup.readTailscaleIPFromSettings(),
-            bearerToken: token
+            tailscaleIP: setup.readTailscaleIPFromSettings()
         )
     }
 }

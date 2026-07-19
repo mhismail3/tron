@@ -1,7 +1,6 @@
-//! Turn context construction and primitive capability resolution.
+//! Provider turn-context construction from the already resolved primitive surface.
 
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::agent::r#loop::primitive_surface::{self, ResolvedPrimitiveSurface};
 use crate::domains::agent::r#loop::types::RunContext;
 use crate::shared::protocol::messages::Context;
 use tracing::debug;
@@ -34,35 +33,4 @@ pub(super) fn build_turn_context(
     );
 
     context
-}
-
-pub(super) async fn resolve_provider_primitive_surface(
-    engine_host: Option<&crate::engine::EngineHostHandle>,
-    session_id: &str,
-    workspace_id: Option<&str>,
-) -> Result<ResolvedPrimitiveSurface, String> {
-    if let Some(host) = engine_host {
-        return primitive_surface::resolve_provider_primitive_surface(
-            host,
-            session_id,
-            workspace_id,
-        )
-        .await;
-    }
-
-    #[cfg(test)]
-    {
-        let _ = (session_id, workspace_id);
-        return Ok(ResolvedPrimitiveSurface {
-            capabilities: Vec::new(),
-            targets_by_name: Default::default(),
-            turn_stopping_capabilities: Default::default(),
-        });
-    }
-
-    #[cfg(not(test))]
-    {
-        let _ = (session_id, workspace_id);
-        Err("engine host is required for provider capability schema resolution".to_owned())
-    }
 }

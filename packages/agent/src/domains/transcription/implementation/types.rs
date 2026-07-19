@@ -162,36 +162,9 @@ impl Default for SharedTranscriptionEngine {
     }
 }
 
-/// Adds transcription-specific setup/sidecar context to fallible operations.
-pub trait ResultExt<T> {
-    /// Map an arbitrary error into a setup error with contextual text.
-    fn setup(self, context: &str) -> Result<T, TranscriptionError>;
-    /// Map an arbitrary error into a sidecar error with contextual text.
-    fn sidecar(self, context: &str) -> Result<T, TranscriptionError>;
-}
-
-impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
-    fn setup(self, context: &str) -> Result<T, TranscriptionError> {
-        self.map_err(|e| TranscriptionError::Setup(format!("{context}: {e}")))
-    }
-
-    fn sidecar(self, context: &str) -> Result<T, TranscriptionError> {
-        self.map_err(|e| TranscriptionError::Sidecar(format!("{context}: {e}")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn result_ext_adds_context() {
-        let err: Result<(), &str> = Err("missing python");
-        let mapped = err.setup("find_python");
-        assert!(
-            matches!(mapped, Err(TranscriptionError::Setup(message)) if message == "find_python: missing python")
-        );
-    }
 
     #[test]
     fn io_error_converts() {

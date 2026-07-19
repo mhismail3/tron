@@ -147,34 +147,6 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
         XCTAssertEqual(second.sequenceHighWaterMark, 2)
     }
 
-    func testSameSessionLiveStreamsDoNotCancelEachOther() {
-        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let first = ChatViewModel(
-            engineClient: engineClient,
-            sessionId: "shared-session",
-            eventStoreManager: nil
-        )
-        let second = ChatViewModel(
-            engineClient: engineClient,
-            sessionId: "shared-session",
-            eventStoreManager: nil
-        )
-
-        first.startLiveEventStream()
-        second.startLiveEventStream()
-
-        XCTAssertTrue(first.liveEventStreamIsActiveForTesting)
-        XCTAssertTrue(second.liveEventStreamIsActiveForTesting)
-
-        first.stopLiveEventStream()
-
-        XCTAssertFalse(first.liveEventStreamIsActiveForTesting)
-        XCTAssertTrue(second.liveEventStreamIsActiveForTesting)
-
-        second.stopLiveEventStream()
-        XCTAssertFalse(second.liveEventStreamIsActiveForTesting)
-    }
-
     func testWatermarkResetForNewReconstructionCycle() {
         // After a new reconstruction sets watermark, the filter honors it.
         viewModel.sequenceHighWaterMark = 42
@@ -191,10 +163,10 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
     /// history) must be dropped on drain.
     func testBufferedEventsBelowWatermarkAreDroppedOnDrain() {
         viewModel.isReconstructing = true
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 3))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 4))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 12))
-        XCTAssertEqual(viewModel.eventBufferCount, 3)
+        viewModel.handleEventV2(makeSequencedEvent(seq: 3))
+        viewModel.handleEventV2(makeSequencedEvent(seq: 4))
+        viewModel.handleEventV2(makeSequencedEvent(seq: 12))
+        XCTAssertEqual(viewModel.eventBuffer.count, 3)
 
         // Reconstruction set the watermark at 10 — events 3 and 4 are
         // already in the reconstructed history; 12 is new.
@@ -202,7 +174,7 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
         viewModel.isReconstructing = false
         viewModel.drainEventBuffer()
 
-        XCTAssertEqual(viewModel.eventBufferCount, 0)
+        XCTAssertEqual(viewModel.eventBuffer.count, 0)
         XCTAssertEqual(viewModel.sequenceHighWaterMark, 12,
                        "only the > 10 event should have advanced the watermark")
     }
@@ -216,10 +188,10 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
     func testBufferedEventsDispatchInSequenceOrder() {
         viewModel.isReconstructing = true
         // Arrive in shuffled order:
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 3))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 1))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 5))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 2))
+        viewModel.handleEventV2(makeSequencedEvent(seq: 3))
+        viewModel.handleEventV2(makeSequencedEvent(seq: 1))
+        viewModel.handleEventV2(makeSequencedEvent(seq: 5))
+        viewModel.handleEventV2(makeSequencedEvent(seq: 2))
 
         viewModel.sequenceHighWaterMark = 0
         viewModel.isReconstructing = false
@@ -236,10 +208,10 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
     /// set up, so this ordering is load-bearing.
     func testMixedSequencedAndUnsequencedDrainsInPriorityOrder() {
         viewModel.isReconstructing = true
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 7))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: nil)) // unsequenced A
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: 3))
-        viewModel.handleEventForTesting(makeSequencedEvent(seq: nil)) // unsequenced B
+        viewModel.handleEventV2(makeSequencedEvent(seq: 7))
+        viewModel.handleEventV2(makeSequencedEvent(seq: nil)) // unsequenced A
+        viewModel.handleEventV2(makeSequencedEvent(seq: 3))
+        viewModel.handleEventV2(makeSequencedEvent(seq: nil)) // unsequenced B
 
         viewModel.sequenceHighWaterMark = 0
         viewModel.isReconstructing = false

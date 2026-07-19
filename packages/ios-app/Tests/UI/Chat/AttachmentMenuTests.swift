@@ -55,7 +55,7 @@ final class AttachmentMenuTests: XCTestCase {
 
     func testNativeAttachmentMenuButtonConstructs() {
         render(
-            GlassAttachmentButton(
+            ComposerAttachmentButton(
                 isDisabled: false,
                 attachmentCapability: .default,
                 includeRecentInputs: true,
@@ -64,7 +64,7 @@ final class AttachmentMenuTests: XCTestCase {
             )
         )
         render(
-            GlassAttachmentButton(
+            ComposerAttachmentButton(
                 isDisabled: true,
                 attachmentCapability: noImageCapability,
                 includeRecentInputs: false,

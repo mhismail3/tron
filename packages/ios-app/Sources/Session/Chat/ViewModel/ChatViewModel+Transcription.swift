@@ -1,10 +1,6 @@
 import Foundation
 
 extension ChatViewModel: ChatTranscriptionContext {
-    var isProcessing: Bool { agentPhase.isProcessing }
-
-    var maxRecordingDuration: TimeInterval { 300 }
-
     func requireTranscriptionReady() async throws {
         let models = try await services.transcription.listModels().models
         guard let model = models.first(where: \.default) ?? models.first else {
@@ -25,7 +21,7 @@ extension ChatViewModel: ChatTranscriptionContext {
     }
 
     func startRecording() async throws {
-        try await micRecorder.startRecording(maxDuration: maxRecordingDuration)
+        try await micRecorder.startRecording()
     }
 
     @discardableResult

@@ -11,9 +11,7 @@ use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::INVALID_PARAMS;
 
 use super::outbound::send_engine_ws_value_async;
-use super::stream_projection::{
-    protocol_event_value, stream_event_matches_filters, visibility_for_context,
-};
+use super::stream_projection::{protocol_event_value, stream_event_matches_filters};
 use super::wire::{AckMessage, PollMessage, SubscribeMessage, checked_limit, protocol_error};
 use super::{EngineWsSession, PUSH_POLL_INTERVAL, STREAM_MAX_LIMIT};
 
@@ -63,44 +61,26 @@ impl EngineWsSession {
         };
         let context = self.merged_context(message.context);
         let subscription_id = format!("engine-ws:{}:{}", self.client_id, uuid::Uuid::now_v7());
-        let visibility = visibility_for_context(&context);
-        match self
-            .ctx
-            .engine_host
-            .subscribe_stream(
-                subscription_id.clone(),
-                message.topic.clone(),
+        self.subscriptions.lock().await.insert(
+            subscription_id.clone(),
+            SubscriptionState {
+                topic: message.topic.clone(),
                 cursor,
-                visibility,
-                context.session_id.clone(),
-                context.workspace_id.clone(),
-            )
-            .await
-        {
-            Ok(subscription) => {
-                self.subscriptions.lock().await.insert(
-                    subscription_id.clone(),
-                    SubscriptionState {
-                        topic: message.topic.clone(),
-                        cursor,
-                        filters: message.filters,
-                        session_id: context.session_id,
-                        workspace_id: context.workspace_id,
-                    },
-                );
-                self.send_success(
-                    message.id,
-                    json!({
-                        "subscriptionId": subscription.subscription_id,
-                        "topic": subscription.topic,
-                        "cursor": subscription.cursor.0,
-                        "limit": limit,
-                    }),
-                    None,
-                )
-            }
-            Err(error) => self.send_error(message.id, engine_error_to_capability_error(error)),
-        }
+                filters: message.filters,
+                session_id: context.session_id,
+                workspace_id: context.workspace_id,
+            },
+        );
+        self.send_success(
+            message.id,
+            json!({
+                "subscriptionId": subscription_id,
+                "topic": message.topic,
+                "cursor": cursor.0,
+                "limit": limit,
+            }),
+            None,
+        )
     }
 
     pub(super) async fn handle_poll(&mut self, id: Option<String>, value: Value) -> bool {
@@ -134,9 +114,7 @@ impl EngineWsSession {
                     ),
                 );
             };
-            let after = Some(StreamCursor(
-                message.cursor.unwrap_or(subscription.cursor.0),
-            ));
+            let after = StreamCursor(message.cursor.unwrap_or(subscription.cursor.0));
             let actor = StreamActorScope::scoped(
                 subscription.session_id.clone(),
                 subscription.workspace_id.clone(),
@@ -144,7 +122,7 @@ impl EngineWsSession {
             return self
                 .send_stream_page(
                     message.id,
-                    &subscription_id,
+                    &subscription.topic,
                     after,
                     limit,
                     &actor,
@@ -169,11 +147,6 @@ impl EngineWsSession {
             );
         }
         let context = self.merged_context(message.context);
-        let subscription_id = format!(
-            "engine-ws-stateless:{}:{}",
-            self.client_id,
-            uuid::Uuid::now_v7()
-        );
         let Some(cursor) = message.cursor.map(StreamCursor) else {
             return self.send_error(
                 message.id,
@@ -184,46 +157,23 @@ impl EngineWsSession {
                 ),
             );
         };
-        let visibility = visibility_for_context(&context);
-        let subscribe_result = self
-            .ctx
-            .engine_host
-            .subscribe_stream(
-                subscription_id.clone(),
-                topic,
-                cursor,
-                visibility,
-                context.session_id.clone(),
-                context.workspace_id.clone(),
-            )
-            .await;
-        if let Err(error) = subscribe_result {
-            return self.send_error(message.id, engine_error_to_capability_error(error));
-        }
         let actor = StreamActorScope::scoped(context.session_id, context.workspace_id);
-        let sent = self
-            .send_stream_page(
-                message.id,
-                &subscription_id,
-                Some(cursor),
-                limit,
-                &actor,
-                message.filters.as_ref(),
-            )
-            .await;
-        let _ = self
-            .ctx
-            .engine_host
-            .unsubscribe_stream(&subscription_id)
-            .await;
-        sent
+        self.send_stream_page(
+            message.id,
+            &topic,
+            cursor,
+            limit,
+            &actor,
+            message.filters.as_ref(),
+        )
+        .await
     }
 
     async fn send_stream_page(
         &self,
         id: Option<String>,
-        subscription_id: &str,
-        after: Option<StreamCursor>,
+        topic: &str,
+        after: StreamCursor,
         limit: usize,
         actor: &StreamActorScope,
         filters: Option<&Value>,
@@ -231,7 +181,7 @@ impl EngineWsSession {
         match self
             .ctx
             .engine_host
-            .poll_stream(subscription_id, after, limit, actor)
+            .poll_stream_topic(topic, after, limit, actor)
             .await
         {
             Ok(page) => {
@@ -282,14 +232,6 @@ impl EngineWsSession {
             };
             subscription.cursor = std::cmp::max(subscription.cursor, StreamCursor(message.cursor));
         }
-        if let Err(error) = self
-            .ctx
-            .engine_host
-            .acknowledge_stream(&message.subscription_id, StreamCursor(message.cursor))
-            .await
-        {
-            return self.send_error(message.id, engine_error_to_capability_error(error));
-        }
         self.send_success_async(
             message.id,
             json!({
@@ -328,12 +270,7 @@ pub(super) async fn push_subscription_events(
                     );
                     let page = match ctx
                         .engine_host
-                        .poll_stream(
-                            &subscription_id,
-                            Some(state.cursor),
-                            STREAM_MAX_LIMIT,
-                            &actor,
-                        )
+                        .poll_stream_topic(&state.topic, state.cursor, STREAM_MAX_LIMIT, &actor)
                         .await
                     {
                         Ok(page) => page,

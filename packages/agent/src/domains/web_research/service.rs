@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResourceLocation, EngineResourceScope, Invocation, ListResources,
+    CreateResource, EngineHostHandle, EngineResourceLocation, EngineResourceScope, Invocation,
+    ListResources,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -30,18 +31,18 @@ use super::resource_store::{
 };
 use super::validation::*;
 use super::{
-    Deps, WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
+    WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
     WEB_RESEARCH_REVIEW_SCHEMA_ID, WEB_RESEARCH_SOURCE_KIND, WEB_RESEARCH_SOURCE_SCHEMA_ID,
 };
 
 pub(crate) async fn record_request_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_write_authority(deps, invocation, "web_research_request_record").await?;
+    ensure_write_authority(engine_host, invocation, "web_research_request_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let request_id_input = optional_string(payload, "webResearchRequestId")?
@@ -81,8 +82,7 @@ pub(crate) async fn record_request_value_at(
         idempotency_key: &idempotency_key,
     });
     let resource_id = request_resource_id(&scope, &request_id, &idempotency_key);
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -102,7 +102,7 @@ pub(crate) async fn record_request_value_at(
         }));
     }
     let resource = create_resource(
-        deps,
+        engine_host,
         invocation,
         resource_id,
         WEB_RESEARCH_REQUEST_KIND,
@@ -116,7 +116,7 @@ pub(crate) async fn record_request_value_at(
     .await?;
     let version_id = current_version_id(&resource, "web research request")?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "web_research.request_recorded",
         &resource,
@@ -130,18 +130,18 @@ pub(crate) async fn record_request_value_at(
         "idempotentReplay": false,
         "webResearchRequestResourceId": resource.resource_id,
         "webResearchRequestVersionId": version_id,
-        "request": request_summary_for_resource(deps, &resource).await?,
+        "request": request_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "web_research_request")]
     }))
 }
 
 pub(crate) async fn list_request_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        engine_host,
         invocation,
         payload,
         "web_research_request_list",
@@ -153,17 +153,18 @@ pub(crate) async fn list_request_value(
 }
 
 pub(crate) async fn inspect_request_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "web_research_request_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "web_research_request_inspect").await?;
     let resource_id = required_string(payload, "webResearchRequestResourceId")?;
     validate_request_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "web_research_request_inspect")?;
     let scope = resource_scope(invocation)?;
-    let inspection = inspect_resource_required(deps, &resource_id, "web research request").await?;
+    let inspection =
+        inspect_resource_required(engine_host, &resource_id, "web research request").await?;
     ensure_request(&inspection, "web_research_request_inspect")?;
     ensure_scope(&inspection, &scope, "web_research_request_inspect")?;
     let (version, payload) = current_payload(&inspection, "web_research_request_inspect")?;
@@ -177,20 +178,22 @@ pub(crate) async fn inspect_request_value(
 }
 
 pub(crate) async fn record_review_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_write_authority(deps, invocation, "web_research_review_record").await?;
+    let grant =
+        ensure_write_authority(engine_host, invocation, "web_research_review_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let request_resource_id = required_string(payload, "webResearchRequestResourceId")?;
     validate_request_resource_id(&request_resource_id)?;
     require_exact_resource_selector(&grant, &request_resource_id, "web_research_review_record")?;
     let request_inspection =
-        inspect_resource_required(deps, &request_resource_id, "web research request").await?;
+        inspect_resource_required(engine_host, &request_resource_id, "web research request")
+            .await?;
     ensure_request(&request_inspection, "web_research_review_record")?;
     ensure_scope(&request_inspection, &scope, "web_research_review_record")?;
     let (request_version, _) = current_payload(&request_inspection, "web_research_review_record")?;
@@ -228,8 +231,7 @@ pub(crate) async fn record_review_value_at(
     });
     let resource_id =
         review_resource_id(&scope, &review_id, &request_resource_id, &idempotency_key);
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -249,7 +251,7 @@ pub(crate) async fn record_review_value_at(
         }));
     }
     let resource = create_resource(
-        deps,
+        engine_host,
         invocation,
         resource_id,
         WEB_RESEARCH_REVIEW_KIND,
@@ -263,7 +265,7 @@ pub(crate) async fn record_review_value_at(
     .await?;
     let version_id = current_version_id(&resource, "web research review")?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "web_research.review_recorded",
         &resource,
@@ -277,18 +279,18 @@ pub(crate) async fn record_review_value_at(
         "idempotentReplay": false,
         "webResearchReviewResourceId": resource.resource_id,
         "webResearchReviewVersionId": version_id,
-        "review": review_summary_for_resource(deps, &resource).await?,
+        "review": review_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "web_research_review")]
     }))
 }
 
 pub(crate) async fn list_review_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        engine_host,
         invocation,
         payload,
         "web_research_review_list",
@@ -300,17 +302,18 @@ pub(crate) async fn list_review_value(
 }
 
 pub(crate) async fn inspect_review_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "web_research_review_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "web_research_review_inspect").await?;
     let resource_id = required_string(payload, "webResearchReviewResourceId")?;
     validate_review_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "web_research_review_inspect")?;
     let scope = resource_scope(invocation)?;
-    let inspection = inspect_resource_required(deps, &resource_id, "web research review").await?;
+    let inspection =
+        inspect_resource_required(engine_host, &resource_id, "web research review").await?;
     ensure_review(&inspection, "web_research_review_inspect")?;
     ensure_scope(&inspection, &scope, "web_research_review_inspect")?;
     let (version, payload) = current_payload(&inspection, "web_research_review_inspect")?;
@@ -324,13 +327,14 @@ pub(crate) async fn inspect_review_value(
 }
 
 pub(crate) async fn record_source_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = ensure_write_authority(deps, invocation, "web_research_source_record").await?;
+    let grant =
+        ensure_write_authority(engine_host, invocation, "web_research_source_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let request_resource_id = optional_string(payload, "webResearchRequestResourceId")?;
@@ -343,7 +347,7 @@ pub(crate) async fn record_source_value_at(
     let request_ref = if let Some(id) = request_resource_id.as_deref() {
         validate_request_resource_id(id)?;
         require_exact_resource_selector(&grant, id, "web_research_source_record")?;
-        let inspection = inspect_resource_required(deps, id, "web research request").await?;
+        let inspection = inspect_resource_required(engine_host, id, "web research request").await?;
         ensure_request(&inspection, "web_research_source_record")?;
         ensure_scope(&inspection, &scope, "web_research_source_record")?;
         let (version, _) = current_payload(&inspection, "web_research_source_record")?;
@@ -358,7 +362,7 @@ pub(crate) async fn record_source_value_at(
     let review_ref = if let Some(id) = review_resource_id.as_deref() {
         validate_review_resource_id(id)?;
         require_exact_resource_selector(&grant, id, "web_research_source_record")?;
-        let inspection = inspect_resource_required(deps, id, "web research review").await?;
+        let inspection = inspect_resource_required(engine_host, id, "web research review").await?;
         ensure_review(&inspection, "web_research_source_record")?;
         ensure_scope(&inspection, &scope, "web_research_source_record")?;
         let (version, _) = current_payload(&inspection, "web_research_source_record")?;
@@ -414,8 +418,7 @@ pub(crate) async fn record_source_value_at(
         idempotency_key: &idempotency_key,
     });
     let resource_id = source_resource_id(&scope, &source_id, parent_id, &idempotency_key);
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -435,7 +438,7 @@ pub(crate) async fn record_source_value_at(
         }));
     }
     let resource = create_resource(
-        deps,
+        engine_host,
         invocation,
         resource_id,
         WEB_RESEARCH_SOURCE_KIND,
@@ -449,7 +452,7 @@ pub(crate) async fn record_source_value_at(
     .await?;
     let version_id = current_version_id(&resource, "web research source")?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "web_research.source_recorded",
         &resource,
@@ -463,18 +466,18 @@ pub(crate) async fn record_source_value_at(
         "idempotentReplay": false,
         "webResearchSourceResourceId": resource.resource_id,
         "webResearchSourceVersionId": version_id,
-        "source": source_summary_for_resource(deps, &resource).await?,
+        "source": source_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "web_research_source")]
     }))
 }
 
 pub(crate) async fn list_source_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        engine_host,
         invocation,
         payload,
         "web_research_source_list",
@@ -486,17 +489,18 @@ pub(crate) async fn list_source_value(
 }
 
 pub(crate) async fn inspect_source_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "web_research_source_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "web_research_source_inspect").await?;
     let resource_id = required_string(payload, "webResearchSourceResourceId")?;
     validate_source_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "web_research_source_inspect")?;
     let scope = resource_scope(invocation)?;
-    let inspection = inspect_resource_required(deps, &resource_id, "web research source").await?;
+    let inspection =
+        inspect_resource_required(engine_host, &resource_id, "web research source").await?;
     ensure_source(&inspection, "web_research_source_inspect")?;
     ensure_scope(&inspection, &scope, "web_research_source_inspect")?;
     let (version, payload) = current_payload(&inspection, "web_research_source_inspect")?;
@@ -510,7 +514,7 @@ pub(crate) async fn inspect_source_value(
 }
 
 async fn create_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     resource_id: String,
     kind: &str,
@@ -521,7 +525,7 @@ async fn create_resource(
     location_kind: &str,
     location_uri: &str,
 ) -> Result<crate::engine::EngineResource, CapabilityError> {
-    deps.engine_host
+    engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id),
             kind: kind.to_owned(),
@@ -565,7 +569,7 @@ fn refs(payload: &Value, field: &str) -> Result<Vec<Value>, CapabilityError> {
 }
 
 async fn list_values(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
@@ -578,7 +582,7 @@ async fn list_values(
     response_key: &str,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    inspect_read_grant(deps, invocation, operation).await?;
+    inspect_read_grant(engine_host, invocation, operation).await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| usize::try_from(value).unwrap_or(LIST_LIMIT_MAX))
@@ -590,8 +594,7 @@ async fn list_values(
         WEB_RESEARCH_SOURCE_KIND => source_lifecycle_state(payload)?,
         _ => return Err(invalid("unsupported web research kind")),
     };
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(kind.to_owned()),
             scope: Some(scope.clone()),
@@ -603,7 +606,8 @@ async fn list_values(
     let mut values = Vec::new();
     for resource in resources {
         let inspection =
-            inspect_resource_required(deps, &resource.resource_id, "web research record").await?;
+            inspect_resource_required(engine_host, &resource.resource_id, "web research record")
+                .await?;
         ensure_scope(&inspection, &scope, operation)?;
         match kind {
             WEB_RESEARCH_REQUEST_KIND => ensure_request(&inspection, operation)?,

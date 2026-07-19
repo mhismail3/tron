@@ -15,26 +15,86 @@ struct EngineClientObservationTests {
     }
 
     @Test("Disconnect cancels observation and resets state")
-    func testDisconnectResetsState() async {
+    func testDisconnectResetsState() {
         let rpc = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        await rpc.disconnect()
+        rpc.disconnect()
         #expect(rpc.connectionState == .disconnected)
     }
 
-    @Test("EngineClient can be deallocated without crash")
-    func testDeallocationSafety() async {
-        var rpc: EngineClient? = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        #expect(rpc != nil)
+    @Test("Installed connection observation releases its engine client")
+    func testConnectionObservationReleasesOwner() async {
+        let recorder = HostedEngineAttemptRecorder()
+        var rpc: EngineClient? = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65531/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        weak let retainedClient = rpc
+
+        await rpc?.connect()
+        var connection = rpc?.engineConnection
+        weak let retainedConnection = connection
+        #expect(recorder.requests.count == 1)
+        #expect(connection != nil)
+
+        connection?.connectionState = .connecting
+        for _ in 0..<100 where rpc?.connectionState != .connecting {
+            await Task.yield()
+        }
+        #expect(rpc?.connectionState == .connecting)
+
+        connection = nil
         rpc = nil
-        #expect(rpc == nil)
+        for _ in 0..<100 where retainedClient != nil || retainedConnection != nil {
+            await Task.yield()
+        }
+
+        #expect(retainedClient == nil)
+        #expect(retainedConnection == nil)
     }
 
     @Test("Multiple disconnect calls are safe")
-    func testMultipleDisconnects() async {
+    func testMultipleDisconnects() {
         let rpc = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        await rpc.disconnect()
-        await rpc.disconnect()
+        rpc.disconnect()
+        rpc.disconnect()
         #expect(rpc.connectionState == .disconnected)
+    }
+
+    @Test("handled policy captures completed requests before any live session exists")
+    func testHandledConnectCreatesNoSession() async throws {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            bearerTokenProvider: { "fixture-token" },
+            sessionAttemptDirective: recorder.handle
+        )
+
+        await rpc.connect()
+
+        let request = try #require(recorder.requests.last)
+        #expect(request.url?.absoluteString == "ws://127.0.0.1:65530/engine")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-token")
+        #expect(rpc.engineConnection?.urlSession == nil)
+        #expect(rpc.engineConnection?.engineConnectionTask == nil)
+        #expect(rpc.connectionState == .disconnected)
+    }
+
+    @Test("manual retry and reconnect preserve the immutable handled policy")
+    func testHandledRetryAndReconnectRemainHandled() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65529/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+
+        await rpc.manualRetry()
+        rpc.disconnect()
+        await rpc.reconnect()
+
+        #expect(recorder.requests.count >= 2)
+        #expect(rpc.engineConnection?.urlSession == nil)
+        #expect(rpc.engineConnection?.engineConnectionTask == nil)
+        rpc.disconnect()
     }
 
     @Test("Connect policy discards stale disconnected transports")
@@ -110,37 +170,6 @@ struct EngineClientObservationTests {
         #expect(nextSchedule)
     }
 
-    @Test("Stream cursor store records subscription tail before first event")
-    func testStreamCursorStorePersistsSubscriptionTail() {
-        let suiteName = "EngineClientObservationTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = EngineStreamCursorStore(userDefaults: defaults)
-        let key = EngineStreamCursorKey(
-            serverOrigin: "127.0.0.1:9847",
-            topic: "events.session",
-            sessionId: "session-a",
-            workspaceId: nil,
-            filterHash: "sessionId=session-a"
-        )
-
-        store.save(EngineStreamCursor(rawValue: 44), for: key)
-        store.save(EngineStreamCursor(rawValue: 12), for: key)
-
-        #expect(store.cursor(for: key) == EngineStreamCursor(rawValue: 44))
-    }
-
-    @Test("Session live subscriptions do not replay durable stream cursors")
-    func testSessionSubscriptionsStartAtLiveTail() {
-        #expect(EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(stored: nil) == nil)
-        #expect(EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
-            stored: EngineStreamCursor(rawValue: 0)
-        ) == nil)
-        #expect(EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
-            stored: EngineStreamCursor(rawValue: 4_572)
-        ) == nil)
-    }
-
     @Test("Stream ACK coalescer reschedules when events arrive during flush")
     func testStreamAckCoalescerReschedulesDuringFlush() {
         var coalescer = EngineStreamAckCoalescer()
@@ -156,5 +185,60 @@ struct EngineClientObservationTests {
         #expect(nextSchedule)
         let secondCursor = coalescer.takeForFlush(subscriptionId: "sub-1")
         #expect(secondCursor == EngineStreamCursor(rawValue: 22))
+    }
+
+    @Test("Local subscriber overflow publishes an explicit recovery marker")
+    func testLocalSubscriberOverflowPublishesRecoveryMarker() async throws {
+        EventRegistry.shared.registerAll()
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65528/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        await rpc.connect()
+        let connection = try #require(rpc.engineConnection)
+        let firstStream = rpc.events
+        let secondStream = rpc.events
+        let payload = ServerEventPayload(
+            type: AgentReadyPlugin.eventType,
+            sessionId: "overflow-session",
+            workspaceId: nil,
+            timestamp: "2026-07-17T00:00:00Z",
+            data: nil,
+            runId: nil,
+            sequence: nil,
+            traceId: nil,
+            parentInvocationId: nil,
+            sourceEventId: nil,
+            sourceSequence: nil,
+            streamCursor: nil
+        )
+        let eventData = try JSONEncoder().encode(payload)
+
+        for _ in 0...256 {
+            connection.onEvent?(
+                EngineEventDelivery(
+                    topic: "events.session",
+                    subscriptionId: nil,
+                    cursor: nil,
+                    event: payload,
+                    eventData: eventData
+                )
+            )
+        }
+
+        var iterator = firstStream.makeAsyncIterator()
+        var recovery: StreamRecoveryRequiredPlugin.Result?
+        for _ in 0..<256 {
+            guard let event = await iterator.next() else { break }
+            if event.eventType == StreamRecoveryRequiredPlugin.eventType {
+                recovery = event.getResult() as? StreamRecoveryRequiredPlugin.Result
+                break
+            }
+        }
+
+        #expect(recovery?.reason == "client_buffer_overflow")
+        #expect(recovery?.droppedEventCount == 2)
+        withExtendedLifetime(secondStream) {}
     }
 }

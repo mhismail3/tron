@@ -1,4 +1,4 @@
-//! # server/onboarding — bearer-token lifecycle + first-run sentinel
+//! # app/lifecycle/onboarding — bearer-token lifecycle + first-run sentinel
 //!
 //! Per-server bootstrap state: bearer-token lifecycle and first-run sentinel.
 //!
@@ -10,9 +10,10 @@
 //!   `tron auth rotate` (CLI) or the
 //!   menu-bar action in the Mac wrapper. File mode is `0o600` and writes
 //!   are owned by the provider-credentials store so provider credentials and the
-//!   pairing bearer share one secure auth document. Fresh Mac installs seed
-//!   `auth.json` as `{}`; first server boot materializes that pristine
-//!   sentinel into the full auth schema plus `bearerToken`.
+//!   pairing bearer share one secure auth document. Constitution first creates
+//!   a private exact `{}` compatibility sentinel required by profile validation;
+//!   first server boot immediately materializes it into the full auth schema
+//!   plus `bearerToken`.
 //!
 //! - **`run/.onboarded`** sentinel at [`crate::shared::foundation::paths::onboarded_marker_path()`].
 //!   Empty marker file. Touched by the Mac wizard at the end of its
@@ -29,10 +30,10 @@
 //! - `auth.json` is never world-readable. The 0o600 perms are set by
 //!   provider-credentials store at `open(2)` time, before any bytes are
 //!   written; the atomic `rename` preserves them.
-//! - Rotation is serialized through a per-process mutex so two
-//!   concurrent `rotate_bearer_token` calls cannot corrupt the file.
-//!   Concurrent reads see a consistent snapshot via the atomic rename
-//!   (mirrors the `auth.json` invariant tested in `auth/storage.rs`).
+//! - Bearer creation and rotation hold both a per-process mutex and the
+//!   canonical auth-file lock. They therefore serialize with provider token
+//!   refresh, OAuth login, and other auth writers across processes. Concurrent
+//!   reads see a consistent snapshot via the atomic rename.
 //! - Sentinel creation is idempotent: `mark_onboarded` on an existing
 //!   marker is a no-op, never an error.
 //!
@@ -52,7 +53,7 @@ use rand::RngCore;
 
 use crate::domains::auth::credentials::errors::AuthError;
 use crate::domains::auth::credentials::{
-    load_auth_storage, load_or_init_for_write, save_auth_storage,
+    acquire_auth_file_lock, load_auth_storage, load_or_init_for_write, save_auth_storage,
 };
 
 /// Length of the raw random token in bytes. Encoded as URL-safe base64
@@ -104,6 +105,7 @@ pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
         return Ok(existing);
     }
     let _guard = rotate_lock().lock();
+    let _file_lock = acquire_auth_file_lock(path)?;
     if let Some(existing) = read_token(path)? {
         return Ok(existing);
     }
@@ -118,12 +120,13 @@ pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
 /// token so the caller can display it (CLI) or push a notification
 /// (engine capability).
 ///
-/// Serialized through a process-wide mutex so two concurrent rotations
-/// cannot corrupt the file. The file write itself is also atomic
-/// (tempfile → sync → rename), so concurrent readers always see either
-/// the old or the new token, never a partial.
+/// Serialized through a process-wide mutex and the canonical auth-file lock so
+/// rotations cannot lose concurrent provider updates from another process. The
+/// file write itself is also atomic (tempfile → sync → rename), so concurrent
+/// readers always see either the old or the new token, never a partial.
 pub fn rotate_bearer_token(path: &Path) -> io::Result<String> {
     let _guard = rotate_lock().lock();
+    let _file_lock = acquire_auth_file_lock(path)?;
     let mut storage = load_or_init_for_write(path).map_err(auth_error_to_io)?;
     let token = generate_bearer_token();
     storage.bearer_token = Some(token.clone());
@@ -426,6 +429,36 @@ mod tests {
             returned.contains(&final_token),
             "final on-disk token must match one of the rotation results"
         );
+    }
+
+    #[test]
+    fn rotate_rereads_after_canonical_auth_lock() {
+        let (_dir, path) = temp_token_path();
+        let mut initial = crate::domains::auth::credentials::AuthStorage::new();
+        initial.bearer_token = Some("initial-bearer".into());
+        save_auth_storage(&path, &mut initial).unwrap();
+
+        let lock = acquire_auth_file_lock(&path).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let thread_path = path.clone();
+        let thread_barrier = Arc::clone(&barrier);
+        let writer = thread::spawn(move || {
+            thread_barrier.wait();
+            rotate_bearer_token(&thread_path).unwrap()
+        });
+        barrier.wait();
+
+        let mut concurrent = load_auth_storage(&path).unwrap().unwrap();
+        concurrent
+            .extra
+            .insert("concurrentMarker".into(), serde_json::json!("preserved"));
+        save_auth_storage(&path, &mut concurrent).unwrap();
+        drop(lock);
+
+        let rotated = writer.join().unwrap();
+        let stored = load_auth_storage(&path).unwrap().unwrap();
+        assert_eq!(stored.extra["concurrentMarker"], "preserved");
+        assert_eq!(stored.bearer_token.as_deref(), Some(rotated.as_str()));
     }
 
     #[test]

@@ -1,4 +1,7 @@
 //! Shared command-side services for agent capabilities.
+//!
+//! Prompt admission reads durable session metadata from the session domain's
+//! persistence dependency directly.
 
 use serde_json::{Value, json};
 
@@ -13,13 +16,13 @@ impl AgentCommandService {
         deps: &Deps,
         session_id: &str,
     ) -> Result<crate::domains::session::event_store::SessionRow, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id = session_id.to_owned();
         run_blocking_task("agent.prompt.load_session", move || {
-            session_manager
+            event_store
                 .get_session(&session_id)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),

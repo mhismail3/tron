@@ -7,13 +7,22 @@
 //! runtime resource validation after this structural gate. Typed resource-ref
 //! fields encode their required kind prefix here so provider preflight rejects
 //! malformed identities before an invocation reaches domain policy.
+//! Server-owned presentation metadata gives every operation a concise behavior
+//! description and a natural verb-first display name for native discovery UI;
+//! canonical operation identifiers remain the stable invocation keys. A private
+//! presentation owner matches the typed registry exhaustively to its display
+//! name and description literals. Tests require every operation to have
+//! presentation metadata and independently require exactly one schema owner,
+//! with representative provider-visible compatibility cases. Schema-family
+//! validation derives its cases
+//! from the typed operation registry and owns no shadow operation-name lists.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 #[cfg(test)]
 use crate::engine::validate_engine_schema_definition;
-use crate::engine::{FunctionId, validate_engine_schema_payload};
+use crate::engine::{FunctionId, RiskLevel, validate_engine_schema_payload};
 use crate::shared::server::errors::CapabilityError;
 
 mod authority;
@@ -23,9 +32,11 @@ mod governance;
 mod metadata;
 mod output;
 mod policy;
+mod presentation;
 mod records;
 
 pub(crate) use output::provider_result_text;
+pub(crate) use presentation::operation_presentation;
 
 macro_rules! define_operation_ids {
     ($($variant:ident => $name:literal,)+) => {
@@ -299,8 +310,12 @@ pub(crate) fn effect(operation: &str) -> Option<OperationEffect> {
     OperationId::parse(operation).map(policy::effect)
 }
 
+pub(super) fn risk_level(operation: &str) -> Option<RiskLevel> {
+    OperationId::parse(operation).map(policy::risk)
+}
+
 pub(crate) fn risk(operation: &str) -> Option<&'static str> {
-    OperationId::parse(operation).map(|operation| policy::risk(operation).as_str())
+    risk_level(operation).map(RiskLevel::as_str)
 }
 
 pub(crate) fn authority_policy(operation: &str) -> Option<AuthorityPolicy> {

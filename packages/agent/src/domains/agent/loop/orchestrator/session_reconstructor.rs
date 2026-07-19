@@ -1,4 +1,12 @@
 //! Session reconstructor — rebuild runtime state from event history.
+//!
+//! Durable provider history is a fail-closed boundary: every reconstructed
+//! wire-format message must decode into the runtime [`Message`] model. A bad
+//! row is reported with its source event IDs instead of being omitted from the
+//! next provider request. The event-store boundary first applies durable
+//! deletion and context-reset visibility, then validates every surviving source
+//! row independently; same-role merging cannot normalize away malformed active
+//! content, while retired history cannot brick the session.
 
 use crate::domains::session::event_store::{EventStore, SessionState};
 use crate::shared::protocol::messages::{Message, TokenUsage};
@@ -7,27 +15,23 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 
 /// Reconstructed session state for resuming.
 #[derive(Clone, Debug, Default)]
-pub struct ReconstructedState {
+pub(in crate::domains) struct ReconstructedState {
     /// Session model.
-    pub model: String,
+    pub(in crate::domains) model: String,
     /// Reconstructed messages.
-    pub messages: Vec<Message>,
+    pub(in crate::domains) messages: Vec<Message>,
     /// Cumulative token usage.
-    pub token_usage: TokenUsage,
+    pub(in crate::domains) token_usage: TokenUsage,
     /// Turn count.
-    pub turn_count: u32,
+    pub(in crate::domains) turn_count: u32,
     /// Working directory.
-    pub working_directory: Option<String>,
-    /// System prompt override.
-    pub system_prompt: Option<String>,
+    pub(in crate::domains) working_directory: Option<String>,
     /// Whether the session has ended.
-    pub is_ended: bool,
-    /// Last-seen reasoning level from `config.reasoning_level` events.
-    pub reasoning_level: Option<String>,
+    pub(in crate::domains) is_ended: bool,
 }
 
 /// Reconstruct session state from the event store.
-pub fn reconstruct(
+pub(in crate::domains::agent::r#loop) fn reconstruct(
     event_store: &EventStore,
     session_id: &str,
 ) -> Result<ReconstructedState, RuntimeError> {
@@ -35,41 +39,32 @@ pub fn reconstruct(
         .get_state_at_head(session_id)
         .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
-    Ok(from_session_state(&state))
+    from_session_state(&state)
 }
 
 /// Convert `SessionState` to `ReconstructedState`.
-#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-fn from_session_state(state: &SessionState) -> ReconstructedState {
+#[allow(clippy::cast_sign_loss)]
+fn from_session_state(state: &SessionState) -> Result<ReconstructedState, RuntimeError> {
     let messages: Vec<Message> = state
         .messages_with_event_ids
         .iter()
-        .filter_map(|m| match serde_json::to_value(&m.message) {
-            Ok(value) => match serde_json::from_value::<Message>(value) {
-                Ok(msg) => Some(msg),
-                Err(e) => {
-                    tracing::warn!(
-                        event_ids = ?m.event_ids,
-                        role = %m.message.role,
-                        error = %e,
-                        "session reconstructor: wire-format message does not round-trip to \
-                         runtime Message enum; dropping from reconstructed history"
-                    );
-                    None
-                }
-            },
-            Err(e) => {
-                tracing::warn!(
-                    event_ids = ?m.event_ids,
-                    role = %m.message.role,
-                    error = %e,
-                    "session reconstructor: failed to serialize wire-format message to JSON; \
-                     dropping from reconstructed history"
-                );
-                None
-            }
+        .map(|message| {
+            let source = format!(
+                "event IDs {:?}, role '{}'",
+                message.event_ids, message.message.role
+            );
+            let value = serde_json::to_value(&message.message).map_err(|error| {
+                RuntimeError::Persistence(format!(
+                    "failed to serialize reconstructed message from {source}: {error}"
+                ))
+            })?;
+            serde_json::from_value::<Message>(value).map_err(|error| {
+                RuntimeError::Persistence(format!(
+                    "failed to decode reconstructed message from {source}: {error}"
+                ))
+            })
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     let token_usage = TokenUsage {
         input_tokens: state.token_usage.input_tokens as u64,
@@ -122,16 +117,21 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
         provider_type: None,
     };
 
-    ReconstructedState {
+    let turn_count = u32::try_from(state.turn_count).map_err(|_| {
+        RuntimeError::Persistence(format!(
+            "invalid reconstructed turn count {}",
+            state.turn_count
+        ))
+    })?;
+
+    Ok(ReconstructedState {
         model: state.model.clone(),
         messages,
         token_usage,
-        turn_count: state.turn_count as u32,
+        turn_count,
         working_directory: Some(state.working_directory.clone()),
-        system_prompt: state.system_prompt.clone(),
         is_ended: state.is_ended.unwrap_or(false),
-        reasoning_level: state.reasoning_level.clone(),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -201,8 +201,306 @@ mod tests {
 
         let state = reconstruct(&store, sid).unwrap();
         assert_eq!(state.model, "test-model");
-        // Messages may or may not parse depending on exact format
-        // but the reconstruction should not error
+        assert_eq!(state.messages.len(), 2);
+    }
+
+    #[test]
+    fn reconstruct_rejects_structurally_invalid_persisted_message() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        let malformed = store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "assistant content must be an array of blocks",
+                    "turn": 1
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = reconstruct(&store, &session.session.id)
+            .expect_err("malformed durable provider history must fail closed");
+        let message = error.to_string();
+        assert!(message.contains("invalid message.assistant provider-history payload"));
+        assert!(message.contains(&malformed.id));
+    }
+
+    #[test]
+    fn reconstruct_rejects_malformed_assistant_before_same_role_merge() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        let malformed = store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({"content": "not an assistant block array", "turn": 1}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "valid later content"}],
+                    "turn": 1
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = reconstruct(&store, &session.session.id)
+            .expect_err("same-role merge must not hide malformed assistant history");
+        let message = error.to_string();
+        assert!(message.contains(&malformed.id));
+        assert!(message.contains("message.assistant"));
+    }
+
+    #[test]
+    fn reconstruct_rejects_malformed_user_before_same_role_merge() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        let malformed = store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": 42}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "valid later content"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = reconstruct(&store, &session.session.id)
+            .expect_err("same-role merge must not hide malformed user history");
+        let message = error.to_string();
+        assert!(message.contains(&malformed.id));
+        assert!(message.contains("message.user"));
+    }
+
+    #[test]
+    fn reconstruct_ignores_structurally_invalid_deleted_message() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        let malformed = store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": 42}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "visible message"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageDeleted,
+                payload: serde_json::json!({
+                    "targetEventId": malformed.id,
+                    "targetType": "message.user"
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let state = reconstruct(&store, &session.session.id)
+            .expect("a durably deleted malformed row cannot reach provider history");
+        assert_eq!(state.messages.len(), 1);
+        assert!(state.messages[0].is_user());
+    }
+
+    #[test]
+    fn reconstruct_ignores_structurally_invalid_message_before_compaction() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({"content": "legacy malformed content", "turn": 1}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::CompactBoundary,
+                payload: serde_json::json!({
+                    "originalTokens": 100,
+                    "compactedTokens": 20,
+                    "reason": "test",
+                    "summary": "safe compacted context"
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "visible after compaction"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let state = reconstruct(&store, &session.session.id)
+            .expect("compacted-away malformed content cannot reach provider history");
+        assert_eq!(state.messages.len(), 3);
+        assert!(state.messages[2].is_user());
+    }
+
+    #[test]
+    fn reconstruct_ignores_structurally_invalid_message_before_context_clear() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": 42}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::ContextCleared,
+                payload: serde_json::json!({
+                    "tokensBefore": 100,
+                    "tokensAfter": 0,
+                    "reason": "test"
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "visible after clear"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let state = reconstruct(&store, &session.session.id)
+            .expect("cleared malformed content cannot reach provider history");
+        assert_eq!(state.messages.len(), 1);
+        assert!(state.messages[0].is_user());
+    }
+
+    #[test]
+    fn reconstruct_rejects_malformed_persisted_capability_completion() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{
+                        "type": "capability_invocation",
+                        "id": "call_bad_completion",
+                        "name": "execute",
+                        "arguments": {}
+                    }],
+                    "turn": 1
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let malformed = store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::CapabilityInvocationCompleted,
+                payload: serde_json::json!({
+                    "invocationId": "call_bad_completion",
+                    "content": "output"
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = reconstruct(&store, &session.session.id)
+            .expect_err("malformed durable capability history must fail closed");
+        let message = error.to_string();
+        assert!(message.contains(&malformed.id));
+        assert!(message.contains("isError"));
+    }
+
+    #[test]
+    fn reconstruct_rejects_turn_count_beyond_runtime_ordinal_range() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &session.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "legacy overflow"}],
+                    "turn": i64::from(u32::MAX) + 1,
+                    "model": "test-model",
+                    "stopReason": "end_turn"
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let error = reconstruct(&store, &session.session.id)
+            .expect_err("oversized durable turn must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("invalid reconstructed turn count")
+        );
     }
 
     /// Verify that provider-native capability invocation blocks survive the
@@ -299,16 +597,6 @@ mod tests {
         } else {
             panic!("Expected assistant message at index 1");
         }
-    }
-
-    #[test]
-    fn reconstruct_reasoning_level_none_by_default() {
-        let store = make_store();
-        let session = store
-            .create_session("test-model", "/tmp", Some("test"), None)
-            .unwrap();
-        let state = reconstruct(&store, &session.session.id).unwrap();
-        assert!(state.reasoning_level.is_none());
     }
 
     #[test]

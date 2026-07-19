@@ -51,6 +51,8 @@ struct AgentCockpitFunctionRow: Equatable, Identifiable, Sendable {
 struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var id: String { name }
     var name: String
+    var displayName: String
+    var description: String
     var family: String
     var familyLabel: String
     var capabilitySurface: String
@@ -58,7 +60,6 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var capabilityReplacementClass: String
     var capabilityDefaultVisibility: String
     var capabilityMinimalityDecision: String
-    var capabilityEvolutionPath: String
     var agentUsageCallable: Bool
     var agentUsageTool: String
     var agentUsageOperation: String
@@ -129,6 +130,12 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var abortAvailable: Bool
     var rollbackBoundary: String
     var rollbackDetail: String
+
+    var isAgentFunctionalCapability: Bool {
+        capabilityAudience == "session_work"
+            && (capabilityReplacementClass == "runtime_routable"
+                || capabilityReplacementClass == "producer_extensible")
+    }
 
     var activityCount: Int {
         bindingRequested
@@ -253,23 +260,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var activity: [AgentCockpitActivityItem]
     var currentRevision: UInt64?
     var nextRevision: UInt64?
-
-    var invokableUnitCount: Int {
-        if let capabilityVisibility {
-            return capabilityVisibility.operationList.totalOperations
-        }
-        if !modularityOperations.isEmpty {
-            return modularityOperations.count
-        }
-        return functions.count
-    }
-
-    var invokableUnitLabel: String {
-        if capabilityVisibility != nil || !modularityOperations.isEmpty {
-            return "Operations"
-        }
-        return "Functions"
-    }
+    var refreshFailed: Bool
 
     static func empty(connectionState: ConnectionState) -> AgentCockpitOverview {
         AgentCockpitOverview(
@@ -295,7 +286,8 @@ struct AgentCockpitOverview: Equatable, Sendable {
             moduleActivity: nil,
             activity: [],
             currentRevision: nil,
-            nextRevision: nil
+            nextRevision: nil,
+            refreshFailed: false
         )
     }
 }
@@ -367,7 +359,7 @@ enum AgentCockpitProjection {
                 functions: functions,
                 packages: packages,
                 catalogDecodeIssues: catalogDecodeIssues,
-                hasOperationProjection: capabilityVisibility != nil && !modularityOperations.isEmpty,
+                hasOperationProjection: capabilityVisibility != nil,
                 operationClassificationIssues: operationClassificationIssues
             ),
             workers: workers,
@@ -384,7 +376,8 @@ enum AgentCockpitProjection {
             moduleActivity: moduleActivity,
             activity: activity,
             currentRevision: snapshot.currentRevision,
-            nextRevision: snapshot.nextRevision
+            nextRevision: snapshot.nextRevision,
+            refreshFailed: false
         )
     }
 
@@ -403,6 +396,7 @@ enum AgentCockpitProjection {
             detail: message.nilIfEmpty ?? "Latest cockpit refresh failed",
             systemImage: "exclamationmark.triangle"
         )
+        overview.refreshFailed = true
         return overview
     }
 
@@ -669,6 +663,8 @@ enum AgentCockpitProjection {
         let pool = operation.capabilityPool
         return AgentCockpitOperationRow(
             name: operation.name,
+            displayName: operation.displayName,
+            description: operation.description,
             family: operation.family,
             familyLabel: operation.familyLabel,
             capabilitySurface: pool?.surface ?? "unknown",
@@ -676,7 +672,6 @@ enum AgentCockpitProjection {
             capabilityReplacementClass: pool?.replacementClass ?? "unknown",
             capabilityDefaultVisibility: pool?.agentDefaultVisibility ?? "inspect_only",
             capabilityMinimalityDecision: pool?.minimalityDecision ?? "unknown",
-            capabilityEvolutionPath: pool?.evolutionPath ?? "Capability-pool classification is missing from the server projection.",
             agentUsageCallable: operation.agentUsage?.callable ?? true,
             agentUsageTool: operation.agentUsage?.tool ?? "capability::execute",
             agentUsageOperation: operation.agentUsage?.operation ?? operation.name,

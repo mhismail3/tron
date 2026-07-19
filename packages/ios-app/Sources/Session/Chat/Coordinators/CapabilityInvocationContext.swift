@@ -2,18 +2,12 @@ import Foundation
 
 /// Protocol defining the context required by CapabilityInvocationCoordinator.
 /// Allows ChatViewModel to be abstracted for independent testing of capability invocation event handling.
-///
-/// Inherits from:
-/// - LoggingContext: Logging and error display
-/// - CapabilityInvocationStateTracking: Capability invocation state (currentCapabilityInvocationMessages, currentTurnCapabilityInvocations, etc.)
-/// - MessageMutating: Centralized message array mutations with automatic index sync
-///
-/// Note: Streaming methods (flushPendingTextUpdates, finalizeStreamingMessage) are declared
-/// directly rather than inheriting StreamingManaging, since resetStreamingManager is not needed.
 @MainActor
-protocol CapabilityInvocationContext: LoggingContext, CapabilityInvocationStateTracking, MessageMutating {
+protocol CapabilityInvocationContext: ChatCoordinatorContext, MessageMutating {
 
     // MARK: - Messages State
+
+    var currentTurnCapabilityMessageIds: Set<UUID> { get set }
 
     /// Running capability counter for O(1) hasRunningCapabilityInvocations check
     var runningCapabilityInvocationCount: Int { get set }

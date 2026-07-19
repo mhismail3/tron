@@ -10,19 +10,8 @@ struct CameraCaptureSheet: View {
     @State private var capturedImage: UIImage?
     @State private var showingPreview = false
 
-#if DEBUG
-    private var usesDebugCameraSurface: Bool {
-        ProcessInfo.processInfo.arguments.contains("--tron-debug-camera-surface")
-    }
-#endif
-
     private var shouldShowCameraStatus: Bool {
-#if DEBUG
-        if usesDebugCameraSurface {
-            return false
-        }
-#endif
-        return cameraModel.permissionDenied
+        cameraModel.permissionDenied
             || cameraModel.cameraUnavailable
             || !cameraModel.isAuthorized
             || (!showingPreview && cameraModel.session == nil)
@@ -49,9 +38,6 @@ struct CameraCaptureSheet: View {
             cameraSurface
         }
         .task {
-#if DEBUG
-            guard !usesDebugCameraSurface else { return }
-#endif
             await cameraModel.requestPermissionAndSetup()
         }
         .onDisappear {
@@ -61,19 +47,6 @@ struct CameraCaptureSheet: View {
 
     @ViewBuilder
     private var cameraSurface: some View {
-#if DEBUG
-        if usesDebugCameraSurface {
-            CameraDebugSurface()
-        } else {
-            productionCameraSurface
-        }
-#else
-        productionCameraSurface
-#endif
-    }
-
-    @ViewBuilder
-    private var productionCameraSurface: some View {
         if let image = capturedImage, showingPreview {
             Image(uiImage: image)
                 .resizable()

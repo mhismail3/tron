@@ -53,10 +53,6 @@ pub fn test_runtime() -> TestRuntime {
         .join(tron::shared::foundation::paths::dirs::PROFILES)
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
     let profile_runtime = Arc::new(ProfileRuntime::load(&home).unwrap());
-    let settings =
-        tron::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
-            .expect("settings load");
-    tron::domains::settings::init_settings(settings);
 
     let ctx = ServerRuntimeContext {
         orchestrator,
@@ -64,9 +60,10 @@ pub fn test_runtime() -> TestRuntime {
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: tron::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: tron::platform::apns::ApnsRuntime::disabled(),
         settings_path,
         profile_runtime,
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_owned(),
@@ -85,6 +82,7 @@ pub async fn causal_context(
     session_id: &str,
     workspace_id: &str,
     working_directory: &Path,
+    operation: &str,
     provider_invocation_id: &str,
     idempotency_key: &str,
 ) -> CausalContext {
@@ -94,6 +92,7 @@ pub async fn causal_context(
         session_id,
         workspace_id,
         &working_directory.display().to_string(),
+        operation,
         provider_invocation_id,
         idempotency_key,
     )
@@ -106,6 +105,7 @@ pub async fn causal_context_raw(
     session_id: &str,
     workspace_id: &str,
     working_directory: &str,
+    operation: &str,
     provider_invocation_id: &str,
     idempotency_key: &str,
 ) -> CausalContext {
@@ -117,6 +117,7 @@ pub async fn causal_context_raw(
         session_id,
         workspace_id,
         working_directory,
+        operation,
         provider_invocation_id,
         "none",
     )
@@ -148,6 +149,7 @@ pub async fn derive_capability_execute_grant(
     session_id: &str,
     workspace_id: &str,
     working_directory: &str,
+    operation: &str,
     provider_invocation_id: &str,
     network_policy: &str,
 ) -> AuthorityGrantId {
@@ -173,6 +175,7 @@ pub async fn derive_capability_execute_grant(
                     "capability.execute",
                     "filesystem.read",
                     "filesystem.write",
+                    "catalog_discovery.read",
                     "resource.read",
                     "resource.write",
                     "state.read",
@@ -180,17 +183,23 @@ pub async fn derive_capability_execute_grant(
                 ],
                 "allowedResourceKinds": [
                     "agent_state",
+                    "log_entry",
+                    "session",
                     "patch_proposal",
-                    "materialized_file"
+                    "materialized_file",
+                    "trace_record"
                 ],
                 "resourceSelectors": [
                     "kind:agent_state",
+                    "kind:log_entry",
+                    "kind:session",
                     "kind:patch_proposal",
-                    "kind:materialized_file"
+                    "kind:materialized_file",
+                    "kind:trace_record"
                 ],
                 "fileRoots": [root],
                 "networkPolicy": network_policy,
-                "maxRisk": "medium",
+                "maxRisk": "high",
                 "budget": {
                     "remainingInvocations": 2,
                     "remainingProcessMs": 120000
@@ -198,6 +207,7 @@ pub async fn derive_capability_execute_grant(
                 "canDelegate": false,
                 "provenance": {
                     "source": "primitive_trace_execution_test",
+                    "operation": operation,
                     "sessionId": session_id,
                     "workspaceId": workspace_id,
                     "providerInvocationId": provider_invocation_id,
@@ -214,7 +224,7 @@ pub async fn derive_capability_execute_grant(
             .with_scope("grant.write")
             .with_session_id(session_id.to_owned())
             .with_idempotency_key(format!(
-                "derive-capability-grant-{provider_invocation_id}-{network_policy}"
+                "derive-capability-grant-{provider_invocation_id}-{operation}-{network_policy}"
             )),
         ))
         .await;

@@ -457,6 +457,22 @@ fn auth_lock_for_profile_auth_lives_under_internal_run() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn auth_lock_is_private() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TempDir::new().unwrap();
+    let path = test_path(&dir);
+    let _lock = acquire_auth_file_lock(&path).unwrap();
+    let mode = std::fs::metadata(lock_path_for(&path))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
 #[allow(unsafe_code)]
 #[test]
 fn file_lock_is_exclusive() {

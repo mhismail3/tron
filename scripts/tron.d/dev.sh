@@ -1,16 +1,52 @@
 #!/bin/bash
 # dev.sh - sourced by tron; do not execute directly.
 
-create_dev_launchd_plist() {
-    local log_level="${1:-}"
-    local log_level_xml=""
-    if [ -n "$log_level" ]; then
-        log_level_xml="
-        <string>--log-level</string>
-        <string>$log_level</string>"
+load_dev_relay_environment() {
+    local env_file="$PROJECT_DIR/packages/mac-app/.env.local"
+    if [ -f "$env_file" ]; then
+        while IFS='=' read -r key value; do
+            key="${key#export }"
+            case "$key" in
+                TRON_RELAY_URL|TRON_RELAY_SECRET)
+                    if [ -z "${!key:-}" ]; then
+                        value="${value%$'\r'}"
+                        value="${value#\"}"
+                        value="${value%\"}"
+                        export "$key=$value"
+                    fi
+                    ;;
+            esac
+        done < "$env_file"
     fi
 
-    cat > "$DEV_PLIST_PATH" << PLIST
+    if { [ -n "${TRON_RELAY_URL:-}" ] && [ -z "${TRON_RELAY_SECRET:-}" ]; } \
+        || { [ -z "${TRON_RELAY_URL:-}" ] && [ -n "${TRON_RELAY_SECRET:-}" ]; }; then
+        print_error "TRON_RELAY_URL and TRON_RELAY_SECRET must be configured together"
+        return 1
+    fi
+}
+
+xml_escape() {
+    local value="$1"
+    value="${value//&/&amp;}"
+    value="${value//</&lt;}"
+    value="${value//>/&gt;}"
+    value="${value//\"/&quot;}"
+    value="${value//\'/&apos;}"
+    printf '%s' "$value"
+}
+
+create_dev_launchd_plist() {
+    local relay_environment_xml=""
+    if [ -n "${TRON_RELAY_URL:-}" ]; then
+        relay_environment_xml="
+        <key>TRON_RELAY_URL</key>
+        <string>$(xml_escape "$TRON_RELAY_URL")</string>
+        <key>TRON_RELAY_SECRET</key>
+        <string>$(xml_escape "$TRON_RELAY_SECRET")</string>"
+    fi
+
+    cat > "$DEV_PLIST_PATH" << PLIST || return 1
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -26,7 +62,7 @@ create_dev_launchd_plist() {
         <string>tron-dev-wrapper</string>
         <string>--port</string>
         <string>$PROD_PORT</string>
-        <string>--quiet</string>$log_level_xml
+        <string>--quiet</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -40,10 +76,9 @@ create_dev_launchd_plist() {
         <string>$TRON_HOME</string>
         <key>TRON_REPO_ROOT</key>
         <string>$RUST_WORKSPACE</string>
-        <key>RUST_LOG</key>
-        <string>${RUST_LOG:-info,ort=error}</string>
         <key>TRON_DEV_BINARY</key>
         <string>$DEV_BINARY</string>
+        $relay_environment_xml
     </dict>
 
     <key>StandardOutPath</key>
@@ -53,24 +88,24 @@ create_dev_launchd_plist() {
 </dict>
 </plist>
 PLIST
+    chmod 600 "$DEV_PLIST_PATH" || return 1
 }
 
 cmd_dev() {
     require_project_dir
+    load_dev_relay_environment
 
     local do_build=false
     local do_test=false
     local do_background=false
     local output_json=false
     local wait_seconds=30
-    local log_level=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -b|--build)   do_build=true; shift ;;
             -t|--test)    do_test=true; shift ;;
             -d|--background) do_background=true; shift ;;
-            -l|--log-level) log_level="$2"; shift 2 ;;
             --json)       output_json=true; shift ;;
             --wait)        wait_seconds="${2:-30}"; shift 2 ;;
             -bt|-tb)      do_build=true; do_test=true; shift ;;
@@ -90,10 +125,9 @@ cmd_dev() {
                 echo "Usage: tron dev [options]"
                 echo ""
                 echo "Options:"
-                echo "  -b, --build       Build before starting (dev-server profile)"
+                echo "  -b, --build       Build before optional tests (always builds once)"
                 echo "  -t, --test        Run tests before starting"
                 echo "  -d, --background  Run in background (logs to database and $DEV_BACKGROUND_LOG)"
-                echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
                 echo "  --json            Emit final machine-readable server status on stdout"
                 echo "  --wait SECONDS    Max health wait for background starts (default: 30)"
                 echo "  --stop            Stop dev server and restart the installed service"
@@ -113,10 +147,17 @@ cmd_dev() {
                 echo ""
                 return 0
                 ;;
-            *) shift ;;
+            *) print_error "Unknown tron dev option: $1"; return 2 ;;
         esac
     done
 
+    if [ "$do_background" = true ] \
+        && { ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; }; then
+        print_error "--wait must be a positive integer number of seconds"
+        return 2
+    fi
+
+    # Schedule one build before takeover; `-b` keeps it before optional tests.
     if [ "$do_build" = true ]; then
         build_rust_dev
     fi
@@ -128,6 +169,10 @@ cmd_dev() {
                 exit 1
             fi
         fi
+    fi
+
+    if [ "$do_build" != true ]; then
+        build_rust_dev
     fi
 
     if [ "$do_background" = true ]; then
@@ -161,14 +206,15 @@ dev_start_foreground() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            restart_installed_service_after_dev 12
+            service_start
             return 1
         fi
     fi
 
     # Restart the installed helper on ANY exit (Ctrl+C, error, normal exit).
-    # IMPORTANT: no `exec` — must run as child so EXIT trap fires
-    trap 'echo ""; restart_installed_service_after_dev 12' EXIT INT TERM
+    # The shared start owner selects the installed wrapper or contributor pair.
+    # IMPORTANT: no `exec` — must run as child so EXIT trap fires.
+    trap 'echo ""; service_start' EXIT INT TERM
 
     echo ""
     echo -e "${CYAN}Starting Tron Dev Server (takeover)${NC}"
@@ -179,23 +225,16 @@ dev_start_foreground() {
     echo -e "${YELLOW}Installed service stopped. Ctrl+C to stop dev and restart it.${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
-    local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
-    create_app_bundle "$DEV_BUNDLE" "$dev_src"
+    # Wrap the built binary so macOS TCC permissions persist across rebuilds.
+    create_app_bundle "$DEV_BUNDLE" "$DEV_SERVER_BINARY"
     codesign_bundle "$DEV_BUNDLE"
 
-    RUST_LOG="${RUST_LOG:-info,ort=error}" "$DEV_BINARY" \
-        --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
+    RUST_LOG="${RUST_LOG:-info,ort=error}" "$DEV_BINARY" --port "$PROD_PORT"
 }
 
 dev_start_background() {
     local output_json="${1:-false}"
     local wait_seconds="${2:-30}"
-    if ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; then
-        print_error "--wait must be a positive integer number of seconds"
-        return 2
-    fi
 
     # Stop any previous dev takeover job before bootstrapping a fresh one.
     # launchd can keep a loaded-but-not-running job after a forced process kill;
@@ -218,35 +257,54 @@ dev_start_background() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            restart_installed_service_after_dev 12
+            service_start
             return 1
         fi
     fi
 
-    # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
-    local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
-    create_app_bundle "$DEV_BUNDLE" "$dev_src"
-    codesign_bundle "$DEV_BUNDLE"
+    # Wrap the built binary so macOS TCC permissions persist across rebuilds.
+    # Any preparation failure after takeover begins must restore the installed
+    # helper before returning.
+    if ! create_app_bundle "$DEV_BUNDLE" "$DEV_SERVER_BINARY" \
+        || ! codesign_bundle "$DEV_BUNDLE"; then
+        print_error "Failed to prepare signed dev takeover bundle"
+        service_start
+        return 1
+    fi
 
     local dev_log="$DEV_BACKGROUND_LOG"
     local dev_pid_file="$DEV_BACKGROUND_PID_FILE"
-    mkdir -p "$RUN_DIR"
-    {
+    if ! mkdir -p "$RUN_DIR"; then
+        print_error "Failed to create dev takeover runtime directory"
+        service_start
+        return 1
+    fi
+    if {
         echo "=== tron dev background start $(date -u +"%Y-%m-%dT%H:%M:%SZ") ==="
         echo "binary=$DEV_BINARY"
         echo "port=$PROD_PORT"
-        echo "rust_log=${RUST_LOG:-info,ort=error}"
-    } > "$dev_log"
+    } > "$dev_log"; then
+        :
+    else
+        print_error "Failed to initialize dev takeover log"
+        service_start
+        return 1
+    fi
 
-    create_dev_launchd_plist "$log_level"
-    if ! launchctl bootstrap "gui/$(id -u)" "$DEV_PLIST_PATH" 2>>"$dev_log"; then
+    if ! create_dev_launchd_plist; then
+        print_error "Failed to create dev takeover LaunchAgent"
+        service_start
+        return 1
+    fi
+    if launchctl bootstrap "gui/$(id -u)" "$DEV_PLIST_PATH" 2>>"$dev_log"; then
+        :
+    else
         print_error "Failed to load dev takeover LaunchAgent: $DEV_PLIST_PATH"
         if [ -s "$dev_log" ]; then
             print_status "Last dev server log lines ($dev_log):"
             tail -n 80 "$dev_log" >&2 || true
         fi
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
 
@@ -310,7 +368,7 @@ dev_start_background() {
         else
             print_warning "Dev server log was empty: $dev_log"
         fi
-        restart_installed_service_after_dev 12
+        service_start
         return 1
     fi
 }
@@ -340,7 +398,7 @@ dev_stop() {
         # If it was kill -9, restart manually:
         sleep 1
         if ! service_is_running; then
-            restart_installed_service_after_dev 12
+            service_start
         fi
     else
         if launchd_is_loaded "$DEV_PLIST_NAME"; then
@@ -349,7 +407,7 @@ dev_stop() {
             rm -f "$DEV_BACKGROUND_PID_FILE"
             print_success "Dev takeover launchd job stopped"
             if ! service_is_running; then
-                restart_installed_service_after_dev 12
+                service_start
             fi
         else
             rm -f "$DEV_BACKGROUND_PID_FILE"

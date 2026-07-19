@@ -1,15 +1,18 @@
 //! Engine host, privileged transport functions, and ledgered invocation.
 //!
-//! `EngineHost` is the boundary future server/runtime services should use when
-//! they need the live capability fabric. It keeps `engine::*` capabilities
-//! visible as normal catalog functions while executing them through privileged
-//! host code that cannot be replaced by ordinary workers.
+//! `EngineHostHandle` is the production boundary for server/runtime services
+//! that need the live capability fabric. `EngineHost` keeps `engine::*`
+//! capabilities visible as normal catalog functions while executing them
+//! through privileged host code that ordinary workers cannot replace. Raw host
+//! locking and catalog borrowing are compiled only for crate unit tests.
 //!
 //! Submodules keep host responsibilities split by surface: bootstrap
 //! construction and built-ins, handle constructors, catalog operations,
 //! invocation orchestration, delegated/meta invocation, substrate-store methods,
 //! shared invocation helpers, meta-function definitions, and the primitive
-//! runtime host.
+//! runtime host. `meta_invocation` single-owns the privileged synchronous
+//! lifecycle envelope shared by reserved synchronous engine functions and
+//! host-dispatched primitives; the router below selects only their dispatch family.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
@@ -18,7 +21,8 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::engine::authority::compensation::{EngineCompensationRecord, compensation_record};
 use crate::engine::authority::grants::{ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant};
@@ -28,8 +32,10 @@ use crate::engine::catalog::registry::{
     InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
     PreparedSyncInvocationDecision,
 };
+#[cfg(test)]
+use crate::engine::durability::ledger::EngineLedgerStore;
 use crate::engine::durability::ledger::{
-    EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
+    IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
 use crate::engine::durability::queue::{
     EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation,
@@ -119,14 +125,16 @@ pub struct EngineHostHandle {
 }
 
 impl EngineHost {
-    /// Borrow the live catalog.
+    /// Borrow the live catalog for crate unit tests.
+    #[cfg(test)]
     #[must_use]
-    pub fn catalog(&self) -> &LiveCatalog {
+    pub(crate) fn catalog(&self) -> &LiveCatalog {
         &self.catalog
     }
 
-    /// Mutably borrow the live catalog for tests and bootstrap setup.
-    pub fn catalog_mut(&mut self) -> &mut LiveCatalog {
+    /// Mutably borrow the live catalog for crate unit tests.
+    #[cfg(test)]
+    pub(crate) fn catalog_mut(&mut self) -> &mut LiveCatalog {
         &mut self.catalog
     }
 

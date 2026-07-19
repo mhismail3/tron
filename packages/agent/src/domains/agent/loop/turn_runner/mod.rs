@@ -13,32 +13,105 @@ mod persistence;
 mod result;
 mod turn_context;
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::domains::model::responder::ModelResponseRequest;
 use crate::shared::server::failure::{
     ASSISTANT_PERSIST_FAILED, ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope,
     FailureOrigin, JOURNAL_CREATE_FAILED, MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
+    RUNTIME_CANCELLED, RUNTIME_PERSISTENCE_ERROR,
 };
 
 use metrics::{counter, histogram};
 use tracing::{error, info, instrument, trace, warn};
 
 use self::capability_invocations::CapabilityInvocationPhaseParams;
-use self::failure::emit_turn_failure;
+use self::failure::{emit_turn_failure, terminalize_interrupted_turn};
 pub use self::params::TurnParams;
+pub(crate) use self::persistence::emit_persisted_capability_invocation_completed;
 use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload,
-    build_interrupted_message_payload, build_token_record_json, emit_response_complete,
-    emit_turn_end, emit_turn_start, persist_completed_assistant_message,
-    persist_interrupted_message, persist_model_provider_request_audit,
+    build_failed_message_payload, build_interrupted_message_payload, build_token_record_json,
+    emit_response_complete, emit_turn_end, emit_turn_start, persist_completed_assistant_message,
+    persist_model_provider_request_audit,
 };
 use self::result::determine_turn_stop_reason;
-use self::turn_context::{build_turn_context, resolve_provider_primitive_surface};
+use self::turn_context::build_turn_context;
 use crate::domains::agent::r#loop::errors::StopReason;
+use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+use crate::domains::agent::r#loop::primitive_surface;
 use crate::domains::agent::r#loop::stream_processor;
 use crate::domains::agent::r#loop::types::TurnResult;
+use crate::shared::protocol::messages::TokenUsage;
+
+fn cancellation_failure(session_id: &str) -> FailureEnvelope {
+    FailureEnvelope::new(
+        RUNTIME_CANCELLED,
+        FailureCategory::Cancelled,
+        "Interrupted by user",
+        false,
+        true,
+        FailureOrigin::AgentRuntime,
+    )
+    .with_session_id(Some(session_id.to_owned()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn terminalize_cancellation(
+    emitter: &Arc<EventEmitter>,
+    persister: Option<
+        &crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister,
+    >,
+    session_id: &str,
+    turn: u32,
+    run_context: &crate::domains::agent::r#loop::types::RunContext,
+    sequence_counter: Option<&std::sync::atomic::AtomicI64>,
+    assistant_payload: Option<serde_json::Value>,
+    partial_content: Option<String>,
+) -> Result<(), crate::domains::agent::r#loop::errors::RuntimeError> {
+    terminalize_interrupted_turn(
+        emitter,
+        persister,
+        session_id,
+        turn,
+        run_context,
+        sequence_counter,
+        &cancellation_failure(session_id),
+        assistant_payload,
+        partial_content,
+    )
+}
+
+fn interrupted_turn_result(
+    partial_content: Option<String>,
+    token_usage: Option<TokenUsage>,
+) -> TurnResult {
+    TurnResult {
+        success: true,
+        interrupted: true,
+        partial_content,
+        stop_reason: Some(StopReason::Interrupted),
+        token_usage,
+        ..Default::default()
+    }
+}
+
+fn terminalization_error_result(
+    error: crate::domains::agent::r#loop::errors::RuntimeError,
+    partial_content: Option<String>,
+    token_usage: Option<TokenUsage>,
+) -> TurnResult {
+    TurnResult {
+        success: false,
+        error: Some(format!("failed to persist interrupted turn: {error}")),
+        partial_content,
+        stop_reason: Some(StopReason::Error),
+        token_usage,
+        ..Default::default()
+    }
+}
 
 /// Execute a single turn of the agent loop.
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -94,11 +167,79 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // inside `get_snapshot` / `get_detailed_snapshot` will fire.
     context_manager.begin_turn();
 
-    // 1. Check context capacity (compact if needed)
-    match compaction
-        .check_and_compact(context_manager, session_id, emitter, sequence_counter)
-        .await
-    {
+    // 1. Persist turn entry before any cancellable preparation. Compaction is
+    // part of this turn's lifecycle, so a stop or failure there must close the
+    // same durable ordinal rather than leaving an invisible consumed turn.
+    if let Err(error) = emit_turn_start(
+        emitter,
+        persister,
+        session_id,
+        turn,
+        sequence_counter,
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
+    ) {
+        return TurnResult {
+            success: false,
+            error: Some(format!("failed to persist turn start: {error}")),
+            stop_reason: Some(StopReason::Error),
+            ..Default::default()
+        };
+    }
+    info!(
+        component = "agent.turn",
+        agent_event = "turn_started_event_recorded",
+        session_id,
+        run_id,
+        trace_id,
+        parent_invocation_id,
+        turn,
+        "turn start persisted and broadcast"
+    );
+
+    if cancel.is_cancelled() {
+        return match terminalize_cancellation(
+            emitter,
+            persister,
+            session_id,
+            turn,
+            run_context,
+            sequence_counter,
+            None,
+            None,
+        ) {
+            Ok(()) => interrupted_turn_result(None, None),
+            Err(error) => terminalization_error_result(error, None, None),
+        };
+    }
+
+    // 2. Check context capacity (compact if needed), but let Stop cancel a
+    // long-running summarizer immediately and terminalize this active turn.
+    let compaction_result = compaction
+        .check_and_compact(
+            context_manager,
+            session_id,
+            emitter,
+            sequence_counter,
+            cancel,
+        )
+        .await;
+    match compaction_result {
+        Err(crate::domains::agent::r#loop::errors::RuntimeError::Cancelled) => {
+            return match terminalize_cancellation(
+                emitter,
+                persister,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                None,
+                None,
+            ) {
+                Ok(()) => interrupted_turn_result(None, None),
+                Err(error) => terminalization_error_result(error, None, None),
+            };
+        }
         Err(e) => {
             warn!(
                 component = "agent.turn",
@@ -111,6 +252,17 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 "pre-turn compaction failed"
             );
             counter!("compaction_total", "status" => "pre_turn_error").increment(1);
+            let failure = e.to_failure();
+            emit_turn_failure(
+                emitter,
+                persister,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
             return TurnResult {
                 success: false,
                 error: Some(format!("Compaction error: {e}")),
@@ -132,60 +284,59 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     }
 
-    // 2. Emit TurnStart and persist (TS persists stream.turn_start events)
-    emit_turn_start(
-        emitter,
-        persister,
-        session_id,
-        turn,
-        sequence_counter,
-        run_context.engine_trace_id.as_ref(),
-        run_context.parent_invocation_id.as_ref(),
-    )
-    .await;
-    info!(
-        component = "agent.turn",
-        agent_event = "turn_started_event_recorded",
-        session_id,
-        run_id,
-        trace_id,
-        parent_invocation_id,
-        turn,
-        "turn start persisted and broadcast"
-    );
-
-    let primitive_surface =
-        match resolve_provider_primitive_surface(engine_host, session_id, workspace_id).await {
-            Ok(capabilities) => capabilities,
-            Err(error) => {
-                let error_msg =
-                    format!("failed to resolve live engine capability surface: {error}");
-                error!(session_id, turn, error = %error_msg);
-                let failure = FailureEnvelope::new(
-                    ENGINE_TOOL_SURFACE_FAILED,
-                    FailureCategory::Engine,
-                    error_msg.clone(),
-                    true,
-                    true,
-                    FailureOrigin::Engine,
-                );
-                emit_turn_failure(
-                    emitter,
-                    session_id,
-                    turn,
-                    run_context,
-                    sequence_counter,
-                    &failure,
-                    None,
-                );
-                return TurnResult {
-                    success: false,
-                    error: Some(error_msg),
-                    stop_reason: Some(StopReason::Error),
-                    ..Default::default()
-                };
-            }
+    if cancel.is_cancelled() {
+        return match terminalize_cancellation(
+            emitter,
+            persister,
+            session_id,
+            turn,
+            run_context,
+            sequence_counter,
+            None,
+            None,
+        ) {
+            Ok(()) => interrupted_turn_result(None, None),
+            Err(error) => terminalization_error_result(error, None, None),
         };
+    }
+
+    let primitive_surface = match primitive_surface::resolve_provider_primitive_surface(
+        engine_host,
+        session_id,
+        workspace_id,
+    )
+    .await
+    {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            let error_msg = format!("failed to resolve live engine capability surface: {error}");
+            error!(session_id, turn, error = %error_msg);
+            let failure = FailureEnvelope::new(
+                ENGINE_TOOL_SURFACE_FAILED,
+                FailureCategory::Engine,
+                error_msg.clone(),
+                true,
+                true,
+                FailureOrigin::Engine,
+            );
+            emit_turn_failure(
+                emitter,
+                persister,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
     info!(
         component = "agent.turn",
         agent_event = "primitive_surface_resolved",
@@ -237,6 +388,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -267,9 +419,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         &model_request_audit,
         sequence_counter,
-    )
-    .await
-    {
+    ) {
         let error_msg = format!("failed to persist model provider request audit: {error}");
         error!(session_id, turn, error = %error_msg);
         let failure = FailureEnvelope::new(
@@ -282,6 +432,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         );
         emit_turn_failure(
             emitter,
+            persister,
             session_id,
             turn,
             run_context,
@@ -320,6 +471,21 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let response = match responder.respond(model_request).await {
         Ok(response) => response,
         Err(error) => {
+            if error.is_cancelled() || cancel.is_cancelled() {
+                return match terminalize_cancellation(
+                    emitter,
+                    persister,
+                    session_id,
+                    turn,
+                    run_context,
+                    sequence_counter,
+                    None,
+                    None,
+                ) {
+                    Ok(()) => interrupted_turn_result(None, None),
+                    Err(error) => terminalization_error_result(error, None, None),
+                };
+            }
             let error_msg = error.to_string();
             let failure = error.failure().clone();
             let category = failure.category.as_str().to_owned();
@@ -332,6 +498,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -392,6 +559,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
             emit_turn_failure(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
@@ -432,23 +600,54 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     .await
     {
         Ok(r) => r,
-        Err(e) => {
-            let error_msg = e.to_string();
+        Err(stream_failure) => {
+            let error_msg = stream_failure.error.to_string();
             error!(session_id, turn, error = %error_msg, "stream failed");
-            let failure = e.to_failure();
-            emit_turn_failure(
+            let failure = stream_failure.error.to_failure();
+            let partial_content = stream_failure.partial.partial_content.clone();
+            let token_usage = stream_failure.partial.token_usage.clone();
+            let assistant_payload = build_failed_message_payload(
+                &stream_failure.partial.message,
+                stream_failure.partial.token_usage.as_ref(),
+                session_id,
+                turn,
+                &model_name,
+                provider_type,
+                previous_context_baseline,
+            );
+            let terminalized = terminalize_interrupted_turn(
                 emitter,
+                persister,
                 session_id,
                 turn,
                 run_context,
                 sequence_counter,
                 &failure,
-                None,
+                assistant_payload,
+                partial_content.clone(),
             );
+            if terminalized.is_ok() {
+                if let Some(j) = journal.take() {
+                    if let Err(cleanup_error) = j.finalize_and_delete() {
+                        warn!(
+                            session_id,
+                            turn,
+                            error = %cleanup_error,
+                            "failed to finalize streaming journal after durable turn failure"
+                        );
+                    }
+                }
+            }
             return TurnResult {
                 success: false,
-                error: Some(error_msg),
+                error: Some(if let Err(terminal_error) = terminalized {
+                    format!("{error_msg}; failed to persist stream failure: {terminal_error}")
+                } else {
+                    error_msg
+                }),
+                token_usage,
                 stop_reason: Some(StopReason::Error),
+                partial_content,
                 ..Default::default()
             };
         }
@@ -488,36 +687,41 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 
     if stream_result.interrupted {
-        persist_interrupted_message(
+        let assistant_payload = build_interrupted_message_payload(
+            &stream_result.message,
+            stream_result.token_usage.as_ref(),
+            session_id,
+            turn,
+            &model_name,
+            provider_type,
+            previous_context_baseline,
+        );
+
+        let partial_content = stream_result.partial_content.clone();
+        let terminalized = terminalize_cancellation(
+            emitter,
             persister,
             session_id,
-            build_interrupted_message_payload(
-                &stream_result.message,
-                stream_result.token_usage.as_ref(),
-                session_id,
-                turn,
-                &model_name,
-                provider_type,
-                previous_context_baseline,
-            ),
+            turn,
+            run_context,
             sequence_counter,
-        )
-        .await;
+            assistant_payload,
+            partial_content.clone(),
+        );
 
-        // Finalize journal — interrupted message was persisted successfully
-        if let Some(j) = journal.take() {
-            if let Err(e) = j.finalize_and_delete() {
-                warn!(session_id, turn, error = %e, "failed to finalize streaming journal after interruption");
+        if terminalized.is_ok() {
+            if let Some(j) = journal.take() {
+                if let Err(e) = j.finalize_and_delete() {
+                    warn!(session_id, turn, error = %e, "failed to finalize streaming journal after interruption");
+                }
             }
         }
 
-        return TurnResult {
-            success: true,
-            interrupted: true,
-            partial_content: stream_result.partial_content,
-            stop_reason: Some(StopReason::Interrupted),
-            token_usage: stream_result.token_usage,
-            ..Default::default()
+        return match terminalized {
+            Ok(()) => interrupted_turn_result(partial_content, stream_result.token_usage),
+            Err(error) => {
+                terminalization_error_result(error, partial_content, stream_result.token_usage)
+            }
         };
     }
 
@@ -570,9 +774,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         assistant_payload,
         sequence_counter,
-    )
-    .await
-    {
+    ) {
         let error_msg = format!("failed to persist assistant message: {error}");
         error!(session_id, turn, error = %error_msg);
         let failure = FailureEnvelope::new(
@@ -585,6 +787,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         );
         emit_turn_failure(
             emitter,
+            persister,
             session_id,
             turn,
             run_context,
@@ -633,13 +836,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         run_context.parent_invocation_id.as_ref(),
     );
 
-    // Finalize journal — assistant message was persisted successfully
-    if let Some(j) = journal.take() {
-        if let Err(e) = j.finalize_and_delete() {
-            warn!(session_id, turn, error = %e, "failed to finalize streaming journal");
-        }
-    }
-
     let invocation_phase = capability_invocations::execute_capability_invocation_phase(
         CapabilityInvocationPhaseParams {
             turn,
@@ -662,9 +858,61 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     )
     .await;
 
+    if let Some(error) = invocation_phase.error {
+        let error_msg = format!("failed to persist capability lifecycle: {error}");
+        let failure = FailureEnvelope::new(
+            RUNTIME_PERSISTENCE_ERROR,
+            FailureCategory::Persistence,
+            error_msg.clone(),
+            false,
+            true,
+            FailureOrigin::AgentRuntime,
+        );
+        emit_turn_failure(
+            emitter,
+            persister,
+            session_id,
+            turn,
+            run_context,
+            sequence_counter,
+            &failure,
+            None,
+        );
+        return TurnResult {
+            success: false,
+            error: Some(error_msg),
+            stop_reason: Some(StopReason::Error),
+            token_usage: stream_result.token_usage,
+            ..Default::default()
+        };
+    }
+
+    if invocation_phase.interrupted {
+        let terminalized = terminalize_cancellation(
+            emitter,
+            persister,
+            session_id,
+            turn,
+            run_context,
+            sequence_counter,
+            None,
+            None,
+        );
+        if terminalized.is_ok()
+            && let Some(j) = journal.take()
+            && let Err(error) = j.finalize_and_delete()
+        {
+            warn!(session_id, turn, error = %error, "failed to finalize streaming journal after capability cancellation");
+        }
+        return match terminalized {
+            Ok(()) => interrupted_turn_result(None, stream_result.token_usage),
+            Err(error) => terminalization_error_result(error, None, stream_result.token_usage),
+        };
+    }
+
     // 10. Emit TurnEnd
     let duration = turn_start.elapsed().as_millis() as u64;
-    emit_turn_end(
+    if let Err(error) = emit_turn_end(
         emitter,
         persister,
         session_id,
@@ -680,8 +928,48 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
-    )
-    .await;
+    ) {
+        let error_msg = format!("failed to persist turn end: {error}");
+        let failure = FailureEnvelope::new(
+            RUNTIME_PERSISTENCE_ERROR,
+            FailureCategory::Persistence,
+            error_msg.clone(),
+            false,
+            true,
+            FailureOrigin::AgentRuntime,
+        );
+        let terminalized = emit_turn_failure(
+            emitter,
+            persister,
+            session_id,
+            turn,
+            run_context,
+            sequence_counter,
+            &failure,
+            None,
+        );
+        if terminalized
+            && let Some(j) = journal.take()
+            && let Err(cleanup_error) = j.finalize_and_delete()
+        {
+            warn!(session_id, turn, error = %cleanup_error, "failed to finalize streaming journal after turn-end persistence failure");
+        }
+        return TurnResult {
+            success: false,
+            error: Some(error_msg),
+            stop_reason: Some(StopReason::Error),
+            token_usage: stream_result.token_usage,
+            ..Default::default()
+        };
+    }
+
+    // The journal remains authoritative until the complete turn lifecycle,
+    // including capability results and turn end, is durably committed.
+    if let Some(j) = journal.take()
+        && let Err(error) = j.finalize_and_delete()
+    {
+        warn!(session_id, turn, error = %error, "failed to finalize streaming journal");
+    }
 
     info!(
         component = "agent.turn",

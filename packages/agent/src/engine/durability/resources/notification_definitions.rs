@@ -68,11 +68,11 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
             redaction_rules: json!({
                 "preview": "device_registration_redacted",
                 "rawApnsToken": "never_return",
-                "tokenHash": "prefix_only"
+                "tokenHash": "redacted_presence_only"
             }),
             materialization_rules: json!({
                 "rawApnsToken": "not_materialized_in_resource_payload",
-                "liveApnsTransport": "disabled"
+                "liveApnsTransport": "private_transport_store_only"
             }),
             required_capabilities: json!({
                 "read": ["device.read", "resource.read"],
@@ -142,7 +142,7 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
             }),
             materialization_rules: json!({
                 "body": "bounded_inline",
-                "liveApnsTransport": "disabled"
+                "liveApnsTransport": "notification_delivery_evidence"
             }),
             required_capabilities: json!({
                 "read": ["notifications.read", "resource.read"],
@@ -169,7 +169,7 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
                         "enum": [
                             "inbox_only", "skipped_no_device",
                             "skipped_policy_disabled", "skipped_family_opt_out",
-                            "skipped_transport_disabled", "failed", "archived"
+                            "skipped_transport_disabled", "delivered", "failed", "archived"
                         ]
                     },
                     "notificationResourceId": {"type": "string"},
@@ -194,6 +194,7 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
                 "skipped_policy_disabled",
                 "skipped_family_opt_out",
                 "skipped_transport_disabled",
+                "delivered",
                 "failed",
                 "archived",
             ]
@@ -209,9 +210,13 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
             redaction_rules: json!({
                 "preview": "delivery_summary",
                 "rawApnsToken": "never_return",
-                "tokenHash": "prefix_only"
+                "tokenHash": "redacted_presence_only"
             }),
-            materialization_rules: json!({"liveApnsAttempt": "disabled", "externalNetwork": "none"}),
+            materialization_rules: json!({
+                "liveApnsAttempt": "relay_only",
+                "rawTokenSource": "private_transport_store",
+                "externalNetwork": "configured_relay_only"
+            }),
             required_capabilities: json!({
                 "read": ["notifications.read", "resource.read"],
                 "write": ["notifications.write", "resource.write"]

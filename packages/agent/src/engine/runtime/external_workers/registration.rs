@@ -8,22 +8,6 @@ use super::validation::{
 use super::*;
 
 impl EngineExternalWorkerRuntime {
-    /// Attach an executable transport proxy for a connected worker.
-    pub fn attach_invoker(
-        &mut self,
-        worker_id: WorkerId,
-        invoker: Arc<dyn ExternalWorkerInvoker>,
-    ) -> Result<()> {
-        if !self.connections.contains_key(&worker_id) {
-            return Err(EngineError::NotFound {
-                kind: "external worker connection",
-                id: worker_id.to_string(),
-            });
-        }
-        self.invokers.insert(worker_id, invoker);
-        Ok(())
-    }
-
     /// Register a function from a local worker. External functions default to
     /// session visibility unless they are explicitly promoted later.
     pub async fn register_function(

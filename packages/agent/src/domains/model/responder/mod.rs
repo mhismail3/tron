@@ -4,11 +4,14 @@
 //! opens model streams, applies provider retry policy, maps provider errors, and
 //! records provider health. It also builds provider request audit payloads from
 //! the same stream options used to open the provider stream, redacts and bounds
-//! those payloads before persistence, attaches metadata-only reasoning/status
+//! those payloads before persistence, projects bulk inline values without
+//! changing the provider request, attaches metadata-only reasoning/status
 //! evidence, and redacts provider-derived failure text. Provider requests never
 //! receive session-derived cache keys or other server-owned correlation ids.
 //! Agent loop code depends on this boundary instead of provider factories,
 //! provider traits, stream options, retry wrappers, or provider-native errors.
+//! Responder creation projects the immutable API-settings snapshot admitted for
+//! the run; the long-lived factory owns only shared HTTP and health resources.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -349,33 +352,40 @@ pub trait ModelResponder: Send + Sync {
 /// Factory for model responders.
 #[async_trait]
 pub trait ModelResponderFactory: Send + Sync {
-    /// Create a responder for the given model id.
+    /// Create a responder for the given model id and admitted API settings.
     async fn create_for_model(
         &self,
         model: &str,
+        api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError>;
 }
 
 /// Default model responder factory backed by the provider implementations.
 pub struct DefaultModelResponderFactory {
-    providers: crate::domains::model::providers::factory::DefaultProviderFactory,
+    http_client: reqwest::Client,
     health: Arc<ModelResponderHealth>,
 }
 
 impl DefaultModelResponderFactory {
-    /// Create a factory from current server settings.
-    pub fn new(settings: &crate::domains::settings::TronSettings) -> Self {
+    /// Create a long-lived factory with configuration-independent resources.
+    pub fn new() -> Self {
         Self {
-            providers: crate::domains::model::providers::factory::DefaultProviderFactory::new(
-                settings,
-            ),
+            http_client:
+                crate::domains::model::providers::factory::DefaultProviderFactory::build_http_client(
+                ),
             health: Arc::new(ModelResponderHealth::new()),
         }
     }
 
     /// Get a clone of the shared HTTP client.
     pub fn http_client(&self) -> reqwest::Client {
-        self.providers.http_client()
+        self.http_client.clone()
+    }
+}
+
+impl Default for DefaultModelResponderFactory {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -384,9 +394,13 @@ impl ModelResponderFactory for DefaultModelResponderFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
-        let provider = self
-            .providers
+        let provider =
+            crate::domains::model::providers::factory::DefaultProviderFactory::with_client(
+                api_settings,
+                self.http_client.clone(),
+            )
             .create_for_model(model)
             .await
             .map_err(|error| {
@@ -612,6 +626,18 @@ fn wrap_provider_stream(
             health.record_failure(provider_name);
             histogram!("provider_request_duration_seconds", "provider" => provider_name)
                 .record(request_start.elapsed().as_secs_f64());
+            let info = ModelResponderInfo {
+                provider_type: crate::shared::protocol::messages::Provider::Unknown,
+                provider_name,
+                model: model.clone(),
+                context_window: 0,
+            };
+            yield Err(ModelResponseError::from_provider_error(
+                ProviderError::StreamEnded {
+                    message: "provider stream ended before a terminal event".to_owned(),
+                },
+                &info,
+            ));
         }
     })
 }

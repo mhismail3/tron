@@ -9,21 +9,14 @@ extension ChatViewModel: TurnLifecycleContext {
     // MARK: - Turn Tracking State (Protocol Properties)
     // Most properties are already defined in ChatViewModel.swift:
     // - messages: [ChatMessage]
-    // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
-    // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
+    // - currentTurnCapabilityMessageIds: Set<UUID>
     // - thinkingMessageId: UUID?
     // - turnStartMessageIndex: Int?
     // - firstTextMessageIdForTurn: UUID?
-    // - isProcessing: Bool
 
     /// ID of the currently streaming message (TurnLifecycleContext)
     var streamingMessageId: UUID? {
         streamingManager.streamingMessageId
-    }
-
-    /// Current streaming text content (TurnLifecycleContext)
-    var streamingText: String {
-        streamingManager.streamingText
     }
 
     /// Whether there is active streaming (TurnLifecycleContext)
@@ -130,22 +123,10 @@ extension ChatViewModel: TurnLifecycleContext {
         )
     }
 
-    /// Update total token usage display (TurnLifecycleContext)
-    func updateTotalTokenUsage(contextSize: Int, outputTokens: Int, cacheRead: Int?, cacheCreation: Int?) {
-        contextState.totalTokenUsage = TokenUsage(
-            inputTokens: contextSize,
-            outputTokens: outputTokens,
-            cacheReadTokens: cacheRead,
-            cacheCreationTokens: cacheCreation
-        )
-    }
-
-    // refreshContextFromServer() is already defined in ChatViewModel
-
     // MARK: - Session Persistence (Protocol Methods)
 
-    /// Update session tokens in database (TurnLifecycleContext)
-    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) async throws {
+    /// Persist ContextTrackingState's accumulated totals and this turn's context size.
+    func persistAccumulatedSessionTokens(lastTurnInputTokens: Int) async throws {
         guard let manager = eventStoreManager else { return }
         try await manager.updateSessionTokens(
             sessionId: sessionId,

@@ -1,8 +1,8 @@
 import SwiftUI
 
-// MARK: - Token Badge (Terminal-style)
+// MARK: - Token Badge
 
-struct TokenBadge: View {
+private struct TokenBadge: View {
     let record: TokenRecord
 
     var body: some View {
@@ -38,55 +38,37 @@ struct TokenBadge: View {
     }
 }
 
-// MARK: - Message Metadata Badge (Enriched Phase 1)
+// MARK: - Final Assistant Response Metadata
 
-/// Displays comprehensive metadata beneath assistant messages:
-/// Token usage, model name, latency, and thinking indicator
+/// Displays metadata only after a server-identified final assistant response.
 struct MessageMetadataBadge: View {
-    let tokenRecord: TokenRecord?
-    let model: String?
-    let latency: String?
-
-    /// Check if we need a separator before additional metadata
-    private var needsSeparator: Bool {
-        tokenRecord != nil && (model != nil || latency != nil)
-    }
-
-    /// Check if we need a separator between model and latency
-    private var needsModelLatencySeparator: Bool {
-        model != nil && latency != nil
-    }
+    let metadata: FinalAssistantResponseMetadata
 
     var body: some View {
         HStack(spacing: 8) {
-            // Token record
-            if let record = tokenRecord {
+            if let record = metadata.tokenRecord {
                 TokenBadge(record: record)
             }
 
-            // Separator after tokens
-            if needsSeparator {
+            if metadata.tokenRecord != nil && (metadata.model != nil || metadata.latency != nil) {
                 Text("\u{2022}")
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
 
-            // Model name pill
-            if let model = model {
+            if let model = metadata.model {
                 Text(model)
                     .font(TronTypography.pillValue)
                     .foregroundStyle(.tronTextMuted)
             }
 
-            // Separator between model and latency
-            if needsModelLatencySeparator {
+            if metadata.model != nil && metadata.latency != nil {
                 Text("\u{2022}")
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
 
-            // Latency pill
-            if let latency = latency {
+            if let latency = metadata.latency {
                 Text(latency)
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)

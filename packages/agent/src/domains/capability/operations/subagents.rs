@@ -11,11 +11,8 @@ pub(super) async fn subagent_task_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let subagent_deps = crate::domains::subagents::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let value = crate::domains::subagents::service::list_subagent_tasks_value(
-        &subagent_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -35,11 +32,8 @@ pub(super) async fn subagent_task_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let subagent_deps = crate::domains::subagents::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let value = crate::domains::subagents::service::inspect_subagent_task_value(
-        &subagent_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -63,11 +57,8 @@ pub(super) async fn subagent_launch(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let subagent_deps = crate::domains::subagents::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let plan = crate::domains::subagents::execution::plan_subagent_launch_value(
-        &subagent_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -87,7 +78,7 @@ pub(super) async fn subagent_launch(
             .await?;
             let module_details = module_program_details(&module_start, "subagent_launch")?;
             crate::domains::subagents::execution::launch_subagent_value(
-                &subagent_deps,
+                &deps.engine_host,
                 invocation,
                 &invocation.payload,
                 module_details,
@@ -114,17 +105,8 @@ pub(super) async fn subagent_status(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let subagent_deps = crate::domains::subagents::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
-    let value = crate::domains::subagents::execution::status_subagent_value(
-        &subagent_deps,
-        invocation,
-        &invocation.payload,
-    )
-    .await?;
-    let followup = crate::domains::subagents::execution::delegated_module_followup_payload(
-        &subagent_deps,
+    let followup = crate::domains::subagents::execution::prepare_delegated_module_followup(
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         "subagent_status",
@@ -132,7 +114,7 @@ pub(super) async fn subagent_status(
     .await?;
     let module_invocation = invocation_with_payload(
         invocation,
-        with_operation(followup, "module_program_execution_status"),
+        with_operation(followup.module_payload(), "module_program_execution_status"),
         &[
             "module_runtime.read",
             "program_execution.read",
@@ -145,7 +127,7 @@ pub(super) async fn subagent_status(
             .await?;
     let module_details = module_program_details(&module_status, "subagent_status")?;
     let value = crate::domains::subagents::execution::status_subagent_from_module_value(
-        value,
+        &followup,
         module_details,
     );
     Ok(ok_result(
@@ -165,11 +147,8 @@ pub(super) async fn subagent_result(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let subagent_deps = crate::domains::subagents::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
-    let followup = crate::domains::subagents::execution::delegated_module_followup_payload(
-        &subagent_deps,
+    let followup = crate::domains::subagents::execution::prepare_delegated_module_followup(
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         "subagent_result",
@@ -177,7 +156,7 @@ pub(super) async fn subagent_result(
     .await?;
     let module_invocation = invocation_with_payload(
         invocation,
-        with_operation(followup, "module_program_execution_status"),
+        with_operation(followup.module_payload(), "module_program_execution_status"),
         &[
             "module_runtime.read",
             "program_execution.read",
@@ -190,12 +169,9 @@ pub(super) async fn subagent_result(
             .await?;
     let module_details = module_program_details(&module_status, "subagent_result")?;
     let value = crate::domains::subagents::execution::result_subagent_from_module_value(
-        &subagent_deps,
-        invocation,
-        &invocation.payload,
+        &followup,
         module_details,
-    )
-    .await?;
+    )?;
     Ok(ok_result(
         format!(
             "Subagent result status {}.",
@@ -213,11 +189,8 @@ pub(super) async fn subagent_cancel(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let subagent_deps = crate::domains::subagents::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
-    let followup = crate::domains::subagents::execution::delegated_module_followup_payload(
-        &subagent_deps,
+    let followup = crate::domains::subagents::execution::prepare_delegated_module_followup(
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         "subagent_cancel",
@@ -225,7 +198,7 @@ pub(super) async fn subagent_cancel(
     .await?;
     let module_invocation = invocation_with_payload(
         invocation,
-        with_operation(followup, "module_program_execution_cancel"),
+        with_operation(followup.module_payload(), "module_program_execution_cancel"),
         &[
             "module_runtime.read",
             "module_runtime.write",
@@ -243,7 +216,7 @@ pub(super) async fn subagent_cancel(
     )
     .await?;
     let value = crate::domains::subagents::execution::cancel_subagent_value(
-        &subagent_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

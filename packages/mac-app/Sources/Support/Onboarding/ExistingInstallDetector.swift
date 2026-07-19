@@ -90,16 +90,6 @@ enum ExistingInstallDetector {
         return signatureProblemResolver(helperBundle)
     }
 
-    static func validateApplicationLocation(
-        bundleURL: URL = Bundle.main.bundleURL,
-        bundleIdentifier: String? = Bundle.main.bundleIdentifier
-    ) -> String? {
-        MacRuntimeVariant.detect(
-            bundleURL: bundleURL,
-            bundleIdentifier: bundleIdentifier
-        ).locationProblem
-    }
-
     static func launchAgentPlistIsCurrent(
         plistPath: URL = TronPaths.launchAgentPlistPath,
         label: String = TronPaths.launchAgentLabel,
@@ -184,7 +174,7 @@ enum ExistingInstallDetector {
 
     static func codeSignatureIdentityProblem(
         _ identityText: String,
-        expectedBundleIdentifier: String = TronPaths.bundleID,
+        expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
         helperName: String = "\(TronPaths.agentBundleName).app"
     ) -> String? {
         guard identityText.contains("Identifier=\(expectedBundleIdentifier)") else {

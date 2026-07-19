@@ -29,8 +29,9 @@ Usage: tron version <command>
 
 Commands:
   print              Print derived version fields as KEY=value lines
-  check              Validate all mirrored version fields
-  sync [--check]     Update mirrors from VERSION.env, or validate with --check
+  check              Read-only validation of all mirrored version fields
+  sync               Update mirrors from VERSION.env
+  github-output      Validate a hosted release ref and write GitHub step outputs
   bump beta|patch|minor
                      Update VERSION.env, sync mirrors, and print the result
   test               Run shell-level version helper tests
@@ -111,6 +112,38 @@ TRON_IS_PRERELEASE=$TRON_IS_PRERELEASE
 EOF
 }
 
+write_github_release_outputs() {
+    check_versions
+    [ -n "${GITHUB_OUTPUT:-}" ] || die "GITHUB_OUTPUT is required for github-output"
+
+    local mode
+    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
+        if [ "$GITHUB_REF_NAME" != "$TRON_RELEASE_TAG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION.env release tag $TRON_RELEASE_TAG" >&2
+            return 1
+        fi
+        mode="tag"
+    else
+        mode="VERSION.env"
+    fi
+
+    if [[ -z "$TRON_VERSION" || -z "$TRON_RELEASE_TAG" || -z "$TRON_DMG_NAME" ||
+          -z "$TRON_DISPLAY_VERSION" || -z "$TRON_APPLE_BUILD" ||
+          -z "$TRON_APPLE_MARKETING_VERSION" || -z "$TRON_RELEASE_TITLE" ||
+          -z "$TRON_IS_PRERELEASE" ]]; then
+        echo "::error::could not resolve centralized version fields" >&2
+        return 1
+    fi
+
+    printf '%s\n' \
+        "version=$TRON_VERSION" "mode=$mode" "tag=$TRON_RELEASE_TAG" \
+        "dmg_name=$TRON_DMG_NAME" "display_version=$TRON_DISPLAY_VERSION" \
+        "apple_build=$TRON_APPLE_BUILD" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
+        "release_title=$TRON_RELEASE_TITLE" "is_prerelease=$TRON_IS_PRERELEASE" \
+        >> "$GITHUB_OUTPUT"
+    echo "Resolved version=$TRON_VERSION ($TRON_DISPLAY_VERSION) / Apple build $TRON_APPLE_BUILD from $mode"
+}
+
 replace_regex() {
     local file="$1"
     local pattern="$2"
@@ -147,14 +180,6 @@ sync_versions() {
     replace_regex "$PROJECT_DIR/packages/ios-app/project.yml" \
         '(TRON_CANONICAL_VERSION: ")[^"]+(")' \
         "\${1}${TRON_VERSION}\${2}"
-
-    # VERSION.env owns iOS versions now; leaving xcconfig mirrors around
-    # creates a second source of truth that XcodeGen may merge differently
-    # across configs.
-    perl -0pi -e 's{(?m)^// App info\nMARKETING_VERSION = [^\n]+\nCURRENT_PROJECT_VERSION = [^\n]+\n}{// App info lives in project.yml and is generated from VERSION.env.\n}' \
-        "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"
-    perl -0pi -e 's{(?m)^// App info\nMARKETING_VERSION = [^\n]+\nCURRENT_PROJECT_VERSION = [^\n]+\n}{// App info lives in project.yml and is generated from VERSION.env.\n}' \
-        "$PROJECT_DIR/packages/mac-app/Configuration/Base.xcconfig"
 }
 
 value_after_key() {
@@ -220,15 +245,12 @@ check_versions() {
     check_grep_count "Mac CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
     check_grep_count "Mac TRON_CANONICAL_VERSION" 1 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
 
-    check_grep_count "iOS MARKETING_VERSION" 2 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
-    check_grep_count "iOS CURRENT_PROJECT_VERSION" 2 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
-    check_grep_count "iOS TRON_CANONICAL_VERSION" 2 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS MARKETING_VERSION" 1 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS TRON_CANONICAL_VERSION" 1 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
 
     if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"; then
         note_failure "iOS Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
-    fi
-    if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/mac-app/Configuration/Base.xcconfig"; then
-        note_failure "Mac Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
     fi
 
     check_equals "iOS app Info.plist TRONCanonicalVersion" \
@@ -240,26 +262,6 @@ check_versions() {
     check_equals "Mac Info.plist TRONCanonicalVersion" \
         "$(value_after_key "$PROJECT_DIR/packages/mac-app/Sources/Info.plist" "TRONCanonicalVersion")" \
         '$(TRON_CANONICAL_VERSION)'
-
-    local drift_pattern='0\.5\.0|0\.5\.1|(^|[^A-Za-z-])mac-v[0-9]|(^|[^A-Za-z-])mac-v\*|mac-vX\.Y\.Z|server-v0\.5|1\.0\.0|server-vX\.Y\.Z|vX\.Y\.Z'
-    local drift_targets=(
-        "$PROJECT_DIR/README.md"
-        "$PROJECT_DIR/CONTRIBUTING.md"
-        "$PROJECT_DIR/packages/mac-app/docs"
-        "$PROJECT_DIR/packages/ios-app/docs"
-        "$PROJECT_DIR/.github/workflows/release-mac.yml"
-        "$PROJECT_DIR/.github/workflows/release-ios.yml"
-        "$PROJECT_DIR/scripts/tron-lib.sh"
-    )
-    if command -v rg >/dev/null 2>&1; then
-        rg -n "$drift_pattern" "${drift_targets[@]}" >/tmp/tron-version-doc-drift.txt || true
-    else
-        grep -RInE "$drift_pattern" "${drift_targets[@]}" >/tmp/tron-version-doc-drift.txt || true
-    fi
-    if [ -s /tmp/tron-version-doc-drift.txt ]; then
-        cat /tmp/tron-version-doc-drift.txt >&2
-        note_failure "release docs/workflow still mention stale version examples"
-    fi
 
     if [ "$failures" -ne 0 ]; then
         echo "$failures version drift issue(s) found" >&2
@@ -325,7 +327,31 @@ self_test() {
     [ "$(asset_version 0.1.1)" = "0.1.1" ] || die "asset version changed stable patch"
     [[ "$TRON_DMG_NAME" =~ ^tron-v[0-9]+\.[0-9]+\.[0-9]+(-beta[1-9][0-9]*)?\.dmg$ ]] || die "DMG name has unexpected format: $TRON_DMG_NAME"
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
-    "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null
+    ! "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null 2>&1 || die "sync --check alias remains accepted"
+
+    local github_output output_keys
+    github_output="$(mktemp)"
+    for ref_type in branch tag; do
+        : > "$github_output"
+        GITHUB_OUTPUT="$github_output" GITHUB_REF_TYPE="$ref_type" \
+            GITHUB_REF_NAME="$([ "$ref_type" = tag ] && echo "$TRON_RELEASE_TAG" || echo main)" \
+            "$PROJECT_DIR/scripts/tron" version github-output >/dev/null
+        grep -Fqx "mode=$([ "$ref_type" = tag ] && echo tag || echo VERSION.env)" "$github_output" \
+            || die "github-output omitted $ref_type mode"
+    done
+    output_keys="$(cut -d= -f1 "$github_output" | paste -sd, -)"
+    [ "$output_keys" = "version,mode,tag,dmg_name,display_version,apple_build,marketing_version,release_title,is_prerelease" ] \
+        || die "github-output keys changed: $output_keys"
+
+    : > "$github_output"
+    if GITHUB_OUTPUT="$github_output" \
+        GITHUB_REF_TYPE="tag" \
+        GITHUB_REF_NAME="${TRON_RELEASE_TAG}-mismatch" \
+        "$PROJECT_DIR/scripts/tron" version github-output >/dev/null 2>&1; then
+        die "github-output accepted a mismatched release tag"
+    fi
+    [ ! -s "$github_output" ] || die "github-output wrote fields for a mismatched release tag"
+    rm -f "$github_output"
 
     local invalid
     for invalid in 0.1 0.1-b1 v0.1.b1 0.1.0.0 0.1.0-beta.x 0.1.0-beta.0; do
@@ -346,13 +372,13 @@ case "$cmd" in
     check)
         check_versions
         ;;
+    github-output)
+        write_github_release_outputs
+        ;;
     sync)
-        if [ "${2:-}" = "--check" ]; then
-            check_versions
-        else
-            sync_versions
-            check_versions
-        fi
+        [ "$#" -eq 1 ] || die "sync accepts no arguments; use 'tron version check' for read-only validation"
+        sync_versions
+        check_versions
         ;;
     bump)
         shift

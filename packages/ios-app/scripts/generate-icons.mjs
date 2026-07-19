@@ -1,14 +1,13 @@
 #!/usr/bin/env bun
 
 import sharp from "sharp";
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IOS_ROOT = join(__dirname, "..");
 const ASSETS = join(IOS_ROOT, "Sources", "Assets.xcassets");
-const ICON_LAYERS = join(IOS_ROOT, "Sources", "IconLayers");
 
 const SOURCE_SVG = join(ASSETS, "TronLogoVector.imageset", "tron-logo.svg");
 const ORIGINAL_FILL = "#000000";
@@ -16,14 +15,10 @@ const ORIGINAL_FILL = "#000000";
 const COLORS = {
   emerald: "#10B981",
   amber: "#D97706",
-  gray: "#808080",
-  black: "#000000",
   white: "#FFFFFF",
 };
 
 const BG = {
-  dark: "#090909",
-  white: "#FFFFFF",
   cream: "#F3EDE3",
 };
 
@@ -60,43 +55,6 @@ async function generateRasterLogo(svgString, size, outputPath) {
     .toFile(outputPath);
 }
 
-function generateTemplateSvg(outputPath) {
-  let svg = readFileSync(SOURCE_SVG, "utf-8");
-  // Strip the Adobe Illustrator comment
-  svg = svg.replace(/\s*<!--.*?-->\s*/s, "\n  ");
-  // Recolor to black for template rendering
-  svg = svg.replaceAll(ORIGINAL_FILL, COLORS.black);
-  writeFileSync(outputPath, svg);
-}
-
-async function generateDepthLayer(svgString, size, outputPath) {
-  const logoSize = Math.round(size * 0.7);
-
-  await sharp(Buffer.from(svgString))
-    .resize(logoSize, logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .extend({
-      top: Math.round((size - logoSize) / 2),
-      bottom: size - logoSize - Math.round((size - logoSize) / 2),
-      left: Math.round((size - logoSize) / 2),
-      right: size - logoSize - Math.round((size - logoSize) / 2),
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .png()
-    .toFile(outputPath);
-}
-
-async function generateSolidBackground(color, size, outputPath) {
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
-
-  await sharp({
-    create: { width: size, height: size, channels: 4, background: { r, g, b, alpha: 1 } },
-  })
-    .png()
-    .toFile(outputPath);
-}
-
 async function verify(path, expectedWidth, expectedHeight, expectAlpha = false) {
   const meta = await sharp(path).metadata();
   const issues = [];
@@ -113,12 +71,8 @@ async function verify(path, expectedWidth, expectedHeight, expectAlpha = false) 
 }
 
 async function main() {
-  mkdirSync(ICON_LAYERS, { recursive: true });
-
   const whiteSvg = recolorSvg(ORIGINAL_FILL, COLORS.white);
   const emeraldSvg = recolorSvg(ORIGINAL_FILL, COLORS.emerald);
-  const amberSvg = recolorSvg(ORIGINAL_FILL, COLORS.amber);
-  const graySvg = recolorSvg(ORIGINAL_FILL, COLORS.gray);
 
   console.log("Generating app icons...");
 
@@ -129,24 +83,10 @@ async function main() {
   // Beta icon: white logo on amber bg (iOS auto-generates dark/tinted)
   await generateAppIcon(whiteSvg, COLORS.amber, join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"));
 
-  console.log("Generating in-app raster logos...");
+  console.log("Generating README logo preview...");
 
-  const logoDir = join(ASSETS, "TronLogo.imageset");
-  await generateRasterLogo(emeraldSvg, 100, join(logoDir, "tron-logo.png"));
-  await generateRasterLogo(emeraldSvg, 200, join(logoDir, "tron-logo@2x.png"));
-  await generateRasterLogo(emeraldSvg, 300, join(logoDir, "tron-logo@3x.png"));
-
-  console.log("Generating template SVG...");
-
-  generateTemplateSvg(join(ASSETS, "TronLogoVector.imageset", "tron-logo.svg"));
-
-  console.log("Generating depth layers...");
-
-  await generateDepthLayer(emeraldSvg, 1024, join(ICON_LAYERS, "foreground-emerald.png"));
-  await generateDepthLayer(amberSvg, 1024, join(ICON_LAYERS, "foreground-amber.png"));
-  await generateDepthLayer(graySvg, 1024, join(ICON_LAYERS, "foreground-gray.png"));
-  await generateSolidBackground(BG.dark, 1024, join(ICON_LAYERS, "background-dark.png"));
-  await generateSolidBackground(BG.white, 1024, join(ICON_LAYERS, "background-white.png"));
+  const readmeLogo = join(IOS_ROOT, "docs", "assets", "tron-logo.png");
+  await generateRasterLogo(emeraldSvg, 100, readmeLogo);
 
   console.log("\nVerifying outputs...");
 
@@ -155,16 +95,8 @@ async function main() {
     // App icons (1024x1024, no alpha needed)
     [join(ASSETS, "AppIcon.appiconset", "icon-1024.png"), 1024, 1024],
     [join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"), 1024, 1024],
-    // In-app logos (transparent)
-    [join(logoDir, "tron-logo.png"), 100, 100, true],
-    [join(logoDir, "tron-logo@2x.png"), 200, 200, true],
-    [join(logoDir, "tron-logo@3x.png"), 300, 300, true],
-    // Depth layers (transparent foregrounds)
-    [join(ICON_LAYERS, "foreground-emerald.png"), 1024, 1024, true],
-    [join(ICON_LAYERS, "foreground-amber.png"), 1024, 1024, true],
-    [join(ICON_LAYERS, "foreground-gray.png"), 1024, 1024, true],
-    [join(ICON_LAYERS, "background-dark.png"), 1024, 1024],
-    [join(ICON_LAYERS, "background-white.png"), 1024, 1024],
+    // README preview (transparent)
+    [readmeLogo, 100, 100, true],
   ];
 
   for (const [path, w, h, alpha] of checks) {
@@ -173,7 +105,7 @@ async function main() {
   }
 
   if (allOk) {
-    console.log("\nAll 11 files generated and verified successfully.");
+    console.log("\nAll 3 files generated and verified successfully.");
   } else {
     console.error("\nSome verifications failed!");
     process.exit(1);

@@ -2,9 +2,8 @@ import SwiftUI
 
 // MARK: - Thinking Content View
 
-/// Displays thinking content with a vertical line indicator (matching TextContentView exactly)
 /// - Only shows pulsing sparkle + "Thinking" label when actively streaming
-/// - Persisted non-streaming blocks show the text with a vertical line
+/// - Persisted non-streaming blocks show the same compact text presentation
 struct ThinkingContentView: View {
     let content: String
     let isExpanded: Bool
@@ -44,44 +43,33 @@ struct ThinkingContentView: View {
     }
 
     var body: some View {
-        // Match TextContentView layout exactly
-        HStack(alignment: .top, spacing: 0) {
-            // Vertical line indicator - matches TextContentView (width: 2, trailing padding: 12)
-            // Use muted color for thinking vs green for response
-            Rectangle()
-                .fill(Color.tronTextMuted.opacity(0.4))
-                .frame(width: 2)
-                .padding(.trailing, 12)
-
-            VStack(alignment: .leading, spacing: 4) {
-                // Header with source contract - shown while streaming and for
-                // reasoning summaries whose text is not raw append-only thinking.
-                if isStreaming || kind == .reasoningSummary {
-                    HStack(spacing: 6) {
-                        if isStreaming {
-                            PulsingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
-                        } else {
-                            TronIconView(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
-                        }
-                        Text(kind.title)
-                            .font(TronTypography.caption)
-                            .fontWeight(.medium)
-                            .foregroundStyle(Color.secondary.opacity(0.8))
+        VStack(alignment: .leading, spacing: 4) {
+            // Header with source contract - shown while streaming and for
+            // reasoning summaries whose text is not raw append-only thinking.
+            if isStreaming || kind == .reasoningSummary {
+                HStack(spacing: 6) {
+                    if isStreaming {
+                        PulsingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
+                    } else {
+                        TronIconView(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
                     }
+                    Text(kind.title)
+                        .font(TronTypography.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.secondary.opacity(0.8))
                 }
-
-                // Content: preview or full (compact, smaller text)
-                // Use eagerly-parsed AttributedString (not LocalizedStringKey) to avoid
-                // SDF renderer crash during navigation teardown
-                Text(TextContentView.markdownAttributedString(from: expanded ? content : previewText, size: TronTypography.sizeCaption))
-                    .foregroundStyle(Color.secondary.opacity(0.6))
-                    .italic()
-                    .lineLimit(expanded ? nil : 2)
-                    .lineSpacing(1)
-                    .animation(.tronStandard, value: expanded)
             }
+
+            // Content: preview or full (compact, smaller text)
+            // Use eagerly-parsed AttributedString (not LocalizedStringKey) to avoid
+            // SDF renderer crash during navigation teardown
+            Text(TextContentView.markdownAttributedString(from: expanded ? content : previewText, size: TronTypography.sizeCaption))
+                .foregroundStyle(Color.secondary.opacity(0.6))
+                .italic()
+                .lineLimit(expanded ? nil : 2)
+                .lineSpacing(1)
+                .animation(.tronStandard, value: expanded)
         }
-        // Match TextContentView padding exactly
         .padding(.vertical, 4)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)

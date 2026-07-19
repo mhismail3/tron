@@ -81,31 +81,6 @@ enum PairingURLParser {
         ))
     }
 
-    /// Inverse — produce a `tron://pair?…` URL for QR encoding.
-    /// Used by the Mac wizard's pairing step to render the QR code AND
-    /// by tests that round-trip the parser.
-    static func makeURL(host: String, port: Int, token: String, label: String? = nil) -> URL? {
-        guard let canonicalHost = PairingHostValidator.canonicalHost(host),
-              (1...65_535).contains(port) else {
-            return nil
-        }
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedToken.isEmpty else { return nil }
-
-        var components = URLComponents()
-        components.scheme = "tron"
-        components.host = "pair"
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "host", value: canonicalHost),
-            URLQueryItem(name: "port", value: String(port)),
-            URLQueryItem(name: "token", value: trimmedToken),
-        ]
-        if let label = label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
-            items.append(URLQueryItem(name: "label", value: label))
-        }
-        components.queryItems = items
-        return components.url
-    }
 }
 
 /// Canonical host validator shared by QR/deep-link parsing and manual pairing.

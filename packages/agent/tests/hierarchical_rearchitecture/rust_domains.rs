@@ -32,37 +32,9 @@ fn rust_session_domain_uses_lifecycle_query_reconstruction_owners() {
 }
 
 #[test]
-fn rust_session_event_store_has_no_same_name_file_folder_pairs() {
-    let mut pairs = Vec::new();
-    let mut source_files = Vec::new();
-    list_source_files(
-        &repo_path("packages/agent/src/domains/session/event_store"),
-        &["rs"],
-        &mut source_files,
-    );
-    for file in source_files {
-        let sibling_folder = file.with_extension("");
-        if sibling_folder.is_dir() {
-            pairs.push(
-                file.strip_prefix(repo_root())
-                    .unwrap()
-                    .display()
-                    .to_string(),
-            );
-        }
-    }
-
-    assert!(
-        pairs.is_empty(),
-        "Session event-store must not retain avoidable same-name file/folder module pairs after HRA-6: {pairs:#?}"
-    );
-}
-
-#[test]
 fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
     let required = [
         "packages/agent/src/domains/session/event_store/envelope/mod.rs",
-        "packages/agent/src/domains/session/event_store/factory/mod.rs",
         "packages/agent/src/domains/session/event_store/reconstruction/mod.rs",
         "packages/agent/src/domains/session/event_store/store/event_store/mod.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
@@ -70,6 +42,7 @@ fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
     ];
     let banned = [
         "packages/agent/src/domains/session/event_store/event",
+        "packages/agent/src/domains/session/event_store/factory/mod.rs",
         "packages/agent/src/domains/session/event_store/store/event_store.rs",
         "packages/agent/src/domains/session/event_store/store/tests.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs",
@@ -92,7 +65,7 @@ fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
 
     assert!(
         missing.is_empty() && present_banned.is_empty(),
-        "Session event-store must expose owned module files after HRA-6; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+        "Session event-store must expose only active owned modules after HRA-6; missing: {missing:#?}; retired paths still present: {present_banned:#?}"
     );
     assert!(
         !session_event_store_source.contains("#[path ="),

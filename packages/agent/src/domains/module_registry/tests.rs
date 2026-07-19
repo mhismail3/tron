@@ -2,7 +2,10 @@ use serde_json::{Value, json};
 
 use super::manifest::{LIST_LIMIT_MAX, validate_manifest_payload};
 use super::service::{inspect_module_value, list_modules_value};
-use super::{MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, SCHEMA_VERSION, WORKER};
+use super::{
+    MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, RESOURCE_READ_SCOPE,
+    SCHEMA_VERSION, WORKER, resource_type_definition,
+};
 use crate::engine::kernel::ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId,
 };
@@ -12,15 +15,22 @@ use crate::engine::{
     EngineResourceScope, EngineResourceVersioningMode, ListResources, RegisterResourceType,
 };
 
-const RESOURCE_READ_SCOPE: &str = "resource.read";
+fn test_host() -> EngineHostHandle {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    crate::domains::registration::install_module_manifests_for_test(&host)
+        .expect("domain manifest composition");
+    host
+}
 
 #[tokio::test]
-async fn built_in_definition_and_seed_resources_are_registered() {
-    let definitions = crate::engine::builtin_resource_type_definitions();
-    let definition = definitions
-        .iter()
-        .find(|definition| definition.kind == MODULE_MANIFEST_KIND)
-        .expect("module manifest type definition");
+async fn domain_definition_and_seed_resources_are_registered() {
+    assert!(
+        crate::engine::builtin_resource_type_definitions()
+            .iter()
+            .all(|definition| definition.kind != MODULE_MANIFEST_KIND),
+        "engine construction must not register a domain-owned resource type"
+    );
+    let definition = resource_type_definition();
 
     assert_eq!(definition.schema_id, MODULE_MANIFEST_SCHEMA_ID);
     assert_eq!(
@@ -33,7 +43,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         json!([READ_SCOPE, RESOURCE_READ_SCOPE])
     );
 
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     for resource_id in [
         "module_manifest:module_registry",
         "module_manifest:capability",
@@ -63,7 +73,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
 
 #[tokio::test]
 async fn current_built_in_manifests_match_canonical_capability_contracts() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let mut resources = host
         .list_resources(ListResources {
             kind: Some(MODULE_MANIFEST_KIND.to_owned()),
@@ -151,7 +161,7 @@ fn manifest_rejects_effect_drift_from_canonical_operation() {
 
 #[tokio::test]
 async fn import_update_module_manifest_projects_pending_review_metadata_only_gates() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "import-update-module",
@@ -403,7 +413,7 @@ async fn import_update_module_manifest_projects_pending_review_metadata_only_gat
 
 #[tokio::test]
 async fn notification_delivery_module_manifest_projects_pending_review_delivery_gates() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "notification-delivery-module",
@@ -598,7 +608,7 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
 
 #[tokio::test]
 async fn web_research_module_manifest_projects_pending_review_metadata_only_bounds() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "web-research-module",
@@ -675,7 +685,7 @@ async fn web_research_module_manifest_projects_pending_review_metadata_only_boun
 
 #[tokio::test]
 async fn procedural_module_manifest_projects_review_and_activation_evidence() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "procedural-module",
@@ -751,7 +761,7 @@ async fn procedural_module_manifest_projects_review_and_activation_evidence() {
 
 #[tokio::test]
 async fn memory_engine_module_manifest_projects_retrieval_and_retention_evidence() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "memory-engine-module",
@@ -830,7 +840,7 @@ async fn memory_engine_module_manifest_projects_retrieval_and_retention_evidence
 
 #[tokio::test]
 async fn jobs_program_execution_module_manifest_projects_ref_only_pending_review_metadata() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "jobs-program-execution-module",
@@ -931,7 +941,7 @@ async fn jobs_program_execution_module_manifest_projects_ref_only_pending_review
 
 #[tokio::test]
 async fn list_and_inspect_return_bounded_provider_safe_projections() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "safe-projection",
@@ -1011,7 +1021,7 @@ async fn list_and_inspect_return_bounded_provider_safe_projections() {
 
 #[tokio::test]
 async fn file_git_module_manifest_projects_bounded_pending_review_metadata() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "file-git-module",
@@ -1095,7 +1105,7 @@ async fn file_git_module_manifest_projects_bounded_pending_review_metadata() {
 
 #[tokio::test]
 async fn stored_kind_schema_scope_lifecycle_and_missing_ids_are_revalidated() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "store-revalidation",
@@ -1131,7 +1141,7 @@ async fn stored_kind_schema_scope_lifecycle_and_missing_ids_are_revalidated() {
         "{wrong_kind}"
     );
 
-    let wrong_schema_host = EngineHostHandle::new_in_memory().expect("wrong schema host");
+    let wrong_schema_host = test_host();
     wrong_schema_host
         .register_resource_type(RegisterResourceType {
             kind: MODULE_MANIFEST_KIND.to_owned(),
@@ -1224,7 +1234,7 @@ async fn stored_kind_schema_scope_lifecycle_and_missing_ids_are_revalidated() {
 
 #[tokio::test]
 async fn read_authority_must_be_explicit_and_module_manifest_scoped() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
 
     let missing_grant_invocation = module_invocation(
         "missing-grant",
@@ -1301,7 +1311,7 @@ async fn read_authority_must_be_explicit_and_module_manifest_scoped() {
 
 #[tokio::test]
 async fn list_and_inspect_have_no_resource_side_effects() {
-    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let host = test_host();
     let grant_id = derive_module_read_grant(
         &host,
         "side-effects",

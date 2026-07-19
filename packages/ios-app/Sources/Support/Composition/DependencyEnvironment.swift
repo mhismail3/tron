@@ -14,12 +14,3 @@ extension EnvironmentValues {
         set { self[DependencyContainerKey.self] = newValue }
     }
 }
-
-// MARK: - View Extensions
-
-extension View {
-    /// Inject dependencies into the view hierarchy
-    func withDependencies(_ container: DependencyContainer) -> some View {
-        self.environment(\.dependencies, container)
-    }
-}

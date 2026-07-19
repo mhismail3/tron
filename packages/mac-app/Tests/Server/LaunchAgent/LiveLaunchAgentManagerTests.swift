@@ -30,7 +30,7 @@ struct LiveLaunchAgentManagerTests {
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(
                 for: .enabled,
-                currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+                currentVariant: .xcodeDebug,
                 runningParentBundleIdentifier: nil
             ) == nil
         )
@@ -38,7 +38,7 @@ struct LiveLaunchAgentManagerTests {
 
     @Test("debug companion treats an installed release service as already loaded")
     func debugCompanionWrapsReleaseService() {
-        let variant = MacRuntimeVariant.xcodeDebug(bundlePath: "/tmp/Debug/Tron.app")
+        let variant = MacRuntimeVariant.xcodeDebug
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(
                 for: .notRegistered,
@@ -80,7 +80,7 @@ struct LiveLaunchAgentManagerTests {
         #expect(
             !LiveLaunchAgentManager.shouldBootoutForTakeover(
                 status: .enabled,
-                currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+                currentVariant: .xcodeDebug,
                 runningParentBundleIdentifier: "com.tron.mac",
                 canManageLaunchAgent: false
             )
@@ -234,7 +234,7 @@ struct LiveLaunchAgentManagerTests {
         )
         let outcome = LiveLaunchAgentManager.preRegistrationOutcome(
             for: .enabled,
-            currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+            currentVariant: .xcodeDebug,
             runtimeInfo: runtime,
             canManageLaunchAgent: false,
             expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
@@ -289,12 +289,12 @@ struct LiveLaunchAgentManagerTests {
     }
 }
 
-@Suite("InstallLaunchAgentRunner")
-struct InstallLaunchAgentRunnerTests {
+@Suite("LaunchAgentLoader")
+struct LaunchAgentLoaderTests {
     @Test("bootstrap success does not restart")
     func bootstrapSuccessDoesNotRestart() async throws {
         let mock = MockLaunchAgentManager()
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: mock,
             plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
             label: "com.tron.server"
@@ -309,7 +309,7 @@ struct InstallLaunchAgentRunnerTests {
         let mock = MockLaunchAgentManager()
         mock.loadOutcome = .alreadyLoaded
 
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: mock,
             plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
             label: "com.tron.server"
@@ -319,13 +319,13 @@ struct InstallLaunchAgentRunnerTests {
         #expect(mock.calls.map(\.kind) == [.load, .restart])
     }
 
-    @Test("restart failure is surfaced to the install step")
+    @Test("restart failure is surfaced to the caller")
     func restartFailureSurfaces() async throws {
         let mock = MockLaunchAgentManager()
         mock.loadOutcome = .alreadyLoaded
         mock.restartOutcome = .launchdRefused(message: "stale job would not restart")
 
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: mock,
             plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
             label: "com.tron.server"

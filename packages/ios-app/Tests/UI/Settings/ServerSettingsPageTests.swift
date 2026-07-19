@@ -33,31 +33,59 @@ struct ServerSettingsPageTests {
         #expect(serverUnavailableCard.contains("startOnboarding(prefill: dependencies.pairedServerStore.activeServer)"))
         #expect(!serverUnavailableCard.contains("Button(SettingsLabels.connectToNewServer)"))
 
-        let connectionPage = try source(pathComponents: [
+        let serverSection = try source(pathComponents: [
             "Sources",
             "UI",
             "Settings",
             "Pages",
-            "ConnectionSettingsPage.swift",
+            "EngineServersSection.swift",
         ])
         let onboardRow = try section(
-            in: connectionPage,
+            in: serverSection,
             from: "private var onboardRow: some View {",
             to: "private func manageServerMenu("
         )
 
-        #expect(onboardRow.contains("startOnboarding(prefill: nil)"))
+        #expect(onboardRow.contains("startServerOnboarding(nil)"))
         #expect(onboardRow.contains("Text(SettingsLabels.connectToNewServer)"))
         #expect(!onboardRow.contains("dependencies.pairedServerStore.activeServer"))
     }
 
-    @Test("server page diagnostics copy stays local and minimal")
-    func serverPageDiagnosticsCopyStaysLocalAndMinimal() {
-        #expect(ConnectionSettingsDiagnosticsCopy.sectionTitle == "Diagnostics")
-        #expect(ConnectionSettingsDiagnosticsCopy.logsLabel == "Logs")
-        #expect(ConnectionSettingsDiagnosticsCopy.logsAction == "View")
-        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("redacted local iOS logs"))
-        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("dashboard cockpit"))
+    @Test("engine server section does not duplicate the settings toolbar log viewer")
+    func engineServerSectionDoesNotDuplicateSettingsToolbarLogViewer() throws {
+        let serverSection = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Settings",
+            "Pages",
+            "EngineServersSection.swift",
+        ])
+
+        #expect(!serverSection.contains("showLogs"))
+        #expect(!serverSection.contains("LogViewer"))
+        #expect(!serverSection.contains("logsSection"))
+        #expect(!serverSection.contains("Diagnostics"))
+    }
+
+    @Test("engine settings exposes the cached Tailscale address as read-only")
+    func engineSettingsExposesCachedTailscaleAddressAsReadOnly() throws {
+        let page = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Settings",
+            "Pages",
+            "EngineSettingsPage.swift",
+        ])
+        let tailscaleSection = try section(
+            in: page,
+            from: "private var tailscaleSection: some View {",
+            to: "private var enginePolicyContent: some View {"
+        )
+
+        #expect(tailscaleSection.contains("settingsState.tailscaleIp"))
+        #expect(tailscaleSection.contains("label: \"Tailscale IP\""))
+        #expect(tailscaleSection.contains(".textSelection(.enabled)"))
+        #expect(!tailscaleSection.contains("updateServerSetting"))
     }
 
     @Test("paired server menu uses server-specific actions")
@@ -82,20 +110,20 @@ struct ServerSettingsPageTests {
 
     @Test("server rows keep intrinsic height across sheet detents")
     func serverRowsKeepIntrinsicHeightAcrossSheetDetents() throws {
-        let connectionPage = try source(pathComponents: [
+        let serverSection = try source(pathComponents: [
             "Sources",
             "UI",
             "Settings",
             "Pages",
-            "ConnectionSettingsPage.swift",
+            "EngineServersSection.swift",
         ])
         let pairedRow = try section(
-            in: connectionPage,
+            in: serverSection,
             from: "private func pairedServerRow(_ server: PairedServer) -> some View {",
             to: "private var onboardRow: some View {"
         )
         let onboardRow = try section(
-            in: connectionPage,
+            in: serverSection,
             from: "private var onboardRow: some View {",
             to: "private func manageServerMenu("
         )
@@ -180,76 +208,6 @@ struct ServerSettingsPageTests {
 
         #expect(launch.consume()?.prefill == server)
         #expect(launch.consume() == nil)
-    }
-
-    @Test("server summary prompts pairing when no local servers exist")
-    func serverSummaryPromptsPairingWhenNoLocalServersExist() {
-        let context = ServerSettingsSummary.Context(
-            activeServerLabel: nil,
-            pairedServerCount: 0,
-            activeServerUnavailable: false,
-            isLoaded: false,
-            loadError: nil
-        )
-
-        #expect(ServerSettingsSummary.title(for: context) == "Connect a Mac")
-        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to connect this iPhone to the engine.")
-    }
-
-    @Test("server summary explains unavailable active server settings")
-    func serverSummaryExplainsUnavailableActiveServerSettings() {
-        let context = ServerSettingsSummary.Context(
-            activeServerLabel: "Test Server",
-            pairedServerCount: 1,
-            activeServerUnavailable: false,
-            isLoaded: false,
-            loadError: "Connection timed out"
-        )
-
-        #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is paired, but settings are unavailable: Connection timed out")
-    }
-
-    @Test("server summary explains connected loading state")
-    func serverSummaryExplainsConnectedLoadingState() {
-        let context = ServerSettingsSummary.Context(
-            activeServerLabel: "Test Server",
-            pairedServerCount: 1,
-            activeServerUnavailable: false,
-            isLoaded: false,
-            loadError: nil
-        )
-
-        #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading server settings.")
-    }
-
-    @Test("server summary warns when active server cannot be reached")
-    func serverSummaryWarnsWhenActiveServerCannotBeReached() {
-        let context = ServerSettingsSummary.Context(
-            activeServerLabel: "Test Server",
-            pairedServerCount: 1,
-            activeServerUnavailable: true,
-            isLoaded: false,
-            loadError: "Connection timed out"
-        )
-
-        #expect(ServerSettingsSummary.title(for: context) == "Test Server not available")
-        #expect(ServerSettingsSummary.description(for: context) == SettingsLabels.connectedServerUnavailableDescription)
-    }
-
-    @Test("server summary reflects loaded pairing and diagnostics state")
-    func serverSummaryReflectsLoadedSettings() {
-        let context = ServerSettingsSummary.Context(
-            activeServerLabel: "Test Server",
-            pairedServerCount: 2,
-            activeServerUnavailable: false,
-            isLoaded: true,
-            loadError: nil
-        )
-
-        #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Pairing and diagnostics are available.")
     }
 
     @Test("active unreachable row overrides stale connected status")

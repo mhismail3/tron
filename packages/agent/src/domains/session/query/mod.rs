@@ -4,12 +4,14 @@
 //! over immutable creation/session-ID keys beneath one server-issued
 //! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
 //! and clients can assemble a generous bounded snapshot without one unbounded
-//! database read.
+//! database read. Row lookups and bounded listing read `EventStore` directly;
+//! within this query path, `SessionManager` remains only for resume/cache data.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
+use crate::domains::session::event_store::ListSessionsOptions;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
 
@@ -42,7 +44,7 @@ impl SessionQueryService {
         let session_manager = deps.session_manager.clone();
         let session_id_for_resume = session_id.clone();
         run_blocking_task("session.resume", move || {
-            let active = session_manager
+            let state = session_manager
                 .resume_session(&session_id_for_resume)
                 .map_err(|error| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -51,8 +53,8 @@ impl SessionQueryService {
 
             Ok(json!({
                 "sessionId": session_id_for_resume,
-                "model": active.state.model,
-                "messageCount": active.state.messages.len(),
+                "model": state.model,
+                "messageCount": state.messages.len(),
                 "lastActivity": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             }))
         })
@@ -75,30 +77,37 @@ impl SessionQueryService {
             || chrono::Utc::now().to_rfc3339(),
             |cursor| cursor.snapshot_as_of.clone(),
         );
-        let filter = crate::domains::agent::r#loop::SessionFilter {
-            workspace_path: working_directory,
-            include_archived,
-            limit: Some(fetch_limit),
-            offset,
-            snapshot_created_at: Some(snapshot_as_of.clone()),
-            before_created_at: cursor
-                .as_ref()
-                .map(|cursor| cursor.before_created_at.clone()),
-            before_session_id: cursor
-                .as_ref()
-                .map(|cursor| cursor.before_session_id.clone()),
-            ..Default::default()
-        };
+        let before_created_at = cursor
+            .as_ref()
+            .map(|cursor| cursor.before_created_at.clone());
+        let before_session_id = cursor
+            .as_ref()
+            .map(|cursor| cursor.before_session_id.clone());
         let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let orchestrator = deps.orchestrator.clone();
         run_blocking_task("session.list", move || {
-            let mut sessions =
-                session_manager
-                    .list_sessions(&filter)
-                    .map_err(|error| CapabilityError::Internal {
-                        message: error.to_string(),
-                    })?;
+            let options = ListSessionsOptions {
+                workspace_id: None,
+                working_directory: working_directory.as_deref(),
+                ended: if include_archived {
+                    None
+                } else {
+                    Some(false)
+                },
+                #[allow(clippy::cast_possible_wrap)]
+                limit: Some(fetch_limit as i64),
+                #[allow(clippy::cast_possible_wrap)]
+                offset: offset.map(|value| value as i64),
+                snapshot_created_at: Some(&snapshot_as_of),
+                before_created_at: before_created_at.as_deref(),
+                before_session_id: before_session_id.as_deref(),
+            };
+            let mut sessions = event_store.list_sessions(&options).map_err(|error| {
+                CapabilityError::Internal {
+                    message: format!("Persistence error: {error}"),
+                }
+            })?;
 
             let has_more = sessions.len() > limit;
             sessions.truncate(limit);
@@ -110,7 +119,7 @@ impl SessionQueryService {
                         before_created_at: session.created_at.clone(),
                         before_session_id: session.id.clone(),
                         include_archived,
-                        working_directory: filter.workspace_path.clone(),
+                        working_directory: working_directory.clone(),
                     })
                     .expect("session list cursor serialization cannot fail")
                 })
@@ -130,7 +139,7 @@ impl SessionQueryService {
             let items: Vec<Value> = sessions
                 .into_iter()
                 .map(|session| {
-                    let is_active = session_manager.is_active(&session.id);
+                    let is_cached = session_manager.is_cached(&session.id);
                     let is_running = orchestrator.has_active_run(&session.id);
                     let preview = previews.get(&session.id);
                     json!({
@@ -141,7 +150,8 @@ impl SessionQueryService {
                         "createdAt": session.created_at,
                         "lastActivity": session.last_activity_at,
                         "endedAt": session.ended_at,
-                        "isActive": is_active,
+                        // Wire compatibility: `isActive` means cache residency.
+                        "isActive": is_cached,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
                         "eventCount": session.event_count,
@@ -166,7 +176,7 @@ impl SessionQueryService {
                 "hasMore": has_more,
                 "nextCursor": next_cursor,
                 "snapshotAsOf": snapshot_as_of,
-                "snapshotCanReconcile": include_archived && filter.workspace_path.is_none() && offset.is_none(),
+                "snapshotCanReconcile": include_archived && working_directory.is_none() && offset.is_none(),
             }))
         })
         .await
@@ -176,13 +186,13 @@ impl SessionQueryService {
         deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_head = session_id.clone();
         run_blocking_task("session.get_head", move || {
-            let session = session_manager
+            let session = event_store
                 .get_session(&session_id_for_head)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -205,17 +215,17 @@ impl SessionQueryService {
         let event_store = deps.event_store.clone();
         let session_id_for_state = session_id.clone();
         run_blocking_task("session.get_state", move || {
-            let session = session_manager
+            let session = event_store
                 .get_session(&session_id_for_state)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_state}' not found"),
                 })?;
 
-            let active = session_manager
+            let state = session_manager
                 .resume_session(&session_id_for_state)
                 .map_err(|error| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -227,16 +237,16 @@ impl SessionQueryService {
             Ok(json!({
                 "sessionId": session_id_for_state,
                 "headEventId": session.head_event_id,
-                "model": active.state.model,
-                "turnCount": active.state.turn_count,
-                "isEnded": active.state.is_ended,
-                "workingDirectory": active.state.working_directory,
+                "model": state.model,
+                "turnCount": state.turn_count,
+                "isEnded": state.is_ended,
+                "workingDirectory": state.working_directory,
                 "workspaceId": session.working_directory,
                 "eventCount": event_count,
                 "lastTurnInputTokens": session.last_turn_input_tokens,
                 "tokenUsage": {
-                    "inputTokens": active.state.token_usage.input_tokens,
-                    "outputTokens": active.state.token_usage.output_tokens,
+                    "inputTokens": state.token_usage.input_tokens,
+                    "outputTokens": state.token_usage.output_tokens,
                     "cacheReadTokens": session.total_cache_read_tokens,
                     "cacheCreationTokens": session.total_cache_creation_tokens,
                 },
@@ -258,14 +268,13 @@ impl SessionQueryService {
     /// unbounded — the payload is serialized in memory before being
     /// returned, which matches how `session.reconstruct` already behaves.
     pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let session_id_for_export = session_id.clone();
         run_blocking_task("session.export", move || {
-            let session = session_manager
+            let session = event_store
                 .get_session(&session_id_for_export)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -319,14 +328,13 @@ impl SessionQueryService {
         limit: Option<usize>,
         before_id: Option<String>,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let session_id_for_history = session_id.clone();
         run_blocking_task("session.get_history", move || {
-            let _ = session_manager
+            let _ = event_store
                 .get_session(&session_id_for_history)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import TronMac
 
@@ -21,8 +22,6 @@ struct MacAppStartupMaintenanceTests {
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
-            serverHelperBundle: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app", isDirectory: true),
-            serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron", isDirectory: false),
             bearerTokenPath: tmp.appendingPathComponent("profiles/auth.json", isDirectory: false),
             onboardedMarkerPath: tmp.appendingPathComponent("internal/run/.onboarded", isDirectory: false),
             settingsPath: tmp.appendingPathComponent("profiles/user/profile.toml", isDirectory: false),
@@ -41,7 +40,7 @@ struct MacAppStartupMaintenanceTests {
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
             pingServer: { _ in
-                pingResult ?? .success(ServerInfo(version: currentVersion.canonicalVersion, port: 9847, paired: true))
+                pingResult ?? .success(ServerPingInfo(version: currentVersion.canonicalVersion))
             },
             serverStartHealthCheckAttempts: 1,
             serverStartHealthCheckDelayNanoseconds: 0,
@@ -150,7 +149,6 @@ struct MacAppStartupMaintenanceTests {
             serverProcess: ServerProcessInfo(
                 pid: 42,
                 uptime: "00:01",
-                command: "\(tmp.path)/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                 isDevServer: true
             ),
             launchAgentManager: mock
@@ -173,12 +171,43 @@ struct MacAppStartupMaintenanceTests {
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
         let mock = MockLaunchAgentManager()
-        let setup = Self.makeSetup(
+        let lifecycleCalls = OSAllocatedUnfairLock(initialState: StartupMaintenanceCalls())
+        var setup = Self.makeSetup(
             tmp: tmp,
             currentVersion: current,
             onboarded: false,
             launchAgentManager: mock
         )
+        let readRecordedAppVersion = setup.readRecordedAppVersion
+        setup.readRecordedAppVersion = {
+            lifecycleCalls.withLock { $0.recordedVersionReads += 1 }
+            return readRecordedAppVersion()
+        }
+        let onboardedSentinelExists = setup.onboardedSentinelExists
+        setup.onboardedSentinelExists = {
+            lifecycleCalls.withLock { $0.onboardedReads += 1 }
+            return onboardedSentinelExists()
+        }
+        let probeServerProcess = setup.probeServerProcess
+        setup.probeServerProcess = { port in
+            lifecycleCalls.withLock { $0.processProbes += 1 }
+            return await probeServerProcess(port)
+        }
+        let writeRecordedAppVersion = setup.writeRecordedAppVersion
+        setup.writeRecordedAppVersion = { version in
+            lifecycleCalls.withLock { $0.markerWrites += 1 }
+            try writeRecordedAppVersion(version)
+        }
+
+        let existingLaunch = await MacAppStartupMaintenance.run(
+            setup: setup,
+            controller: nil,
+            context: .existingOnboardedLaunch
+        )
+
+        #expect(existingLaunch == .skipped(.notOnboarded))
+        #expect(setup.readRecordedAppVersion() == nil)
+        lifecycleCalls.withLock { $0 = StartupMaintenanceCalls() }
 
         let result = await MacAppStartupMaintenance.run(
             setup: setup,
@@ -188,6 +217,19 @@ struct MacAppStartupMaintenanceTests {
 
         #expect(result == .recordedCurrentVersion)
         #expect(mock.calls.isEmpty)
-        #expect(setup.readRecordedAppVersion() == current)
+        let completionCalls = lifecycleCalls.withLock { $0 }
+        #expect(completionCalls.recordedVersionReads == 0)
+        #expect(completionCalls.onboardedReads == 0)
+        #expect(completionCalls.processProbes == 0)
+        #expect(completionCalls.markerWrites == 1)
+        let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json", isDirectory: false)
+        #expect(MacAppVersionMarkerStore.read(at: marker) == current)
     }
+}
+
+private struct StartupMaintenanceCalls {
+    var recordedVersionReads = 0
+    var onboardedReads = 0
+    var processProbes = 0
+    var markerWrites = 0
 }

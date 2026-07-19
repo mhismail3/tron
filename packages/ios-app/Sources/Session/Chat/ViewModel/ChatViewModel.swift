@@ -3,7 +3,6 @@ import PhotosUI
 import UIKit
 
 // MARK: - Chat View Model
-// Note: CapabilityInvocationRecord is defined in EventStoreManager.swift
 
 @Observable
 @MainActor
@@ -14,15 +13,13 @@ final class ChatViewModel {
     var messages: [ChatMessage] = []
     /// Agent lifecycle phase for the primitive chat loop.
     var agentPhase: AgentPhase = .idle
+    var isProcessing: Bool { agentPhase.isProcessing }
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
     /// because context maintenance can trigger it asynchronously. A turn_start resets it.
     var isCompacting = false
-    var connectionState: ConnectionState = .disconnected
     var showSettings = false
-    var errorMessage: String?
-    var showError: Bool { errorMessage != nil }
     /// Set to true when the session doesn't exist on server and view should navigate back
     var shouldDismiss = false
     var isThinkingExpanded = false
@@ -32,6 +29,8 @@ final class ChatViewModel {
     var isLoadingMoreMessages = false
     /// Composer microphone recording state.
     var isRecording = false
+    /// Smoothed microphone energy for the recording affordance (0...1).
+    var recordingAudioLevel: Double = 0
     /// Composer audio is being sent to local transcription.
     var isTranscribing = false
 
@@ -77,7 +76,7 @@ final class ChatViewModel {
         animationCoordinator.makeCapabilityInvocationVisible(invocationId)
     }
 
-    /// Logging methods (LoggingContext)
+    /// Logging methods (ChatCoordinatorContext)
     func logVerbose(_ message: String) {
         logger.verbose(message, category: .events)
     }
@@ -98,7 +97,7 @@ final class ChatViewModel {
         logger.error(message, category: .events)
     }
 
-    /// Show error to user (required by LoggingContext, used by all coordinators)
+    /// Show error to user (required by ChatCoordinatorContext).
     func showError(_ message: String) {
         handleError(message, severity: .fatal)
     }
@@ -107,6 +106,10 @@ final class ChatViewModel {
 
     let services: ChatSessionServices
     let sessionId: String
+    /// PhotosPicker I/O adapter. The selection task captures this value rather
+    /// than retaining the mounted view model across an external data load.
+    @ObservationIgnored
+    let photoPickerDataLoader: PhotoPickerDataLoader
     /// Task for handling the live session event stream.
     @ObservationIgnored
     private var eventTask: Task<Void, Never>?
@@ -116,11 +119,19 @@ final class ChatViewModel {
     var thinkingMessageId: UUID?
     /// True while reconstruction is in progress — buffers real-time events for replay after
     var isReconstructing = false
-    /// Events buffered during reconstruction, drained after sequenceHighWaterMark is set.
+    /// Events buffered during reconstruction. They drain only after a server
+    /// snapshot commits its sequence high-water mark and projection.
     @ObservationIgnored
     var eventBuffer: [ParsedEventV2] = []
     /// Highest processed event sequence number. Events with seq <= this are dropped (dedup).
     var sequenceHighWaterMark: Int64 = -1
+    /// Monotonic request observed by the mounted ChatView. The view owns the
+    /// cancel-and-replace reconstruction task; the event handler owns no Task.
+    private(set) var streamRecoveryRequestGeneration: UInt64 = 0
+
+    func advanceStreamRecoveryRequest() {
+        streamRecoveryRequestGeneration &+= 1
+    }
     /// Oldest event ID from the loaded reconstruction window (for pagination cursor).
     var reconstructionOldestEventId: String?
     /// Whether the server reported older reconstruction pages before `reconstructionOldestEventId`.
@@ -163,8 +174,6 @@ final class ChatViewModel {
     let messagingCoordinator = MessagingCoordinator()
     /// Coordinates session connection, reconnection, and catch-up
     let connectionCoordinator = ConnectionCoordinator()
-    /// Coordinates event dispatch - routes plugin events to handlers
-    let eventDispatchCoordinator = EventDispatchCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
     /// Coordinates local composer mic recording and transcription.
@@ -178,10 +187,8 @@ final class ChatViewModel {
     let micRecorder = ComposerMicRecorder()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
-    var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
-
-    /// Track capability invocations for the current turn (for display purposes)
-    var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
+    /// Message identities for capability invocations in the live current turn.
+    var currentTurnCapabilityMessageIds: Set<UUID> = []
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end
@@ -249,11 +256,16 @@ final class ChatViewModel {
 
     // MARK: - Initialization
 
-    init(services: ChatSessionServices, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
+    init(
+        services: ChatSessionServices,
+        sessionId: String,
+        eventStoreManager: EventStoreManager? = nil,
+        photoPickerDataLoader: PhotoPickerDataLoader = .live
+    ) {
         self.services = services
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
-        self.connectionState = services.connection.connectionState
+        self.photoPickerDataLoader = photoPickerDataLoader
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
         setupBindings()
         setupEventProcessingCallbacks()
@@ -268,28 +280,38 @@ final class ChatViewModel {
     private var observationTasks: [Task<Void, Never>] = []
 
     private func setupBindings() {
-        observationTasks.append(Self.observeLoop({ self.services.connection.connectionState }) { [self] state in
-            self.connectionState = state
+        let connection = services.connection
+        let inputBarState = inputBarState
+        let micRecorder = micRecorder
+
+        observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
+            guard let self else { return }
 
             if case .disconnected = state {
-                if self.agentPhase != .idle {
-                    self.agentPhase = .idle
+                // A matched Stop remains pending across transport loss. Only
+                // canonical terminal events or reconstruction can decide its
+                // outcome; clearing it here would re-enable duplicate Stop.
+                if agentPhase == .processing {
+                    agentPhase = .idle
                 }
-                self.streamingManager.reset()
-                self.isCompacting = false
-                self.compactionInProgressMessageId = nil
-                self.runningCapabilityInvocationCount = 0
-                self.clearDisplayStreamState()
-                self.prunedLiveMessages.removeAll()
+                isCompacting = false
+                compactionInProgressMessageId = nil
+                runningCapabilityInvocationCount = 0
+                clearDisplayStreamState()
+                prunedLiveMessages.removeAll()
             }
         })
 
-        observationTasks.append(Self.observeLoop({ self.inputBarState.selectedImages }) { [self] images in
-            Task { await self.processSelectedImages(images) }
+        observationTasks.append(Self.observeLoop({ inputBarState.selectedImages }) { [weak self] images in
+            self?.startSelectedImageProcessing(images)
         })
 
-        observationTasks.append(Self.observeLoop({ self.micRecorder.isRecording }) { [self] recording in
-            self.isRecording = recording
+        observationTasks.append(Self.observeLoop({ micRecorder.isRecording }) { [weak self] recording in
+            self?.isRecording = recording
+        })
+
+        observationTasks.append(Self.observeLoop({ micRecorder.audioLevel }) { [weak self] level in
+            self?.recordingAudioLevel = level
         })
     }
 
@@ -299,11 +321,13 @@ final class ChatViewModel {
         guard eventTask == nil else { return }
         eventTaskGeneration += 1
         let generation = eventTaskGeneration
+        let eventRepository = services.events
+        let sessionId = self.sessionId
         eventTask = Task { [weak self] in
-            guard let self else { return }
             logger.info("[LIVE] Starting engine event stream for session \(sessionId)", category: .events)
-            for await event in services.events.events(for: sessionId) {
+            for await event in eventRepository.events(for: sessionId) {
                 guard !Task.isCancelled else { break }
+                guard let self else { break }
                 logger.verbose(
                     "[LIVE] ChatViewModel received event \(event.eventType) session=\(event.sessionId ?? "nil") seq=\(event.sequence?.description ?? "nil")",
                     category: .events
@@ -311,6 +335,7 @@ final class ChatViewModel {
                 handleEventV2(event)
             }
             logger.info("[LIVE] Engine event stream ended for session \(sessionId), cancelled=\(Task.isCancelled)", category: .events)
+            guard let self else { return }
             if self.eventTaskGeneration == generation {
                 self.eventTask = nil
             }
@@ -323,21 +348,9 @@ final class ChatViewModel {
         eventTask = nil
     }
 
-    var liveEventStreamIsActiveForTesting: Bool {
-        eventTask != nil
-    }
-
-    /// Tracked fire-and-forget tasks — cancelled in deinit to prevent leaks
+    /// Single cancel-and-replace owner for the current PhotosPicker selection.
     @ObservationIgnored
-    private var backgroundTasks: [Task<Void, Never>] = []
-    /// Launch a tracked background task. Removed from tracking on completion.
-    func launchBackground(_ operation: @escaping @Sendable @MainActor () async -> Void) {
-        let task = Task { @MainActor [weak self] in
-            await operation()
-            self?.backgroundTasks.removeAll { $0.isCancelled }
-        }
-        backgroundTasks.append(task)
-    }
+    var selectedImageTask: Task<Void, Never>?
 
     deinit {
         // MainActor classes always deinit on the main actor.
@@ -345,7 +358,7 @@ final class ChatViewModel {
         MainActor.assumeIsolated {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
-            for task in backgroundTasks { task.cancel() }
+            selectedImageTask?.cancel()
             transcriptionTask?.cancel()
             micRecorder.cancelRecording()
         }
@@ -399,9 +412,9 @@ final class ChatViewModel {
         }
     }
 
-    /// Handle a plugin-based event by dispatching to the EventDispatchCoordinator
+    /// Handle a plugin-based event through the authoritative registry.
     private func handlePluginEvent(type: String, transform: @Sendable () -> (any EventResult)?) {
-        eventDispatchCoordinator.dispatch(type: type, transform: transform, context: self)
+        EventRegistry.shared.dispatch(type: type, transform: transform, context: self)
     }
 
     // MARK: - Message Updates
@@ -542,10 +555,6 @@ final class ChatViewModel {
         runningCapabilityInvocationCount > 0
     }
 
-    var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
-    }
-
     var currentModel: String {
         services.events.currentModel
     }
@@ -554,15 +563,11 @@ final class ChatViewModel {
         services.events.hasActiveSession
     }
 
-    /// Updates the context window based on available model info
-    /// Called by ChatView when models are loaded or model is switched
+    /// Updates the context window from the model catalog loaded by ChatView.
     func updateContextWindow(from models: [ModelInfo]) {
         if let model = models.first(where: { $0.id == currentModel }) {
             contextState.currentContextWindow = model.contextWindow
         }
-    }
-
-    func refreshContextFromServer() async {
     }
 
     // Note: Deep link methods moved to ChatViewModel+DeepLinks.swift

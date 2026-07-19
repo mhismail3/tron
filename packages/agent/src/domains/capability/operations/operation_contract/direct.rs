@@ -8,51 +8,6 @@ use serde_json::{Value, json};
 
 use super::{closed_schema, idempotency_schema};
 
-#[cfg(test)]
-const ASSIGNED_OPERATIONS: &[&str] = &[
-    "observe",
-    "state_get",
-    "state_set",
-    "state_list",
-    "filesystem_read",
-    "filesystem_list",
-    "filesystem_find",
-    "filesystem_glob",
-    "filesystem_search_text",
-    "filesystem_diff",
-    "filesystem_write",
-    "filesystem_edit",
-    "filesystem_apply_patch",
-    "git_status",
-    "git_diff",
-    "git_branch_inventory",
-    "git_stage",
-    "git_unstage",
-    "git_commit",
-    "git_branch_start",
-    "process_run",
-    "job_start",
-    "job_status",
-    "job_list",
-    "job_log",
-    "job_cancel",
-    "trace_list",
-    "trace_get",
-    "log_recent",
-    "replay_manifest",
-    "catalog_search",
-    "catalog_inspect",
-    "catalog_conformance",
-    "repository_tree_snapshot",
-    "repository_tree_list",
-    "repository_tree_inspect",
-    "web_fetch",
-    "web_robots_check",
-    "web_source_list",
-    "web_source_inspect",
-    "web_source_archive",
-];
-
 pub(super) fn input_schema(operation: &str) -> Option<Value> {
     let (required, fields) = match operation {
         "observe" => (vec!["operation"], vec![("input", string_schema())]),
@@ -738,8 +693,6 @@ fn enum_schema(values: &[&str]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use serde_json::json;
 
     use super::*;
@@ -750,27 +703,22 @@ mod tests {
         FunctionId::new("capability::execute").expect("canonical function id")
     }
 
+    fn direct_operations() -> impl Iterator<Item = &'static str> {
+        super::super::supported_operation_names()
+            .iter()
+            .copied()
+            .filter(|operation| input_schema(operation).is_some())
+    }
+
     #[test]
-    fn assigned_operation_set_is_exact_and_unique() {
-        assert_eq!(ASSIGNED_OPERATIONS.len(), 41);
-        assert_eq!(
-            ASSIGNED_OPERATIONS
-                .iter()
-                .copied()
-                .collect::<BTreeSet<_>>()
-                .len(),
-            ASSIGNED_OPERATIONS.len()
-        );
-        for operation in ASSIGNED_OPERATIONS {
-            assert!(input_schema(operation).is_some(), "missing {operation}");
-        }
+    fn direct_family_rejects_unowned_operations() {
         assert!(input_schema("job_cleanup").is_none());
         assert!(input_schema("filesystem_create_dir").is_none());
     }
 
     #[test]
     fn assigned_schemas_are_closed_valid_exact_contracts() {
-        for operation in ASSIGNED_OPERATIONS {
+        for operation in direct_operations() {
             let contract = input_schema(operation).expect("assigned schema");
             assert_eq!(contract["additionalProperties"], false, "{operation}");
             assert_eq!(
@@ -778,7 +726,7 @@ mod tests {
                 "{operation}"
             );
             assert_eq!(
-                contract["properties"]["operation"]["const"], *operation,
+                contract["properties"]["operation"]["const"], operation,
                 "{operation}"
             );
             assert!(

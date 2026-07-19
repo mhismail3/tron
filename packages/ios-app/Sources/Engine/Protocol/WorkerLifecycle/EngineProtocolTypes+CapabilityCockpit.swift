@@ -102,6 +102,8 @@ struct CapabilityCockpitRouteStoryDTO: Codable, Equatable, Identifiable, Sendabl
 
 struct CapabilityCockpitOperationDTO: Codable, Equatable, Identifiable, Sendable {
     var name: String
+    var displayName: String
+    var description: String
     var family: String
     var familyLabel: String
     var capabilityPool: CapabilityCockpitPoolDTO? = nil

@@ -30,14 +30,15 @@ struct PairingURLParserTests {
         }
     }
 
-    @Test("Optional server name label is round-tripped")
-    func roundTripsLabel() {
-        let url = PairingURLParser.makeURL(host: "1.2.3.4", port: 9847, token: "tok", label: "Studio Mac")!
-        if case .success(let payload) = PairingURLParser.parse(url.absoluteString) {
-            #expect(payload.label == "Studio Mac")
-        } else {
-            Issue.record("expected success with label")
-        }
+    @Test("Parses the Mac emitter's optional server label")
+    func parsesMacEmitterLabel() {
+        let url = "tron://pair?host=1.2.3.4&port=9847&token=tok&label=Studio%20Mac"
+        #expect(PairingURLParser.parse(url) == .success(.init(
+            host: "1.2.3.4",
+            port: 9847,
+            token: "tok",
+            label: "Studio Mac"
+        )))
     }
 
     @Test("Unrecognized query parameters are dropped")
@@ -46,21 +47,26 @@ struct PairingURLParserTests {
         #expect((try? PairingURLParser.parse(url).get()) != nil)
     }
 
-    @Test("Round-trip through makeURL preserves all required fields")
-    func roundTripsRequiredFields() {
-        let original = PairingURLParser.PairingPayload(
-            host: "100.64.213.113", port: 9847, token: "AbC-_xyz123", label: nil
-        )
-        let url = PairingURLParser.makeURL(host: original.host, port: original.port, token: original.token)!
-        let parsed = try? PairingURLParser.parse(url.absoluteString).get()
-        #expect(parsed == original)
+    @Test("Parses all required fields emitted by the Mac")
+    func parsesMacEmitterRequiredFields() {
+        let url = "tron://pair?host=100.64.213.113&port=9847&token=AbC-_xyz123"
+        #expect(PairingURLParser.parse(url) == .success(.init(
+            host: "100.64.213.113",
+            port: 9847,
+            token: "AbC-_xyz123",
+            label: nil
+        )))
     }
 
-    @Test("IPv6 hosts are accepted and round-tripped unbracketed")
-    func acceptsIPv6Host() {
-        let url = PairingURLParser.makeURL(host: "FD7A:115C:A1E0::1", port: 9847, token: "tok")!
-        let parsed = try? PairingURLParser.parse(url.absoluteString).get()
-        #expect(parsed?.host == "fd7a:115c:a1e0::1")
+    @Test("Parses an unbracketed IPv6 host emitted by the Mac")
+    func parsesMacEmitterIPv6Host() {
+        let url = "tron://pair?host=fd7a:115c:a1e0::1&port=9847&token=tok"
+        #expect(PairingURLParser.parse(url) == .success(.init(
+            host: "fd7a:115c:a1e0::1",
+            port: 9847,
+            token: "tok",
+            label: nil
+        )))
     }
 
     // MARK: - Schemes & hosts
@@ -125,14 +131,6 @@ struct PairingURLParserTests {
         }
     }
 
-    @Test("makeURL rejects malformed host, bad port, and empty token")
-    func makeURLRejectsMalformedRequiredFields() {
-        #expect(PairingURLParser.makeURL(host: "https://100.64.0.1", port: 9847, token: "t") == nil)
-        #expect(PairingURLParser.makeURL(host: "100.64.0.1", port: 0, token: "t") == nil)
-        #expect(PairingURLParser.makeURL(host: "100.64.0.1", port: 65_536, token: "t") == nil)
-        #expect(PairingURLParser.makeURL(host: "100.64.0.1", port: 9847, token: "  ") == nil)
-    }
-
     // MARK: - Missing fields
 
     @Test("Missing host classified as missingHost")
@@ -159,6 +157,14 @@ struct PairingURLParserTests {
         } else { Issue.record("expected missingToken") }
     }
 
+    @Test("Whitespace-only token is classified as missingToken")
+    func whitespaceOnlyTokenIsMissing() {
+        let result = PairingURLParser.parse("tron://pair?host=h&port=1&token=%20%20")
+        if case .failure(let err) = result {
+            #expect(err == .missingToken)
+        } else { Issue.record("expected missingToken") }
+    }
+
     @Test("Empty values count as missing")
     func emptyValuesAreMissing() {
         let result = PairingURLParser.parse("tron://pair?host=&port=1&token=t")
@@ -179,9 +185,9 @@ struct PairingURLParserTests {
 
     @Test("Out-of-range port is invalidPort")
     func outOfRangePortRejected() {
-        let result = PairingURLParser.parse("tron://pair?host=h&port=99999&token=t")
+        let result = PairingURLParser.parse("tron://pair?host=h&port=65536&token=t")
         if case .failure(let err) = result {
-            #expect(err == .invalidPort("99999"))
+            #expect(err == .invalidPort("65536"))
         } else { Issue.record("expected invalidPort") }
     }
 

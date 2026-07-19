@@ -11,21 +11,19 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`authority`] | Grants, leases, compensation, and authorization policy |
-//! | [`catalog`] | Live catalog registry, discovery, capability views, and revision changes |
-//! | [`durability`] | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
-//! | [`invocation`] | Host handle, invocation records, handler dispatch, and model-facing context |
-//! | [`kernel`] | Engine ids, definitions, shared types, and error model |
-//! | [`primitives`] | Engine-native primitive workers such as resource/grant/ui support |
-//! | [`runtime`] | Trigger dispatch, external-worker runtime, and worker protocol DTOs |
+//! | `authority` | Grants, leases, compensation, and authorization policy |
+//! | `catalog` | Live catalog registry, discovery, and revision changes |
+//! | `durability` | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
+//! | `invocation` | Host handle, invocation records, handler dispatch, and model-facing context |
+//! | `kernel` | Engine ids, definitions, shared types, and error model |
+//! | `primitives` | Engine-native primitive workers such as resource/grant/ui support |
+//! | `runtime` | Trigger dispatch, external-worker runtime, and worker protocol DTOs |
 //!
 //! ## Entry Points
 //!
-//! - [`EngineHost`] owns the in-process catalog, policy checks, invocation
-//!   lifecycle, idempotency, ledgers, queues, streams, resources, grants, and
-//!   runtime handles.
 //! - [`EngineHostHandle`] is the intent-shaped boundary used by transports,
-//!   startup, and domain services.
+//!   startup, and domain services. The raw host and live catalog remain
+//!   engine-owned composition details behind this handle.
 //! - [`EngineTriggerRuntime`] dispatches trigger-originated work through the
 //!   same canonical invocation lifecycle as direct requests.
 //! - [`EngineExternalWorkerRuntime`] owns loopback external-worker connection,
@@ -47,12 +45,16 @@
 //!   the engine-owned grant store before any handler runs;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
-//! - `EngineHost` exposes privileged `engine::*` transport functions for live
-//!   worker/client discovery, inspection, cursor watch, delegated invocation,
-//!   and promotion;
+//! - the engine-owned raw host implements privileged `engine::*` transport
+//!   functions for live worker/client discovery, inspection, cursor watch,
+//!   delegated invocation, and promotion without exposing raw composition
+//!   through the crate facade;
 //! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
+//!   its narrow regular-handler cancellation path observes cancellation only at
+//!   the in-process handler boundary, then still releases acquired resource
+//!   leases and finalizes ledger, idempotency, and compensation records;
 //!   read-only grant inspection through the handle is reserved for domain
 //!   workers that must enforce policy against the active stored grant without
 //!   importing grant-store internals;
@@ -63,7 +65,7 @@
 //!   enter startup through source-backed domain contracts and inventory lineage;
 //! - stream, state, queue, catalog, grant, worker, trace records, generated UI,
 //!   and the generic `resource` kernel are retained only where covered by the
-//!   primitive loop and the completed cleanup/ownership scorecards;
+//!   primitive loop, source-owned contracts, and focused boundary tests;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   shared-state mutations, so the host can acquire/release one domain resource
 //!   from payload fields plus causal context such as `sessionId`, record
@@ -142,17 +144,15 @@ pub use authority::grants::{
     ListGrants,
 };
 pub use authority::leases::{AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus};
-pub use catalog::capabilities::AgentCapabilityClient;
 pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
-pub use catalog::registry::LiveCatalog;
 pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
 };
 pub use durability::queue::{
-    EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
-    EnqueueInvocation, MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_LIST_PAGE_SIZE,
-    MAX_QUEUE_PAYLOAD_BYTES, QueueAttemptOutcome, QueueItemStatus,
+    EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EnqueueInvocation,
+    MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_LIST_PAGE_SIZE, MAX_QUEUE_PAYLOAD_BYTES,
+    QueueAttemptOutcome, QueueItemStatus,
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub(crate) use durability::resources::CAPABILITY_BINDING_DECISION_PAYLOAD_SCHEMA_VERSION;
@@ -176,7 +176,6 @@ pub(crate) use durability::resources::CONTEXT_SURVIVOR_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use durability::resources::MODULE_INSTALL_DECISION_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use durability::resources::MODULE_INSTALL_REQUEST_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use durability::resources::MODULE_LIFECYCLE_STATE_PAYLOAD_SCHEMA_VERSION;
-pub(crate) use durability::resources::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use durability::resources::MODULE_PROPOSAL_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use durability::resources::MODULE_RUNTIME_STATE_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use durability::resources::MODULE_VALIDATION_REPORT_PAYLOAD_SCHEMA_VERSION;
@@ -222,9 +221,8 @@ pub use durability::resources::{
     MODULE_DEPENDENCY_REQUEST_KIND, MODULE_DEPENDENCY_REQUEST_SCHEMA_ID,
     MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_INSTALL_REQUEST_KIND,
     MODULE_INSTALL_REQUEST_SCHEMA_ID, MODULE_LIFECYCLE_STATE_KIND,
-    MODULE_LIFECYCLE_STATE_SCHEMA_ID, MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID,
-    MODULE_PROPOSAL_KIND, MODULE_PROPOSAL_SCHEMA_ID, MODULE_RUNTIME_STATE_KIND,
-    MODULE_RUNTIME_STATE_SCHEMA_ID, MODULE_VALIDATION_REPORT_KIND,
+    MODULE_LIFECYCLE_STATE_SCHEMA_ID, MODULE_PROPOSAL_KIND, MODULE_PROPOSAL_SCHEMA_ID,
+    MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID, MODULE_VALIDATION_REPORT_KIND,
     MODULE_VALIDATION_REPORT_SCHEMA_ID, NOTIFICATION_DELIVERY_KIND,
     NOTIFICATION_DELIVERY_SCHEMA_ID, NOTIFICATION_KIND, NOTIFICATION_SCHEMA_ID,
     PROCEDURAL_ACTIVATION_DECISION_KIND, PROCEDURAL_ACTIVATION_DECISION_SCHEMA_ID,
@@ -252,9 +250,7 @@ pub use durability::streams::{
     EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
     StreamActorScope, StreamCursor,
 };
-pub use invocation::host::{
-    CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle,
-};
+pub use invocation::host::{CatalogWatchRequest, CatalogWatchResponse, EngineHostHandle};
 pub use invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -279,9 +275,8 @@ pub use kernel::types::{
     TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
     WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
-pub use runtime::external_workers::{
-    EngineExternalWorkerRuntime, ExternalWorkerConnection, ExternalWorkerInvoker,
-};
+pub use runtime::external_workers::EngineExternalWorkerRuntime;
+pub(crate) use runtime::external_workers::ExternalWorkerInvoker;
 pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use runtime::worker_protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
@@ -293,9 +288,7 @@ pub use runtime::worker_protocol::{
 /// Return whether a grant id is one of the engine-owned bootstrap roots.
 #[must_use]
 pub(crate) fn is_bootstrap_authority_grant_id(grant_id: &AuthorityGrantId) -> bool {
-    authority::grants::BOOTSTRAP_GRANT_IDS
-        .iter()
-        .any(|bootstrap| grant_id.as_str() == *bootstrap)
+    authority::grants::is_bootstrap_grant_id(grant_id)
 }
 
 #[cfg(test)]

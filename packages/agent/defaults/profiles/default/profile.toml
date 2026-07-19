@@ -43,17 +43,6 @@ preserveRecentCount = 5
 [settings.agent]
 maxTurns = 250
 
-[settings.logging.moduleOverrides]
-ort = "error"
-
-[settings.observability]
-logLevel = "info"
-verboseRetentionDays = 7
-
-[settings.storage]
-retentionEnabled = true
-maxDatabaseMb = 512
-
 [settings.server]
 heartbeatIntervalMs = 30000
 defaultModel = "claude-sonnet-4-6"

@@ -16,7 +16,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     let mut specs = vec![
         CapabilityContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"acknowledged":{"type":"boolean"},"runId":{"type":"string"}},"required":["acknowledged","runId"],"type":"object"}))
+            .response_schema(agent_prompt_response_schema())
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .stream_topics(STREAM_TOPICS.to_vec())
@@ -93,7 +93,7 @@ fn agent_prompt_response_schema() -> serde_json::Value {
         "required": ["acknowledged", "runId"],
         "additionalProperties": false,
         "properties": {
-            "acknowledged": {"type": "boolean"},
+            "acknowledged": {"type": "boolean", "const": true},
             "runId": {"type": "string"}
         }
     })
@@ -121,5 +121,25 @@ mod tests {
                 "agent::run_turn",
             ]
         );
+    }
+
+    #[test]
+    fn prompt_contracts_admit_only_affirmative_acknowledgements() {
+        let specs = capabilities().expect("agent contracts");
+        for function_id in ["agent::prompt", "agent::prompt_apply", "agent::run_turn"] {
+            let spec = specs
+                .iter()
+                .find(|spec| spec.function_id.as_str() == function_id)
+                .expect("prompt capability should be registered");
+            let schema = spec
+                .response_schema
+                .as_ref()
+                .expect("prompt capability should declare its response schema");
+            assert_eq!(
+                schema["properties"]["acknowledged"]["const"],
+                json!(true),
+                "{function_id} must not encode rejection as a successful response"
+            );
+        }
     }
 }

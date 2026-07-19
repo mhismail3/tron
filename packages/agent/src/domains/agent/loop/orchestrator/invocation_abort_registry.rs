@@ -21,8 +21,6 @@
 //! token) propagates to every child automatically; we do not have to loop
 //! over the registry on turn abort.
 
-use std::sync::Arc;
-
 use dashmap::DashMap;
 use tokio_util::sync::CancellationToken;
 
@@ -95,17 +93,17 @@ impl InvocationAbortRegistry {
 
 /// RAII guard that unregisters a capability on drop. Ensures cleanup even on
 /// early returns / panics in the executor.
-pub struct InvocationAbortGuard {
-    registry: Arc<InvocationAbortRegistry>,
+pub struct InvocationAbortGuard<'a> {
+    registry: &'a InvocationAbortRegistry,
     session_id: String,
     invocation_id: String,
 }
 
-impl InvocationAbortGuard {
+impl<'a> InvocationAbortGuard<'a> {
     /// Create a new guard that removes the entry on drop.
     #[must_use]
     pub fn new(
-        registry: Arc<InvocationAbortRegistry>,
+        registry: &'a InvocationAbortRegistry,
         session_id: &str,
         invocation_id: &str,
     ) -> Self {
@@ -117,7 +115,7 @@ impl InvocationAbortGuard {
     }
 }
 
-impl Drop for InvocationAbortGuard {
+impl Drop for InvocationAbortGuard<'_> {
     fn drop(&mut self) {
         self.registry
             .unregister(&self.session_id, &self.invocation_id);
@@ -209,13 +207,13 @@ mod tests {
 
     #[test]
     fn guard_unregisters_on_drop() {
-        let reg = Arc::new(InvocationAbortRegistry::new());
+        let reg = InvocationAbortRegistry::new();
         let parent = CancellationToken::new();
         let _child = reg.register("sess-1", "call_1", &parent);
         assert_eq!(reg.len(), 1);
 
         {
-            let _guard = InvocationAbortGuard::new(reg.clone(), "sess-1", "call_1");
+            let _guard = InvocationAbortGuard::new(&reg, "sess-1", "call_1");
         }
 
         assert!(reg.is_empty(), "guard drop must remove the registry entry");

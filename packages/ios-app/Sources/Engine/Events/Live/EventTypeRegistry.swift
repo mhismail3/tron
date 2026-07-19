@@ -195,19 +195,6 @@ enum StopReason: String {
 }
 
 // =============================================================================
-// MARK: - Session End Reasons (from server SessionEndEvent)
-// =============================================================================
-
-/// Reasons for session termination.
-/// This EXACTLY mirrors the server's reason union.
-enum SessionEndReason: String {
-    case completed = "completed"
-    case aborted = "aborted"
-    case error = "error"
-    case timeout = "timeout"
-}
-
-// =============================================================================
 // MARK: - System Message Sources (from server SystemMessageEvent)
 // =============================================================================
 

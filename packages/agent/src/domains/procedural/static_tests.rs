@@ -161,9 +161,9 @@ fn procedural_record_resource_definition_is_registered_as_inert_metadata() {
 
 #[test]
 fn procedural_operations_are_read_only_execute_schema_values_without_activation_goals() {
-    let metadata = crate::domains::capability::contract::model_metadata(
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-    );
+    let metadata = crate::domains::capability::contract::execute_function_definition()
+        .expect("execute definition")
+        .metadata;
     let schema_text = crate::domains::capability::operation_host_request_schema().to_string();
     assert!(schema_text.contains("procedural_state_list"));
     assert!(schema_text.contains("procedural_state_inspect"));
@@ -279,8 +279,7 @@ fn skill_bootstrap_identifier_guard_allows_metadata_only_proof_fields() {
 
 #[test]
 fn procedural_module_manifest_seed_remains_metadata_only_not_skill_bootstrap() {
-    let manifest_path =
-        "packages/agent/src/engine/durability/resources/module_registry_procedural_manifest.rs";
+    let manifest_path = "packages/agent/src/domains/registration/module_manifests/procedural.rs";
     let manifest = std::fs::read_to_string(repo_root().join(manifest_path))
         .unwrap_or_else(|error| panic!("failed to read {manifest_path}: {error}"));
     for required in [

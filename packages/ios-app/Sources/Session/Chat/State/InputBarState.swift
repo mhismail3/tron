@@ -15,22 +15,6 @@ final class InputBarState {
 
     var reasoningLevel: String = "medium"
 
-    // MARK: - Clear All
-
-    /// Reset all input state to initial values
-    func clear() {
-        text = ""
-        selectedImages = []
-        attachments = []
-    }
-
-    /// Clear all pending composer state.
-    func clearAll() {
-        text = ""
-        selectedImages = []
-        attachments = []
-    }
-
     /// Remove attachments incompatible with the given capability.
     /// Returns count of removed attachments.
     @discardableResult
@@ -51,19 +35,12 @@ final class InputBarState {
         return hasher.finalize()
     }
 
-    /// Whether there is any draft content worth persisting.
-    var hasDraftContent: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !attachments.isEmpty
-    }
-
     // MARK: - Computed Properties
 
-    /// Whether there is any content to send
+    /// Whether there is any content to send or persist as a draft.
     var hasContent: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
-
 }
 
 /// Why the send button is unavailable, if at all.
@@ -78,7 +55,7 @@ enum SendBlockReason: Equatable, Sendable {
     case disconnected
     /// Context compaction is in progress.
     case compacting
-    /// This chat view is read-only (shared, workspace deleted, etc.).
+    /// The shared interaction policy currently treats this chat view as read-only.
     case readOnly
 
     /// User-facing explanation shown in the disabled-button tooltip.
@@ -105,8 +82,25 @@ struct InputBarConfig {
     var isProcessing: Bool { agentPhase.isProcessing }
     /// Whether composer audio is currently recording.
     let isRecording: Bool
+    /// Normalized microphone energy owned by the recorder (0...1).
+    let recordingAudioLevel: Double
     /// Whether a captured recording is being transcribed.
     let isTranscribing: Bool
+
+    /// Session Briefing yields its composer slot throughout the authoritative
+    /// voice lifecycle so capture/transcription status stays adjacent to the
+    /// trailing action.
+    var showsContextBriefingControl: Bool {
+        !isRecording && !isTranscribing
+    }
+
+    /// Voice capture owns the trailing composer action until recording and
+    /// transcription have both finished, even when a draft already has text
+    /// or attachments.
+    func canSend(hasContent: Bool) -> Bool {
+        guard agentPhase.isIdle, showsContextBriefingControl else { return false }
+        return hasContent && sendBlockReason == nil
+    }
 
     /// Why the send button would be unavailable even with non-empty input.
     /// `nil` means no async blocker; input emptiness is the only remaining gate.
@@ -128,10 +122,7 @@ struct InputBarConfig {
     let placeholderText: String
     /// Whether the placeholder represents a shell-owned loading state.
     let placeholderShowsProgress: Bool
-    let tokenUsage: TokenUsage?
     let contextPercentage: Int
-    let contextWindow: Int
-    let lastTurnInputTokens: Int
 
     // MARK: - Model / Attachments
     let currentModelInfo: ModelInfo?
@@ -140,7 +131,6 @@ struct InputBarConfig {
     let inputHistory: InputHistoryStore?
 
     // MARK: - Misc
-    let animationCoordinator: AnimationCoordinator?
     let readOnly: Bool
 
     // MARK: - Attachment Limits
@@ -162,16 +152,13 @@ struct InputBarConfig {
         isCompacting: Bool = false,
         isConnected: Bool = true,
         isRecording: Bool = false,
+        recordingAudioLevel: Double = 0,
         isTranscribing: Bool = false,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
-        tokenUsage: TokenUsage? = nil,
         contextPercentage: Int = 0,
-        contextWindow: Int = 0,
-        lastTurnInputTokens: Int = 0,
         currentModelInfo: ModelInfo? = nil,
         inputHistory: InputHistoryStore? = nil,
-        animationCoordinator: AnimationCoordinator? = nil,
         readOnly: Bool = false,
         showDragHint: Bool = false
     ) {
@@ -179,16 +166,13 @@ struct InputBarConfig {
         self.isCompacting = isCompacting
         self.isConnected = isConnected
         self.isRecording = isRecording
+        self.recordingAudioLevel = min(max(recordingAudioLevel, 0), 1)
         self.isTranscribing = isTranscribing
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress
-        self.tokenUsage = tokenUsage
         self.contextPercentage = contextPercentage
-        self.contextWindow = contextWindow
-        self.lastTurnInputTokens = lastTurnInputTokens
         self.currentModelInfo = currentModelInfo
         self.inputHistory = inputHistory
-        self.animationCoordinator = animationCoordinator
         self.readOnly = readOnly
         self.showDragHint = showDragHint
     }

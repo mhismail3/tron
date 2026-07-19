@@ -29,7 +29,9 @@
 //! absolute or unsafe paths, token-like material, automatic capture flags,
 //! prompt injection, or context-inclusion requests. Prompt artifact timestamps
 //! are supplied by `capability::execute` or tests; this domain does not sample
-//! wall-clock time directly.
+//! wall-clock time directly. Services consume the intent-shaped
+//! `EngineHostHandle` facade directly and own no parallel dependency or state
+//! container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -38,11 +40,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{PROMPT_ARTIFACT_KIND, PROMPT_ARTIFACT_SCHEMA_ID};
 

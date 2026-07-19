@@ -98,15 +98,17 @@ enum InterleavedContentProcessor {
             // Other block types (redacted, etc.) are skipped
         }
 
-        // Attach turn metadata (tokenRecord, model, latency, thinking) to the LAST
-        // message so the stats line renders after all content in the turn — not
-        // between text and first capability, or between parallel capability invocations.
-        if !messages.isEmpty {
-            let lastIdx = messages.count - 1
-            messages[lastIdx].tokenRecord = effectiveTokenRecord
-            messages[lastIdx].model = parsed.model
-            messages[lastIdx].latencyMs = parsed.latencyMs
-            messages[lastIdx].stopReason = parsed.stopReason?.rawValue
+        // Provider stop reasons do not identify finality: `end_turn` can arrive
+        // with capability drafts. Only completed no-capability text is
+        // guaranteed to be the final response and eligible for a stats row.
+        if parsed.isFinalAssistantResponse,
+           let responseIndex = messages.lastIndex(where: { $0.content.isAssistantResponseText }) {
+            messages[responseIndex].isFinalAssistantResponse = true
+            messages[responseIndex].applyFinalAssistantResponseMetadata(
+                tokenRecord: effectiveTokenRecord,
+                model: parsed.model,
+                latencyMs: parsed.latencyMs
+            )
         }
 
         return messages
@@ -153,9 +155,8 @@ enum InterleavedContentProcessor {
 
     /// Process a text content block.
     ///
-    /// Metadata (tokenRecord, model, latency, etc.) is NOT set here — it's
-    /// attached to the last message after all blocks are processed so the
-    /// stats line renders after all capability chips, not in the middle.
+    /// Metadata is attached after all blocks are processed, and only when the
+    /// payload is the final no-capability response for the prompt cycle.
     private static func processTextBlock(
         _ block: [String: Any],
         timestamp: Date,
@@ -216,7 +217,6 @@ enum InterleavedContentProcessor {
             .first { !$0.isEmpty }
             ?? CapabilityIdentity()
 
-        // Metadata is set after the loop on the last message (see transform())
         return ChatMessage(
             role: .assistant,
             content: .capabilityInvocation(CapabilityInvocationData(
@@ -234,8 +234,7 @@ enum InterleavedContentProcessor {
             model: nil,
             latencyMs: nil,
             turnNumber: turn,
-            hasThinking: nil,
-            stopReason: nil
+            hasThinking: nil
         )
     }
 }

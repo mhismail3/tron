@@ -69,6 +69,8 @@ fn completed_event(
         event_type: SseEventType::Completed,
         response: Some(ResponsesResponse {
             id: Some("resp-123".into()),
+            error: None,
+            incomplete_details: None,
             output,
             usage,
         }),
@@ -974,6 +976,159 @@ fn unknown_event_type_returns_empty() {
     };
     let events = process_stream_event(&event, &mut state);
     assert!(events.is_empty());
+}
+
+// ── Terminal failure and incomplete events ─────────────────────
+
+#[test]
+fn failed_response_becomes_typed_stream_api_error() {
+    let mut state = create_stream_state();
+    let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.failed",
+        "response": {
+            "id": "resp_failed",
+            "error": {
+                "code": "server_error",
+                "message": "The model failed to generate a response."
+            },
+            "output": []
+        }
+    }))
+    .unwrap();
+
+    let error = process_provider_stream_event(&event, &mut state).unwrap_err();
+
+    match error {
+        ProviderError::StreamApi {
+            message,
+            code,
+            retryable,
+        } => {
+            assert_eq!(message, "The model failed to generate a response.");
+            assert_eq!(code.as_deref(), Some("server_error"));
+            assert!(retryable);
+        }
+        other => panic!("expected streaming API error, got {other:?}"),
+    }
+}
+
+#[test]
+fn failed_response_rate_limit_uses_canonical_rate_limit_failure() {
+    let mut state = create_stream_state();
+    let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.failed",
+        "response": {
+            "id": "resp_rate_limited",
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": "Too many requests"
+            },
+            "output": []
+        }
+    }))
+    .unwrap();
+
+    let error = process_provider_stream_event(&event, &mut state).unwrap_err();
+    let failure = error.to_failure("openai", "gpt-5.5");
+
+    assert!(matches!(error, ProviderError::RateLimited { .. }));
+    assert_eq!(
+        failure.code,
+        crate::shared::server::failure::PROVIDER_RATE_LIMITED
+    );
+    assert_eq!(
+        failure.category,
+        crate::shared::server::failure::FailureCategory::RateLimit
+    );
+    assert_eq!(failure.error_type.as_deref(), Some("rate_limit_exceeded"));
+    assert_eq!(
+        failure.details.as_ref().unwrap()["providerCode"],
+        "rate_limit_exceeded"
+    );
+    assert!(failure.retryable);
+}
+
+#[test]
+fn vector_store_timeout_is_retryable_stream_api_error() {
+    let mut state = create_stream_state();
+    let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({
+        "type": "error",
+        "code": "vector_store_timeout",
+        "message": "Vector store timed out"
+    }))
+    .unwrap();
+
+    let error = process_provider_stream_event(&event, &mut state).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ProviderError::StreamApi {
+            code: Some(code),
+            retryable: true,
+            ..
+        } if code == "vector_store_timeout"
+    ));
+}
+
+#[test]
+fn top_level_error_becomes_typed_stream_api_error() {
+    let mut state = create_stream_state();
+    let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({
+        "type": "error",
+        "code": "invalid_prompt",
+        "message": "Prompt rejected"
+    }))
+    .unwrap();
+
+    let error = process_provider_stream_event(&event, &mut state).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ProviderError::StreamApi {
+            code: Some(code),
+            retryable: false,
+            ..
+        } if code == "invalid_prompt"
+    ));
+}
+
+#[test]
+fn incomplete_response_preserves_partial_output_usage_and_stop_reason() {
+    let mut state = create_stream_state();
+    let _ = process_stream_event(&text_delta_event("Partial answer"), &mut state);
+    let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.incomplete",
+        "response": {
+            "id": "resp_incomplete",
+            "incomplete_details": { "reason": "max_output_tokens" },
+            "output": [],
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "total_tokens": 15
+            }
+        }
+    }))
+    .unwrap();
+
+    let events = process_provider_stream_event(&event, &mut state).unwrap();
+    let done = events
+        .iter()
+        .find_map(|event| match event {
+            StreamEvent::Done {
+                message,
+                stop_reason,
+            } => Some((message, stop_reason)),
+            _ => None,
+        })
+        .expect("incomplete response should emit Done");
+
+    assert_eq!(done.1, "max_tokens");
+    assert_eq!(done.0.token_usage.as_ref().unwrap().total_tokens, Some(15));
+    assert_eq!(
+        done.0.content,
+        vec![AssistantContent::text("Partial answer")]
+    );
 }
 
 // ── reasoning_summary_part.added ───────────────────────────────

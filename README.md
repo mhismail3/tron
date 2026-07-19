@@ -1,7 +1,7 @@
 # Tron
 
 <p align="center">
-  <img src="packages/ios-app/Sources/Assets.xcassets/TronLogo.imageset/tron-logo.png" width="112" alt="Tron logo">
+  <img src="packages/ios-app/docs/assets/tron-logo.png" width="112" alt="Tron logo">
 </p>
 
 **A persistent, local-first coding agent for Mac and iPhone.**
@@ -72,7 +72,8 @@ the command line.
 Requirements:
 
 - macOS 15 or newer
-- Rust `1.94.1` through `rustup`
+- Rust through `rustup` (version and components are pinned in
+  [`rust-toolchain.toml`](rust-toolchain.toml))
 - Xcode 26 or newer
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
@@ -81,8 +82,8 @@ Clone this repository, then set up and start a development server:
 ```bash
 cd tron
 scripts/tron setup
+scripts/tron dev --background
 scripts/tron login
-scripts/tron dev
 ```
 
 Useful commands:
@@ -92,7 +93,7 @@ scripts/tron dev --background   # start in the background
 scripts/tron dev --stop         # stop development takeover
 scripts/tron status --json      # inspect the active server
 scripts/tron logs               # query bounded local logs
-scripts/tron ci                 # run the complete repository validation
+scripts/tron ci                 # run full local Rust validation
 ```
 
 Build the iOS app:
@@ -128,16 +129,6 @@ scripts/personal-info-guard.sh
 GitHub Actions runs the same warning-denied Rust path plus iOS and Mac validation
 on `main`. The required branch check is `CI summary`.
 
-## Repository
-
-```text
-packages/
-  agent/      Rust server and engine
-  ios-app/    SwiftUI iPhone and iPad client
-  mac-app/    SwiftUI Mac wrapper and server installer
-scripts/      Development, validation, version, and release tooling
-```
-
 ## Documentation
 
 Start with the document closest to the work:
@@ -152,13 +143,11 @@ Start with the document closest to the work:
   [development guide](packages/ios-app/docs/development.md).
 - [Mac architecture](packages/mac-app/docs/architecture.md) and
   [development guide](packages/mac-app/docs/development.md).
-- [Capability modularity](packages/agent/docs/capability-modularity-scorecard.md),
-  [capability pool](packages/agent/docs/engine-capability-pool-scorecard.md), and
-  [dynamic replacement](packages/agent/docs/capability-dynamic-replacement-scorecard.md)
-  scorecards.
+- [Capability operation contracts](packages/agent/src/domains/capability/operations/operation_contract/mod.rs)
+  and their [ownership metadata](packages/agent/src/domains/capability/operations/operation_contract/metadata.rs).
 
-The root README intentionally stays short. Detailed catalogs and audit evidence
-belong with their owning source or scorecard rather than on the project front
+The root README intentionally stays short. Detailed contracts belong with
+their owning source or technical reference rather than on the project front
 page.
 
 ## Project Rules

@@ -350,8 +350,8 @@ async fn web_fetch_runtime_grant_rejects_partial_robots_proof_before_execution()
     let (engine_host, surface, captured) = capturing_execute_surface().await;
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
-    ctx.engine_host = Some(&engine_host);
+    let registry = Arc::new(InvocationAbortRegistry::new());
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &registry, &engine_host);
     let tempdir = tempfile::tempdir().expect("working directory");
     let call = CapabilityInvocationDraft::new(
         "tc1",
@@ -1315,6 +1315,10 @@ async fn unsupported_operation_runtime_grant_is_rejection_only() {
     assert!(grant.resource_selectors.is_empty());
     assert_eq!(grant.network_policy, "none");
     assert!(!grant.can_delegate);
+    assert_eq!(
+        grant.provenance["operation"],
+        json!("definitely_not_a_real_operation")
+    );
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

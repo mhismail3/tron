@@ -59,6 +59,14 @@ struct EngineConnectionReconnectTests {
         #expect(EngineConnection.connectionVerificationTimeout < 30.0)
     }
 
+    @Test("heartbeat owns long-lived websocket liveness")
+    func heartbeatOwnsLongLivedWebSocketLiveness() {
+        let configuration = EngineConnection.makeSessionConfiguration()
+
+        #expect(configuration.timeoutIntervalForRequest == 30.0)
+        #expect(configuration.timeoutIntervalForResource.isInfinite)
+    }
+
     @Test(".failed reason after capped probe exhaustion uses tap-to-retry copy")
     func failedReasonCopy() {
         #expect(EngineConnection.failedAfterExhaustionReason == "Connection lost — tap to retry")

@@ -29,7 +29,9 @@
 //! repository contents, raw file contents, unbounded trees, absolute paths,
 //! unsafe relative paths, blob bytes, git mutation instructions, or secret-like
 //! caller material. Preview timestamps are supplied by `capability::execute` or
-//! tests; this domain does not sample wall-clock time directly.
+//! tests; this domain does not sample wall-clock time directly. Services consume
+//! the intent-shaped `EngineHostHandle` facade directly and own no parallel
+//! dependency or state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -38,11 +40,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{IMPORT_PREVIEW_KIND, IMPORT_PREVIEW_SCHEMA_ID};
 

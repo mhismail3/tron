@@ -32,7 +32,8 @@
 //! directly. Module-owned job execution records may link to delegated runtime
 //! and output resource refs, but the record remains metadata evidence only and
 //! must not be loosened to carry the command, stdio, process ids, install
-//! steps, paths, network requests, or raw output previews.
+//! steps, paths, network requests, or raw output previews. Services borrow the
+//! engine host directly and own no parallel dependency or engine-state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -41,11 +42,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{PROGRAM_EXECUTION_KIND, PROGRAM_EXECUTION_SCHEMA_ID};
 

@@ -5,6 +5,8 @@
 //! work. Hidden functions serialize those prompts into the provider loop; the
 //! model-facing capability surface after that loop starts is the single
 //! `capability::execute` primitive.
+//! Worker composition carries the optional model responder factory directly;
+//! prompt validation reports `NotAvailable` when that runtime owner is absent.
 //!
 //! ## Prompt Execution Flow
 //!
@@ -13,8 +15,9 @@
 //!    catalog revision before this domain handler runs.
 //! 3. `agent::prompt` derives the run id, records the accepted prompt, invokes
 //!    hidden `agent::prompt_apply` synchronously through an engine-owned
-//!    internal causal context, and returns the acknowledgement envelope. The
-//!    prompt path does not race the background queue drainer for its own receipt.
+//!    internal causal context, and returns an affirmative acknowledgement plus
+//!    run id. Rejection is an engine error, never a negative success envelope.
+//!    The prompt path does not race the background queue drainer for its own receipt.
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
 //! 5. The turn runner builds provider input from session state and supplies one
@@ -40,7 +43,9 @@
 //!
 //! External integration tests construct a real server runtime through the
 //! narrow re-exports below. The loop module itself remains private so tests do
-//! not grow a dependency on its internal submodule layout.
+//! not grow a dependency on its internal submodule layout. `SessionManager`
+//! stays public for runtime construction; mutating session lifecycle operations
+//! stay crate- or domain-owner scoped.
 
 pub(crate) mod context;
 pub(crate) mod contract;

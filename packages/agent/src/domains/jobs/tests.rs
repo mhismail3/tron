@@ -6,7 +6,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
+use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
     FunctionId, Invocation, InvocationResult, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
@@ -32,6 +32,7 @@ async fn job_start_requires_network_policy_none() {
         session_id,
         workspace_id,
         root.path(),
+        "job_start",
         "loopback",
         4,
         None,
@@ -74,6 +75,7 @@ async fn job_start_requires_idempotency_at_execute_boundary() {
         session_id,
         workspace_id,
         root.path(),
+        "job_start",
         "none",
         4,
         None,
@@ -580,6 +582,85 @@ async fn cancel_after_process_exit_preserves_completion_and_output() {
 }
 
 #[tokio::test]
+async fn capability_started_job_is_owned_by_direct_jobs_worker_runtime() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    if !sandbox_available() {
+        return;
+    }
+
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-cross-route").await;
+    let marker = root.path().join("started");
+    let start = fixture
+        .invoke_ok(json!({
+            "operation": "job_start",
+            "command": "touch started; sleep 10",
+            "timeoutMs": 10000,
+            "maxOutputBytes": 1000,
+            "idempotencyKey": "jobs-cross-route-start"
+        }))
+        .await;
+    let job_resource_id = job_resource_id(&start);
+    wait_for_path(&marker).await;
+
+    let cancel = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(super::CANCEL_FUNCTION).unwrap(),
+            json!({
+                "jobResourceId": job_resource_id,
+                "reason": "cross-route ownership test"
+            }),
+            CausalContext::new(
+                ActorId::new("engine-client").unwrap(),
+                ActorKind::Client,
+                AuthorityGrantId::new("engine-transport").unwrap(),
+                TraceId::new("jobs-cross-route-cancel").unwrap(),
+            )
+            .with_scope(super::WRITE_SCOPE)
+            .with_session_id(&fixture.session_id)
+            .with_workspace_id(&fixture.workspace_id)
+            .with_runtime_metadata(
+                RUNTIME_METADATA_WORKING_DIRECTORY,
+                root.path().display().to_string(),
+            )
+            .with_idempotency_key("jobs-cross-route-cancel"),
+        ))
+        .await;
+    assert_eq!(cancel.error, None, "direct cancel failed: {cancel:?}");
+    assert_eq!(
+        cancel.value.expect("direct cancel value")["status"],
+        json!("cancel_requested")
+    );
+
+    let status = fixture.wait_for_state(&job_resource_id, "cancelled").await;
+    assert_eq!(
+        jobs_details(&status)["job"]["terminal"]["cancelled"],
+        json!(true)
+    );
+}
+
+#[tokio::test]
+async fn startup_reconciliation_task_is_owned_by_shutdown_coordinator() {
+    let ctx = make_test_context();
+    let shutdown = Arc::new(ShutdownCoordinator::new());
+    let deps = activation_deps(&ctx, &shutdown);
+    let host_guard = ctx.engine_host.lock().await;
+
+    deps.activate_after_registration();
+
+    assert_eq!(shutdown.tracked_task_count(), 1);
+    drop(host_guard);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while shutdown.tracked_task_count() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("jobs startup reconciliation should leave shutdown tracking");
+}
+
+#[tokio::test]
 async fn shutdown_cancels_running_job_and_records_terminal_state() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");
@@ -588,14 +669,12 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     }
 
     let shutdown = Arc::new(ShutdownCoordinator::new());
-    let runtime = super::runtime::JobRuntime::default();
-    let runtime_for_shutdown = runtime.clone();
-    shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs-test", move || {
-        let runtime = runtime_for_shutdown.clone();
-        async move {
-            runtime.cancel_all("server_shutdown").await;
-        }
-    });
+    let deps = activation_deps(&ctx, &shutdown);
+    let runtime = deps.state.runtime();
+    let shutdown_coordinator = deps.shutdown_coordinator.clone();
+    assert_eq!(shutdown.registered_phase_callback_count(), 0);
+    deps.activate_after_registration();
+    assert_eq!(shutdown.registered_phase_callback_count(), 1);
 
     let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-shutdown").await;
     let marker = root.path().join("started");
@@ -619,7 +698,7 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     );
     let start = super::service::start_job_value(
         &ctx.engine_host,
-        Some(shutdown.clone()),
+        shutdown_coordinator,
         runtime,
         &invocation,
         &invocation.payload,
@@ -650,6 +729,16 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     );
 }
 
+fn activation_deps(ctx: &ServerRuntimeContext, shutdown: &Arc<ShutdownCoordinator>) -> super::Deps {
+    let mut activation_ctx = ctx.clone();
+    activation_ctx.shutdown_coordinator = Some(shutdown.clone());
+    let registration_deps =
+        crate::domains::registration::worker::DomainRegistrationContext::from_context(
+            &activation_ctx,
+        );
+    super::Deps::from_engine(&registration_deps, super::RuntimeState::new())
+}
+
 struct ExecuteFixture<'a> {
     ctx: &'a ServerRuntimeContext,
     actor_id: ActorId,
@@ -673,6 +762,7 @@ impl<'a> ExecuteFixture<'a> {
             &session_id,
             &workspace_id,
             root,
+            "job_start",
             "none",
             40,
             None,
@@ -734,9 +824,10 @@ impl<'a> ExecuteFixture<'a> {
     }
 
     async fn grant_for_payload(&self, payload: &Value) -> AuthorityGrantId {
-        let Some(job_resource_id) = payload.get("jobResourceId").and_then(Value::as_str) else {
-            return self.grant_id.clone();
-        };
+        let operation = payload["operation"]
+            .as_str()
+            .expect("job execute operation");
+        let job_resource_id = payload.get("jobResourceId").and_then(Value::as_str);
         derive_execute_grant(
             self.ctx,
             &self.actor_id,
@@ -744,9 +835,10 @@ impl<'a> ExecuteFixture<'a> {
             &self.session_id,
             &self.workspace_id,
             self.root,
+            operation,
             "none",
             40,
-            Some(job_resource_id),
+            job_resource_id,
         )
         .await
     }
@@ -870,10 +962,17 @@ async fn derive_execute_grant(
     session_id: &str,
     workspace_id: &str,
     root: &Path,
+    operation: &str,
     network_policy: &str,
     remaining_invocations: u64,
     job_resource_id: Option<&str>,
 ) -> AuthorityGrantId {
+    let max_risk = match crate::domains::capability::operation_risk(operation)
+        .expect("job execute operation risk")
+    {
+        "high" | "critical" => "high",
+        _ => "medium",
+    };
     let mut resource_selectors = vec![
         "kind:agent_state".to_owned(),
         "kind:job_process".to_owned(),
@@ -903,10 +1002,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": resource_selectors,
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": network_policy,
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": remaining_invocations},
                 "canDelegate": false,
-                "provenance": {"source": "jobs_test"}
+                "provenance": {"source": "jobs_test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:jobs-test").unwrap(),
@@ -917,7 +1016,7 @@ async fn derive_execute_grant(
             .with_scope("grant.write")
             .with_session_id(session_id)
             .with_idempotency_key(format!(
-                "derive-{workspace_id}-{network_policy}-{selector_key}"
+                "derive-{workspace_id}-{operation}-{network_policy}-{selector_key}"
             )),
         ))
         .await;

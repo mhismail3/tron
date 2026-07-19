@@ -3,7 +3,7 @@ import SwiftUI
 /// Text view that animates changes with a typewriter effect:
 /// deletes the old text character by character, then types the new text.
 ///
-/// Changes during the settle window (first 500ms after appear) snap
+/// Changes during the settle window (first 350ms after appear) snap
 /// instantly so async-loaded titles don't trigger a stale animation.
 struct TypewriterText: View {
     let text: String
@@ -11,8 +11,7 @@ struct TypewriterText: View {
     let color: Color
     var characterDelay: Duration = .milliseconds(30)
 
-    @State private var displayedText: String
-    @State private var animationTask: Task<Void, Never>?
+    @State private var animationState: TypewriterAnimationState
     /// True once the settle window has elapsed and animations are allowed.
     @State private var hasSettled = false
 
@@ -21,54 +20,27 @@ struct TypewriterText: View {
         self.font = font
         self.color = color
         self.characterDelay = characterDelay
-        self._displayedText = State(initialValue: text)
+        self._animationState = State(
+            initialValue: TypewriterAnimationState(text: text, characterDelay: characterDelay)
+        )
     }
 
     var body: some View {
-        Text(displayedText)
+        Text(animationState.displayedText)
             .font(font)
             .foregroundStyle(color)
             .fixedSize(horizontal: !hasSettled, vertical: false)
             .onChange(of: text) { _, newValue in
                 if hasSettled {
-                    animate(to: newValue)
+                    animationState.characterDelay = characterDelay
+                    animationState.animate(to: newValue)
                 } else {
-                    displayedText = newValue
+                    animationState.snap(to: newValue)
                 }
             }
             .task {
                 try? await Task.sleep(for: .milliseconds(350))
                 hasSettled = true
             }
-    }
-
-    private func animate(to newText: String) {
-        animationTask?.cancel()
-        animationTask = Task { @MainActor in
-            // Phase 1: Delete current text character by character
-            while !displayedText.isEmpty {
-                try? await Task.sleep(for: characterDelay)
-                guard !Task.isCancelled else {
-                    displayedText = newText
-                    return
-                }
-                displayedText = String(displayedText.dropLast())
-            }
-
-            // Phase 2: Type new text character by character.
-            // First char is appended without sleeping so the "" → "X"
-            // transition is atomic. Without this, Text("") in a SwiftUI
-            // toolbar causes a permanent layout collapse to zero width.
-            for (index, char) in newText.enumerated() {
-                if index > 0 {
-                    try? await Task.sleep(for: characterDelay)
-                    guard !Task.isCancelled else {
-                        displayedText = newText
-                        return
-                    }
-                }
-                displayedText.append(char)
-            }
-        }
     }
 }

@@ -240,6 +240,83 @@ async fn provider_stream_error_event_becomes_canonical_model_response_error() {
     assert!(failure.message.contains("Bearer ****"));
 }
 
+#[tokio::test]
+async fn provider_eof_without_done_becomes_recoverable_parse_error() {
+    let stream: StreamEventStream = Box::pin(stream::iter([Ok(StreamEvent::Start)]));
+    let health = Arc::new(ModelResponderHealth::new());
+    let mut wrapped = wrap_provider_stream(
+        stream,
+        "openai",
+        "gpt-5.5".to_owned(),
+        health,
+        Instant::now(),
+    );
+
+    assert!(matches!(wrapped.next().await, Some(Ok(StreamEvent::Start))));
+    let error = wrapped
+        .next()
+        .await
+        .expect("EOF should produce a terminal model error")
+        .expect_err("EOF without Done must fail");
+    let failure = error.failure();
+
+    assert_eq!(
+        failure.code,
+        crate::shared::server::failure::PROVIDER_SSE_PARSE_ERROR
+    );
+    assert_eq!(failure.category, FailureCategory::Parse);
+    assert!(!failure.retryable);
+    assert!(failure.recoverable);
+    assert_eq!(failure.provider.as_deref(), Some("openai"));
+    assert_eq!(failure.model.as_deref(), Some("gpt-5.5"));
+    assert!(wrapped.next().await.is_none());
+}
+
+#[tokio::test]
+async fn long_lived_factory_projects_api_settings_per_create_call() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let first_server = MockServer::start().await;
+    let second_server = MockServer::start().await;
+    for server in [&first_server, &second_server] {
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw("", "application/x-ndjson"))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    let factory = DefaultModelResponderFactory::new();
+    for (index, server) in [&first_server, &second_server].into_iter().enumerate() {
+        let mut api_settings = crate::domains::settings::ApiSettings::default();
+        api_settings.ollama = Some(crate::domains::settings::OllamaApiSettings {
+            base_url: server.uri(),
+        });
+        let responder = factory
+            .create_for_model("gemma4:e4b", &api_settings)
+            .await
+            .unwrap();
+        let response = responder
+            .respond(ModelResponseRequest {
+                context: Context::default(),
+                session_id: format!("settings-snapshot-{index}"),
+                reasoning_level: None,
+                trace_id: None,
+                parent_invocation_id: None,
+                cancel: CancellationToken::new(),
+                retry_config: None,
+            })
+            .await
+            .unwrap();
+        drop(response);
+    }
+
+    first_server.verify().await;
+    second_server.verify().await;
+}
+
 #[test]
 fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     let responder = ProviderBackedModelResponder {
@@ -265,7 +342,7 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
 
     let audit = responder.request_audit(&request).unwrap();
 
-    assert_eq!(audit.format, "tron.model_provider_request.v1");
+    assert_eq!(audit.format, "tron.model_provider_request.v2");
     assert_eq!(
         audit.provider_type,
         crate::shared::protocol::messages::Provider::OpenAi
@@ -322,5 +399,59 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     assert_eq!(
         audit.provider_request.body["authorization"],
         serde_json::json!("Bearer ****")
+    );
+}
+
+#[test]
+fn provider_request_audit_projects_bulk_media_without_blocking_model_request() {
+    let responder = ProviderBackedModelResponder {
+        provider: Arc::new(AuditProvider),
+        health: Arc::new(ModelResponderHealth::new()),
+    };
+    let request = ModelResponseRequest {
+        context: Context::default(),
+        session_id: "sess-media".to_owned(),
+        reasoning_level: None,
+        trace_id: Some("trace-media".to_owned()),
+        parent_invocation_id: None,
+        cancel: CancellationToken::new(),
+        retry_config: None,
+    };
+    let info = responder.info();
+    let provider_request = ProviderAuditPayload::exact_provider_envelope(serde_json::json!({
+        "model": "gpt-5.5-codex",
+        "input": [{
+            "role": "user",
+            "content": [{
+                "type": "input_image",
+                "image_url": format!(
+                    "data:image/jpeg;base64,{}",
+                    "a".repeat(
+                        crate::shared::protocol::model_audit::MAX_PROVIDER_AUDIT_PAYLOAD_BYTES
+                    )
+                )
+            }]
+        }]
+    }));
+
+    let audit = build_request_audit(
+        info,
+        &request,
+        ProviderStreamOptions::default(),
+        provider_request,
+    )
+    .expect("bulk media must become bounded audit evidence");
+
+    assert_eq!(
+        audit.provider_request.kind,
+        ProviderAuditPayloadKind::ProviderEnvelopeProjection
+    );
+    assert_eq!(
+        audit.provider_request.body["input"][0]["content"][0]["image_url"]["$tronAuditProjection"],
+        "bulk_string.v1"
+    );
+    assert!(
+        serde_json::to_vec(&audit.provider_request).unwrap().len()
+            < crate::shared::protocol::model_audit::MAX_PROVIDER_AUDIT_PAYLOAD_BYTES
     );
 }

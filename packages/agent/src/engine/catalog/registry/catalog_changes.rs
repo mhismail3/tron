@@ -44,7 +44,6 @@ impl LiveCatalog {
         };
         self.ledger.append_catalog_change(&change)?;
         self.revision = after;
-        self.changes.push(change);
         Ok(())
     }
 }

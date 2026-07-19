@@ -18,6 +18,21 @@
 //! rejected before durable trace insertion still rely on direct bounded failure
 //! result evidence; adding a pre-trace failure record is a separate tracing
 //! slice.
+//!
+//! Every `TronAgent` owns a required engine host for its full lifetime. Each
+//! turn borrows that host to resolve the live provider primitive surface and to
+//! execute provider-requested capability invocations through the same engine.
+//! Turn starts, ends, and failures are persisted before their matching live
+//! broadcast, and each surface shares the durable row sequence. User
+//! cancellation is terminalized by the active turn runner, which owns the
+//! session-global turn ordinal and any partial content; prompt completion never
+//! manufactures turn lifecycle rows. The streaming journal remains until
+//! capability completions and the turn terminal have committed; journal-write
+//! failure stops the stream before broadcasting content that cannot be
+//! recovered. Provider failures atomically retain any already visible partial
+//! assistant content with `turn.failed`. Durable turn entry precedes cancellable
+//! pre-turn compaction. The compaction handler owns cancellation rollback and a
+//! matching failed completion event before Stop closes the active ordinal.
 
 #![deny(unsafe_code)]
 
@@ -39,5 +54,5 @@ pub(crate) mod types;
 pub(crate) use event_emitter::EventEmitter;
 pub use orchestrator::core::Orchestrator;
 pub use orchestrator::recovery::recover_incomplete_turns;
-pub use orchestrator::session_manager::{SessionFilter, SessionManager};
+pub use orchestrator::session_manager::SessionManager;
 pub use profile_runtime::ProfileRuntime;

@@ -13,9 +13,10 @@ struct SessionReconstructParams: Encodable {
 ///
 /// Returns the complete session state in one response: persisted events,
 /// in-flight state (if agent is running), and session metadata. The client
-/// uses `lastSequence` as its high-water mark for WebSocket event filtering.
+/// uses `lastSequence` as its high-water mark for live event-stream filtering.
 struct SessionReconstructResult: Decodable {
-    /// Persisted events in sequence order.
+    /// Persisted events in server-authored reconstruction-chain order.
+    /// Sequence is monotonic only within each session in a fork chain.
     let events: [RawEvent]
     /// True if older events exist (for pagination via `beforeEventId`).
     let hasMoreEvents: Bool
@@ -23,10 +24,14 @@ struct SessionReconstructResult: Decodable {
     let oldestEventId: String?
     /// In-flight turn state (non-null only when agent is running).
     let inFlight: InFlightState?
-    /// Highest assigned sequence (includes non-persisted events).
+    /// Highest target-session sequence represented by persisted or in-flight state.
     let lastSequence: Int64
     /// Whether the agent is currently running.
     let isRunning: Bool
+    /// Whether context compaction is active at the reconstruction cut.
+    let isCompacting: Bool?
+    /// Server compaction reason used to rebuild the in-progress pill.
+    let compactionReason: String?
     /// Server-authoritative agent phase ("processing" or "idle").
     let agentPhase: String?
     /// Session metadata.

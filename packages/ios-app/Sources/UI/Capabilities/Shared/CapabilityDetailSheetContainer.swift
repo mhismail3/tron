@@ -46,7 +46,6 @@ struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View
                 content()
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     leadingToolbar()

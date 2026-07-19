@@ -1,7 +1,8 @@
 import Foundation
 
 /// Client for settings engine capabilities.
-/// Reads and writes server-authoritative settings (compaction, model, workspace).
+/// Reads and writes server-authoritative settings for model/workspace defaults,
+/// compaction, and local transcription policy.
 final class SettingsClient: EngineDomainClient {
 
     // MARK: - Settings Methods

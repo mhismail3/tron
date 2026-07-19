@@ -130,57 +130,71 @@ extension SourceGuardTests {
     }
 
 
-    @Test("Primitive shell has no APNs or device-token client plane")
-    func testPrimitiveShellHasNoAPNsOrDeviceTokenClientPlane() throws {
+    @Test("APNs registration stays inside the trusted lifecycle plane")
+    func testAPNsRegistrationStaysInsideTrustedLifecyclePlane() throws {
         let iosRoot = iosAppRoot()
-        let deletedPaths = [
-            "Sources/Support/Notifications/PushNotificationService.swift",
-            "Sources/Support/Infrastructure/APNsEnvironment.swift",
-            "Tests/Services/PushNotificationServiceTests.swift",
-            "Tests/Services/APNsEnvironmentTests.swift",
+        let ownedPaths = [
+            "Sources/App/Lifecycle/AppDelegate.swift",
+            "Sources/App/Lifecycle/AppRuntimeMode.swift",
+            "Sources/App/Lifecycle/ProductionAppRoot.swift",
+            "Sources/App/Lifecycle/TronMobileApp.swift",
+            "Sources/Engine/Transport/Clients/SystemClient.swift",
+            "Sources/Support/Foundation/Notifications/APNsEnvironment.swift",
+            "Sources/Support/Foundation/Notifications/PushNotificationService.swift",
         ]
-        for relativePath in deletedPaths {
+        for relativePath in ownedPaths {
             #expect(
-                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
-                "\(relativePath) belongs to the deleted push transport plane"
+                FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) is required by the trusted APNs lifecycle plane"
             )
         }
-        for relativePath in [
-            "TronMobileBeta.entitlements",
-            "TronMobileProd.entitlements",
-        ] {
-            let entitlement = try String(
-                contentsOf: iosRoot.appendingPathComponent(relativePath),
-                encoding: .utf8
-            )
-            #expect(!entitlement.contains("aps-environment"))
-        }
-        let forbidden = [
-            "PushNotificationService",
-            "APNsEnvironment",
-            "device::register",
-            "device::unregister",
-            "DeviceTokenRegister",
-            "registerForRemoteNotifications",
-            "UNUserNotificationCenter",
-            "registerPushIfAuthorized",
-            "registerDeviceToken",
-        ]
-        let checkedRoots = [
-            iosRoot.appendingPathComponent("Sources"),
-            iosRoot.appendingPathComponent("Tests"),
-        ]
-        for root in checkedRoots {
-            for path in try swiftFiles(in: root) {
-                if isSourceGuardFile(path) {
-                    continue
-                }
-                let source = try String(contentsOf: path, encoding: .utf8)
-                for token in forbidden {
-                    #expect(!source.contains(token), "\(token) must stay deleted from \(path.path)")
-                }
-            }
-        }
+        let betaEntitlement = try String(
+            contentsOf: iosRoot.appendingPathComponent("TronMobileBeta.entitlements"),
+            encoding: .utf8
+        )
+        let productionEntitlement = try String(
+            contentsOf: iosRoot.appendingPathComponent("TronMobileProd.entitlements"),
+            encoding: .utf8
+        )
+        #expect(betaEntitlement.contains("<string>development</string>"))
+        #expect(productionEntitlement.contains("<string>production</string>"))
+
+        let systemClient = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Engine/Transport/Clients/SystemClient.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(systemClient.contains("device::register"))
+        #expect(systemClient.contains("UUID().uuidString"))
+        #expect(systemClient.contains("ios:device-register:v4:"))
+        #expect(!systemClient.contains("identifierForVendor"))
+        #expect(!systemClient.contains("UserDefaults.standard.set(token"))
+
+        let appDelegate = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/AppDelegate.swift"),
+            encoding: .utf8
+        )
+        #expect(appDelegate.contains("didRegisterForRemoteNotificationsWithDeviceToken"))
+        #expect(!appDelegate.contains("APNs token: "))
+
+        let appLifecycle = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/App/Lifecycle/ProductionAppRoot.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(appLifecycle.contains("container.pushNotificationService.deviceToken"))
+        #expect(appLifecycle.contains("await registerPushIfAuthorized()"))
+
+        let pushService = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Support/Foundation/Notifications/PushNotificationService.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(pushService.contains("Notification authorization status:"))
+        #expect(pushService.contains("notifications are disabled in iOS Settings"))
     }
 
 

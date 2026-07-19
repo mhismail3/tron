@@ -2,8 +2,8 @@
 //!
 //! The thin `main.rs` entry point handles process-level dispatch. This module
 //! owns long-running server initialization so bootstrap, service construction,
-//! shutdown registration, and background task wiring stay below one audited
-//! boundary.
+//! shutdown registration, legacy transport-state reconciliation, and
+//! background task wiring stay below one audited boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,15 +20,13 @@ use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomp
 use crate::domains::model::responder::{DefaultModelResponderFactory, ModelResponderFactory};
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
 use crate::domains::settings::db_path_policy::resolve_production_db_path;
-use crate::shared::server::context::{
-    AgentDeps, ServerRuntimeContext, register_blocking_supervisor_shutdown,
-};
+use crate::shared::server::context::{ServerRuntimeContext, register_blocking_supervisor_shutdown};
 use crate::transport::runtime::streams::EngineStreamEventPump;
 
 /// Run either the requested CLI subcommand or the long-running server.
 pub async fn run(args: Cli) -> Result<()> {
     if let Some(ref cmd) = args.command {
-        return run_subcommand(cmd);
+        return run_subcommand(cmd).await;
     }
     run_server(args).await
 }
@@ -199,8 +197,6 @@ pub(crate) fn init_engine_host(db_path: &Path) -> Result<crate::engine::EngineHo
 /// Initialize tracing with SQLite persistence and start the periodic flush task.
 fn init_logging(
     db_path: &std::path::Path,
-    settings: &crate::domains::settings::TronSettings,
-    log_level_override: Option<&str>,
     stderr_enabled: bool,
 ) -> Result<(
     crate::shared::observability::TransportHandle,
@@ -212,20 +208,8 @@ fn init_logging(
         rusqlite::Connection::open(db_path).context("Failed to open logging DB connection")?;
     crate::shared::storage::apply_runtime_pragmas(&log_conn)
         .context("Failed to set logging connection pragmas")?;
-    let module_overrides: Vec<(String, &str)> = settings
-        .logging
-        .module_overrides
-        .iter()
-        .map(|(m, lvl)| (m.clone(), lvl.as_filter_str()))
-        .collect();
-    let effective_log_level =
-        log_level_override.unwrap_or_else(|| settings.observability.log_level.as_filter_str());
-    let log_handle = crate::shared::observability::init_subscriber_with_sqlite(
-        effective_log_level,
-        &module_overrides,
-        log_conn,
-        stderr_enabled,
-    );
+    let log_handle =
+        crate::shared::observability::init_subscriber_with_sqlite(log_conn, stderr_enabled);
     let flush_task = crate::shared::observability::spawn_flush_task(log_handle.clone());
     Ok((log_handle, flush_task))
 }
@@ -236,7 +220,7 @@ struct ServiceState {
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
     transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-    agent_deps: Option<AgentDeps>,
+    responder_factory: Arc<dyn ModelResponderFactory>,
 }
 
 /// Build core services: orchestrator, session manager, providers, and capabilities.
@@ -261,9 +245,6 @@ async fn init_services(
     let (responder_factory, shared_http_client) = init_model_responder_factory(settings).await;
     let _ = shared_http_client;
 
-    let agent_deps = Some(AgentDeps {
-        responder_factory: responder_factory.clone(),
-    });
     let transcription_runtime = crate::domains::transcription::SharedTranscriptionEngine::new();
 
     Ok(ServiceState {
@@ -271,7 +252,7 @@ async fn init_services(
         session_manager,
         orchestrator,
         transcription_runtime,
-        agent_deps,
+        responder_factory,
     })
 }
 
@@ -316,12 +297,12 @@ fn register_transcription_sidecar(
 async fn init_model_responder_factory(
     settings: &crate::domains::settings::TronSettings,
 ) -> (Arc<dyn ModelResponderFactory>, reqwest::Client) {
-    let default_factory = DefaultModelResponderFactory::new(settings);
+    let default_factory = DefaultModelResponderFactory::new();
     let shared_http_client = default_factory.http_client();
     let responder_factory: Arc<dyn ModelResponderFactory> = Arc::new(default_factory);
 
     let startup_auth_ok = responder_factory
-        .create_for_model(&settings.server.default_model)
+        .create_for_model(&settings.server.default_model, &settings.api)
         .await
         .is_ok();
     if startup_auth_ok {
@@ -350,9 +331,12 @@ fn build_server_runtime_context(
         event_store: services.event_store.clone(),
         engine_host,
         transcription_runtime: services.transcription_runtime.clone(),
+        apns_runtime: crate::platform::apns::ApnsRuntime::production(
+            &crate::shared::foundation::paths::internal_dir(),
+        ),
         settings_path,
         profile_runtime,
-        agent_deps: services.agent_deps,
+        responder_factory: Some(services.responder_factory),
         server_start_time: std::time::Instant::now(),
         shutdown_coordinator: None,
         origin,
@@ -418,54 +402,55 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     );
     let settings_path = crate::domains::settings::profile::settings_path();
     let settings = profile_runtime.current().settings.clone();
-    crate::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);
-    let (log_handle, flush_task) =
-        init_logging(&db_path, &settings, args.log_level.as_deref(), !args.quiet)?;
-    if settings.storage.retention_enabled {
-        match crate::shared::storage::StorageRuntime::new(db_path.clone())
-            .retention_run(false, settings.observability.verbose_retention_days)
-        {
-            Ok(report) => tracing::debug!(
-                rows_deleted = report.rows_deleted,
-                blobs_deleted = report.blobs_deleted,
-                verbose_retention_days = report.verbose_retention_days,
-                "storage retention completed on startup"
-            ),
-            Err(error) => tracing::warn!(error = %error, "storage retention failed on startup"),
+    let (log_handle, flush_task) = init_logging(&db_path, !args.quiet)?;
+    match crate::shared::storage::StorageRuntime::new(db_path.clone()).retention_run(false) {
+        Ok(report) => tracing::debug!(
+            rows_deleted = report.rows_deleted,
+            blobs_deleted = report.blobs_deleted,
+            diagnostic_retention_days = report.diagnostic_retention_days,
+            "diagnostic storage retention completed on startup"
+        ),
+        Err(error) => {
+            tracing::warn!(error = %error, "diagnostic storage retention failed on startup")
         }
     }
-    if settings.storage.max_database_mb > 0 {
-        match crate::shared::storage::StorageRuntime::new(db_path.clone()).enforce_size_budget(
-            settings.storage.max_database_mb,
-            settings.observability.verbose_retention_days,
-        ) {
-            Ok(report) if report.over_limit => tracing::warn!(
-                max_database_bytes = report.max_database_bytes,
-                before_total_bytes = report.before_total_bytes,
-                after_total_bytes = report.after_total_bytes,
-                retention_rows_deleted = report
-                    .retention
-                    .as_ref()
-                    .map(|retention| retention.rows_deleted)
-                    .unwrap_or_default(),
-                retention_blobs_deleted = report
-                    .retention
-                    .as_ref()
-                    .map(|retention| retention.blobs_deleted)
-                    .unwrap_or_default(),
-                "storage soft size budget exceeded; safe retention and checkpoint completed"
-            ),
-            Ok(_) => {}
-            Err(error) => tracing::warn!(
-                error = %error,
-                max_database_mb = settings.storage.max_database_mb,
-                "storage soft size budget check failed"
-            ),
-        }
+    match crate::shared::storage::StorageRuntime::new(db_path.clone()).enforce_size_budget() {
+        Ok(report) if report.over_limit => tracing::warn!(
+            max_database_bytes = report.max_database_bytes,
+            before_total_bytes = report.before_total_bytes,
+            after_total_bytes = report.after_total_bytes,
+            retention_rows_deleted = report
+                .retention
+                .as_ref()
+                .map(|retention| retention.rows_deleted)
+                .unwrap_or_default(),
+            retention_blobs_deleted = report
+                .retention
+                .as_ref()
+                .map(|retention| retention.blobs_deleted)
+                .unwrap_or_default(),
+            "storage soft size budget exceeded; safe retention and checkpoint completed"
+        ),
+        Ok(_) => {}
+        Err(error) => tracing::warn!(
+            error = %error,
+            max_database_mb = crate::shared::storage::DATABASE_STORAGE_BUDGET_MB,
+            "storage soft size budget check failed"
+        ),
     }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;
+    let retired_socket_subscriptions =
+        crate::transport::engine::socket::retire_legacy_socket_subscriptions(&engine_host)
+            .await
+            .context("Failed to reconcile legacy engine WebSocket subscriptions")?;
+    if retired_socket_subscriptions > 0 {
+        tracing::info!(
+            retired = retired_socket_subscriptions,
+            "retired legacy durable engine WebSocket subscriptions"
+        );
+    }
 
     // Phase 3: Core services (orchestrator, providers, primitive agent deps)
     let services = init_services(event_store, &settings).await?;
@@ -504,7 +489,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         orchestrator_for_stream_events.subscribe(),
         server.runtime_context().engine_host.clone(),
         server.shutdown().token(),
-        orchestrator_for_stream_events.turn_accumulators().clone(),
     );
     let stream_event_pump_handle = tokio::spawn(pump.run());
     crate::transport::runtime::EngineRuntimeServices::start(&server);

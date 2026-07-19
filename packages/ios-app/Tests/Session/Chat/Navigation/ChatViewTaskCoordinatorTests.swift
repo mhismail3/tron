@@ -49,6 +49,94 @@ struct ChatViewTaskCoordinatorTests {
         #expect(secondRan)
     }
 
+    @Test("replacement joins a cancellation-insensitive keyed predecessor")
+    func replacementJoinsCancellationInsensitivePredecessor() async {
+        let coordinator = ChatViewTaskCoordinator(sessionId: "session-a")
+        _ = coordinator.beginLifecycle()
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        var executionOrder: [String] = []
+
+        coordinator.replaceTask(.connectionRefresh) { _ in
+            executionOrder.append("first-start")
+            await withCheckedContinuation { continuation in
+                releaseFirst = continuation
+            }
+            executionOrder.append("first-end")
+        }
+        while releaseFirst == nil { await Task.yield() }
+
+        coordinator.replaceTask(.connectionRefresh) { _ in
+            executionOrder.append("second")
+        }
+        for _ in 0..<5 { await Task.yield() }
+        #expect(executionOrder == ["first-start"])
+
+        releaseFirst?.resume()
+        for _ in 0..<10 where executionOrder.count < 3 { await Task.yield() }
+
+        #expect(executionOrder == ["first-start", "first-end", "second"])
+    }
+
+    @Test("recovery burst keeps one coalesced follow-up")
+    func recoveryBurstKeepsOneCoalescedFollowUp() async {
+        let coordinator = ChatViewTaskCoordinator(sessionId: "session-a")
+        _ = coordinator.beginLifecycle()
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        var runCount = 0
+
+        let operation: @MainActor (ChatViewTaskTicket) async -> Void = { _ in
+            runCount += 1
+            if runCount == 1 {
+                await withCheckedContinuation { continuation in
+                    releaseFirst = continuation
+                }
+            }
+        }
+        coordinator.coalesceTask(.connectionRefresh, operation: operation)
+        while releaseFirst == nil { await Task.yield() }
+
+        coordinator.coalesceTask(.connectionRefresh, operation: operation)
+        coordinator.coalesceTask(.connectionRefresh, operation: operation)
+        for _ in 0..<5 { await Task.yield() }
+        #expect(runCount == 1)
+
+        releaseFirst?.resume()
+        for _ in 0..<10 where runCount < 2 { await Task.yield() }
+
+        #expect(runCount == 2)
+    }
+
+    @Test("start-if-absent preserves one history autoload stabilization task")
+    func startIfAbsentPreservesFirstTask() async {
+        let coordinator = ChatViewTaskCoordinator(sessionId: "session-a")
+        _ = coordinator.beginLifecycle()
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        var runCount = 0
+
+        coordinator.startTaskIfAbsent(.historyAutoload) { _ in
+            runCount += 1
+            await withCheckedContinuation { continuation in
+                releaseFirst = continuation
+            }
+        }
+        while releaseFirst == nil { await Task.yield() }
+
+        coordinator.startTaskIfAbsent(.historyAutoload) { _ in
+            runCount += 1
+        }
+        for _ in 0..<5 { await Task.yield() }
+        #expect(runCount == 1)
+
+        releaseFirst?.resume()
+        for _ in 0..<10 { await Task.yield() }
+        coordinator.startTaskIfAbsent(.historyAutoload) { _ in
+            runCount += 1
+        }
+        for _ in 0..<10 where runCount < 2 { await Task.yield() }
+
+        #expect(runCount == 2)
+    }
+
     @Test("invalidate cancels pending keyed task")
     func invalidateCancelsPendingKeyedTask() async {
         let coordinator = ChatViewTaskCoordinator(sessionId: "session-a")

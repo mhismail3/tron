@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 use super::super::contract::{
     DEVICE_READ_SCOPE, READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE,
@@ -32,12 +33,39 @@ pub(super) struct Fixture {
 
 impl Fixture {
     pub(super) async fn new(label: &str) -> Self {
+        Self::new_with_runtime(
+            label,
+            crate::platform::apns::ApnsRuntime::disabled_for_test(),
+        )
+        .await
+    }
+
+    pub(super) async fn new_with_sender(
+        label: &str,
+        sender: Arc<crate::platform::apns::MockPushSender>,
+    ) -> Self {
+        Self::new_with_runtime(
+            label,
+            crate::platform::apns::ApnsRuntime::test(
+                crate::platform::apns::MemoryDeviceTokenStore::shared(),
+                Some(sender),
+            ),
+        )
+        .await
+    }
+
+    async fn new_with_runtime(
+        label: &str,
+        apns_runtime: crate::platform::apns::ApnsRuntime,
+    ) -> Self {
         let ctx = make_test_context();
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
+            apns_runtime: apns_runtime.clone(),
         };
         let device_deps = device::Deps {
             engine_host: ctx.engine_host.clone(),
+            apns_runtime,
         };
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
@@ -312,7 +340,12 @@ impl Fixture {
         .expect("mark all read")
     }
 
-    pub(super) async fn register_device(&self, key: &str, payload: Value) -> Value {
+    pub(super) async fn register_device(&self, key: &str, mut payload: Value) -> Value {
+        if let Some(object) = payload.as_object_mut() {
+            object
+                .entry("bundleId")
+                .or_insert_with(|| json!("com.example.tron.beta"));
+        }
         let invocation = self.device_invocation(key, payload);
         device::service::register_device_value_at(
             &self.device_deps,
@@ -346,7 +379,7 @@ impl Fixture {
     }
 
     fn device_invocation(&self, key: &str, payload: Value) -> Invocation {
-        invocation(
+        let mut invocation = invocation(
             key,
             payload,
             self.device_write_grant_id.clone(),
@@ -356,7 +389,9 @@ impl Fixture {
                 device::contract::RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        )
+        );
+        invocation.function_id = FunctionId::new("device::register").unwrap();
+        invocation
     }
 }
 

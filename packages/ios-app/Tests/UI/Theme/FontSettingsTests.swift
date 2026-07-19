@@ -236,124 +236,96 @@ struct FontCategoryTests {
 @MainActor
 struct FontSettingsTests {
 
+    private func withSettings<T>(
+        _ body: (FontSettings, UserDefaults) throws -> T
+    ) rethrows -> T {
+        try IsolatedTestState.withDefaults(label: "font-settings") { defaults in
+            try body(FontSettings(defaults: defaults), defaults)
+        }
+    }
+
     @Test func defaultFamilyIsSourceSerif4() {
-        let defaults = UserDefaults(suiteName: "FontSettingsTests.default")!
-        defaults.removePersistentDomain(forName: "FontSettingsTests.default")
-        let settings = FontSettings(defaults: defaults)
-        #expect(settings.selectedFamily == .sourceSerif4)
+        withSettings { settings, _ in
+            #expect(settings.selectedFamily == .sourceSerif4)
+        }
     }
 
     @Test func defaultMonoFamilyIsRecursive() {
-        let defaults = UserDefaults(suiteName: "FontSettingsTests.monoDefault")!
-        defaults.removePersistentDomain(forName: "FontSettingsTests.monoDefault")
-        let settings = FontSettings(defaults: defaults)
-        #expect(settings.selectedMonoFamily == .recursive)
+        withSettings { settings, _ in
+            #expect(settings.selectedMonoFamily == .recursive)
+        }
     }
 
     @Test func selectedFamilyPersists() {
-        let settings = FontSettings.shared
-        let original = settings.selectedFamily
-
-        settings.selectedFamily = .alanSans
-        #expect(UserDefaults.standard.string(forKey: "fontFamily") == "alanSans")
-
-        settings.selectedFamily = .comme
-        #expect(UserDefaults.standard.string(forKey: "fontFamily") == "comme")
-
-        settings.selectedFamily = .sourceSerif4
-        #expect(UserDefaults.standard.string(forKey: "fontFamily") == "sourceSerif4")
-
-        settings.selectedFamily = original
+        withSettings { settings, defaults in
+            settings.selectedFamily = .alanSans
+            #expect(defaults.string(forKey: "fontFamily") == "alanSans")
+            settings.selectedFamily = .comme
+            #expect(defaults.string(forKey: "fontFamily") == "comme")
+            settings.selectedFamily = .sourceSerif4
+            #expect(defaults.string(forKey: "fontFamily") == "sourceSerif4")
+        }
     }
 
     @Test func selectedMonoFamilyPersists() {
-        let settings = FontSettings.shared
-        let original = settings.selectedMonoFamily
-
-        settings.selectedMonoFamily = .jetBrainsMono
-        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "jetBrainsMono")
-
-        settings.selectedMonoFamily = .ibmPlexMono
-        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "ibmPlexMono")
-
-        settings.selectedMonoFamily = .geistMono
-        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "geistMono")
-
-        settings.selectedMonoFamily = .recursive
-        #expect(UserDefaults.standard.string(forKey: "monoFontFamily") == "recursive")
-
-        settings.selectedMonoFamily = original
+        withSettings { settings, defaults in
+            for family in [FontFamily.jetBrainsMono, .ibmPlexMono, .geistMono, .recursive] {
+                settings.selectedMonoFamily = family
+                #expect(defaults.string(forKey: "monoFontFamily") == family.rawValue)
+            }
+        }
     }
 
     @Test func monoFamilyDefaultsToRecursiveForInvalidValue() {
-        let defaults = UserDefaults(suiteName: "FontSettingsTests.monoInvalid")!
-        defaults.removePersistentDomain(forName: "FontSettingsTests.monoInvalid")
-        defaults.set("nonExistentFont", forKey: "monoFontFamily")
-        let settings = FontSettings(defaults: defaults)
-        #expect(settings.selectedMonoFamily == .recursive)
+        IsolatedTestState.withDefaults(label: "font-invalid") { defaults in
+            defaults.set("nonExistentFont", forKey: "monoFontFamily")
+            #expect(FontSettings(defaults: defaults).selectedMonoFamily == .recursive)
+        }
     }
 
     @Test func monoFamilyDefaultsToRecursiveForNonMonoFont() {
-        let defaults = UserDefaults(suiteName: "FontSettingsTests.monoNonMono")!
-        defaults.removePersistentDomain(forName: "FontSettingsTests.monoNonMono")
-        // Try to set a serif font as mono; should use recursive
-        defaults.set(FontFamily.lora.rawValue, forKey: "monoFontFamily")
-        let settings = FontSettings(defaults: defaults)
-        #expect(settings.selectedMonoFamily == .recursive)
+        IsolatedTestState.withDefaults(label: "font-non-mono") { defaults in
+            defaults.set(FontFamily.lora.rawValue, forKey: "monoFontFamily")
+            #expect(FontSettings(defaults: defaults).selectedMonoFamily == .recursive)
+        }
     }
 
     @Test func axisValueDefaultsWhenNotSet() {
-        let defaults = UserDefaults(suiteName: "FontSettingsTests.axisDefault")!
-        defaults.removePersistentDomain(forName: "FontSettingsTests.axisDefault")
-        let settings = FontSettings(defaults: defaults)
-        #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.5)
+        withSettings { settings, _ in
+            #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.5)
+        }
     }
 
     @Test func axisValueSetAndGet() {
-        let settings = FontSettings.shared
-        let original = settings.axisValue(for: .recursive, axis: .casual)
-
-        settings.setAxisValue(for: .recursive, axis: .casual, value: 0.9)
-        #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.9)
-
-        settings.setAxisValue(for: .recursive, axis: .casual, value: original)
+        withSettings { settings, defaults in
+            settings.setAxisValue(for: .recursive, axis: .casual, value: 0.9)
+            #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.9)
+            let restored = FontSettings(defaults: defaults)
+            #expect(restored.axisValue(for: .recursive, axis: .casual) == 0.9)
+        }
     }
 
     @Test func axisValuesPreservedPerFont() {
-        let settings = FontSettings.shared
-        let origRecCasual = settings.axisValue(for: .recursive, axis: .casual)
-        let origFamily = settings.selectedFamily
-
-        settings.setAxisValue(for: .recursive, axis: .casual, value: 0.8)
-
-        // Switching family doesn't lose Recursive's casual value
-        settings.selectedFamily = .alanSans
-        #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.8)
-        settings.selectedFamily = .recursive
-        #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.8)
-
-        // Restore
-        settings.setAxisValue(for: .recursive, axis: .casual, value: origRecCasual)
-        settings.selectedFamily = origFamily
+        withSettings { settings, _ in
+            settings.setAxisValue(for: .recursive, axis: .casual, value: 0.8)
+            settings.selectedFamily = .alanSans
+            #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.8)
+            settings.selectedFamily = .recursive
+            #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.8)
+        }
     }
 
     @Test func currentAxisValueFollowsSelectedFamily() {
-        let settings = FontSettings.shared
-        let origFamily = settings.selectedFamily
-
-        settings.selectedFamily = .recursive
-        settings.setAxisValue(for: .recursive, axis: .casual, value: 0.6)
-        #expect(settings.currentAxisValue(for: .casual) == 0.6)
-
-        settings.selectedFamily = origFamily
+        withSettings { settings, _ in
+            settings.selectedFamily = .recursive
+            settings.setAxisValue(for: .recursive, axis: .casual, value: 0.6)
+            #expect(settings.currentAxisValue(for: .casual) == 0.6)
+        }
     }
 
     @Test func newSerifFontsLoadWithCorrectDefaults() {
-        let defaults = UserDefaults(suiteName: "FontSettingsTests.newSerifs")!
-        defaults.removePersistentDomain(forName: "FontSettingsTests.newSerifs")
-        let settings = FontSettings(defaults: defaults)
-
-        // Serif fonts with optical size should have default axis values
-        #expect(settings.axisValue(for: .sourceSerif4, axis: .opticalSize) == 14)
+        withSettings { settings, _ in
+            #expect(settings.axisValue(for: .sourceSerif4, axis: .opticalSize) == 14)
+        }
     }
 }

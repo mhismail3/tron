@@ -9,10 +9,10 @@ use crate::engine::{
 
 use super::{EngineQueueAttemptRecord, EngineQueueItem, QueueAttemptOutcome, QueueItemStatus};
 
-/// Queue drain runtime.
-pub struct EngineQueueRuntime;
+/// Single queue-delivery owner used by runtime services and synchronous receipt drains.
+pub struct EngineQueueDrainer;
 
-impl EngineQueueRuntime {
+impl EngineQueueDrainer {
     /// Claim and execute one queue item, returning `Ok(None)` when no item is
     /// ready. Failed invocations are retried through the queue store.
     pub async fn drain_once(
@@ -148,30 +148,6 @@ fn queue_attempt_record(
         resource_lease_ids: target.resource_lease_ids.clone(),
         compensation_status: target.compensation_status.clone(),
         compensation_id: target.compensation_id.clone(),
-    }
-}
-
-/// Service-shaped queue drainer for production owners that want a named
-/// boundary instead of calling the lower-level queue runtime directly.
-pub struct EngineQueueDrainer;
-
-impl EngineQueueDrainer {
-    /// Claim and execute one queue item.
-    pub async fn drain_once(
-        handle: &EngineHostHandle,
-        queue: &str,
-        lease_owner: &str,
-    ) -> Result<Option<InvocationResult>> {
-        EngineQueueRuntime::drain_once(handle, queue, lease_owner).await
-    }
-
-    /// Claim and execute a specific queue receipt.
-    pub async fn drain_receipt(
-        handle: &EngineHostHandle,
-        receipt_id: &str,
-        lease_owner: &str,
-    ) -> Result<Option<InvocationResult>> {
-        EngineQueueRuntime::drain_receipt(handle, receipt_id, lease_owner).await
     }
 }
 

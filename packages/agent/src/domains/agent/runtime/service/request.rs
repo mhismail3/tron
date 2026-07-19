@@ -1,13 +1,14 @@
 use super::PromptEngineCausality;
 use serde_json::Value;
 
-#[derive(Clone)]
+/// Accepted prompt inputs and the sole plan-level invocation-causality owner
+/// until execution consumes the request.
 pub struct PromptRequest {
     pub session_id: String,
     pub prompt: String,
     pub reasoning_level: Option<String>,
     pub attachments: Option<Vec<Value>>,
-    /// Optional engine causality propagated from accepted/apply invocations
-    /// into the provider turn.
+    /// Engine causality moved from the accepted invocation into the provider
+    /// turn, completion resources, and runtime stream records.
     pub engine_causality: Option<PromptEngineCausality>,
 }

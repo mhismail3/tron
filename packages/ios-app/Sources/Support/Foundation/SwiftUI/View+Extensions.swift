@@ -314,6 +314,9 @@ extension View {
             phoneBackground: phoneBackground,
             dragIndicator: dragIndicator
         ))
+        // SwiftUI presentations establish a separate presentation root and do
+        // not reliably inherit the application root's edge style on iOS 27.
+        .scrollEdgeEffectStyle(.soft, for: .all)
     }
 }
 

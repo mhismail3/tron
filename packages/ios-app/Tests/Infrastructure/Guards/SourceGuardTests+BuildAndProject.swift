@@ -3,6 +3,139 @@ import Foundation
 
 extension SourceGuardTests {
 
+    @Test("icon generator owns only active generated image outputs")
+    func testIconGeneratorOwnsOnlyActiveGeneratedImageOutputs() throws {
+        let iosRoot = iosAppRoot()
+        let generator = try String(
+            contentsOf: iosRoot.appendingPathComponent("scripts/generate-icons.mjs"),
+            encoding: .utf8
+        )
+        let generatedAssets = [
+            "Sources/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+            "Sources/Assets.xcassets/AppIconBeta.appiconset/icon-1024-beta.png",
+            "docs/assets/tron-logo.png",
+        ]
+
+        for path in generatedAssets {
+            #expect(FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(path).path))
+            #expect(generator.contains(URL(fileURLWithPath: path).lastPathComponent))
+        }
+        #expect(generator.contains("TronLogoVector.imageset"))
+        #expect(generator.contains("All 3 files generated and verified successfully."))
+        for obsolete in [
+            "IconLayers",
+            "generateDepthLayer",
+            "generateSolidBackground",
+            "generateTemplateSvg",
+            "writeFileSync",
+            "TronLogo.imageset",
+            "tron-logo@2x.png",
+            "tron-logo@3x.png",
+        ] {
+            #expect(!generator.contains(obsolete))
+        }
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: iosRoot.appendingPathComponent("Sources/Resources/IconLayers").path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: iosRoot.appendingPathComponent("Sources/Assets.xcassets/TronLogo.imageset").path
+            )
+        )
+    }
+
+    @Test("application and sheet scroll edges use soft style with automatic chrome")
+    func testApplicationScrollEdgesUseExplicitSoftStyle() throws {
+        let iosRoot = iosAppRoot()
+        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
+        let swiftUISoftStyleOwners = [
+            "Sources/App/Lifecycle/ProductionAppRoot.swift":
+                "ProductionAppRoot must own one app-wide soft SwiftUI scroll-edge preference",
+            "Sources/Support/Foundation/SwiftUI/View+Extensions.swift":
+                "The adaptive presentation helper must own one soft edge for every app-owned sheet root",
+        ]
+        let expectedWebViewOwners = Set([
+            "Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift",
+            "Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift",
+        ])
+        let edgeAssignments = [
+            "webView.scrollView.topEdgeEffect.style = .soft",
+            "webView.scrollView.leftEdgeEffect.style = .soft",
+            "webView.scrollView.bottomEdgeEffect.style = .soft",
+            "webView.scrollView.rightEdgeEffect.style = .soft",
+        ]
+
+        for (owner, message) in swiftUISoftStyleOwners {
+            let source = try String(
+                contentsOf: iosRoot.appendingPathComponent(owner),
+                encoding: .utf8
+            )
+            #expect(
+                source.components(separatedBy: ".scrollEdgeEffectStyle(.soft, for: .all)").count - 1 == 1,
+                "\(message)"
+            )
+        }
+        var webViewOwners: Set<String> = []
+        var automaticConfigurations: [String] = []
+        var hardConfigurations: [String] = []
+        var hiddenNavigationBarBackgrounds: [String] = []
+        for url in try swiftFiles(in: sourcesRoot) {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            let relativePath = url.path.replacingOccurrences(of: iosRoot.path + "/", with: "")
+            if source.contains("UIViewRepresentable"), source.contains("WKWebView(") {
+                webViewOwners.insert(relativePath)
+            }
+
+            let compactSource = source
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "\t", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+            if compactSource.contains(".scrollEdgeEffectStyle(.automatic,for:")
+                || compactSource.contains("EdgeEffect.style=.automatic") {
+                automaticConfigurations.append(relativePath)
+            }
+            if compactSource.contains(".scrollEdgeEffectStyle(.hard,for:")
+                || compactSource.contains("EdgeEffect.style=.hard") {
+                hardConfigurations.append(relativePath)
+            }
+            if compactSource.contains(".toolbarBackgroundVisibility(.hidden,for:.navigationBar)") {
+                hiddenNavigationBarBackgrounds.append(relativePath)
+            }
+        }
+
+        #expect(
+            webViewOwners == expectedWebViewOwners,
+            "Every app-owned WKWebView scroll view must be declared in the explicit soft-style contract: \(webViewOwners.sorted())"
+        )
+        for owner in expectedWebViewOwners {
+            let source = try String(
+                contentsOf: iosRoot.appendingPathComponent(owner),
+                encoding: .utf8
+            )
+            for assignment in edgeAssignments {
+                #expect(
+                    source.components(separatedBy: assignment).count - 1 == 1,
+                    "\(owner) must configure exactly one \(assignment)"
+                )
+            }
+        }
+
+        #expect(
+            automaticConfigurations.isEmpty,
+            "First-party sources must not delegate scroll-edge style to .automatic: \(automaticConfigurations.sorted())"
+        )
+        #expect(
+            hardConfigurations.isEmpty,
+            "First-party sources must not configure hard scroll edges: \(hardConfigurations.sorted())"
+        )
+        #expect(
+            hiddenNavigationBarBackgrounds.isEmpty,
+            "App navigation bars must leave visibility automatic so scroll edge effects appear only during overlap: \(hiddenNavigationBarBackgrounds.sorted())"
+        )
+    }
+
     @Test("feedback recipient has no tracked personal default")
     func testFeedbackRecipientConfigDefault() throws {
         let iosRoot = iosAppRoot()
@@ -35,8 +168,8 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Shell/SettingsView.swift"),
             encoding: .utf8
         )
-        let connectionSettingsPage = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+        let engineServersSection = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineServersSection.swift"),
             encoding: .utf8
         )
         let logViewer = try String(
@@ -55,12 +188,8 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
             encoding: .utf8
         )
-        let dependencyProviding = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyProviding.swift"),
-            encoding: .utf8
-        )
         let app = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/ProductionAppRoot.swift"),
             encoding: .utf8
         )
         let architectureDoc = try String(
@@ -79,11 +208,10 @@ extension SourceGuardTests {
         #expect(settingsView.contains("Button { showLogViewer = true }"))
         #expect(settingsView.contains("LogViewer()"))
         #expect(!settingsView.contains("#if DEBUG || BETA"))
-        #expect(connectionSettingsPage.contains("@State private var showLogs = false"))
-        #expect(connectionSettingsPage.contains("SettingsSectionHeader(title: ConnectionSettingsDiagnosticsCopy.sectionTitle)"))
-        #expect(connectionSettingsPage.contains("showLogs = true"))
-        #expect(connectionSettingsPage.contains("LogViewer()"))
-        #expect(!connectionSettingsPage.contains("AgentCockpitSheet("))
+        #expect(!engineServersSection.contains("showLogs"))
+        #expect(!engineServersSection.contains("LogViewer()"))
+        #expect(!engineServersSection.contains("logsSection"))
+        #expect(!engineServersSection.contains("AgentCockpitSheet("))
         #expect(!logViewer.hasPrefix("#if DEBUG || BETA"))
         #expect(!logViewer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
         #expect(!logViewer.contains("exportLogsToServer"))
@@ -101,7 +229,6 @@ extension SourceGuardTests {
         #expect(dependencyContainer.contains("clientLogIngestionService.start()"))
         #expect(dependencyContainer.contains("clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))"))
         #expect(dependencyContainer.contains("private(set) var engineClient: EngineClient"))
-        #expect(!dependencyProviding.contains("var engineClient: EngineClient { get }"))
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
         #expect(logsClient.contains("func ingestLogs("))
@@ -115,11 +242,11 @@ extension SourceGuardTests {
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))
 
-        #expect(architectureDoc.contains("The settings toolbar and the Servers page Diagnostics section expose Logs in"))
+        #expect(architectureDoc.contains("The settings toolbar exposes Logs in"))
         #expect(architectureDoc.contains("client log ingestion service mirrors bounded client logs into the server"))
         #expect(architectureDoc.contains("`logs` table while connected"))
         #expect(architectureDoc.contains("Successful ingest transport chatter is filtered"))
-        #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration from the toolbar and the Servers page Diagnostics section"))
+        #expect(rootReadme.contains("Settings exposes the Logs sheet in every iOS build configuration from its toolbar"))
         #expect(rootReadme.contains("automatically ingests deduplicated client logs"))
         #expect(rootReadme.contains("self-feeding diagnostics loops"))
     }
@@ -128,6 +255,27 @@ extension SourceGuardTests {
     @Test("paired-server tokens stay in Keychain and diagnostics redact auth fields")
     func testSecretStorageAndRedactionBoundaries() throws {
         let iosRoot = iosAppRoot()
+
+        func hasCheckedSendableTokenBackend(_ source: String) -> Bool {
+            let compact = source.components(separatedBy: .whitespacesAndNewlines).joined()
+            let requiredDeclarations = [
+                "structBackend:Sendable{",
+                "letsetToken:@Sendable(_token:String,_serverId:String)throws->Void",
+                "lettoken:@Sendable(_serverId:String)->String?",
+                "letremove:@Sendable(_serverId:String)throws->Void",
+            ]
+            guard requiredDeclarations.allSatisfy({ compact.contains($0) }) else {
+                return false
+            }
+            guard !compact.contains("@uncheckedSendable"),
+                  !compact.contains("nonisolated(unsafe)"),
+                  !compact.contains("staticvarproduction") else {
+                return false
+            }
+
+            let actorIsolationPattern = #"@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?(?:structBackend|static(?:let|var)production)"#
+            return compact.range(of: actorIsolationPattern, options: .regularExpression) == nil
+        }
 
         let pairedServerStore = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Pairing/PairedServerStore.swift"),
@@ -143,6 +291,10 @@ extension SourceGuardTests {
         )
         let dependencyContainer = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
+            encoding: .utf8
+        )
+        let runtimeIO = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer+RuntimeServices.swift"),
             encoding: .utf8
         )
         let redactor = try String(
@@ -169,7 +321,86 @@ extension SourceGuardTests {
 
         #expect(pairedServerTokenStore.contains("KeychainItem("))
         #expect(pairedServerTokenStore.contains("static let keychainServicePrefix = \"com.tron.mobile.bearer\""))
+        #expect(pairedServerTokenStore.contains("static let production = Backend("))
+        #expect(pairedServerTokenStore.contains("try makeProductionItem(for: id).set(token)"))
+        #expect(pairedServerTokenStore.contains("makeProductionItem(for: id).get()"))
+        #expect(pairedServerTokenStore.contains("try makeProductionItem(for: id).delete()"))
+        #expect(hasCheckedSendableTokenBackend(pairedServerTokenStore))
         #expect(!pairedServerTokenStore.contains("UserDefaults"))
+
+        let checkedSendabilityFixture = """
+        struct Backend: Sendable {
+            let setToken: @Sendable (_ token: String, _ serverId: String) throws -> Void
+            let token: @Sendable (_ serverId: String) -> String?
+            let remove: @Sendable (_ serverId: String) throws -> Void
+
+            static let production = Backend(
+                setToken: { _, _ in },
+                token: { _ in nil },
+                remove: { _ in }
+            )
+        }
+        """
+        let invalidSendabilityFixtures: [(name: String, source: String)] = [
+            (
+                "unchecked conformance",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "struct Backend: Sendable",
+                    with: "struct Backend: @unchecked Sendable"
+                )
+            ),
+            (
+                "main-actor production",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "static let production",
+                    with: "@MainActor static let production"
+                )
+            ),
+            (
+                "custom-global-actor backend",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "struct Backend: Sendable",
+                    with: "@TokenBackendActor struct Backend: Sendable"
+                )
+            ),
+            (
+                "unsafe nonisolated production",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "static let production",
+                    with: "nonisolated(unsafe) static let production"
+                )
+            ),
+            (
+                "computed production",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "static let production",
+                    with: "static var production"
+                )
+            ),
+            (
+                "conformance-only fix",
+                checkedSendabilityFixture.replacingOccurrences(of: "@Sendable ", with: "")
+            ),
+            (
+                "closures-only fix",
+                checkedSendabilityFixture.replacingOccurrences(of: ": Sendable", with: "")
+            ),
+            (
+                "partially annotated operations",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "let remove: @Sendable",
+                    with: "let remove:"
+                )
+            ),
+        ]
+        #expect(hasCheckedSendableTokenBackend(checkedSendabilityFixture))
+        for fixture in invalidSendabilityFixtures {
+            #expect(
+                !hasCheckedSendableTokenBackend(fixture.source),
+                "Token backend sendability guard accepted the \(fixture.name) fixture"
+            )
+        }
+
         #expect(keychainItem.contains("kSecClassGenericPassword"))
         #expect(keychainItem.contains("kSecAttrAccessibleAfterFirstUnlock"))
         #expect(keychainItem.contains("**Access group:** intentionally unset"))
@@ -179,6 +410,10 @@ extension SourceGuardTests {
         #expect(dependencyContainer.contains("defaults.string(forKey: PairedServerStore.activeIdKey)"))
         #expect(dependencyContainer.contains("defaults.data(forKey: PairedServerStore.serversKey)"))
         #expect(dependencyContainer.contains("return tokenStore.token(forServerId: activeId)"))
+        #expect(dependencyContainer.contains("pairedServerTokenStore = runtimeIO.pairedServerTokenStore"))
+        #expect(runtimeIO.contains("pairedServerTokenStore: PairedServerTokenStore()"))
+        #expect(runtimeIO.contains("makePairingProbe: { URLSessionPairingProbe() }"))
+        #expect(runtimeIO.contains("sessionAttemptDirective: { _ in .openLiveSession }"))
         #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "bearer"#))
         #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "token"#))
 
@@ -245,6 +480,7 @@ extension SourceGuardTests {
         ] {
             #expect(parser.contains(required), "PairingURLParser missing lifecycle marker: \(required)")
         }
+        #expect(!parser.contains("static func makeURL("))
         #expect(validator.contains("case invalidHost(String)"))
         #expect(validator.contains("PairingHostValidator.canonicalHost(trimmedHost)"))
         #expect(persistor.contains("enum RollbackTokenAction"))
@@ -261,7 +497,8 @@ extension SourceGuardTests {
         for required in [
             "rejectsURLShapedHostValue",
             "rejectsHostFragments",
-            "makeURLRejectsMalformedRequiredFields",
+            "parsesMacEmitterRequiredFields",
+            "whitespaceOnlyTokenIsMissing",
         ] {
             #expect(parserTests.contains(required), "Pairing URL parser tests missing \(required)")
         }
@@ -275,16 +512,9 @@ extension SourceGuardTests {
     }
 
 
-    @Test("DependencyProviding stays concrete-engine-client free")
-    func testDependencyProvidingDoesNotExposeEngineClient() throws {
+    @Test("UI and Session stay concrete-engine-client free")
+    func testUIAndSessionDoNotAccessEngineClient() throws {
         let iosRoot = iosAppRoot()
-        let protocolSource = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyProviding.swift"),
-            encoding: .utf8
-        )
-        #expect(!protocolSource.contains("var engineClient: EngineClient { get }"))
-        #expect(protocolSource.contains("var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint { get }"))
-        #expect(protocolSource.contains("var chatSessionServices: ChatSessionServices { get }"))
 
         var leaks: [String] = []
         for root in ["Sources/UI", "Sources/Session"] {
@@ -315,6 +545,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Configuration/ProdDebug.xcconfig"),
             encoding: .utf8
         )
+        let debugConfig = try String(
+            contentsOf: iosRoot.appendingPathComponent("Configuration/Debug.xcconfig"),
+            encoding: .utf8
+        )
         let developmentDoc = try String(
             contentsOf: iosRoot.appendingPathComponent("docs/development.md"),
             encoding: .utf8
@@ -338,9 +572,10 @@ extension SourceGuardTests {
         #expect(projectYML.contains("CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements"))
         #expect(projectYML.contains("CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements"))
 
-        #expect(prodDebugConfig.contains("SWIFT_OPTIMIZATION_LEVEL = -Onone"))
-        #expect(prodDebugConfig.contains("ENABLE_TESTABILITY = YES"))
-        #expect(prodDebugConfig.contains("ONLY_ACTIVE_ARCH = YES"))
+        #expect(prodDebugConfig.contains("#include \"Debug.xcconfig\""))
+        #expect(debugConfig.contains("SWIFT_OPTIMIZATION_LEVEL = -Onone"))
+        #expect(debugConfig.contains("ENABLE_TESTABILITY = YES"))
+        #expect(debugConfig.contains("ONLY_ACTIVE_ARCH = YES"))
         #expect(prodDebugConfig.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG"))
         #expect(!prodDebugConfig.contains("BETA"))
         #expect(prodDebugConfig.contains("PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile"))
@@ -389,6 +624,9 @@ extension SourceGuardTests {
         #expect(environment.contains(#"name = "Just Launch Installed iOS Prod on iPhone""#))
         #expect(!environment.contains(#"name = "Just Launch Installed iOS Prod Fast on iPhone""#))
         #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta launch"))
+        #expect(installScript.contains(#"/(:[0-9]+:[0-9]+)?: (error|warning|note):/"#))
+        #expect(installScript.contains("grep -E '(:[0-9]+:[0-9]+)?: (error|warning):'"))
+        #expect(installScript.contains("No Accounts|No signing certificate|requires a development team"))
 
         var actionNames: [String] = []
         var inAction = false
@@ -417,8 +655,15 @@ extension SourceGuardTests {
 
         #expect(installScript.contains(#"SCHEME="${TRON_IOS_SCHEME:-Tron Beta}""#))
         #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Beta}""#))
+        #expect(installScript.contains(#"PROJECT="TronMobile.xcodeproj""#))
+        #expect(installScript.contains(#"-project "$PROJECT""#))
+        #expect(installScript.contains(#"-destination "platform=iOS,id=${device_id}""#))
+        #expect(!installScript.contains("TRON_IOS_DESTINATION"))
+        #expect(!installScript.contains("project_selector"))
+        #expect(!installScript.contains(".xcworkspace"))
         #expect(installScript.contains("TRON_IOS_SCHEME"))
         #expect(installScript.contains("TRON_IOS_CONFIGURATION"))
+        #expect(!installScript.contains("install|start)"))
         #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))
         #expect(!installScript.contains(#"find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1"#))
 

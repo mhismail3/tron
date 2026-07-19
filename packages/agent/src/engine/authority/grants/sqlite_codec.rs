@@ -10,15 +10,6 @@ use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, InvocationId, TraceId, WorkerId};
 use crate::engine::kernel::types::RiskLevel;
 
-pub(super) fn risk_as_str(risk: RiskLevel) -> &'static str {
-    match risk {
-        RiskLevel::Low => "low",
-        RiskLevel::Medium => "medium",
-        RiskLevel::High => "high",
-        RiskLevel::Critical => "critical",
-    }
-}
-
 fn parse_risk(value: &str) -> Result<RiskLevel> {
     match value {
         "low" => Ok(RiskLevel::Low),

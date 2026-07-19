@@ -108,7 +108,7 @@ async fn refresh_tokens(
     }
 
     let data: TokenResponse = response.json().await.map_err(ProviderError::Http)?;
-    let expires_at = calculate_expires_at(data.expires_in, 0);
+    let expires_at = calculate_expires_at(data.expires_in);
 
     Ok(OAuthTokens {
         access_token: data.access_token,
@@ -435,6 +435,7 @@ impl GoogleProvider {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
                     message: err_info.message,
+                    code: err_info.code,
                 });
             }
             return Err(ProviderError::Api {
@@ -454,7 +455,7 @@ impl GoogleProvider {
                 response,
                 &SSE_OPTIONS,
                 create_stream_state(),
-                process_stream_chunk,
+                |event, state| Ok(process_stream_chunk(event, state)),
             ),
         )
     }

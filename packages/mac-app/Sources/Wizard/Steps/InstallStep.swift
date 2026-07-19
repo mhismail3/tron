@@ -203,31 +203,6 @@ struct InstallStep: View {
         }
         stages[.validateHelper] = .succeeded
 
-        let plan: InstallPlan
-        let plannerResult = InstallPlanner.plan(
-            paths: InstallPlanner.TargetPaths(
-                helperBundle: setup.serverHelperBundle,
-                helperBinary: setup.serverHelperBinary,
-                plistPath: setup.launchAgentPlistPath,
-                label: setup.launchAgentLabel,
-                port: setup.serverPort
-            )
-        )
-        switch plannerResult {
-        case .failure(.helperMissing(let url)):
-            let message = "Missing helper executable at \(url.path). Reinstall Tron.app."
-            state.installOutcome = .helperValidationFailed(message)
-            stages[.validateHelper] = .failed(message)
-            return
-        case .failure(.plistMissing(let url)):
-            let message = "Missing LaunchAgent plist at \(url.path). Reinstall Tron.app."
-            state.installOutcome = .helperValidationFailed(message)
-            stages[.validateHelper] = .failed(message)
-            return
-        case .success(let value):
-            plan = value
-        }
-
         guard setup.canManageLaunchAgent else {
             let message = "This Xcode Debug wrapper is in companion mode. Use /Applications/Tron.app for the production install, or run the isolated install-testing scheme."
             stages[.registerAgent] = .failed(message)
@@ -238,9 +213,9 @@ struct InstallStep: View {
         // 3. Register the bundled Login Item through SMAppService.
         stages[.registerAgent] = .running
         await paceStage()
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: setup.launchAgentManager,
-            plistPath: plan.plistPath,
+            plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
         )
         switch outcome {
@@ -434,8 +409,8 @@ struct InstallStep: View {
         installStatusText = "Checking..."
         let token = setup.readBearerToken()
         switch await setup.pingServer(token) {
-        case .success(let info):
-            installStatusText = "Running on port \(info.port)"
+        case .success:
+            installStatusText = "Running on port \(setup.serverPort)"
         case .unauthorized:
             installStatusText = "Running; token needs refresh"
         case .unreachable:
@@ -490,22 +465,5 @@ enum InstallStepLayout {
                 .combined(with: .scale(scale: 0.98, anchor: .top)),
             removal: .opacity
         )
-    }
-}
-
-/// Applies the service registration step. An already-enabled label may
-/// still be running an older helper image after app replacement, so
-/// `.alreadyLoaded` is followed by `kickstart -k`.
-enum InstallLaunchAgentRunner {
-    static func ensureLoaded(
-        manager: LaunchAgentManaging,
-        plistPath: URL,
-        label: String
-    ) async -> LaunchAgentOutcome {
-        let loadOutcome = await manager.load(plistPath: plistPath, label: label)
-        guard case .alreadyLoaded = loadOutcome else {
-            return loadOutcome
-        }
-        return await manager.restart(label: label)
     }
 }

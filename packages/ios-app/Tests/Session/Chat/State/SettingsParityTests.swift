@@ -3,47 +3,42 @@ import XCTest
 
 /// Settings parity meta-test.
 ///
-/// CLAUDE.md codifies a rule that every server setting decoded into
+/// AGENTS.md codifies a rule that every server setting decoded into
 /// `ServerSettings` must have a 1-to-1 control in the iOS settings UI.
 /// There is no Swift reflection path from the `ServerSettings` struct
-/// because its fields are read from JSON via `decodeIfPresent`, not
-/// codable synthesis. Instead, this test walks `SettingsState`'s
-/// runtime fields via `Mirror` — every field on the observable
-/// projection is expected to either be part of the user-editable
+/// because it uses a custom strict decoder rather than Codable synthesis.
+/// The first bridge test reflects the decoded DTO and repository snapshot so a
+/// newly decoded field cannot be silently dropped before it reaches state. The
+/// remaining tests walk `SettingsState`'s runtime fields via `Mirror` — every field on the observable
+/// projection is expected to either be represented in the settings
 /// surface (covered by `KNOWN_UI_FIELDS`) or on `WAIVER` with an
 /// explanation for why it doesn't need a UI control.
 ///
-/// A new server field added to the iOS decode path will eventually
-/// land on `SettingsState`, at which point this test fires until the
-/// maintainer updates either the UI list or the waiver.
+/// A new server field added to the iOS decode path must be projected into the
+/// snapshot and state before the UI list or a waiver can be updated.
 @MainActor
 final class SettingsParityTests: XCTestCase {
 
     /// Fields that are wired to a UI control somewhere under
-    /// `Views/Settings/Pages/`. Adding a field here requires a real
-    /// UI control — the test only asserts the field is accounted for,
+    /// `Sources/UI/Settings/Pages/`. Adding a field here requires a real
+    /// UI control or read-only row — the test only asserts the field is accounted for,
     /// not that it's actually displayed, but the intent is explicit.
     private let KNOWN_UI_FIELDS: Set<String> = [
         // General
         "defaultModel",
         "quickSessionWorkspace",
+        "tailscaleIp",
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
-        // Engine diagnostics
-        "observabilityLogLevel",
-        "observabilityVerboseRetentionDays",
-        "storageRetentionEnabled",
-        "storageMaxDatabaseMb",
+        // Engine transcription policy
         "transcriptionEnabled",
     ]
 
     /// Explicit waivers — fields that exist on SettingsState but are
     /// NOT user-editable settings. Adding a waiver requires a reason.
     private let WAIVER: [String: String] = [
-        "availableModels": "cached model list from models.list engine protocol — not a setting",
         "isLoaded": "UI loading flag — not persisted",
-        "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",
         "lastLoadedSettings": "rollback snapshot for failed sparse updates — not a setting",
     ]
@@ -63,6 +58,33 @@ final class SettingsParityTests: XCTestCase {
         return stripped
     }
 
+    func testEveryDecodedSettingsFieldProjectsIntoSnapshot() throws {
+        let json = #"{"server":{"defaultWorkspace":"/parity-workspace","tailscaleIp":"100.64.0.7","transcription":{"enabled":true}},"context":{"compactor":{"preserveRecentCount":7,"triggerTokenThreshold":0.55}}}"#
+        let settings = try JSONDecoder().decode(
+            ServerSettings.self,
+            from: try ServerSettingsFixture.data(json)
+        )
+
+        XCTAssertEqual(
+            Set(Mirror(reflecting: settings).children.compactMap(\.label)),
+            Set(["defaultModel", "defaultWorkspace", "tailscaleIp", "compaction", "transcriptionEnabled"])
+        )
+        XCTAssertEqual(
+            Set(Mirror(reflecting: settings.compaction).children.compactMap(\.label)),
+            Set(["preserveRecentCount", "triggerTokenThreshold"])
+        )
+
+        let snapshot = ServerSettingsSnapshot(settings)
+        XCTAssertEqual(snapshot, ServerSettingsSnapshot(
+            defaultModel: "claude-sonnet-4-6",
+            defaultWorkspace: "/parity-workspace",
+            tailscaleIp: "100.64.0.7",
+            compactionPreserveRecentCount: 7,
+            compactionTriggerTokenThreshold: 0.55,
+            transcriptionEnabled: true
+        ))
+    }
+
     func testEverySettingsStateFieldIsWiredOrWaived() {
         let state = SettingsState()
         let mirror = Mirror(reflecting: state)
@@ -79,7 +101,7 @@ final class SettingsParityTests: XCTestCase {
             orphans.isEmpty,
             """
             SettingsState fields without a UI control or waiver: \(orphans).
-            Either add a UI control in Views/Settings/Pages/ and register
+            Either add a UI control in Sources/UI/Settings/Pages/ and register
             the field in KNOWN_UI_FIELDS, or add an entry to WAIVER with
             a justification.
             """

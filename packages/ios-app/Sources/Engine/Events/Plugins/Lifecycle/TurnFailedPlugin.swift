@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling turn failed events.
 /// These events signal that a turn failed due to errors.
-enum TurnFailedPlugin: EventPlugin {
+enum TurnFailedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.turn_failed"
 
     // MARK: - Event Data
@@ -39,6 +39,10 @@ enum TurnFailedPlugin: EventPlugin {
         let details: [String: AnyCodable]?
         let failure: CanonicalFailurePayload?
         let partialContent: String?
+
+        var isCancellation: Bool {
+            CanonicalFailurePayload.isTurnCancellation(code: code, category: category)
+        }
     }
 
     // MARK: - Protocol Implementation
@@ -62,5 +66,11 @@ enum TurnFailedPlugin: EventPlugin {
             failure: failure,
             partialContent: data.partialContent
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let result = result as? Result else { return }
+        context.handleTurnFailed(result)
     }
 }

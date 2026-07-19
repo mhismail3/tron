@@ -1,13 +1,20 @@
 //! Broadcast-based event emitter for `TronEvent` dispatch.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use crate::shared::protocol::events::TronEvent;
+use parking_lot::Mutex;
 use tokio::sync::broadcast;
-use tracing::trace;
+use tracing::{error, trace};
 
 /// Default broadcast channel capacity.
 const DEFAULT_CAPACITY: usize = 1024;
+
+/// Synchronous state projection owned by the emitter boundary.
+pub(crate) trait TronEventObserver: Send + Sync {
+    fn observe_tron_event(&self, event: &TronEvent);
+}
 
 /// Broadcast-based event emitter.
 ///
@@ -16,6 +23,8 @@ const DEFAULT_CAPACITY: usize = 1024;
 pub struct EventEmitter {
     tx: broadcast::Sender<TronEvent>,
     emit_count: AtomicU64,
+    dispatch: Mutex<()>,
+    observer: Option<Arc<dyn TronEventObserver>>,
 }
 
 impl EventEmitter {
@@ -26,10 +35,25 @@ impl EventEmitter {
 
     /// Create a new emitter with a custom channel capacity.
     pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_observer(capacity, None)
+    }
+
+    /// Create an emitter whose observer is updated synchronously before each
+    /// event becomes visible to broadcast consumers.
+    pub(crate) fn with_observer(observer: Arc<dyn TronEventObserver>) -> Self {
+        Self::with_capacity_and_observer(DEFAULT_CAPACITY, Some(observer))
+    }
+
+    fn with_capacity_and_observer(
+        capacity: usize,
+        observer: Option<Arc<dyn TronEventObserver>>,
+    ) -> Self {
         let (tx, _) = broadcast::channel(capacity);
         Self {
             tx,
             emit_count: AtomicU64::new(0),
+            dispatch: Mutex::new(()),
+            observer,
         }
     }
 
@@ -38,6 +62,10 @@ impl EventEmitter {
     /// Returns the number of receivers that received the event.
     /// Returns 0 if there are no active subscribers.
     pub fn emit(&self, event: TronEvent) -> usize {
+        let _dispatch = self.dispatch.lock();
+        if let Some(observer) = self.observer.as_ref() {
+            observer.observe_tron_event(&event);
+        }
         let _ = self.emit_count.fetch_add(1, Ordering::Relaxed);
         self.tx.send(event).unwrap_or(0)
     }
@@ -47,7 +75,27 @@ impl EventEmitter {
     /// Atomically increments the counter and assigns the sequence to the event
     /// before broadcasting. Returns the number of receivers that got the event.
     pub fn emit_sequenced(&self, mut event: TronEvent, counter: &AtomicI64) -> usize {
-        let seq = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        // INVARIANT: sequence allocation, state observation, and broadcast are
+        // one short synchronous critical section. Concurrent callers using
+        // this allocation path cannot expose N+1 before N or advertise a cut
+        // that the stream has not accepted. Presequenced events must arrive at
+        // this emitter in source order; active-run ownership enforces that.
+        let _dispatch = self.dispatch.lock();
+        let mut current = counter.load(Ordering::SeqCst);
+        let seq = loop {
+            let Some(next) = current.checked_add(1) else {
+                error!(
+                    event_type = event.event_type(),
+                    session_id = event.session_id(),
+                    "event sequence exhausted; refusing unsequenced broadcast"
+                );
+                return 0;
+            };
+            match counter.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break next,
+                Err(observed) => current = observed,
+            }
+        };
         event.set_sequence(seq);
         trace!(
             event_type = event.event_type(),
@@ -55,6 +103,9 @@ impl EventEmitter {
             seq,
             "emitting sequenced event"
         );
+        if let Some(observer) = self.observer.as_ref() {
+            observer.observe_tron_event(&event);
+        }
         let _ = self.emit_count.fetch_add(1, Ordering::Relaxed);
         self.tx.send(event).unwrap_or(0)
     }
@@ -63,11 +114,6 @@ impl EventEmitter {
     /// all events emitted after this call.
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {
         self.tx.subscribe()
-    }
-
-    /// Get a clone of the broadcast sender for external components.
-    pub fn sender(&self) -> broadcast::Sender<TronEvent> {
-        self.tx.clone()
     }
 
     /// Get the number of active subscribers.
@@ -91,6 +137,19 @@ impl Default for EventEmitter {
 mod tests {
     use super::*;
     use crate::shared::protocol::events::{BaseEvent, agent_start_event};
+
+    #[derive(Default)]
+    struct RecordingObserver {
+        sequences: Mutex<Vec<i64>>,
+    }
+
+    impl TronEventObserver for RecordingObserver {
+        fn observe_tron_event(&self, event: &TronEvent) {
+            if let Some(sequence) = event.sequence() {
+                self.sequences.lock().push(sequence);
+            }
+        }
+    }
 
     #[test]
     fn emit_with_no_subscribers() {
@@ -133,6 +192,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sequenced_emit_fails_closed_at_i64_max() {
+        let emitter = EventEmitter::new();
+        let mut receiver = emitter.subscribe();
+        let counter = AtomicI64::new(i64::MAX);
+
+        assert_eq!(emitter.emit_sequenced(agent_start_event("s1"), &counter), 0);
+        assert_eq!(counter.load(Ordering::SeqCst), i64::MAX);
+        assert_eq!(emitter.emit_count(), 0);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
     async fn dropped_slow_receiver() {
         let emitter = EventEmitter::with_capacity(2);
         let mut rx = emitter.subscribe();
@@ -145,6 +219,24 @@ mod tests {
         // Receiver should be lagged
         let result = rx.recv().await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn synchronous_observer_remains_complete_when_receiver_lags() {
+        let observer = Arc::new(RecordingObserver::default());
+        let emitter = EventEmitter::with_capacity_and_observer(2, Some(observer.clone()));
+        let mut receiver = emitter.subscribe();
+        let counter = AtomicI64::new(0);
+
+        for _ in 0..3 {
+            let _ = emitter.emit_sequenced(agent_start_event("s1"), &counter);
+        }
+
+        assert_eq!(*observer.sequences.lock(), vec![1, 2, 3]);
+        assert!(matches!(
+            receiver.recv().await,
+            Err(broadcast::error::RecvError::Lagged(1))
+        ));
     }
 
     #[test]
@@ -240,6 +332,36 @@ mod tests {
         assert_eq!(e1.sequence(), Some(1));
         assert_eq!(e2.sequence(), Some(2));
         assert_eq!(e3.sequence(), Some(3));
+    }
+
+    #[test]
+    fn concurrent_sequence_allocation_observation_and_broadcast_stay_ordered() {
+        let observer = Arc::new(RecordingObserver::default());
+        let emitter = Arc::new(EventEmitter::with_observer(observer.clone()));
+        let mut receiver = emitter.subscribe();
+        let counter = Arc::new(AtomicI64::new(0));
+
+        std::thread::scope(|scope| {
+            for _ in 0..64 {
+                let emitter = emitter.clone();
+                let counter = counter.clone();
+                scope.spawn(move || {
+                    let _ = emitter.emit_sequenced(agent_start_event("s1"), &counter);
+                });
+            }
+        });
+
+        assert_eq!(
+            *observer.sequences.lock(),
+            (1..=64).map(i64::from).collect::<Vec<_>>()
+        );
+        let broadcast_sequences = (0..64)
+            .map(|_| receiver.try_recv().unwrap().sequence().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            broadcast_sequences,
+            (1..=64).map(i64::from).collect::<Vec<_>>()
+        );
     }
 
     #[test]

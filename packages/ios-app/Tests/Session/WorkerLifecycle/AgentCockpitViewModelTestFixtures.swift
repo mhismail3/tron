@@ -133,7 +133,7 @@ extension AgentCockpitViewModelTests {
 
     nonisolated static func capabilityCockpitOverview() -> CapabilityCockpitOverviewDTO {
         CapabilityCockpitOverviewDTO(
-            schemaVersion: "tron.capability_binding.cockpit_overview.v1",
+            schemaVersion: "tron.capability_binding.cockpit_overview.v2",
             operation: "capability_binding_cockpit_overview",
             summary: CapabilityCockpitSummaryDTO(
                 totalOperations: 2,
@@ -216,7 +216,7 @@ extension AgentCockpitViewModelTests {
                 CapabilityCockpitRouteStoryDTO(
                     kind: "active_route",
                     operation: "git_status",
-                    title: "git_status is using a governed replacement route",
+                    title: "Inspect Git Status is using a governed replacement route",
                     detail: "1 routed invocation recorded. Rollback available and disable available.",
                     status: "active",
                     evidenceCount: 4,
@@ -227,6 +227,8 @@ extension AgentCockpitViewModelTests {
             operations: [
                 CapabilityCockpitOperationDTO(
                     name: "git_status",
+                    displayName: "Inspect Git Status",
+                    description: "Inspects the current repository state without changing it.",
                     family: "git",
                     familyLabel: "Git",
                     capabilityPool: CapabilityCockpitPoolDTO(
@@ -247,7 +249,7 @@ extension AgentCockpitViewModelTests {
                     status: CapabilityCockpitStatusDTO(
                         kind: "built_in_adapter",
                         label: "Built-in adapter",
-                        detail: "Built-in execution can be shadowed or replaced only after governed evidence. Family: Git.",
+                        detail: "Built-in execution can be shadowed or replaced only after governed evidence.",
                         builtIn: true,
                         moduleOwned: false,
                         locked: false
@@ -323,6 +325,8 @@ extension AgentCockpitViewModelTests {
                 ),
                 CapabilityCockpitOperationDTO(
                     name: "observe",
+                    displayName: "Record Observation",
+                    description: "Records text as an assistant-visible observation.",
                     family: "core",
                     familyLabel: "Core",
                     capabilityPool: CapabilityCockpitPoolDTO(
@@ -343,7 +347,7 @@ extension AgentCockpitViewModelTests {
                     status: CapabilityCockpitStatusDTO(
                         kind: "kernel_locked",
                         label: "Kernel locked",
-                        detail: "Engine substrate; replacement is not available. Family: Core.",
+                        detail: "Engine substrate; replacement is not available.",
                         builtIn: true,
                         moduleOwned: false,
                         locked: true
@@ -436,71 +440,6 @@ extension AgentCockpitViewModelTests {
         )
     }
 
-    nonisolated static func agentBriefingOverview() -> AgentBriefingOverviewDTO {
-        AgentBriefingOverviewDTO(
-            schemaVersion: "tron.agent_briefing.overview.v1",
-            operation: "agent_briefing_overview",
-            summary: AgentBriefingSummaryDTO(
-                title: "Tron has active work",
-                detail: "1 active, 0 waiting on review, 0 blocked, 1 total records.",
-                activeWorkCount: 1,
-                needsYouCount: 0,
-                weakPointCount: 0,
-                activityCount: 1,
-                degraded: false
-            ),
-            sections: [
-                AgentBriefingSectionDTO(
-                    id: "active_work",
-                    title: "Active work",
-                    question: "What is currently in motion?",
-                    narrative: "Active module runtime work is in progress.",
-                    items: [
-                        AgentBriefingItemDTO(
-                            id: "briefing-item-1",
-                            title: "Active module runtime",
-                            detail: "Server-owned projection",
-                            status: "active",
-                            evidence: AgentBriefingEvidenceDTO(
-                                label: "Evidence 1",
-                                resourceKind: "module_runtime_state",
-                                updatedAt: "2026-06-20T12:00:00Z",
-                                providerSafe: true
-                            )
-                        )
-                    ],
-                    emptyState: "No active work is in progress.",
-                    drilldownAvailable: true
-                )
-            ],
-            scope: AgentBriefingScopeDTO(
-                sessionScoped: true,
-                workspaceScoped: false,
-                exactScopeRequired: true,
-                payloadScopeTrusted: false
-            ),
-            projection: AgentBriefingProjectionPolicyDTO(
-                allowlist: "agent_briefing_metadata_redacted_v1",
-                serverOwnedTruth: true,
-                projectionOnly: true,
-                autonomyBehaviorCreated: false,
-                metadataOnly: true,
-                rawPayloadsReturned: false,
-                rawCommandsReturned: false,
-                rawLogsReturned: false,
-                promptBodiesReturned: false,
-                fileContentsReturned: false,
-                absolutePathsReturned: false,
-                grantIdsReturned: false,
-                authorityIdsReturned: false,
-                traceIdsReturned: false,
-                invocationIdsReturned: false,
-                tokenLikeMaterialReturned: false,
-                boundedItems: true,
-                sourceProjection: "module_activity_overview"
-            )
-        )
-    }
 }
 
 @MainActor
@@ -517,7 +456,6 @@ final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
     var inspections: [String: ResourceInspectResultDTO] = [:]
     var moduleActivity = AgentCockpitViewModelTests.moduleActivityOverview()
     var capabilityVisibility = AgentCockpitViewModelTests.capabilityCockpitOverview()
-    var agentBriefing = AgentCockpitViewModelTests.agentBriefingOverview()
 
     var overviewCallCount = 0
     var moduleActivityOverviewCallCount = 0
@@ -526,9 +464,6 @@ final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
     var capabilityCockpitOverviewCallCount = 0
     var lastCapabilityCockpitSessionId: String?
     var lastCapabilityCockpitWorkspaceId: String?
-    var agentBriefingOverviewCallCount = 0
-    var lastAgentBriefingSessionId: String?
-    var lastAgentBriefingWorkspaceId: String?
     var listedKinds: [WorkerLifecycleResourceKind] = []
     var inspectCallIds: [String] = []
     var installedManifest: [String: AnyCodable]?
@@ -580,17 +515,6 @@ final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         lastCapabilityCockpitSessionId = sessionId
         lastCapabilityCockpitWorkspaceId = workspaceId
         return capabilityVisibility
-    }
-
-    func agentBriefingOverview(
-        limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> AgentBriefingOverviewDTO {
-        agentBriefingOverviewCallCount += 1
-        lastAgentBriefingSessionId = sessionId
-        lastAgentBriefingWorkspaceId = workspaceId
-        return agentBriefing
     }
 
     func proposePackageChange(

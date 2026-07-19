@@ -94,6 +94,7 @@ final class TypewriterAnimationStateTests: XCTestCase {
         state.animate(to: "something")
         try? await Task.sleep(for: .milliseconds(50))
         state.snap(to: "snapped")
+        await state.waitForCompletion()
         XCTAssertEqual(state.displayedText, "snapped")
     }
 }

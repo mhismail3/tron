@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    WorkerId,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -18,20 +18,20 @@ use super::contract::{
 };
 use super::projection::{inspected_module_validation_report, module_validation_report_summary};
 use super::validation::*;
-use super::{Deps, MODULE_VALIDATION_REPORT_KIND, MODULE_VALIDATION_REPORT_SCHEMA_ID};
+use super::{MODULE_VALIDATION_REPORT_KIND, MODULE_VALIDATION_REPORT_SCHEMA_ID};
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str =
     "sha256:tron.module_validation_report.idempotency.v1";
 const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.module_validation_report.idempotency.v1\0";
 
 pub(crate) async fn record_module_validation_report_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_write_authority(deps, invocation, "module_validation_record").await?;
+    ensure_write_authority(engine_host, invocation, "module_validation_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let validation_report_id_input =
@@ -102,8 +102,7 @@ pub(crate) async fn record_module_validation_report_value_at(
     let resource_id =
         module_validation_report_resource_id(&scope, &validation_report_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -148,8 +147,7 @@ pub(crate) async fn record_module_validation_report_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_VALIDATION_REPORT_KIND.to_owned(),
@@ -175,7 +173,7 @@ pub(crate) async fn record_module_validation_report_value_at(
         invalid("module validation report resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_validation.recorded",
         &resource,
@@ -197,18 +195,18 @@ pub(crate) async fn record_module_validation_report_value_at(
         "idempotentReplay": false,
         "moduleValidationReportResourceId": resource.resource_id,
         "moduleValidationReportVersionId": version_id,
-        "validationReport": module_validation_report_summary_for_resource(deps, &resource).await?,
+        "validationReport": module_validation_report_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_validation_report")]
     }))
 }
 
 pub(crate) async fn list_module_validation_report_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, "module_validation_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "module_validation_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -218,8 +216,7 @@ pub(crate) async fn list_module_validation_report_value(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_VALIDATION_REPORT_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -237,8 +234,7 @@ pub(crate) async fn list_module_validation_report_value(
     let truncated = resources.len() > limit;
     let mut validation_reports = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -270,18 +266,17 @@ pub(crate) async fn list_module_validation_report_value(
 }
 
 pub(crate) async fn inspect_module_validation_report_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_validation_inspect").await?;
+    let grant = inspect_read_grant(engine_host, invocation, "module_validation_inspect").await?;
     let resource_id = required_string(payload, "moduleValidationReportResourceId")?;
     validate_module_validation_report_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_validation_inspect")?;
     let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -374,11 +369,10 @@ fn module_validation_report_record(input: ModuleValidationReportRecordInput<'_>)
 }
 
 async fn module_validation_report_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?
@@ -456,13 +450,13 @@ fn validate_module_validation_report_resource_id(value: &str) -> Result<(), Capa
 }
 
 async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: MODULE_VALIDATION_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

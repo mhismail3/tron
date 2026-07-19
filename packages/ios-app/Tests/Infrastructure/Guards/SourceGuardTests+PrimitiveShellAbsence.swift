@@ -201,16 +201,12 @@ extension SourceGuardTests {
     }
 
 
-    @Test("iOS runtime contract is iOS 26 only")
-    func testIOSRuntimeContractIsIOS26Only() throws {
+    @Test("iOS 26 deployment baseline supports Xcode 26 and Xcode 27 runtimes")
+    func testIOSRuntimeContractSupportsIOS26AndIOS27() throws {
         let iosRoot = iosAppRoot()
 
         let projectYML = try String(
             contentsOf: iosRoot.appendingPathComponent("project.yml"),
-            encoding: .utf8
-        )
-        let baseConfig = try String(
-            contentsOf: iosRoot.appendingPathComponent("Configuration/Base.xcconfig"),
             encoding: .utf8
         )
         let appEntry = try String(
@@ -221,7 +217,11 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("docs/architecture.md"),
             encoding: .utf8
         )
-        let rootReadme = try String(
+        let developmentDoc = try String(
+            contentsOf: iosRoot.appendingPathComponent("docs/development.md"),
+            encoding: .utf8
+        )
+        let projectReference = try String(
             contentsOf: iosRoot
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
@@ -230,11 +230,15 @@ extension SourceGuardTests {
         )
 
         #expect(projectYML.contains(#"iOS: "26.0""#))
-        #expect(baseConfig.contains("IPHONEOS_DEPLOYMENT_TARGET = 26.0"))
+        #expect(projectYML.contains(#"xcodeVersion: "2640""#))
         #expect(architectureDoc.contains("**Minimum iOS**: 26.0"))
+        #expect(architectureDoc.contains("iOS 26 and iOS 27"))
         #expect(!architectureDoc.contains("**Minimum iOS**: 18.0"))
-        #expect(rootReadme.contains("**Minimum iOS:** 26.0"))
-        #expect(!rootReadme.contains("**Minimum iOS:** 18.0"))
+        #expect(developmentDoc.contains("Xcode 26.6 with the iOS 26.5 SDK"))
+        #expect(developmentDoc.contains("Xcode 27 beta with the iOS 27 SDK"))
+        #expect(projectReference.contains("**Minimum iOS:** 26.0"))
+        #expect(projectReference.contains("Xcode 26 and Xcode 27"))
+        #expect(!projectReference.contains("**Minimum iOS:** 18.0"))
         #expect(!appEntry.contains("This app requires iOS 26 or later"))
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }

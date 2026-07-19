@@ -1,5 +1,6 @@
 use super::*;
 use crate::domains::session::event_store::EventStore;
+use crate::shared::protocol::events::BaseEvent;
 use serde_json::json;
 
 fn make_orchestrator() -> Orchestrator {
@@ -19,21 +20,18 @@ fn make_orchestrator() -> Orchestrator {
 #[test]
 fn create_orchestrator() {
     let orch = make_orchestrator();
-    assert_eq!(orch.max_concurrent_sessions(), MAX_CONCURRENT_SESSIONS);
-    assert_eq!(orch.active_session_count(), 0);
-    assert!(orch.can_accept_session());
+    assert_eq!(orch.cached_session_count(), 0);
 }
 
 #[tokio::test]
 async fn create_session_through_orchestrator() {
     let orch = make_orchestrator();
-    let sid = orch
-        .session_manager()
+    let _ = orch
+        .session_manager
         .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
-    assert_eq!(orch.active_session_count(), 1);
-    assert!(orch.is_session_busy(&sid));
+    assert_eq!(orch.cached_session_count(), 1);
 }
 
 #[tokio::test]
@@ -47,21 +45,6 @@ async fn subscribe_to_events() {
 
     let event = rx.try_recv().unwrap();
     assert_eq!(event.event_type(), "agent_start");
-}
-
-#[tokio::test]
-async fn max_concurrent_enforced() {
-    let orch = make_orchestrator();
-
-    for i in 0..MAX_CONCURRENT_SESSIONS {
-        let _ = orch
-            .session_manager()
-            .create_session("model", &format!("/tmp/{i}"), None)
-            .unwrap();
-    }
-
-    assert_eq!(orch.active_session_count(), MAX_CONCURRENT_SESSIONS);
-    assert!(!orch.can_accept_session());
 }
 
 // --- Run tracking tests ---
@@ -94,6 +77,67 @@ fn dropping_run_clears_active() {
     drop(run);
     assert!(!orch.has_active_run("s1"));
     assert_eq!(orch.active_run_count(), 0);
+    assert!(orch.active_reconstruction_snapshot("s1").is_none());
+}
+
+#[test]
+fn terminal_callback_serializes_replacement_admission() {
+    let orchestrator = Arc::new(make_orchestrator());
+    let mut run = orchestrator.begin_run("s1", "run-1").unwrap();
+    let (start_tx, start_rx) = std::sync::mpsc::channel();
+    let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let replacement_orchestrator = orchestrator.clone();
+    let replacement = std::thread::spawn(move || {
+        start_rx.recv().unwrap();
+        attempted_tx.send(()).unwrap();
+        let admitted = replacement_orchestrator.begin_run("s1", "run-2").is_ok();
+        result_tx.send(admitted).unwrap();
+    });
+
+    assert!(run.finish_with(|| {
+        start_tx.send(()).unwrap();
+        attempted_rx.recv().unwrap();
+        assert!(
+            result_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "replacement admission must wait while terminal events are published"
+        );
+    }));
+
+    assert!(
+        result_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap(),
+        "replacement admission must succeed immediately after terminal release"
+    );
+    replacement.join().unwrap();
+}
+
+#[test]
+fn replacement_run_never_inherits_stale_reconstruction_projection() {
+    let orch = make_orchestrator();
+    let run_one = orch.begin_run("s1", "run-1").unwrap();
+    let _ = orch.broadcast().emit(TronEvent::TurnStart {
+        base: BaseEvent::now("s1").with_sequence(1),
+        turn: 1,
+    });
+    assert_eq!(
+        orch.active_reconstruction_snapshot("s1")
+            .unwrap()
+            .1
+            .unwrap()
+            .last_sequence,
+        Some(1)
+    );
+
+    drop(run_one);
+    let _run_two = orch.begin_run("s1", "run-2").unwrap();
+    let (run_id, snapshot) = orch.active_reconstruction_snapshot("s1").unwrap();
+
+    assert_eq!(run_id, "run-2");
+    assert_eq!(snapshot.unwrap().last_sequence, None);
 }
 
 #[test]
@@ -107,6 +151,43 @@ fn get_run_id_returns_correct_id() {
 fn get_run_id_unknown_returns_none() {
     let orch = make_orchestrator();
     assert!(orch.get_run_id("unknown").is_none());
+}
+
+#[test]
+fn status_snapshot_never_pairs_registry_run_with_replacement_projection() {
+    let orch = make_orchestrator();
+    let _run = orch.begin_run("s1", "run-1").unwrap();
+
+    // Model the only dangerous interleaving directly: a replacement projection
+    // becomes visible while the old registry identity is still being read.
+    orch.turn_accumulators.begin_run("s1", "run-2");
+    let _ = orch.broadcast().emit(TronEvent::TurnStart {
+        base: BaseEvent::now("s1"),
+        turn: 1,
+    });
+    let _ = orch
+        .broadcast()
+        .emit(TronEvent::CapabilityInvocationGenerating {
+            base: BaseEvent::now("s1"),
+            invocation_id: "cap-2".into(),
+            model_primitive_name: "execute".into(),
+            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
+            ),
+        });
+    let _ = orch
+        .broadcast()
+        .emit(TronEvent::CapabilityInvocationStarted {
+            base: BaseEvent::now("s1"),
+            invocation_id: "cap-2".into(),
+            model_primitive_name: "execute".into(),
+            arguments: None,
+            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
+            ),
+        });
+
+    let (run_id, capability) = orch.agent_status_snapshot("s1");
+    assert_eq!(run_id.as_deref(), Some("run-1"));
+    assert!(capability.is_none());
 }
 
 // --- Abort tests ---
@@ -272,28 +353,6 @@ async fn shutdown_clears_invocations() {
 
     orch.shutdown().await.unwrap();
     assert!(rx.await.is_err()); // sender was dropped
-}
-
-// --- is_session_busy advisory tests ---
-
-#[test]
-fn is_session_busy_reflects_active_run() {
-    let orch = make_orchestrator();
-    assert!(!orch.is_session_busy("s1"));
-    let run = orch.begin_run("s1", "run_1").unwrap();
-    assert!(orch.is_session_busy("s1"));
-    drop(run);
-    assert!(!orch.is_session_busy("s1"));
-}
-
-#[tokio::test]
-async fn is_session_busy_reflects_active_session() {
-    let orch = make_orchestrator();
-    let sid = orch
-        .session_manager()
-        .create_session("model", "/tmp", Some("test"))
-        .unwrap();
-    assert!(orch.is_session_busy(&sid));
 }
 
 // --- Sequence counter tests ---
@@ -502,6 +561,17 @@ fn next_sequence_error_contains_session_id() {
     );
 }
 
+#[test]
+fn next_sequence_fails_closed_at_i64_max() {
+    let orch = make_orchestrator();
+    let counter = orch.ensure_sequence_counter_at_least("s1", i64::MAX);
+
+    let error = orch.next_sequence("s1").unwrap_err();
+
+    assert!(matches!(error, RuntimeError::Persistence(_)));
+    assert_eq!(counter.load(Ordering::SeqCst), i64::MAX);
+}
+
 // --- Orphaned run cleanup ---
 
 #[tokio::test]
@@ -520,5 +590,18 @@ async fn shutdown_clears_orphaned_runs() {
         orch.active_run_count(),
         0,
         "active_runs must be cleared after shutdown"
+    );
+    assert!(orch.active_reconstruction_snapshot("s1").is_none());
+    assert!(orch.active_reconstruction_snapshot("s2").is_none());
+
+    let _ = orch.broadcast().emit(TronEvent::TurnStart {
+        base: BaseEvent::now("s1"),
+        turn: 99,
+    });
+    assert!(
+        orch.turn_accumulators
+            .reconstruction_snapshot("s1", "")
+            .is_none(),
+        "late shutdown events must not recreate an ownerless projection"
     );
 }

@@ -1,10 +1,16 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-09 (dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-18 (prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
 
 ## Overview
 
 **Minimum iOS**: 26.0
+
+One source tree and binary contract supports iOS 26 and iOS 27. The generated
+project keeps an iOS 26.0 deployment target and an Xcode 26 project-format
+baseline, while compiling without source forks against either the iOS 26 or
+iOS 27 SDK. SDK selection is a build-toolchain choice; runtime behavior stays
+behind Apple's availability model rather than separate app variants.
 
 The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
@@ -12,11 +18,8 @@ keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
 runtime surfaces emitted by the engine. The session dashboard keeps its
-workspace-grouped chat list and adds small Agent Briefing and Engine Cockpit
-bands backed by server-owned projections. The full Agent Briefing
-sheet presents activity, adaptation, active work, user-needed work, weak
-points/failures, memory/learned-state, and audit sections with drill-down
-evidence and empty/degraded states. The Engine Cockpit opens from the dashboard
+workspace-grouped chat list and adds one compact Dashboard band backed by
+server-owned projections. The Dashboard sheet opens from the session list
 and starts with core engine visibility before progressively exposing module-plane
 diagnostics. It surfaces capabilities grouped into user-facing areas,
 schema/health gaps, durable verification history, redacted
@@ -33,9 +36,11 @@ being silently omitted from counts or verified/no-capabilities summaries. The ap
 does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
-Session Briefing is the first restored chat pill affordance: tapping the chat
-timeline/model pill opens a server-backed sheet with narrative session context
-status, model switching, a
+Session Briefing opens from the prompt composer's context progress ring or an
+audited timeline action. The ring fills in direct proportion to the bounded
+server-projected context percentage; model identity remains available to
+accessibility without occupying a floating visual pill. The server-backed
+sheet provides narrative session context status, model switching, a
 provider-safe Context Breakdown, compact, clear, read-only memory status, and
 recent context action audit detail. Its context section renders
 `context_control` records and timeline action refs through first-party
@@ -48,50 +53,65 @@ truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
 source-control state, worker state, or product panels locally.
 
-Notification and inbox affordances remain deferred in the current Phase 1
-shell. Local chat error pills, app-global connection toasts, timeline system
+Fixed notification and inbox product affordances remain absent. Local chat
+error pills, app-global connection toasts, timeline system
 events, Logs, Server Diagnostics, and feedback are the current attention
-surfaces. A notification bell, unread inbox, APNs registration, push delivery,
-device broker behavior, notification read state, and notification delivery
-chips return only with a future server-owned APNs/device/capability resource
-mechanism; iOS must not create a local substitute that implies hidden backend
-truth.
+surfaces. A notification bell, unread inbox, and fixed delivery chips remain
+absent. APNs registration and push delivery are narrow lifecycle effects backed
+by server-owned device, notification, and delivery resources; iOS must not
+create a local substitute that implies hidden backend truth. One observable
+push service owns token callbacks; the app retries registration after pairing,
+connection, and foreground transitions. Per-install identity plus server-side
+bundle/environment identity keeps side-by-side variants independent.
 
-The iOS Affordance Restoration Map is the active planning artifact for
-functional-only Phase 1 iOS UX restoration. It classifies every deleted or
-renamed old iOS path before implementation, starts with local-native and
-current server-fact affordances, and does not restore deleted product panels.
-The full Phase 2 agent-execution restoration plan now lives in
-`packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md` and
-covers capability discovery, filesystem, jobs, workers, subagents, approvals,
-web, git/worktrees, skills/rules/memory, MCP, scheduling, program execution,
-and matching database/event/settings/dependency work.
+This document and focused concern-owned tests define current iOS behavior;
+historical deleted-path campaigns remain available through Git history.
 
 ## Retained Surface
 
 - Connection, strict pairing host validation, onboarding, and local paired-server
   selection.
 - Settings needed to reach the server, configure providers, choose models, tune
-  server-owned context/evidence policy, and inspect local diagnostics.
-- Grouped session dashboard with scoped Agent Briefing and Engine Cockpit bands, collapsible
+  server-owned context policy, configure voice input, and inspect local diagnostics.
+- Grouped session dashboard with one scoped Dashboard band, collapsible
   workspace headers and compact
   inset liquid-glass one-line session rows. Each workspace shows its latest 10
   sessions initially and exposes native View more/View less controls for
-  independent 10-row progressive disclosure without reordering groups. The
+  independent 10-row progressive disclosure without reordering groups. Those
+  controls share the row content insets so their leading/trailing actions align
+  with the session status and date columns. The
   retained session actions include creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
-  recent session workspaces, and manual Mac paths, prompt composer with a
-  local recent-input picker, a functional-only native attachment menu that
-  preserves composer keyboard focus while layering native camera/photo/file
-  pickers above it, unified attachments for images/documents, a right-side mic
-  affordance for local composer transcription when enabled, and message
-  rendering with quiet blank empty/loading chat content, streamed thinking content, and
+  recent session workspaces, and manual Mac paths. Its configured, default,
+  recent, and navigation actions share one compact, intrinsic-width,
+  single-line capsule geometry while retaining their distinct semantics. The
+  prompt composer has a
+  local recent-input picker, a functional-only native attachment menu whose
+  transparent icon-sized target preserves composer keyboard focus. The
+  composed content row directly owns native interactive Liquid Glass, while
+  that Menu is applied afterward over a reserved leading dock so rebuilding
+  its label cannot replace or invalidate the material owner. Native
+  camera/photo/file pickers layer above it, alongside unified attachments, and
+  one composer surface with an embedded left
+  attachment action plus a right-side, background-free proportional context
+  ring and state action that becomes voice, send, transcribing, or stop as
+  needed. The context ring yields its slot while recorder-owned capture or
+  coordinator-owned transcription is active, placing the waveform/status
+  immediately beside the trailing stop/progress action, and returns only after
+  both lifecycle states end. `ComposerMicRecorder` owns the fixed five-minute
+  auto-stop policy; the coordinator context exposes readiness and recording
+  lifecycle actions without duplicating duration configuration.
+  Recording/transcription also owns the trailing
+  action even when draft content exists; sending resumes only after both voice
+  states clear. Message rendering
+  preserves ordered/unordered list nesting and includes quiet blank
+  empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
-- Chat timeline/model pill Session Briefing sheet for model switching,
+- Composer context-ring Session Briefing sheet for model switching,
   server-owned context snapshots, manual compact/clear actions, read-only memory
   refs, and durable context action audit refs.
-- Dashboard Engine Cockpit band and sheet for core engine link/catalog health,
+- Dashboard band and sheet for core engine link/catalog health,
   catalog discovery, worker lifecycle catalog/resource state, package actions,
   server-owned module activity, capability binding cockpit visibility, and
   dynamic runtime surfaces. The primary chat conversation shell does not mount
@@ -104,9 +124,9 @@ and matching database/event/settings/dependency work.
 
 The primary source tree must not contain fixed product roots, repository
 workflow panels, assistant-management panels, extension-source panels, or their
-matching state/client objects. Static source guards and the cleanup invariant
-test are the regression gates for this boundary; product names live only in
-scorecards, evidence manifests, inventory docs, and static absence tests.
+matching state/client objects. Static source guards and focused
+product-boundary tests are the regression gates for this boundary; retired
+product names do not remain as active app structure.
 Protocol code must also avoid broad product DTO buckets, product event payload
 files, public product clients, and product table models. Accepted DTOs live
 under server-domain owners such as worker lifecycle, module activity, and
@@ -125,11 +145,16 @@ Sources/
 +-- Support/              Composition, diagnostics, feedback, foundation,
 |                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
-|                         surfaces, Agent Briefing, Engine Cockpit, capabilities, components,
+|                         surfaces, Dashboard, capabilities, components,
 |                         system sheets
 +-- Assets.xcassets/      App icons and image assets
-+-- Resources/            Fonts and generated app-icon source layers
++-- Resources/            Bundled fonts
 ```
+
+`Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the authoritative
+logo input. `scripts/generate-icons.mjs` derives only the two app icons and the
+README preview under `docs/assets/`; the app renders the vector directly and
+has no raster or loose icon-layer resource directory.
 
 The retained `UI/Capabilities` components render capability lifecycle
 data as generic chat evidence. They are not a capability catalog, admin
@@ -146,17 +171,67 @@ icon catalog, or fork-row state model.
 
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Stop:    InputBar -> MessagingCoordinator -> agent::abort intent -> agent.turn_failed + agent.complete terminal truth
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
-Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
-Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> cancellable transcription::audio -> InputBar
+Attach:  model.list attachmentPolicy -> camera/photo/file data -> AttachmentImagePreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup + fixed five-minute auto-stop -> ComposerMicCaptureEngine permission gate + bounded RMS meter -> cancellable transcription::audio -> InputBar
+Push:    AppDelegate token -> observable PushNotificationService -> system device::register (install + bundle + environment identity) -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
-Context: ContextStatusPill/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
-Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
+Context: ContextBriefingButton/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
+Dashboard: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
+
+Transient composer failures use the shared one-line local notification pill.
+The timeline keeps the notice compact while its tap-through detail and
+accessibility label retain the complete title and message. Tap-through local
+errors use the same compact adaptive sheet chrome and glass detail treatment as
+the rest of the chat. While recording, the capture owner publishes only a
+normalized microphone-energy value; the composer keeps a bounded rolling
+waveform locally so no audio samples become view state.
+
+`KeyboardObserver` is a process-lifetime owner of keyboard visibility and
+transition state only; native layout owns keyboard geometry. Its four stored
+notification tasks drive composer menu gating and hidden-to-visible message
+scrolling without a separate teardown path.
+
+Prompt submission is transactional at the composer boundary. Text, prepared
+attachments, the optimistic user row, and the persisted draft are committed
+only after `/engine` accepts `agent::prompt`; a pre-accept encoding, size,
+transport, or protocol failure removes the optimistic row and leaves the latest
+composer state intact. Acceptance requires an affirmative
+`acknowledged` response; a false value is an invalid success envelope and stays
+on the same rollback path. `MessagingCoordinator` owns one pre-accept
+submission reservation shared by send and retry, acquired before the live-event
+subscription can suspend; accepted/running state remains owned by the session's
+agent phase. The sendable payload is snapshotted when the user submits it;
+acceptance consumes only that text prefix and those prepared attachment IDs,
+while later composer edits remain the next unsent draft. Pending
+`PhotosPickerItem` state stays exclusively with the image-processing owner,
+which clears a selection only after conversion commits prepared attachments.
+`InputBarConfig.canSend` gates both trailing Send and keyboard Return.
+`hello.ok` supplies the server's canonical
+frame budget, and `EngineConnection` checks the final encoded JSON byte count
+before sending so an oversized attachment cannot force a disconnect or erase a
+retryable prompt. `InputBarState.hasContent` is the single composer-content
+predicate shared by send availability and draft retention.
+
+Stop participates in the same admission boundary. If tapped while
+`agent::prompt` is awaiting acknowledgement, `MessagingCoordinator` coalesces
+one cancellation intent and sends it only after acceptance; a rejected prompt
+discards that intent. For an admitted run, the client enters `.stopping` and
+suppresses repeated writes. The `agent::abort` Boolean means only that an
+active run matched the cancellation request—it never finalizes text, clears
+session processing, or appends interruption UI. Canonical cancelled
+`agent.turn_failed` owns the interruption notification, and `agent.complete`
+owns final queue/stream cleanup and the return to idle. Stop is a session-owned
+request rather than mounted-view work, so transient view disappearance does not
+cancel it. A disconnected client never synthesizes Stop; reconnect projection
+and the connection observer preserve `.stopping` while the server outcome is
+unknown. Active reconstruction keeps that stricter phase; terminal reconstruction
+accepts the server's completed state.
 
 `ContextControlSheet` presents Session Briefing as a mobile-first progressive
 disclosure surface. The top level is narrative plus compact metric strips; the
@@ -171,11 +246,13 @@ with an explicit failed-refresh status.
 
 `WorkspaceSelector` is a narrow server-backed workspace browser, not the old
 general filesystem tool surface. Its hierarchy is navigation-first: configured
-quick/default and recent workspace shortcuts are compact horizontal chips,
-navigation actions are separate compact intrinsic-width single-line capsule
-controls, the current folder is listed as a plain left-aligned path, and
-existing server directories own the main list. It browses
-the paired Mac through `WorkspaceBrowserRepository` over
+quick/default and recent workspace shortcuts plus the Go Up, New Folder, and
+Hidden actions share one compact, intrinsic-width, single-line capsule
+presentation. One primitive owns their icon slot, padding, shape, and
+interactive Liquid Glass geometry while selection and action semantics remain
+distinct. The current folder is listed as a plain left-aligned path, and
+existing server directories own the main list. It browses the paired Mac
+through `WorkspaceBrowserRepository` over
 `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`. Hidden folders are toggled from the compact action
 row, and inline folder creation selects the created folder. The selector must
@@ -183,7 +260,9 @@ not restore old read/write/edit/search/diff/apply-patch/import or
 agent-execution filesystem behavior without a Phase 2 module contract.
 
 `CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
-camera viewport is the sheet surface, controls layer at the bottom of that
+composer `InputBar` is its sole production presentation owner; the app process
+root has no launch-argument bypass or synthetic camera viewport. The camera
+viewport is the sheet surface, controls layer at the bottom of that
 surface, and the live/captured camera image is installed as the modal
 presentation background. The foreground layer is controls-only; it does not add
 a bottom fade or other material over the live viewport, and it expands through
@@ -214,9 +293,34 @@ discover front/back camera variants through `AVCaptureDevice` discovery, and
 remove the old video input before validating and attaching the replacement
 input so the old input does not make `canAddInput` fail.
 
+### Application process root
+
+`TronMobileApp` is only the process entry point. It resolves `AppRuntimeMode`
+before constructing the application graph and stores the production root only
+for application launches. Presence of an Apple hosted-XCTest marker
+(`XCTestConfigurationFilePath`, `XCTestBundlePath`, or `XCInjectBundleInto`) is
+the sole authority for the inert hosted-unit-test root; schemes carry no
+parallel runtime-mode setting. Application and separate UI-test launches build
+`ProductionAppRoot`, while an injected unit-test host mounts only an
+accessibility-hidden clear view. `AppLifecycleEffects.live` is likewise
+construction-inert, and every notification-center, MetricKit, logger, or
+application-singleton lookup remains behind the application-mode callback
+guard.
+
 The shell mounts `ContentView` even before onboarding is complete.
-`TronMobileApp` owns one onboarding presenter for first-run setup, Server-page
-pairing, and pairing URLs. `OnboardingSheetPresentation` starts that flow on a
+`ProductionAppRoot` owns one onboarding presenter for first-run setup, Engine → Servers
+pairing, and pairing URLs. It applies the explicit soft scroll-edge style at the
+application root. The chat transcript repeats that policy at its native
+`ScrollView` through that inherited application preference, preserving one
+style owner rather than stacking edge modifiers. App-owned navigation surfaces
+do not force bar backgrounds hidden or visible: automatic visibility makes the
+system fade and blur appear only while scrolling content overlaps navigation
+controls. SwiftUI sheets establish separate presentation roots on iOS 27, so
+`adaptivePresentationDetents` applies the same soft style to every app-owned
+sheet; new app sheets must use that canonical presentation path. The
+two app-owned `WKWebView` wrappers mirror the policy on every edge of their
+independent UIKit scroll views. System-owned controller hierarchies remain
+untouched. `OnboardingSheetPresentation` starts that flow on a
 medium detent, allows expansion to large when content needs more room, and uses
 compact iPad sizing so the connect form, QR-first pairing card, and setup pages
 share one geometry. On iPhone, onboarding pages do not scroll at the medium
@@ -241,19 +345,74 @@ edited host/port values are treated as a new pairing and continue into setup.
 boundary. Runtime callback installation for streaming text, UI update queue
 drain, capability completion ordering, and live event processing lives in
 `ChatViewModel+RuntimeCallbacks.swift` so new callback behavior does not grow
-the root state object. Chat-scoped error routing lives in
+the root state object. Its session-lifetime observation tasks retain only their
+observed sources, capture the view model weakly for mutations, and use a
+cancellation-aware wait so releasing the view model terminates idle bindings;
+the connection-state binding owns only local cleanup after an observed
+disconnect. It retains the live streaming buffer until
+`ConnectionCoordinator.cleanUpStreamingState` snapshots its text and message
+identity immediately before server reconstruction replaces transient state.
+`AppConnectionRepository.connectionState` is the sole raw
+connectivity fact. `ChatView` derives its immediate `InputBarConfig`
+transport-safety gate from that state, while `InteractionPolicy` remains the
+shared debounced read-only policy.
+Workspace existence is likewise not cached in the client; any future
+invalidation must arrive through authoritative engine or session state. Every
+mounted model owns and cancels its live-event task; that task captures the
+repository and session independently and retains the model only while
+dispatching an event, so an idle stream cannot keep its owner alive.
+Event-pipeline tests use `@testable` access to the internal dispatcher and
+buffer without production test shims.
+PhotosPicker transfers use a narrow I/O adapter and one cancel-and-replace task
+that never retains the view model across data loading or image preparation.
+Chat-scoped error routing lives in
 `ChatViewModel+Errors.swift`: local failures append ephemeral
 `LocalChatNotification` timeline items with deduped replacement and are cleared
-when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
-shell composition; message-list scrolling, pagination, composer, and sheet
-rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
-extensions. View-local async work is owned by `ChatViewTaskCoordinator`: every
-delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets
+when a new prompt starts or the chat view disappears; `ChatViewModel` carries no
+parallel optional or Boolean error state. `ChatView.swift` keeps shell
+composition; message-list scrolling, pagination, composer, and sheet rendering
+live in `ChatView+MessageList.swift` and the existing toolbar/helper extensions.
+`TypewriterAnimationState` is the toolbar title's single mutable
+display/task owner, shared by the production view and its focused tests.
+View-local async work is owned by `ChatViewTaskCoordinator`: every
+delayed scroll or history autoload, reconnect refresh, model prefetch, and deep-link navigation gets
 a session-generation ticket and is cancelled on disappearance so stale work
-cannot mutate a replaced chat view. Transcript mutations go through the
+cannot mutate a replaced chat view. Initial and later connected edges both use
+the single `connectAndReconstruct` session-reconstruction entry point. Explicit
+`stream.recovery_required` markers from server-source lag or a local subscriber
+buffer overflow coalesce on that same keyed task slot. Connected-edge replacements
+join their cancelled predecessor before running. The connection coordinator
+commits the server sequence cut before cancellable projection work and drains
+buffered events only after the snapshot succeeds. Failure and cancellation keep
+the reconstruction gate and live suffix intact for the replacement task, which
+uses capped backoff while the socket remains connected. Recovery bursts coalesce
+to one pending follow-up behind the active repair. The event handler only
+advances an observable request generation and never owns a reconnect task.
+The global event owner independently routes the marker through its existing
+coalesced session-list refresh. The reconstruction entry point's
+server-authored high-water mark covers only target-session state represented by
+the durable/in-flight snapshot; buffered events above that cut are sorted and
+dispatched. The snapshot also restores terminal processing phase, the active
+compaction gate/pill, and capability progress/run status before frames at the
+watermark are discarded. Fork reconstruction preserves the server's root-to-head chain by
+event-ID overlap, and gap detection compares only the mounted child session's
+sequence domain; fork-ancestor and older-page sequences never redefine the
+child's live cursor. If bounded gap backfill cannot close a discontinuity, the
+view model replaces the stale disjoint cache with the latest contiguous server
+window and retains that window's paging cursor for later recovery.
+Transcript mutations go through the
 `MessageMutating` helpers in `Session/Chat/Navigation/MessageIndex.swift`; in
 place updates must use `updateMessage(at:)` so message-id and capability-id
 lookups cannot drift while streaming text, thinking, and tool chips update.
+Chat coordinator contracts live with `Session/Chat/Coordinators`; Engine
+transport and persistence do not own UI session state. Capability chips in the
+message timeline are the single live invocation projection—there is no shadow
+turn-level capability record. Live-turn cleanup retains only the capability
+message UUIDs it must remove before reconstruction, never duplicate message
+values. Each coordinator context declares only the state and lifecycle
+operations that coordinator consumes.
+The compaction coordinator context exposes only message mutation, info logging,
+and the two stream-finalization actions it consumes.
 
 ## Chat Visual Affordances
 
@@ -263,7 +422,9 @@ The chat timeline owns only truthful local/session presentation state:
   spinner or explanatory timeline row.
 - Connection status is app-global. Reconnecting, disconnected, and retry
   signals route through `ToastCenter`/connection retry policy, not through
-  separate in-chat connection pills.
+  separate in-chat connection pills. `ToastCenter`'s production dismissal APIs
+  own queue and timer cancellation; focused tests inject time instead of adding
+  production test hooks.
 - Local chat errors are temporary `LocalChatNotification` timeline messages.
   Tapping opens `LocalErrorDetailSheet` only when structured details exist;
   there is no tap-to-dismiss, explicit dismiss button, timer-only dismissal, or
@@ -276,7 +437,10 @@ The chat timeline owns only truthful local/session presentation state:
   state is limited to a small `ProgressView` with an accessibility label. A
   newly opened existing session keeps the transcript hidden while server
   reconstruction, scroll-proxy readiness, stable lazy-stack height, and
-  measured bottom-distance convergence complete. During that window the
+  viewport-relative bottom-target convergence complete. Initial reveal measures
+  the actual `bottom` scroll target rather than the padded content extent, so
+  intentional tail spacing and safe-area layout do not trigger futile settle
+  retries. During that window the
   composer placeholder shows an inline progress spinner and reads "Loading
   latest messages", then transitions back to "Type here" as the latest
   transcript fades in from the settled bottom position. A single viewport-relative
@@ -293,10 +457,50 @@ The chat timeline owns only truthful local/session presentation state:
   allows repeated older-history paging without an uncontrolled load loop.
   Prepends preserve the first visible row identity by restoring it to `.top`;
   viewport-relative offsets are not replayed as SwiftUI target anchors because
-  that can strand lazy content in empty space. Bottom autoscroll is centralized
-  through `ScrollStateCoordinator`: the view suppresses programmatic bottom
-  jumps while the user is interacting, the scroll view is rubber-band/programmatic
-  animating, or older history is being prepended. Reconnect reconstruction preserves
+  that can strand lazy content in empty space. A non-observable
+  `ChatViewportMeasurements` cache is owned by the transcript UI. Raw viewport,
+  row-frame, bottom-anchor, and top-detent samples guide imperative scroll and history
+  tasks without invalidating the `LazyVStack` layout pass that produced them; the same
+  non-observable owner retains the imperative scroll-proxy handle. Stable container
+  geometry supplies viewport height; after reveal, one consolidated scroll-geometry
+  callback publishes bottom distance and the history top detent. Row-frame probes mount
+  only after reveal and only while older history remains available. During initial
+  reconstruction an absent bottom anchor is represented explicitly and remains
+  unmeasured until the lazy target materializes. Its viewport-relative distance is then
+  authoritative. The convergence loop requires consecutive bottom samples at a
+  layout-safe cadence and retains a roughly two-second worst-case budget for very tall
+  lazy rows while ordinary transcripts exit after the first stable samples.
+  Bottom autoscroll is centralized
+  through `ScrollStateCoordinator`: a pinned transcript remains eligible while its
+  programmatic bottom animation settles so streamed growth and foreground catch-up
+  can keep following the moving edge. Native `ScrollPosition` ownership distinguishes
+  app-issued bottom movement from touch, pointer, and native positioning paths even
+  when SwiftUI animates directly from idle; the proven `ScrollViewProxy` bottom anchor
+  performs physical movement after the app explicitly retakes native ownership. The
+  idle phase's own geometry snapshot closes SwiftUI's phase/geometry callback-order
+  race before transient input ownership is released. Consecutive upward offset samples
+  with matching increases in bottom distance, a stable viewport, and a stable composer
+  inset accumulate from the pinned position through the automatic-follow boundary for
+  runtimes that publish neither phase nor native ownership. Each qualifying sample vetoes
+  the next automatic bottom request, so a streaming tick cannot interrupt continuing
+  movement; if no new movement follows, the one-shot veto is consumed and normal following
+  resumes. Phase callbacks without a new geometry sample preserve that evidence, and
+  foregrounding promotes an away candidate before clearing transient ownership. Reverse
+  or incompatible geometry resets the candidate. Initial reconstruction and history
+  prepend remain explicitly excluded. Native ownership input enters through the bound
+  scroll-position change callback. App positioning uses the proxy without writing a
+  second position owner in the same frame; the bound owner is re-armed only at the
+  settled idle phase, never from geometry. Geometry therefore observes position without
+  writing back into the same layout pass during keyboard dismissal and live transcript
+  updates.
+  Returning to bottom transfers ownership back to the app. Bottom jumps remain
+  suppressed during user interaction, user-driven rubber-band rebound, explicit
+  scroll-away, or older-history prepend.
+  When the scene becomes active, the coordinator discards only transient gesture and
+  settling attribution, samples the bound native owner, and then permits a guarded
+  bottom catch-up only when neither native nor durable user intent blocks it;
+  intentional scroll-away, unseen content, history prepend, and target navigation
+  remain intact. Reconnect reconstruction preserves
   the user's already-expanded visible history window, merges it with the new
   server-authoritative suffix, and performs bounded older-page backfill when the
   suffix would otherwise leave an event-sequence gap. Server reconstruction
@@ -316,12 +520,30 @@ The chat timeline owns only truthful local/session presentation state:
   iOS must not treat it as another delta.
   Legacy OpenAI replay blocks without an explicit `kind` field use the same
   reasoning-summary presentation based on persisted provider type.
+- Thinking, streaming response, and completed assistant text use the same
+  rail-free leading edge. Per-item metadata is absent from thinking blocks,
+  capability chips, and intermediate assistant text. A metadata footer may
+  appear only beneath completed assistant text projected as the final clean
+  response: live events use `agent.response_complete` with zero capability
+  invocations, then attach token/model/latency facts from the matching
+  `agent.turn_end`; replay uses a non-interrupted `message.assistant` payload
+  with text and no capability-invocation block. Raw provider stop reasons and
+  visual position never establish finality.
+  Capability-bearing responses get no footer even when capability execution
+  explicitly stops, while their token records still contribute to
+  session/context accounting.
+  Live assistant text keeps each cadence-smoothed prefix in one native,
+  selectable and accessible `Text` while a draw-time `TextRenderer` fades only
+  the bounded newly appended source-character tail in the final visual line
+  over 70ms. Settled spans and earlier lines use native bulk drawing, composed
+  characters share one opacity, Reduce Motion bypasses the effect, and initially
+  mounted or static messages do not replay the reveal.
 - Capability evidence uses `CapabilityEvidencePresentation` for one-line chat
   chips and `CapabilityInvocationBriefPresentation` for detail sheets. Chips
   stay compact; detail sheets read as a progressive briefing: what happened,
   what needs attention, the concise request, the useful result, then evidence.
   Detail cards use the same liquid-glass progressive disclosure language as
-  Engine Cockpit: high-level narrative and compact metric strips first,
+  Dashboard: high-level narrative and compact summary facts first,
   invocation list rows with dividers next, and full invocation refs/raw payloads
   only inside disclosure rows so top-level sheets do not lead with raw IDs,
   grants, paths, or JSON.
@@ -355,8 +577,32 @@ files live under `Engine/Transport/Clients` as thin method wrappers over
 `/engine` frames; system, message, and log operations use concrete
 `SystemClient`, `MessageClient`, and `LogsClient` domains rather than a
 miscellaneous facade. They must not encode product policy. Any fixed
-workflow-specific client removed in PET-8 must stay removed unless a later
-scorecard row proves it is boot infrastructure.
+workflow-specific client must stay removed unless a source-owned product
+contract proves it is required boot infrastructure.
+
+Request dispatch installs correlation and timeout ownership before handing the
+frame to `URLSessionWebSocketTask` in the same actor turn. The transport handoff
+must not wait behind a newly scheduled MainActor task; only asynchronous send
+completion bookkeeping returns to MainActor. This preserves immediate-response
+correlation without allowing UI/layout work to consume a request's timeout
+budget before the frame has entered the transport. Recovery from a send failure
+also requires the failed task to still be the active socket, so a delayed
+completion from a retired task cannot disconnect its replacement.
+The heartbeat owns long-lived socket liveness; URLSession does not impose a
+fixed resource-expiry deadline. Completion of the current established task uses
+the same identity-guarded teardown, which cancels its receive and heartbeat
+loops before reconnecting, while completion from a retired task is ignored.
+
+Every WebSocket connect or manual-retry attempt builds the completed upgrade
+request and consults its injected `EngineSessionAttemptDirective` before
+constructing `URLSessionConfiguration`, a delegate, a `URLSession`, or a task.
+Production defaults to the unchanged live-session path. Tests that exercise
+connection state inject a deterministic handled outcome, making the request
+observable without opening a network session. The source guard evaluates
+constructor provenance independently inside each test-function or initializer
+scope, including aliases, so repeated local names cannot make unrelated tests
+safe or unsafe; no filename, suite, test, path, or binding-name exception can
+bypass that analysis.
 
 Engine child errors are normalized at the transport boundary. Canonical
 `details.failure` payloads stay authoritative; older or setup-time child errors
@@ -367,34 +613,101 @@ of a generic invalid-response state.
 SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
 `EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
 They consume protocol-typed repositories and view models: `ChatSessionServices`
-for mounted chat sessions, `AppConnectionRepository` for connection state,
+for mounted chat sessions, `AppConnectionRepository` for observable connection
+state plus explicit connect,
 `SessionEventRepository` for live events, `SettingsRepository` for settings
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
+`EngineClient` is the composition-owned concrete transport. Its domain clients
+are concrete adapters over the narrower `EngineTransport` contract; repository
+protocols are the sole consumer-facing injection boundary. Concrete-client and
+policy-repository tests exercise those adapters over injected `EngineTransport`.
+No second whole-client or per-domain client protocol mirrors those surfaces.
+`AgentClient` fulfills the narrow `AgentRepository` contract directly because
+that boundary adds no policy or state; policy-owning repositories such as
+`DefaultModelRepository` remain separate adapters.
+`ModelClient` is transport-only; `DefaultModelRepository` owns the active
+server's five-minute model catalog, refresh, and invalidation policy, while
+Settings surfaces read that catalog directly. `SettingsState` owns only the
+server-settings snapshot and rollback state, including the Mac-populated
+Tailscale address exposed as read-only connection metadata; the wire update DTO
+cannot write that cache. `ModelPickerState` owns only optimistic switch
+presentation. `SettingsParityTests` guards the DTO-to-snapshot bridge before
+checking state-to-UI ownership so decoded settings cannot disappear between
+layers.
 `WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
 resource, catalog-discovery report, module-activity overview,
 capability-binding cockpit overview, and worker lifecycle calls.
 `AgentCockpitProjection` remains a pure mapper from server-owned facts to UI
 rows; it does not own worker truth, module-activity truth, capability binding
 truth, or redaction policy.
+Its focused regression suites mirror the production seams:
+`WorkerLifecycleDTOTests` proves malformed catalog entries are retained as
+decode issues; core projection, module-activity mapping, general degradation,
+and lifecycle actions live in `AgentCockpitStateTests`; capability grouping,
+schema evidence, and malformed-catalog projection through the exact degraded
+Dashboard summary titled `Operations Need Review` live in
+`AgentCockpitDiscoveryStateTests`; generic Dashboard summary, count
+qualification, activity grouping, and user-facing copy live in
+`AgentCockpitPresentationTests`. One
+`AgentCockpitStateTestFixtures` namespace owns the shared synthetic catalog,
+resource, module-activity, and package builders used by those suites.
 `Support/Composition` is the production composition root allowed to wire those
-protocols to engine-owned clients.
+protocols to engine-owned clients. `DependencyContainerStorage` owns typed
+production/test resolution of defaults, Documents, and the event database;
+`DependencyContainer+RuntimeServices` owns the consumer-facing chat repository
+bundle plus paired-server-guarded background, retry, and verification policy.
+Consumer connection initiation belongs to `AppConnectionRepository`, while
+client teardown belongs to the composition-owned `EngineClient` in
+`DependencyContainer`, alongside application assembly and active-server
+selection.
+Post-switch connection and settings startup is one cancel-and-replace task
+bound to the installed `EngineClient` identity; superseded work cannot connect
+or update a newer generation. Replaced-client teardown is synchronous at the
+`EngineClient` owner and completes before the replacement services are installed.
+
+`DependencyContainerRuntimeIO` is the single immutable runtime-I/O seam. Its
+production value preserves live URL-session attempts, the production
+`PairedServerTokenStore` Keychain backend, and `URLSessionPairingProbe`.
+Hosted tests inject a handled-attempt recorder, a task-owned in-memory token
+backend, and a test-target inert pairing probe; that directive is forwarded
+into the initial `EngineClient` and every active-server rebuild. No process-mode
+boolean or environment lookup inside transport, pairing, or token storage may
+bypass the composition boundary.
+
+`PairedServerTokenStore.Backend` is an immutable, checked `Sendable` strategy;
+each of its three stored operations is `@Sendable`. Production operations
+capture no Keychain object and construct a fresh local `KeychainItem` for each
+call. Hosted operations capture only the existing lock-backed
+`HostedTestPairedServerTokenBackend`, so this concurrency contract does not
+change production Keychain behavior or the hosted in-memory token lifecycle.
 
 Transport tests mirror the production owners: retry policy tests live under
 `Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under
 `Tests/Engine/Transport/WebSocket`.
 
-DRC-9 replay manifest/event parity remains a server/iOS boundary rule. Replay
+Replay manifest/event parity remains a server/iOS boundary rule. Replay
 exports remain server-owned capability results, not live or persisted iOS
 events. iOS decodes the metadata-only `model.provider_request` audit event for
 stored-event parity, but replay manifests stay outside the iOS event plugin and
 database event-case surface.
 
-Transport and UI scheduling follows the CSD inventory in
-`packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`.
-Long-lived `Task` handles are stored and cancelled by their owner, SwiftUI
+Transport and UI scheduling is guarded directly by
+`concurrency_scheduling_discipline_invariants`. Releasable lifecycle owners
+store and cancel long-lived `Task` handles. The source-guarded
+`KeyboardObserver` exception owns its fixed weak-capturing notification task
+set until process exit. SwiftUI
 `.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
-callback bridges use bounded stream buffering or owner queues. Production code
+callback bridges use bounded stream buffering or owner queues. Filtered event
+subscribers register at the shared stream owner and therefore have one visible
+bounded queue; an eviction emits an explicit reconstruction marker before the
+upstream cursor is acknowledged. An observation
+task must not retain its lifecycle owner through a suspended wait, and stored
+observation waits must resume on cancellation. The shared bridge in
+`Support/Foundation/Concurrency` enforces that contract for chat bindings and
+transport owners; active-server replacement can therefore release the old
+engine client, connection manager, and interaction policy even while
+observation or connect debounce work is suspended. Production code
 must not use `Task.detached`, `DispatchQueue.global`, or
 `DispatchQueue.main.asyncAfter`; capture sessions use owner serial queues and
 UI delays use cancellation-aware Swift concurrency tasks.
@@ -415,8 +728,9 @@ plugin registration, and stored-event reconstruction helpers.
 
 Engine invocation context carries session/workspace ids and trace metadata when
 needed. The server owns validation, routing, execution, idempotency, and event
-publication. iOS records delivered stream cursors for acknowledgement and
-diagnostics only; it does not use them as an alternate truth store.
+publication. iOS keeps delivered stream cursors only in connection-local ACK
+state and coalesces each subscription to its highest cursor; it does not persist
+them or use them as an alternate truth store.
 Replay exports remain server-owned: `session::replay_manifest` and the
 `execute` `replay_manifest` operation return canonical JSON capability results,
 not live or persisted iOS events. The only replay-specific persisted event iOS
@@ -431,7 +745,29 @@ Documents is unavailable; startup fails at the composition boundary instead of s
 Tests and diagnostics harnesses may create explicit isolated database paths, but
 those paths are not production recovery modes.
 
-`EventStoreManager` and `SessionSynchronizer` rebuild local session/event
+`TokenRecord` is the server-projected per-turn token DTO, not an independent
+state owner. `ContextTrackingState` is the sole mounted owner of live token and
+context-window presentation state. On resume, `UnifiedEventTransformer`
+reconstructs a Session-owned transient projection containing only messages,
+reasoning level, accumulated usage, and the last context size. The chat view
+model applies its token fields to `ContextTrackingState`; there is no parallel
+client-side token history. Current model, turn count, workspace, session tree,
+file activity, and metadata remain owned by server reconstruction metadata,
+`CachedSession`, or raw durable events rather than duplicated projection fields.
+Model-catalog prefetch and the selected `ModelInfo` establish the mounted
+context-window limit, while `agent.turn_end.contextLimit` provides the live
+server correction. Turn-end token records plus `agent.compaction` and
+`agent.context_cleared` update mounted token state directly; they do not launch
+a second context-refresh lifecycle. Session Briefing keeps its server-owned
+snapshot and reload work sheet-local through `ContextControlRepository`.
+
+`EventStoreManager` owns the client generation for each persistence operation;
+it passes one strongly captured client into every page of that operation.
+Incremental pagination, cursor advancement, and in-operation ancestor resolution therefore
+finish through one server generation even if composition selects another server
+while the operation is suspended. Fork orchestration uses that same captured
+client for the fork request, ancestor fetch, full-history sync, and cached
+server-origin tag. The two types rebuild local session/event
 projections from server session lists and event-sync APIs. Session-list refresh
 uses immutable creation-key server cursors in 200-row pages beneath one
 `snapshotAsOf` boundary, with independent page/no-progress limits and a
@@ -442,41 +778,115 @@ missing pagination/proof fields, inconsistent boundaries, and oversized pages
 fail closed before local mutation. A complete unfiltered snapshot is applied in one SQLite
 transaction; server-missing sessions at or before its boundary are removed
 with their events while newer local rows and all retained events survive.
+Refresh completion is client-identity fenced after network and database
+boundaries: a retired client cannot begin reconciliation, schedule a current
+projection load or retry, or surface an error in the replacement client's UI.
+An origin-scoped SQLite transaction admitted while its client was current may
+finish atomically after a switch, but cannot update the replacement projection.
+An accepted refresh then awaits its exact generation-bound load before
+returning. Its server `isRunning` values replace the processing projection only
+for sessions without a newer live or optimistic override; explicit true and
+false overrides are ordered per session and retired when that refresh
+supersedes them. Partial snapshots, omitted rows, and rows without an
+`isRunning` value retain their overrides. The session array is the sole
+observable processing projection. Overrides and transient activity are
+origin-bound, and activity is captured after database suspension, so a newer
+event or another server cannot leak stale state into the published projection.
+Cancelling a refresh also cancels its exact pending load before it can publish.
 Destructive boundary checks compare RFC 3339 instants at full nanosecond
 precision; Foundation floating-point dates and SQLite `julianday` are not used
-because either can collapse distinct session creation times. Full
-session sync clears and refetches event rows, and fork ancestor rows remain source-session history
-rather than copied client truth. Engine stream cursors are stored per server
-origin/topic/filter for ACK coalescing and diagnostics only; session history is
-reconstructed through server APIs, not replayed from cursor storage.
+because either can collapse distinct session creation times. Full session sync
+fetches its complete replacement and any fork ancestors before clearing the last
+usable local event rows; fork ancestor rows remain source-session history
+rather than copied client truth. Engine stream cursors stay connection-local
+for ACK coalescing only; session history is reconstructed through server APIs,
+not replayed from client cursor storage.
+The manager owns one weak-idle global subscription lane plus predecessor-chained
+replacement and load lanes. Once a stream event is accepted, its database and
+completion effects are awaited inline; shutdown is idempotent and terminal,
+cancels and joins the global lane, drains `SessionRefreshService`, then cancels
+and joins the load chain before an outer fixture closes `EventDatabase`.
+Replacement A→B→C therefore cannot allow an earlier client to overtake the
+latest lane, and shutdown never finishes the shared event bus or invents an app
+process-termination callback.
 Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
 prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
 composes the dashboard surface and shell actions; `SessionList.swift` owns
-workspace grouping, per-workspace header collapse and session-row expansion as
-separate state, row status mapping, interactive row liquid-glass containers,
-and header/row presentation metrics. Session expansion is count-based and
+workspace grouping, per-workspace header collapse, row status mapping,
+interactive row liquid-glass containers, and presentation metrics, while
+`SessionListPagination.swift` owns page counts and transition generations.
+Session expansion is count-based and
 derived from each refreshed server group, so new or archived rows cannot leave
 stale counts; disappearing or <=10-row groups shed obsolete expansion state.
+Workspace disclosure is a staged state machine because each interactive Liquid
+Glass row is its own compositing layer. Collapse fades child rows out before an
+animated layout removal, ordered from the last visible row upward; expansion
+inserts invisible rows, animates project headers into place, and then reveals
+rows from the first visible row downward. The total stagger is bounded so large
+projects remain responsive; its short window starts nearby feedback promptly,
+while a smooth layout curve keeps the relocation measured rather than abrupt.
+Generation-checked phases make rapid direction
+changes deterministic without stale completion tasks.
+Pagination uses the same staged contract without disturbing existing rows:
+`View more` inserts only the next page invisibly, settles layout, then reveals
+that page from top to bottom; `View less` fades only rows beyond the default ten
+from bottom to top before removing them. Controls are briefly disabled while a
+generation-owned transition is active, preventing concurrent page mutations.
 `NewSessionFlow` owns the new-session sheet workflow and presents with medium
 and large detents so the sheet starts compactly while still allowing expansion
 for workspace and model selection.
 
-Server settings shown in the iOS settings UI are snapshots from
-`settings::get`/`settings::reset`; local state exists only to render the active
-server and roll back a failed in-flight edit to the last loaded snapshot.
-Pairing is device-local `UserDefaults` state, injected at the production
-composition root so tests use isolated persistence domains and cannot alter the
-installed app's active server. Bearer tokens are per-server
-Keychain secrets, drafts and input history are local workflow state, pending
+`settings::get` returns the server's complete validated profile. iOS
+intentionally admits only its mobile product-settings projection, ignores
+unrelated provider/runtime/tmux/TUI keys, and strictly maps every admitted field
+through `ServerSettingsSnapshot` and `SettingsState` to a read-only row or
+editable control. Local state exists only to render the active server and roll
+back a failed in-flight edit to the last loaded snapshot.
+Onboarding completion is one device-local `@AppStorage` flag owned by
+`ProductionAppRoot`, alongside the sheet and startup effects it gates.
+`PairedServerStore` owns paired-server metadata and active selection as
+device-local `UserDefaults` state injected at the production composition root,
+so tests use isolated persistence domains and cannot alter the installed app's
+active server. Bearer tokens are per-server Keychain secrets, drafts and input
+history are local workflow state, pending
 share content is App Group handoff state cleared after consumption, and
 MetricKit payloads are bounded Application Support diagnostics buffers.
 Recent input history is stored only on the device through
 `InputHistoryStore`, capped at 100 sent text prompts, exposed from the
 composer attachment menu only while local history exists and the session is
-idle/editable, and clearable from the Recent Inputs sheet with an icon-only
-destructive toolbar action. It is not a server prompt-library
+idle/editable, rendered as compact one-line previews with an ellipsis when
+later prompt lines are omitted, and clearable from the Recent Inputs sheet with an icon-only
+destructive toolbar action followed by explicit confirmation. It is not a server prompt-library
 resource, snippet catalog, routing plane, or generated management surface.
+
+Hosted test storage and I/O have explicit ownership rather than a claim of zero
+activity. The injected app root itself owns no storage. `IsolatedTestState` in
+the test target is the only general factory for named defaults,
+temporary roots, Documents directories, SQLite databases, visual artifacts,
+handled transport attempts, stub pairing probes, and injected token backends.
+Its suite lifecycle ledger and synchronous process-fallback registry also live
+entirely in the test target; production sources contain only the mode guard.
+Scopes emit a locked, parseable `TRON_TEST_SUITE_LIFECYCLE_V1` registration
+record before exposure. Cleanup cancels fixture work, awaits database close,
+removes the database/WAL/SHM and root, removes the named defaults persistent
+domain, proves that domain has no keys, and then emits exactly one matching
+cleanup record. Process fallback uses the same idempotent lifecycle owner.
+Each touched hosted token identity separately emits balanced, secret-free
+`TRON_TEST_KEYCHAIN_LIFECYCLE_V1` registration/cleanup records. Cleanup first
+drains every retained `EventStoreManager`, then terminally clears and proves
+all token backends empty, closes databases, removes files/defaults, and finally
+deregisters process fallback; hosted code never constructs the production
+Keychain item or a live pairing/session owner.
+CoreSimulator may retain a regular empty plist as the canonical backing
+envelope for a semantically removed domain; isolation evidence accepts it only
+when its exact suite identity was registered and cleaned in that invocation,
+matches the owned fixture-suite grammar, parses as an empty dictionary, and
+lives directly under the current app container's Preferences directory.
+Task-owned DerivedData, result bundles, and
+declared fixture artifacts remain allowed ephemeral outputs. The supported
+claim is narrower: hosted unit tests do not read or write pre-existing user
+durable state and do not initiate a real network attempt.
 
 ## Event Handling
 
@@ -501,11 +911,29 @@ payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
-The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
-and sheet header are the core engine summary: connection state, visible
-invokable operation count, issue count, and plain verification state from server-owned
-facts. The sheet opens on Capabilities, grouping visible operations into
-user-facing areas before drilling into server-supplied operation owner,
+The Dashboard opens from the session list, not Settings.
+`AgentCockpitPresentation.dashboardSummary(for:)` is the single presentation
+boundary for its compact band and large sheet summary card. The compact band
+uses the session-row icon width, icon-to-text spacing, and horizontal content
+inset so its icon, title, and description share the same visual columns as
+session rows. The sheet starts with one larger aggregate
+summary card derived from that presentation model. One neutral, untinted glass
+surface uses dividers instead of nested tinted cards, with one status header and
+concise Capabilities, Engine, and Recent activity rows. Quiet state is expressed
+once as “All Systems Quiet”; the activity row says “No recent work” and omits
+zero-valued activity facts. The status header and all three rows share one icon
+column and one text column. The rows cover qualified action/interface counts,
+workers, triggers, verification, and activity while the header owns the global
+issue count. The capability check action sits beside the complete fact stack,
+not inside its title line, so the button cannot inflate title-to-value spacing.
+Bounded action projections render returned counts as lower bounds,
+and missing projections render action counts as unavailable instead of
+relabeling catalog interfaces. The previous duplicate capability-verification
+summary, top-level worker/trigger explainer, nested green fills, and area-count
+metrics remain absent. The sheet
+orders Capabilities, Engine, then Activity, grouping agent-facing actions into
+user-facing areas before drilling into
+server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
 bounded resource-scan state, locked/built-in/module status, redacted
 replacement target, server-owned capability-pool role, runtime-routable versus
@@ -515,7 +943,24 @@ replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 active route state, route events, routed invocations,
 failed-closed/disabled/rolled-back route state, rollback/disable/abort
 availability, effect/risk, schema-health, worker, trigger, tags,
-request/response schema bodies, and safe verification details.
+request/response schema bodies, and safe verification details. Top-level
+Capabilities cards contain one title, one concise description, and only their
+meaningful Actions and Ownership facts, all aligned in the title text column;
+Engine cards may additionally show qualified engine-interface and worker facts.
+Healthy cards do not repeat status badges or worker boilerplate. Operation rows and
+detail summaries lead with server-owned friendly names and concise behavior
+descriptions while retaining canonical identifiers as secondary technical
+detail, with the canonical operation ID on its own final technical row. User-facing
+Dashboard copy calls provider/model-facing `capability::execute` operations
+“Actions” and calls lower-level typed catalog functions “Engine interfaces.”
+The latter are contracts used by Tron and its clients and are not presented as
+an additive agent-capability count; canonical Operation ID and Function ID
+labels remain in technical drill-down. The shared issue count covers degraded workers,
+deduplicated blocked or degraded module activity, malformed operation
+classification, failed-closed routes, incomplete operation/evidence
+projections, failed verification evidence, and Dashboard refresh failures. It
+appears in the Dashboard summary, while Activity renders a concise review card
+instead of repeating healthy badges on every capability area.
 Capability map version and recent `catalog_discovery_report` resources are
 rendered only inside cockpit evidence/detail surfaces, not as top-level
 telemetry.
@@ -529,7 +974,12 @@ camelCase client fixtures and the engine's snake_case catalog definitions at
 the protocol boundary so schema, owner, risk, and authority evidence are not
 misclassified as missing by presentation code. The top-level cockpit must stay
 high-signal; binding, shadow-trial, route, readiness, scan completeness, and
-rollback details belong in group and operation drill-down.
+rollback details belong in group and operation drill-down. Agent-facing group
+summaries describe modular replacement/extension ownership without mixing in
+engine-locked counts. Activity owns recent verification reports alongside
+runtime work. Engine owns the Engine Core summary and inspectable
+kernel/governance groups, keeping the trust substrate visible without
+presenting it as ordinary session capability inventory.
 Dashboard, capability group, and operation cards use the whole glass container
 as the disclosure target instead of decorative chevron glyphs; drill-down is
 communicated by the surface hierarchy and tap target, while functional
@@ -542,17 +992,24 @@ Surfaces tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
 Its Activity tab renders invocation-scoped `module_activity::overview`
-summaries from the server: active/waiting/blocked/degraded status, generic timeline
-entries, authority labels, touched-resource summaries, and
+summaries plus bounded catalog-verification history from the server:
+active/waiting/blocked/degraded status, generic timeline entries, authority
+labels, touched-resource summaries, and
 rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
 module resource payloads, invent activity states, own redaction policy, or
 mount fixed source-control, memory, process, subagent, notification, skill,
 approval, work, or work-dashboard panels. These generic surfaces also do not
 reintroduce broad product DTOs, product event variants, or product table-backed
 state.
-`UI/AgentCockpit/AgentCockpitModuleActivityViews.swift` owns the Activity tab's
-bounded summary card so the root cockpit sheet remains only the tab shell and
-shared row composition.
+`Session/WorkerLifecycle/AgentCockpitPresentation.swift` is the sole
+presentation boundary for the Activity tab's narrative grouping. It maps each
+server-reported item exactly once into Needs review, Needs you, Active work, or
+Recent activity from the explicit server status; unknown or completed states
+remain truthful recent activity rather than being inferred from visual
+position. The separate duplicate module-activity summary card and projection
+path are absent. `UI/AgentCockpit/AgentCockpitTabViews.swift` owns tab
+selection and Capabilities, Activity, Engine, worker, package, and generated
+surface composition so `AgentCockpitViews.swift` remains sheet orchestration.
 The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
 and shared `TronSegmentedControl` tabs rather than a native segmented picker.
 Empty state is allowed when no runtime surface is published; a hardcoded sample
@@ -567,19 +1024,28 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 `SettingsServerSupport.swift`; and shared row/card primitives stay in
 `SettingsSupport.swift`.
 
-Settings main groups controls by ownership rather than by old product modules.
-Engine owns actionable server-mirrored defaults, context compaction,
-transcription, log level, and storage retention policy; provider routing follows
-the selected model. Accounts owns provider credential setup.
-Servers owns local pairing/connection and redacted local logs. App owns local
-appearance and device behavior. Settings main does not grow a server-health
-dashboard; core engine visibility lives on the dashboard Engine Cockpit.
+Settings main exposes three destinations without category headers: Engine,
+Providers, and App. Engine owns local server pairing alongside actionable
+server-mirrored session defaults, context compaction, and the Local
+Transcription policy; only the pairing section remains active while a server
+settings snapshot is unavailable. Providers owns OAuth and API-key setup, and
+App owns local appearance and device behavior. Database logging, diagnostic
+retention, and storage-budget enforcement are fixed internal Engine safeguards,
+not mobile settings. Settings main does not grow a server-health dashboard;
+core engine visibility lives in the Dashboard. Its trailing destination copy
+stays to two or three short concepts: Servers/session defaults/context,
+OAuth/API keys, and appearance/notifications/behavior. It does not attempt to
+enumerate every control owned by the destination.
 Each main Settings destination or maintenance action renders as its own card;
 the sheet avoids grouped table dividers and chevrons because the card itself is
-the tap target and disclosure affordance.
-The Settings footer stays in the sheet content flow after the maintenance
-actions. It uses a subtle material fade, but it is not a pinned overlay; the
-footer appears naturally when the sheet is expanded or scrolled to the bottom.
+the tap target and disclosure affordance. Engine and Providers open directly
+on their owned sections; neither sheet builds or renders a duplicate summary
+hero above those controls.
+The Settings footer is a reserved bottom sibling owned by the Settings shell,
+so its left/right alignment matches the rows and it remains reachable at
+medium and large detents without content scrolling behind it. It does not
+paint a material or gradient backdrop; the tagline and feedback control sit
+directly on the native sheet surface.
 
 Chat compaction notifications display token savings and label the percentage as
 reduction. The percentage is not a context-window usage value; durable compact
@@ -596,8 +1062,8 @@ primary accent, and success/warning/error remain separate semantic colors.
 
 ## Diagnostics And Build Identity
 
-The settings toolbar and the Servers page Diagnostics section expose Logs in
-every build configuration. The Logs sheet shows redacted local iOS log entries;
+The settings toolbar exposes Logs in every build configuration without
+duplicating that destination inside another settings page. The Logs sheet shows redacted local iOS log entries;
 the client log ingestion service mirrors bounded client logs into the server
 `logs` table while connected, tagging each batch with the active session id so
 server-side `logs::recent` can narrow phone-tested runs by session. iOS redacts
@@ -611,7 +1077,8 @@ hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
 Diagnostics support consumes `DiagnosticsEngineEndpoint` and
 `ClientLogIngestionEndpoint`; `Support/Composition` is the only support-layer
 owner that adapts those endpoints to concrete `EngineClient` instances.
-`DependencyProviding` intentionally does not expose the concrete engine client.
+UI and Session code consume repository and session-service dependencies; a
+source guard rejects direct `dependencies.engineClient` access in those roots.
 
 `ProdDebug` backs the `Tron Fast` scheme: it keeps production bundle identity
 and entitlements while using debug build settings for fast local iteration.
@@ -623,20 +1090,20 @@ For shell-affecting changes:
 - Regenerate the project with `xcodegen generate` when files are added,
   deleted, or renamed.
 - Run `SourceGuardTests`, which compiles the full app/test target and enforces
-  deleted product roots.
+  deleted product roots, hosted-test storage ownership, and the explicit
+  no-network session-attempt seam.
+- Prove hosted lifecycle isolation through injected `AppLifecycleEffects` and
+  the explicit storage, token, and runtime-I/O seams. Ambient simulator
+  notification authorization is not a unit-test oracle because it is not
+  owned by the test process. External isolation runs may compare scoped TCC
+  rows on a newly created exact-UDID simulator, but never the whole permission
+  database.
 - For cockpit capability visibility changes, run the focused
   `WorkerLifecycleDTOTests`, `WorkerLifecycleClientTests`,
-  `AgentCockpitStateTests`, and `AgentCockpitViewModelTests` on the iPhone
-  simulator so server-owned DTO decoding, transport context, display shaping,
-  and degraded states stay covered.
+  `AgentCockpitStateTests`, `AgentCockpitDiscoveryStateTests`,
+  `AgentCockpitPresentationTests`, and `AgentCockpitViewModelTests` on the
+  iPhone simulator so server-owned DTO decoding, transport context, state,
+  discovery, display shaping, and degraded states stay covered.
 - Keep chat tests under the same owner names as production chat code:
   `Coordinators`, `Messaging`, `Navigation`, `State`, and `ViewModel`.
 - Capture iPhone and iPad simulator screenshots when UI behavior changes.
-- Include simulator name, UDID, bundle id, launch/openurl return codes, and
-  screenshot paths in the relevant scorecard evidence.
-
-The current iOS thin-client closeout proof is recorded in
-`packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`,
-`packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
-`packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`, and
-`packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`.

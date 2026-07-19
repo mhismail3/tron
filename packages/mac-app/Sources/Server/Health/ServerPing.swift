@@ -12,16 +12,11 @@ import Foundation
 /// - `.unreachable`, `.timeout`, `.malformedResponse` → ask launchd;
 ///   unloaded maps to `.paused`, loaded maps to `.failed(reason:)`.
 enum ServerPingResult: Sendable, Equatable {
-    case success(ServerInfo)
+    case success(ServerPingInfo)
     case unauthorized
     case unreachable
     case timeout
     case malformedResponse
-
-    var info: ServerInfo? {
-        if case .success(let info) = self { return info }
-        return nil
-    }
 }
 
 /// One-shot `system::ping` over the engine WebSocket protocol. Used by the install step's
@@ -91,7 +86,7 @@ enum ServerPing {
                     return .malformedResponse
                 }
 
-                switch decodeFrame(data: raw, defaultPort: port) {
+                switch decodeFrame(data: raw) {
                 case .result(let info):
                     return .success(info)
                 case .ignore:
@@ -138,16 +133,39 @@ enum ServerPing {
     }
 
     enum ResponseFrame: Equatable {
-        case result(ServerInfo)
+        case result(ServerPingInfo)
         case ignore
         case error
         case malformed
     }
 
+    private struct PingResponseFrame: Decodable {
+        let type: String
+        let id: String
+        let ok: Bool
+        let result: ResultFrame?
+
+        struct ResultFrame: Decodable {
+            let child: ChildFrame
+        }
+
+        struct ChildFrame: Decodable {
+            let value: Value
+        }
+
+        struct Value: Decodable {
+            let pong: Bool
+            let timestamp: String
+            let serverVersion: String
+            let serverProtocolVersion: Int
+            let minClientProtocolVersion: Int
+            let compatible: Bool
+        }
+    }
+
     static func decodeFrame(
         data: Data,
-        expectedID: String = requestID,
-        defaultPort: Int = TronPaths.defaultServerPort
+        expectedID: String = requestID
     ) -> ResponseFrame {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
             return .malformed
@@ -155,27 +173,22 @@ enum ServerPing {
         guard responseID(json["id"], matches: expectedID) else {
             return .ignore
         }
-        if json["error"] != nil || json["ok"] as? Bool == false {
-            return .error
-        }
-        guard let info = decode(data: data, defaultPort: defaultPort) else {
+        guard let frame = try? JSONDecoder().decode(PingResponseFrame.self, from: data),
+              frame.type == "response",
+              frame.id == expectedID else {
             return .malformed
         }
-        return .result(info)
-    }
-
-    static func decode(data: Data, defaultPort: Int = TronPaths.defaultServerPort) -> ServerInfo? {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              let result = json["result"] as? [String: Any],
-              let child = result["child"] as? [String: Any],
-              let value = child["value"] as? [String: Any] else {
-            return nil
+        if json["error"] != nil || !frame.ok {
+            return .error
         }
-        let serverVersion = value["serverVersion"] as? String ?? ""
-        let port = value["port"] as? Int ?? defaultPort
-        let tailscaleIp = value["tailscaleIp"] as? String
-        let paired = value["paired"] as? Bool ?? false
-        return ServerInfo(version: serverVersion, port: port, tailscaleIp: tailscaleIp, paired: paired)
+        guard let value = frame.result?.child.value,
+              value.pong,
+              !value.timestamp.isEmpty,
+              !value.serverVersion.isEmpty,
+              value.compatible else {
+            return .malformed
+        }
+        return .result(ServerPingInfo(version: value.serverVersion))
     }
 
     private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {

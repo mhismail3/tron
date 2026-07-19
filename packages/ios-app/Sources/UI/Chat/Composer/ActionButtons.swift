@@ -1,90 +1,6 @@
 import SwiftUI
-import PhotosUI
 
-// MARK: - Glass Action Button (Send/Abort)
-
-struct GlassActionButton: View {
-    /// Show stop icon (red) when true, send arrow when false.
-    let showStop: Bool
-    let canSend: Bool
-    let onSend: () -> Void
-    let onAbort: () -> Void
-    let namespace: Namespace.ID
-    let buttonSize: CGFloat
-
-    var body: some View {
-        Button {
-            if showStop {
-                onAbort()
-            } else {
-                onSend()
-            }
-        } label: {
-            Group {
-                if showStop {
-                    Image(systemName: "stop.fill")
-                        .font(TronTypography.button)
-                        .foregroundStyle(.red)
-                } else {
-                    Image(systemName: "arrow.up")
-                        .font(TronTypography.button)
-                        .foregroundStyle(canSend ? .white : .tronTextDisabled)
-                }
-            }
-            .frame(width: buttonSize, height: buttonSize)
-            .contentShape(Circle())
-        }
-        .matchedGeometryEffect(id: "actionButtonMorph", in: namespace)
-        .glassEffect(
-            .regular.tint(canSend && !showStop ? Color.tronEmerald.opacity(0.65) : Color.tronPhthaloGreen.opacity(0.25)).interactive(),
-            in: .circle
-        )
-        .disabled(!showStop && !canSend)
-        .animation(.easeInOut(duration: 0.2), value: showStop)
-        .animation(.easeInOut(duration: 0.2), value: canSend)
-        .accessibilityLabel(showStop ? "Stop agent" : "Send message")
-    }
-}
-
-// MARK: - Action Button Dock (Morph Origin)
-
-struct ActionButtonDock: View {
-    let namespace: Namespace.ID
-    let buttonSize: CGFloat
-
-    var body: some View {
-        Circle()
-            .fill(Color.clear)
-            .frame(width: buttonSize, height: buttonSize)
-            .matchedGeometryEffect(id: "actionButtonMorph", in: namespace)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-}
-
-// MARK: - Glass Circle Button Style (iOS 26.1 Menu fix)
-
-/// Custom ButtonStyle that applies glassEffect internally - fixes Menu morphing animation glitch
-/// See: https://juniperphoton.substack.com/p/adopting-liquid-glass-experiences
-struct GlassCircleButtonStyle: ButtonStyle {
-    let size: CGFloat
-    let tint: Color
-    let isDisabled: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        // Use explicit Circle as base to ensure correct bounds during Menu transitions
-        Circle()
-            .fill(.clear)
-            .frame(width: size, height: size)
-            .overlay {
-                configuration.label
-            }
-            .glassEffect(.regular.tint(tint).interactive(), in: .circle)
-            .opacity(isDisabled ? 0.5 : 1.0)
-    }
-}
-
-// MARK: - Glass Attachment Button
+// MARK: - Attachment Menu
 
 enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
     case camera
@@ -136,7 +52,7 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
     }
 }
 
-struct GlassAttachmentButton: View {
+struct ComposerAttachmentButton: View {
     let isDisabled: Bool
     let attachmentCapability: AttachmentCapability
     let includeRecentInputs: Bool
@@ -152,7 +68,7 @@ struct GlassAttachmentButton: View {
             .font(TronTypography.buttonSM)
             .foregroundStyle(menuDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
             .frame(width: buttonSize, height: buttonSize)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
+            .contentShape(Circle())
             .opacity(menuDisabled ? 0.5 : 1.0)
             .overlay {
                 Menu {
@@ -175,85 +91,146 @@ struct GlassAttachmentButton: View {
                 .controlSize(.small)
                 .disabled(menuDisabled)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
-                guard let action = notification.object as? AttachmentMenuAction else { return }
-                onSelect(action)
-            }
-            .accessibilityLabel("Add attachment")
-            .accessibilityHint(menuDisabled ? "Attachments are unavailable while the agent is active." : "")
+        .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
+            guard let action = notification.object as? AttachmentMenuAction else { return }
+            onSelect(action)
+        }
+        .accessibilityLabel("Add attachment")
+        .accessibilityHint(menuDisabled ? "Attachments are unavailable while the agent is active." : "")
     }
 }
 
-// MARK: - Attachment Button Dock (Morph Origin)
+// MARK: - Trailing Composer Action
 
-struct AttachmentButtonDock: View {
-    let buttonSize: CGFloat
+enum ComposerTrailingMode: Equatable {
+    case stopAgent
+    case stopRecording
+    case transcribing
+    case send
+    case record
 
-    var body: some View {
-        Circle()
-            .fill(Color.clear)
-            .frame(width: buttonSize, height: buttonSize)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+    init(showStop: Bool, canSend: Bool, isRecording: Bool, isTranscribing: Bool) {
+        if showStop {
+            self = .stopAgent
+        } else if isRecording {
+            self = .stopRecording
+        } else if isTranscribing {
+            self = .transcribing
+        } else if canSend {
+            self = .send
+        } else {
+            self = .record
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .stopAgent: return "Stop agent"
+        case .stopRecording: return "Stop recording"
+        case .transcribing: return "Transcribing"
+        case .send: return "Send message"
+        case .record: return "Record voice input"
+        }
+    }
+
+    func accessibilityHint(micDisabled: Bool) -> String {
+        switch self {
+        case .transcribing:
+            return "Wait for transcription to finish."
+        case .record where micDisabled:
+            return "Voice input is unavailable while the agent is active or disconnected."
+        case .stopAgent, .stopRecording, .send, .record:
+            return ""
+        }
     }
 }
 
-// MARK: - Glass Mic Button
-
-struct GlassMicButton: View {
+struct ComposerTrailingButton: View {
+    let showStop: Bool
+    let canSend: Bool
     let isRecording: Bool
     let isTranscribing: Bool
-    let isDisabled: Bool
+    let micDisabled: Bool
+    let onSend: () -> Void
+    let onAbort: () -> Void
     let onMicTap: () -> Void
     let buttonSize: CGFloat
 
-    @State private var isPulsing = false
+    private var mode: ComposerTrailingMode {
+        ComposerTrailingMode(
+            showStop: showStop,
+            canSend: canSend,
+            isRecording: isRecording,
+            isTranscribing: isTranscribing
+        )
+    }
 
-    private var glassTint: Color {
-        if isRecording {
-            return Color.red.opacity(isPulsing ? 0.45 : 0.25)
+    private var isDisabled: Bool {
+        switch mode {
+        case .transcribing:
+            return true
+        case .record:
+            return micDisabled
+        case .stopAgent, .stopRecording, .send:
+            return false
         }
-        return Color.tronPhthaloGreen.opacity(0.25)
+    }
+
+    private var accessibilityLabel: String {
+        mode.accessibilityLabel
+    }
+
+    private var accessibilityHint: String {
+        mode.accessibilityHint(micDisabled: micDisabled)
     }
 
     var body: some View {
-        Button(action: onMicTap) {
+        Button(action: performAction) {
             Group {
-                if isTranscribing {
-                    ProgressView()
-                        .tint(.tronEmerald)
-                        .scaleEffect(0.8)
-                } else if isRecording {
+                switch mode {
+                case .stopAgent, .stopRecording:
                     Image(systemName: "stop.fill")
                         .font(TronTypography.buttonSM)
                         .foregroundStyle(.red)
-                } else {
+                case .transcribing:
+                    ProgressView()
+                        .tint(.tronEmerald)
+                        .scaleEffect(0.8)
+                case .send:
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(TronTypography.button)
+                        .foregroundStyle(.tronEmerald)
+                case .record:
                     Image(systemName: "mic.fill")
                         .font(TronTypography.buttonSM)
                         .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 }
             }
             .frame(width: buttonSize, height: buttonSize)
-            .contentShape(Circle())
+            .contentShape(Rectangle())
         }
-        .glassEffect(.regular.tint(glassTint).interactive(), in: .circle)
-        .disabled(isDisabled && !isRecording)
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .contentTransition(.symbolEffect(.replace))
+        .animation(.easeInOut(duration: 0.2), value: showStop)
+        .animation(.easeInOut(duration: 0.2), value: canSend)
         .animation(.easeInOut(duration: 0.2), value: isRecording)
         .animation(.easeInOut(duration: 0.2), value: isTranscribing)
-        .onAppear { updatePulse() }
-        .onChange(of: isRecording) { _, _ in updatePulse() }
-        .accessibilityLabel(isRecording ? "Stop recording" : isTranscribing ? "Transcribing" : "Record voice input")
-        .accessibilityHint(isDisabled ? "Voice input is unavailable while the agent is active or disconnected." : "")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
     }
 
-    private func updatePulse() {
-        guard isRecording else {
-            isPulsing = false
-            return
-        }
-        isPulsing = false
-        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-            isPulsing = true
+    private func performAction() {
+        switch mode {
+        case .stopAgent:
+            onAbort()
+        case .stopRecording, .record:
+            onMicTap()
+        case .send:
+            onSend()
+        case .transcribing:
+            break
         }
     }
+
 }

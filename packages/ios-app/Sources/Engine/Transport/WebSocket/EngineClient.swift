@@ -43,12 +43,40 @@ enum EngineClientStreamSubscriptionPolicy {
     ) -> Bool {
         !previous.isConnected && next.isConnected && hasCurrentSession
     }
+}
 
-    static func sessionEventSubscriptionCursor(stored: EngineStreamCursor?) -> EngineStreamCursor? {
-        // Session history is reconstructed through `session::reconstruct`.
-        // `events.session` is the live lane and must not replay old events into
-        // the view state machine after reconstruction.
-        nil
+private struct EngineStreamSubscriptionKey: Hashable {
+    let topic: String
+    let sessionId: String?
+    let workspaceId: String?
+}
+
+/// Coalesces connection-local stream acknowledgements per subscription.
+struct EngineStreamAckCoalescer {
+    private var latestBySubscription: [String: EngineStreamCursor] = [:]
+    private var scheduledSubscriptions: Set<String> = []
+
+    mutating func record(subscriptionId: String, cursor: EngineStreamCursor) -> Bool {
+        if let existing = latestBySubscription[subscriptionId] {
+            latestBySubscription[subscriptionId] = max(existing, cursor)
+        } else {
+            latestBySubscription[subscriptionId] = cursor
+        }
+        return scheduledSubscriptions.insert(subscriptionId).inserted
+    }
+
+    mutating func takeForFlush(subscriptionId: String) -> EngineStreamCursor? {
+        latestBySubscription.removeValue(forKey: subscriptionId)
+    }
+
+    mutating func completeFlush(subscriptionId: String) -> Bool {
+        scheduledSubscriptions.remove(subscriptionId)
+        return latestBySubscription[subscriptionId] != nil
+    }
+
+    mutating func removeAll() {
+        latestBySubscription.removeAll()
+        scheduledSubscriptions.removeAll()
     }
 }
 
@@ -62,9 +90,7 @@ final class EngineClient: EngineTransport {
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var currentSessionId: String?
     private(set) var currentModel: String = ""
-    private let streamCursorStore: EngineStreamCursorStore
-    private var streamSubscriptions: [EngineStreamCursorKey: EngineSubscription] = [:]
-    private var streamSubscriptionKeysById: [String: EngineStreamCursorKey] = [:]
+    private var streamSubscriptions: [EngineStreamSubscriptionKey: EngineSubscription] = [:]
     private var streamAckCoalescer = EngineStreamAckCoalescer()
     private var streamAckTasks: [String: Task<Void, Never>] = [:]
 
@@ -140,13 +166,12 @@ final class EngineClient: EngineTransport {
 
     private let serverURL: URL
 
-    /// Bearer-token resolver passed through to the underlying `EngineConnection`
-    /// on every `connect()`. Re-evaluated at upgrade time, so token rotations
-    /// (e.g. user re-pairs after `.unauthorized`) flow through without
-    /// recreating the EngineClient.
+    /// Bearer-token resolver re-evaluated for every WebSocket upgrade.
     @ObservationIgnored
     private let bearerTokenProvider: BearerTokenProvider?
 
+    @ObservationIgnored
+    private let sessionAttemptDirective: (URLRequest) -> EngineSessionAttemptDirective
     /// Server origin string (host:port) for tagging sessions
     var serverOrigin: String {
         let host = serverURL.host ?? "localhost"
@@ -157,11 +182,13 @@ final class EngineClient: EngineTransport {
     init(
         serverURL: URL,
         bearerTokenProvider: BearerTokenProvider? = nil,
-        streamCursorStore: EngineStreamCursorStore = EngineStreamCursorStore()
+        sessionAttemptDirective: @escaping (URLRequest) -> EngineSessionAttemptDirective = { _ in
+            .openLiveSession
+        }
     ) {
         self.serverURL = serverURL
         self.bearerTokenProvider = bearerTokenProvider
-        self.streamCursorStore = streamCursorStore
+        self.sessionAttemptDirective = sessionAttemptDirective
     }
 
     deinit {
@@ -209,9 +236,7 @@ final class EngineClient: EngineTransport {
             engineConnection = nil
         }
 
-        // Set connecting state BEFORE creating WebSocket to prevent concurrent attempts.
-        // This is critical: if another connect() call comes in during the await below,
-        // it will see .connecting state and bail out.
+        // Set connecting before creating the transport so concurrent attempts bail out.
         connectionState = .connecting
 
         logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .engine)
@@ -227,7 +252,7 @@ final class EngineClient: EngineTransport {
         }
     }
 
-    func disconnect() async {
+    func disconnect() {
         logger.info("Disconnecting from server", category: .engine)
         observationTask?.cancel()
         observationTask = nil
@@ -242,40 +267,49 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     private var observationTask: Task<Void, Never>?
 
-    /// Continuation-based observation loop that mirrors EngineConnection.connectionState.
-    /// Cancelled in disconnect() — no recursive re-registration needed.
-    /// Syncs state at the TOP of each iteration so the initial state is never missed.
+    /// Continuation-based observation loop that mirrors the connection state.
     private func startConnectionStateObservation() {
         observationTask?.cancel()
-        observationTask = Task { [weak self] in
+        guard let observedConnection = engineConnection else { return }
+        observationTask = Task { [weak self, observedConnection] in
             while !Task.isCancelled {
                 // Sync current state FIRST, then register for next change.
                 // This prevents missing the initial .connecting → .connected transition
                 // when ws.connect() completes before this Task starts executing.
-                guard !Task.isCancelled, let self, let ws = self.engineConnection else { return }
-                let previousState = self.connectionState
-                let nextState = ws.connectionState
-                self.connectionState = nextState
-                if EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
-                    previous: previousState,
-                    next: nextState
-                ) {
-                    self.clearActiveStreamSubscriptions(reason: "engine transport left connected state")
-                }
-                if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
-                    previous: previousState,
-                    next: nextState,
-                    hasCurrentSession: self.currentSessionId != nil
-                ), let currentSessionId = self.currentSessionId {
-                    _ = try? await self.ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
+                var sessionToResubscribe: String?
+                do {
+                    guard !Task.isCancelled, let self else { return }
+                    let previousState = connectionState
+                    let nextState = observedConnection.connectionState
+                    connectionState = nextState
+                    if EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+                        previous: previousState,
+                        next: nextState
+                    ) {
+                        clearActiveStreamSubscriptions(reason: "engine transport left connected state")
+                    }
+                    if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+                        previous: previousState,
+                        next: nextState,
+                        hasCurrentSession: currentSessionId != nil
+                    ) {
+                        sessionToResubscribe = currentSessionId
+                    }
                 }
 
-                await withCheckedContinuation { cont in
-                    withObservationTracking {
-                        _ = ws.connectionState
-                    } onChange: {
-                        cont.resume()
-                    }
+                if let sessionToResubscribe {
+                    guard !Task.isCancelled else { return }
+                    _ = try? await self?.ensureSessionEventSubscription(
+                        sessionId: sessionToResubscribe,
+                        workspaceId: nil
+                    )
+                    // Re-read before installing the next observation so the
+                    // final source state after subscription is reconciled.
+                    continue
+                }
+
+                await waitForObservationChange {
+                    observedConnection.connectionState
                 }
             }
         }
@@ -283,7 +317,11 @@ final class EngineClient: EngineTransport {
 
     private func installEngineConnection() -> EngineConnection {
         clearActiveStreamSubscriptions(reason: "installing a new engine transport")
-        let ws = EngineConnection(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
+        let ws = EngineConnection(
+            serverURL: serverURL,
+            bearerTokenProvider: bearerTokenProvider,
+            sessionAttemptDirective: sessionAttemptDirective
+        )
         self.engineConnection = ws
 
         // Observe connection state via @Observable property.
@@ -299,7 +337,7 @@ final class EngineClient: EngineTransport {
     }
 
     func reconnect() async {
-        await disconnect()
+        disconnect()
         try? await Task.sleep(for: .milliseconds(500))
         await connect()
     }
@@ -361,17 +399,33 @@ final class EngineClient: EngineTransport {
             NotificationCenter.default.post(name: .authDidUpdate, object: nil)
         }
 
-        // Publish event to async stream
-        _eventStream.send(eventV2)
+        // Publish before acknowledging the upstream cursor. A full subscriber
+        // buffer retains this newest event but evicts older live state, so queue
+        // an explicit global recovery marker that drives source reconstruction.
+        let droppedSubscriberDeliveries = _eventStream.send(eventV2)
+        if droppedSubscriberDeliveries > 0 {
+            logger.error(
+                "Local live event buffer overflowed for \(droppedSubscriberDeliveries) subscriber(s); requiring reconstruction",
+                category: .events
+            )
+            let result = StreamRecoveryRequiredPlugin.Result(
+                reason: "client_buffer_overflow",
+                droppedEventCount: UInt64(droppedSubscriberDeliveries)
+            )
+            let recoveryEvent = ParsedEventV2.plugin(
+                type: StreamRecoveryRequiredPlugin.eventType,
+                event: ParsedEventData(value: result),
+                sessionId: nil,
+                sequence: nil,
+                transform: { result }
+            )
+            _eventStream.send(recoveryEvent)
+        }
 
         recordAndAck(delivery)
     }
 
     // MARK: - State Accessors
-
-    var isConnected: Bool {
-        connectionState.isConnected
-    }
 
     var hasActiveSession: Bool {
         currentSessionId != nil
@@ -433,11 +487,10 @@ final class EngineClient: EngineTransport {
         guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
         guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
         let filters = Self.sessionEventFilters(sessionId: sessionId, workspaceId: workspaceId)
-        let key = streamKey(
+        let key = EngineStreamSubscriptionKey(
             topic: "events.session",
             sessionId: sessionId,
-            workspaceId: workspaceId,
-            filterHash: Self.sessionEventFilterHash(sessionId: sessionId, workspaceId: workspaceId)
+            workspaceId: workspaceId
         )
         if let existing = streamSubscriptions[key] {
             logger.debug(
@@ -447,21 +500,18 @@ final class EngineClient: EngineTransport {
             return existing
         }
         do {
-            let cursor = EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
-                stored: streamCursorStore.cursor(for: key)
-            )
+            // Session history is reconstructed through `session::reconstruct`.
+            // `events.session` is a connection-local live lane, so reconnects
+            // subscribe at the current topic tail instead of replaying a cursor.
             let subscription = try await ws.subscribe(
                 topic: key.topic,
-                cursor: cursor,
+                cursor: nil,
                 filters: filters,
                 context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
             )
-            let subscribedCursor = EngineStreamCursor(rawValue: subscription.cursor)
-            streamCursorStore.save(subscribedCursor, for: key)
             streamSubscriptions[key] = subscription
-            streamSubscriptionKeysById[subscription.subscriptionId] = key
             logger.info(
-                "Subscribed to \(key.topic) for session \(sessionId) from live tail \(subscribedCursor.rawValue)",
+                "Subscribed to \(key.topic) for session \(sessionId) from live tail \(subscription.cursor)",
                 category: .events
             )
             return subscription
@@ -479,24 +529,9 @@ final class EngineClient: EngineTransport {
         return filters
     }
 
-    static func sessionEventFilterHash(sessionId: String, workspaceId: String?) -> String {
-        if let workspaceId {
-            return "sessionId=\(sessionId);workspaceId=\(workspaceId)"
-        }
-        return "sessionId=\(sessionId)"
-    }
-
     private func recordAndAck(_ delivery: EngineEventDelivery) {
-        guard let topic = delivery.topic, let cursor = delivery.cursor else { return }
-        let key = delivery.subscriptionId.flatMap { streamSubscriptionKeysById[$0] }
-            ?? streamKey(
-                topic: topic,
-                sessionId: delivery.event.sessionId,
-                workspaceId: delivery.event.workspaceId,
-                filterHash: "none"
-            )
-        streamCursorStore.save(cursor, for: key)
-        guard let subscriptionId = delivery.subscriptionId else { return }
+        guard let subscriptionId = delivery.subscriptionId,
+              let cursor = delivery.cursor else { return }
         scheduleStreamAck(subscriptionId: subscriptionId, cursor: cursor)
     }
 
@@ -546,7 +581,6 @@ final class EngineClient: EngineTransport {
         streamAckTasks.removeAll()
         streamAckCoalescer.removeAll()
         streamSubscriptions.removeAll()
-        streamSubscriptionKeysById.removeAll()
         if subscriptionCount > 0 || ackTaskCount > 0 {
             logger.info(
                 "Cleared active engine stream state: subscriptions=\(subscriptionCount), pendingAckTasks=\(ackTaskCount), reason=\(reason)",
@@ -555,18 +589,4 @@ final class EngineClient: EngineTransport {
         }
     }
 
-    private func streamKey(
-        topic: String,
-        sessionId: String?,
-        workspaceId: String?,
-        filterHash: String
-    ) -> EngineStreamCursorKey {
-        EngineStreamCursorKey(
-            serverOrigin: serverOrigin,
-            topic: topic,
-            sessionId: sessionId,
-            workspaceId: workspaceId,
-            filterHash: filterHash
-        )
-    }
 }

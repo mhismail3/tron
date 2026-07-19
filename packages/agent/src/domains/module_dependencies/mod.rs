@@ -31,11 +31,13 @@
 //! manifests, repo-managed `packages/agent/skills`, runtime files, or network
 //! state. Policy activation means an approved bounded metadata policy is
 //! available for later module-pack/runtime work under `networkPolicy: none`.
+//! Only `worker_module` and `service` are crate-visible composition seams;
+//! contracts stay private, and services borrow the engine host without parallel state.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
 mod authority;
-pub(crate) mod contract;
+mod contract;
 mod payload_safety;
 mod projection;
 mod records;
@@ -43,12 +45,7 @@ mod resource_store;
 pub(crate) mod service;
 mod validation;
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-pub(crate) use crate::engine::{
+use crate::engine::{
     MODULE_DEPENDENCY_DECISION_KIND, MODULE_DEPENDENCY_DECISION_SCHEMA_ID,
     MODULE_DEPENDENCY_POLICY_KIND, MODULE_DEPENDENCY_POLICY_SCHEMA_ID,
     MODULE_DEPENDENCY_REQUEST_KIND, MODULE_DEPENDENCY_REQUEST_SCHEMA_ID,

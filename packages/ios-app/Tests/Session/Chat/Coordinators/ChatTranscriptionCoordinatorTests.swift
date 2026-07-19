@@ -190,6 +190,33 @@ final class ChatTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(String(data: data.dropFirst(8).prefix(4), encoding: .ascii), "WAVE")
         XCTAssertEqual(data.count, 44 + pcm.count)
     }
+
+    func testAudioMeterNormalizationBoundsSilenceAndSpeech() {
+        XCTAssertEqual(ComposerMicCaptureEngine.normalizedMeterLevel(forRMS: 0), 0, accuracy: 0.001)
+        XCTAssertGreaterThan(ComposerMicCaptureEngine.normalizedMeterLevel(forRMS: 0.02), 0.2)
+        XCTAssertEqual(ComposerMicCaptureEngine.normalizedMeterLevel(forRMS: 1), 1, accuracy: 0.001)
+    }
+
+    func testCaptureBufferDrainResetsMeterForNextRecording() {
+        let buffer = ComposerMicCaptureBuffer()
+        buffer.append(Data([0x01, 0x02]), normalizedLevel: 0.75)
+
+        XCTAssertEqual(buffer.drain(), Data([0x01, 0x02]))
+        XCTAssertEqual(buffer.currentLevel(), 0)
+        XCTAssertTrue(buffer.drain().isEmpty)
+    }
+
+    func testAudioLevelSmootherUsesFastAttackAndSlowerRelease() {
+        var smoother = ComposerAudioLevelSmoother()
+        let attack = smoother.update(target: 1)
+        let release = smoother.update(target: 0)
+
+        XCTAssertEqual(attack, 0.58, accuracy: 0.001)
+        XCTAssertEqual(release, 0.464, accuracy: 0.001)
+
+        smoother.reset()
+        XCTAssertEqual(smoother.value, 0)
+    }
 }
 
 @MainActor
@@ -198,7 +225,6 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     var isProcessing = false
     var isTranscribing = false
     var inputText = ""
-    var maxRecordingDuration: TimeInterval = 300
 
     var nextTranscript = ""
     var nextData = Data(repeating: 1, count: 2_048)
@@ -212,7 +238,6 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     var loadedURL: URL?
     var transcribedMimeType: String?
     var errors: [String] = []
-    var shownErrors: [String] = []
     var onStartRecordingSuspended: (() -> Void)?
     var onTranscriptionStarted: (() -> Void)?
     private var startRecordingContinuation: CheckedContinuation<Void, Never>?
@@ -278,16 +303,6 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     func appendTranscriptionError(_ message: String) {
         errors.append(message)
     }
-
-    func showError(_ message: String) {
-        shownErrors.append(message)
-    }
-
-    func logVerbose(_ message: String) {}
-    func logDebug(_ message: String) {}
-    func logInfo(_ message: String) {}
-    func logWarning(_ message: String) {}
-    func logError(_ message: String) {}
 }
 
 private struct MockLocalizedError: LocalizedError {

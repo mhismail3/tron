@@ -165,6 +165,7 @@ extension EventStoreManager {
     func forkSession(_ sessionId: String, fromEventId: String? = nil) async throws -> String {
         logger.info("[FORK] ========== FORK SESSION START ==========", category: .session)
         logger.info("[FORK] Starting fork: sessionId=\(sessionId), fromEventId=\(fromEventId ?? "HEAD")", category: .session)
+        let operationClient = engineClient
 
         // Get current session state for logging
         do {
@@ -176,7 +177,7 @@ extension EventStoreManager {
         }
 
         // Call server with the specific event ID
-        let result = try await engineClient.session.fork(
+        let result = try await operationClient.session.fork(
             sessionId,
             fromEventId: fromEventId,
             idempotencyKey: .userAction("session.fork")
@@ -192,7 +193,7 @@ extension EventStoreManager {
             logger.info("[FORK] Fetching ancestor history from rootEventId=\(rootEventId)", category: .session)
 
             do {
-                let ancestorRawEvents = try await engineClient.eventSync.getAncestors(rootEventId)
+                let ancestorRawEvents = try await operationClient.eventSync.getAncestors(rootEventId)
 
                 // Convert RawEvents to SessionEvents, keeping original session_id
                 // These may already exist in local DB from when parent session was active.
@@ -233,7 +234,10 @@ extension EventStoreManager {
 
         // Sync the forked session's own events.
         logger.info("[FORK] Syncing forked session events...", category: .session)
-        try await fullSyncSession(result.newSessionId)
+        _ = try await sessionSynchronizer.fullSync(
+            sessionId: result.newSessionId,
+            using: operationClient
+        )
 
         // Create the cached session entry
         // Get source session info from local DB if available, otherwise use fork result
@@ -245,8 +249,8 @@ extension EventStoreManager {
             sourceSession = nil
         }
         let now = DateParser.now
-        // CRITICAL: Tag with current server origin for filtering
-        let serverOrigin = engineClient.serverOrigin
+        // CRITICAL: Tag with the initiating server origin for filtering.
+        let serverOrigin = operationClient.serverOrigin
         let forkedSession = Self.makeLocalForkSessionCache(
             result: result,
             sourceSession: sourceSession,
@@ -299,7 +303,7 @@ extension EventStoreManager {
         try await eventDB.clearAll()
         clearSessions()
         setActiveSessionId(nil)
-        UserDefaults.standard.removeObject(forKey: "tron.activeSessionId")
+        defaults.removeObject(forKey: "tron.activeSessionId")
         logger.info("Cleared all local data", category: .session)
     }
 

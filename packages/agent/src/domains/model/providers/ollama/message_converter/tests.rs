@@ -18,7 +18,7 @@ fn multi_block_user_message_serializes_native_content_as_string() {
                 text: "Compacted summary".into(),
             },
             UserContent::Document {
-                file_name: Some("scorecard.md".into()),
+                file_name: Some("architecture.md".into()),
                 data: String::new(),
                 mime_type: "text/markdown".into(),
                 extracted_text: Some("Scenario evidence".into()),
@@ -39,7 +39,12 @@ fn multi_block_user_message_serializes_native_content_as_string() {
             .unwrap()
             .contains("Compacted summary")
     );
-    assert!(wire["content"].as_str().unwrap().contains("scorecard.md"));
+    assert!(
+        wire["content"]
+            .as_str()
+            .unwrap()
+            .contains("architecture.md")
+    );
     assert!(wire.get("images").is_none());
 }
 

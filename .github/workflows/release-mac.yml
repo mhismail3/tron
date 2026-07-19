@@ -1,25 +1,26 @@
-# Mac DMG Release Pipeline (Plan §E, Phase 6)
+# Mac DMG Release Pipeline
 #
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
 #   - Tag push matching `server-v*` (e.g. `server-v0.1.0-beta.1`)
-#   - Manual `workflow_dispatch` dry-run. The version always comes from
-#     VERSION.env so manual runs cannot produce mismatched artifacts.
+#   - Manual `workflow_dispatch`, which defaults to an unsigned dry-run and
+#     never publishes. The version always comes from VERSION.env.
 #
 # ─── Pipeline overview ──────────────────────────────────────────────────
 #
 #   1. Resolve the target version from VERSION.env and verify any tag
 #      matches the centralized release tag.
 #   2. Build the Rust agent helper in release mode (cached).
-#   3. Stage both helpers into the embedded `Tron Server.app` Login Item via
+#   3. Stage the agent into both embedded helper apps via
 #      `packages/mac-app/scripts/bundle-agent.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
-#      `TronMac` scheme with automatic signing.
-#   5. Export the `.app` from the archive (Developer ID Application).
+#      `TronMac` scheme with explicit Developer ID signing for a release;
+#      dry-runs disable signing and exercise the release-layout package path.
+#   5. Locate the archived `.app`; publishing uses Developer ID Application.
 #   6. Notarize the `.app` via `xcrun notarytool submit --wait`; staple with
 #      `stapler`.
-#   7. Build and sign the DMG via `create-dmg` into
-#      `dist/tron-v0.1.0-beta1.dmg`.
+#   7. Build and verify the version-owned DMG through
+#      `packages/mac-app/scripts/package-dmg.sh`, then sign it.
 #   8. Notarize the signed DMG separately, then staple it. Notary tickets are
 #      artifact-specific; the stapled `.app` ticket does not apply to the DMG.
 #   9. Generate a SHA256 manifest and deterministic changelog.
@@ -33,9 +34,9 @@
 #   NOTARIZE_APPLE_ID       Apple ID email for notarytool
 #   NOTARIZE_TEAM_ID        Apple Developer team ID
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
-# All required signing and notarization secrets must be present for notarization to run. In
-# dry-run mode (workflow_dispatch with `dry_run=true`) missing secrets
-# are tolerated and the job short-circuits before the notarization step.
+# All required signing and notarization secrets must be present for a live
+# release. Only an explicit manual dry-run may omit them; release tags fail
+# before the build when any required secret is missing.
 #
 # ─── Secret handling INVARIANT ──────────────────────────────────────────
 #
@@ -48,15 +49,13 @@
 # The build keychain is created with a unique random password, isolated
 # from the runner's `login.keychain`, and DESTROYED in an `if: always()`
 # cleanup step so it doesn't outlive the job even if a later step
-# fails. Keychain default is restored to `login.keychain-db` to leave
-# the runner in a known state for subsequent jobs (fork PRs share
-# runners; ephemerality is best-effort).
+# fails. Cleanup restores the original user keychain search list; the
+# default keychain is never changed.
 #
 # ─── Rollback ───────────────────────────────────────────────────────────
 #
-# Bad release? `gh release delete server-v0.1.0-beta.1` pulls the DMG. Existing
-# installs are unaffected (they don't auto-pull deletions). Cut a fixed
-# release at the next beta or patch version.
+# Remove or unpublish the affected GitHub release assets, then cut a fixed
+# release at the next beta or patch version. Existing installs are unaffected.
 
 name: Release (Mac DMG)
 
@@ -67,10 +66,10 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Skip notarization + release publish (true/false)."
+        description: "Skip signing/notarization; manual runs never publish."
         required: false
-        default: "true"
-        type: string
+        default: true
+        type: boolean
 
 concurrency:
   group: release-mac-${{ github.ref }}
@@ -102,64 +101,51 @@ jobs:
         id: ver
         shell: bash
         run: |
-          set -euo pipefail
-          ./scripts/tron version check
-          while IFS='=' read -r key value; do
-            case "$key" in
-              TRON_VERSION) version="$value" ;;
-              TRON_RELEASE_TAG) tag="$value" ;;
-              TRON_DMG_NAME) dmg_name="$value" ;;
-              TRON_DISPLAY_VERSION) display_version="$value" ;;
-              TRON_APPLE_BUILD) apple_build="$value" ;;
-              TRON_RELEASE_TITLE) release_title="$value" ;;
-              TRON_IS_PRERELEASE) is_prerelease="$value" ;;
-            esac
-          done < <(./scripts/tron version print)
-
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
-            if [[ "${GITHUB_REF_NAME}" != "$tag" ]]; then
-              echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION.env release tag $tag"
-              exit 1
-            fi
-            mode="tag"
-          else
-            mode="VERSION.env"
-          fi
-          if [[ -z "${version:-}" || -z "${tag:-}" || -z "${dmg_name:-}" || -z "${display_version:-}" || -z "${apple_build:-}" || -z "${release_title:-}" || -z "${is_prerelease:-}" ]]; then
-            echo "::error::could not resolve centralized version fields"
-            exit 1
-          fi
-          {
-            echo "version=$version"
-            echo "mode=$mode"
-            echo "tag=$tag"
-            echo "dmg_name=$dmg_name"
-            echo "display_version=$display_version"
-            echo "apple_build=$apple_build"
-            echo "release_title=$release_title"
-            echo "is_prerelease=$is_prerelease"
-          } >> "$GITHUB_OUTPUT"
-          echo "Resolved version=$version ($display_version) from $mode"
+          ./scripts/tron version github-output
 
       - name: Resolve dry-run flag
         id: drymode
         shell: bash
+        env:
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+          NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+          NOTARIZE_APP_PASSWORD: ${{ secrets.NOTARIZE_APP_PASSWORD }}
         run: |
-          # Tag pushes default to publish; workflow_dispatch defaults to dry-run.
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            flag="${{ inputs.dry_run }}"
-            [[ -z "$flag" ]] && flag="true"
-          else
-            flag="false"
-          fi
-          # Also treat missing notarize secrets as an automatic dry-run so
-          # forks can exercise the build without the Apple credentials.
-          if [[ -z "${{ secrets.MACOS_CERT_P12_BASE64 }}" \
-             || -z "${{ secrets.NOTARIZE_APPLE_ID }}" \
-             || -z "${{ secrets.NOTARIZE_TEAM_ID }}" \
-             || -z "${{ secrets.NOTARIZE_APP_PASSWORD }}" ]]; then
-            flag="true"
-            echo "::notice::Release signing/notarization secrets missing → forcing dry-run"
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch) flag="${DRY_RUN_INPUT:-true}" ;;
+            push) flag="false" ;;
+            *)
+              echo "::error::unsupported release event: $GITHUB_EVENT_NAME"
+              exit 1
+              ;;
+          esac
+          case "$flag" in
+            true|false) ;;
+            *)
+              echo "::error::dry_run must be true or false, got: $flag"
+              exit 1
+              ;;
+          esac
+          if [[ "$flag" == "false" ]]; then
+            required_secrets=(
+              MACOS_CERT_P12_BASE64
+              MACOS_CERT_PASSWORD
+              NOTARIZE_APPLE_ID
+              NOTARIZE_TEAM_ID
+              NOTARIZE_APP_PASSWORD
+            )
+            missing_secrets=()
+            for secret_name in "${required_secrets[@]}"; do
+              [[ -n "${!secret_name:-}" ]] || missing_secrets+=("$secret_name")
+            done
+            if (( ${#missing_secrets[@]} > 0 )); then
+              echo "::error::live Mac release requires secrets: ${missing_secrets[*]}"
+              exit 1
+            fi
           fi
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
@@ -199,11 +185,6 @@ jobs:
       - name: Generate Xcode project
         working-directory: packages/mac-app
         run: xcodegen generate
-
-      - name: Verify generated Xcode project stays ignored
-        run: |
-          test -d packages/mac-app/TronMac.xcodeproj
-          git check-ignore -q packages/mac-app/TronMac.xcodeproj
 
       # ── Code signing setup ─────────────────────────────────────────
       #
@@ -297,13 +278,12 @@ jobs:
 
       # ── Archive + export ───────────────────────────────────────────
       #
-      # Two signing paths:
+      # Two archive paths:
       #   - Real release: CODE_SIGN_STYLE=Manual + the imported
       #     Developer ID identity. Notarization-ready.
-      #   - Dry-run: ad-hoc sign (`-`). Produces a runnable archive
-      #     suitable for layout/build verification but unsigned for
-      #     distribution. Without this, dry-run on a fork (no cert)
-      #     would fail the archive step entirely.
+      #   - Dry-run: disable code signing. Produces an archive suitable
+      #     for structural layout/build verification only. Without this,
+      #     a dry-run on a fork (no certificate) would fail the archive.
       - name: xcodebuild archive
         working-directory: packages/mac-app
         run: |
@@ -420,28 +400,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           DMG_PATH="$(pwd)/dist/${{ steps.ver.outputs.dmg_name }}"
-          # `--skip-jenkins` keeps create-dmg from trying to open a GUI
-          # window on the headless runner. `--hdiutil-quiet` suppresses
-          # the verbose Apple tooling output that otherwise spams logs.
-          create-dmg \
-            --volname "${APP_NAME} ${{ steps.ver.outputs.version }}" \
-            --window-size 540 340 \
-            --icon "$APP_BUNDLE" 135 170 \
-            --app-drop-link 405 170 \
-            --hide-extension "$APP_BUNDLE" \
-            --hdiutil-quiet \
-            "$DMG_PATH" \
-            "$APP_PATH" \
-            || {
-              # create-dmg exits non-zero on benign cases (e.g. no code
-              # sign identity in dry-run). Retry with a minimal invocation
-              # just to ensure we still produce a DMG artifact.
-              echo "::warning::create-dmg with layout args failed — retrying minimal"
-              rm -f "$DMG_PATH"
-              create-dmg --volname "${APP_NAME} ${{ steps.ver.outputs.version }}" \
-                --hdiutil-quiet \
-                "$DMG_PATH" "$APP_PATH"
-            }
+          ./packages/mac-app/scripts/package-dmg.sh \
+            --app "$APP_PATH" \
+            --output "$DMG_PATH" \
+            --volume-name "${APP_NAME} ${{ steps.ver.outputs.version }}" \
+            --layout release
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Sign DMG
@@ -507,7 +470,6 @@ jobs:
           notes_path="$RUNNER_TEMP/tron-release-notes.md"
           ./scripts/tron-release-notes \
             --tag "${{ steps.ver.outputs.tag }}" \
-            --title "${{ steps.ver.outputs.release_title }}" \
             --version "${{ steps.ver.outputs.version }}" \
             --display-version "${{ steps.ver.outputs.display_version }}" \
             --apple-build "${{ steps.ver.outputs.apple_build }}" \
@@ -534,7 +496,7 @@ jobs:
       # upload + clobber — but we DO NOT change its publish state, so
       # operators can recover an over-eager publish without deleting
       # the release first.
-      - name: Create or update GitHub Release (draft)
+      - name: Create or update GitHub Release
         if: |
           steps.drymode.outputs.dry_run != 'true' &&
           github.event_name == 'push'

@@ -1,12 +1,33 @@
-//! Engine meta-function invocation and delegated child execution.
+//! Privileged synchronous invocation and delegated child execution.
+//!
+//! Reserved synchronous engine functions and host-dispatched primitives share one
+//! validation, idempotency, budget, lease, ledger, and compensation envelope;
+//! only their dispatch functions differ.
 
 use super::*;
 
 impl EngineHost {
     pub(super) fn invoke_sync_host_dispatched_primitive(
         &mut self,
-        mut invocation: Invocation,
+        invocation: Invocation,
     ) -> InvocationResult {
+        self.invoke_sync_privileged(invocation, |host, invocation| {
+            primitives::runtime::dispatch(host, invocation)
+        })
+    }
+
+    pub(super) fn invoke_sync_meta(&mut self, invocation: Invocation) -> InvocationResult {
+        self.invoke_sync_privileged(invocation, Self::dispatch_meta)
+    }
+
+    fn invoke_sync_privileged<Dispatch>(
+        &mut self,
+        mut invocation: Invocation,
+        dispatch: Dispatch,
+    ) -> InvocationResult
+    where
+        Dispatch: Fn(&mut Self, &Invocation) -> Result<Value>,
+    {
         let function = match self.prepare_meta_invocation(&mut invocation) {
             Ok(function) => function,
             Err(err) => return self.meta_error(&invocation, err),
@@ -34,10 +55,10 @@ impl EngineHost {
         let value = match lease_result {
             Ok(Some(lease)) => {
                 lease_ids.push(lease.lease_id.clone());
-                let result = primitives::runtime::dispatch(self, &invocation);
+                let result = dispatch(self, &invocation);
                 release_after_primary(self.release_resource_lease_sync(&lease.lease_id), result)
             }
-            Ok(None) => primitives::runtime::dispatch(self, &invocation),
+            Ok(None) => dispatch(self, &invocation),
             Err(error) => Err(error),
         };
         self.finish_meta_invocation_with_contracts(
@@ -50,66 +71,17 @@ impl EngineHost {
         )
     }
 
-    pub(super) fn invoke_sync_meta(&mut self, mut invocation: Invocation) -> InvocationResult {
-        let function = match self.prepare_meta_invocation(&mut invocation) {
-            Ok(function) => function,
-            Err(err) => return self.meta_error(&invocation, err),
-        };
-
-        let idempotency = match self
-            .catalog
-            .begin_invocation_idempotency(&function, &invocation)
-        {
-            InvocationIdempotencyDecision::None => None,
-            InvocationIdempotencyDecision::Reserved(reservation) => Some(reservation),
-            InvocationIdempotencyDecision::Finished { result, scope } => {
-                return self
-                    .catalog
-                    .record_invocation_result(&invocation, result, scope);
-            }
-        };
-        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
-            return self.finish_meta_invocation(invocation, function, Err(err), idempotency);
+    fn dispatch_meta(&mut self, invocation: &Invocation) -> Result<Value> {
+        match invocation.function_id.as_str() {
+            DISCOVER_FUNCTION => self.meta_discover(invocation),
+            INSPECT_FUNCTION => self.meta_inspect(invocation),
+            WATCH_FUNCTION => self.meta_watch(invocation),
+            PROMOTE_FUNCTION => self.meta_promote(invocation),
+            _ => Err(EngineError::NotFound {
+                kind: "function",
+                id: invocation.function_id.to_string(),
+            }),
         }
-
-        let compensation_contract = function.compensation.clone();
-        let lease_result = self.acquire_resource_lease_for_invocation(&function, &invocation);
-        let mut lease_ids = Vec::new();
-        let value = match lease_result {
-            Ok(Some(lease)) => {
-                lease_ids.push(lease.lease_id.clone());
-                let result = match invocation.function_id.as_str() {
-                    DISCOVER_FUNCTION => self.meta_discover(&invocation),
-                    INSPECT_FUNCTION => self.meta_inspect(&invocation),
-                    WATCH_FUNCTION => self.meta_watch(&invocation),
-                    PROMOTE_FUNCTION => self.meta_promote(&invocation),
-                    _ => Err(EngineError::NotFound {
-                        kind: "function",
-                        id: invocation.function_id.to_string(),
-                    }),
-                };
-                release_after_primary(self.release_resource_lease_sync(&lease.lease_id), result)
-            }
-            Ok(None) => match invocation.function_id.as_str() {
-                DISCOVER_FUNCTION => self.meta_discover(&invocation),
-                INSPECT_FUNCTION => self.meta_inspect(&invocation),
-                WATCH_FUNCTION => self.meta_watch(&invocation),
-                PROMOTE_FUNCTION => self.meta_promote(&invocation),
-                _ => Err(EngineError::NotFound {
-                    kind: "function",
-                    id: invocation.function_id.to_string(),
-                }),
-            },
-            Err(error) => Err(error),
-        };
-        self.finish_meta_invocation_with_contracts(
-            invocation,
-            function,
-            value,
-            idempotency,
-            lease_ids,
-            compensation_contract,
-        )
     }
 
     pub(super) async fn invoke_delegated(

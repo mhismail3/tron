@@ -14,27 +14,6 @@ struct TronPathsTests {
         #expect(TronPaths.defaultServerPort(environment: [:]) == 9847)
     }
 
-    @Test("helper bundle ID matches the production LaunchAgent label")
-    func bundleIDMatches() {
-        // The agent's CFBundleIdentifier MUST equal the LaunchAgent
-        // production label so SMAppService registration and launchctl diagnostics
-        // refer to the same production service. Historical mismatch
-        // (bundleID="com.tron.agent", label="com.tron.server") caused
-        // status checks to report the wrong service; the two unified
-        // as `com.tron.server`.
-        #expect(TronPaths.bundleID(environment: [:]) == "com.tron.server")
-        #expect(TronPaths.bundleID(environment: [:]) == TronPaths.productionLaunchAgentLabel)
-    }
-
-    @Test("agent display name is 'Tron Server'")
-    func agentDisplayNameMatches() {
-        // System Settings lists CFBundleDisplayName, then CFBundleName.
-        // Calling the agent "Tron Server" keeps the
-        // helper entry distinct from the responsible wrapper entry
-        // used by Full Disk Access.
-        #expect(TronPaths.agentDisplayName(environment: [:]) == "Tron Server")
-    }
-
     @Test("LaunchAgent associates with wrapper variants")
     func associatedWrapperBundleIDsMatchVariants() {
         #expect(TronPaths.associatedWrapperBundleIDs(environment: [:]) == [
@@ -63,7 +42,6 @@ struct TronPathsTests {
         #expect(TronPaths.agentBundleName(environment: environment) == "Tron Server Dev")
         #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron")
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
-            "RUST_LOG": "info",
             TronPaths.tronHomeNameEnv: ".tron-dev",
         ])
         #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))

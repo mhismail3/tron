@@ -47,8 +47,6 @@ create_launchd_plist() {
         <string>$TRON_HOME</string>
         <key>TRON_REPO_ROOT</key>
         <string>$RUST_WORKSPACE</string>
-        <key>RUST_LOG</key>
-        <string>info</string>
     </dict>
 
     <key>SoftResourceLimits</key>
@@ -62,6 +60,23 @@ create_launchd_plist() {
 </dict>
 </plist>
 PLIST
+}
+
+install_runtime_cli_payload() {
+    if ! contributor_pair_update_is_owned; then
+        print_error "Installing the contributor CLI requires the helper update lock"
+        return 1
+    fi
+    mkdir -p "$CONTRIBUTOR_DIR" || return 1
+    cp "$SCRIPT_DIR"/{tron-cli,tron-lib.sh,tron-agent.entitlements} "$CONTRIBUTOR_DIR/" \
+        || return 1
+    cp "$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns" \
+        "$CONTRIBUTOR_DIR/AppIcon.icns" || return 1
+    chmod +x "$CONTRIBUTOR_DIR/tron-cli" || return 1
+    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d" || return 1
+    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d" || return 1
+    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/" || return 1
+    printf '%s\n' "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path" || return 1
 }
 
 write_restart_sentinel() {
@@ -91,8 +106,19 @@ SENTINEL
 }
 
 restore_contributor_backup() {
-    if [ ! -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
-        print_error "No backup found for rollback"
+    local pair_backup="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    local backup_binary="$pair_backup/Tron-Deploy.app/Contents/MacOS/tron"
+    if [[ "$(contributor_pair_backup_kind 2>/dev/null || true)" != "pair" \
+        || ! -f "$backup_binary" \
+        || ! -f "$pair_backup/tron-cli" \
+        || ! -f "$pair_backup/tron-lib.sh" \
+        || ! -d "$pair_backup/tron-lib.d" ]] \
+        || ! file "$backup_binary" 2>/dev/null | grep -q "Mach-O"; then
+        print_error "No complete helper and contributor CLI backup found for rollback"
+        return 1
+    fi
+    if ! contributor_pair_update_is_owned; then
+        print_error "Contributor rollback requires the helper update lock"
         return 1
     fi
 
@@ -100,21 +126,37 @@ restore_contributor_backup() {
     launchd_stop "$PLIST_NAME"
     wait_for_port_free "$PROD_PORT" 10 || return 1
 
-    if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-        return 1
-    fi
-    codesign_bundle "$INSTALLED_BUNDLE"
+    restore_contributor_pair_plan || return 1
     launchd_start "$PLIST_NAME"
 
     if wait_for_service_health 12; then
         local pid
         pid=$(get_service_pid)
         print_success "Rolled back to previous healthy version (PID: ${pid:-unknown})"
-        rm -f "$CONTRIBUTOR_DIR/tron.bak"
         return 0
     fi
 
     print_error "Rollback helper did not become healthy"
+    return 1
+}
+
+record_failed_contributor_deploy() {
+    local new_commit="$1"
+    local previous_commit="$2"
+    local restored=false
+
+    if restore_contributor_backup; then
+        restored=true
+        write_restart_sentinel \
+            "deploy" "$new_commit" "$previous_commit" "rolled_back" || true
+        discard_contributor_pair_backup rollback || return 1
+    else
+        write_restart_sentinel \
+            "deploy" "$new_commit" "$previous_commit" "failed" || true
+    fi
+    if $restored; then
+        end_contributor_pair_update || true
+    fi
     return 1
 }
 
@@ -225,7 +267,10 @@ cmd_manual_deploy() {
     done
 
     require_project_dir
-    require_installed
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Contributor service is not installed. Run: tron install"
+        exit 1
+    fi
 
     # Abort if dev takeover is active
     if ! service_is_running; then
@@ -281,64 +326,62 @@ cmd_manual_deploy() {
         fi
     fi
 
-    # Write lock
-    mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
-    echo "$$" > "$DEPLOY_LOCK_FILE"
-    trap 'rm -f "$DEPLOY_LOCK_FILE"' EXIT
+    begin_contributor_pair_update manual-deploy || return 1
+
+    # Atomically publish the complete helper/CLI/launch rollback unit before
+    # replacing any member of the installed pair.
+    if ! contributor_pair_is_complete; then
+        print_error "Contributor helper/CLI pair is incomplete; rollback it or run tron uninstall, then tron install"
+        return 1
+    fi
+    if ! backup_contributor_pair; then
+        return 1
+    fi
+    if ! install_runtime_cli_payload; then
+        if restore_contributor_pair_plan; then
+            discard_contributor_pair_backup rollback || return 1
+            end_contributor_pair_update || true
+        fi
+        return 1
+    fi
 
     # Record previous commit
     local previous_commit
     previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
-
-    if [ -f "$INSTALLED_BINARY" ]; then
-        print_status "Backing up current helper executable..."
-        mkdir -p "$CONTRIBUTOR_DIR"
-        cp "$INSTALLED_BINARY" "$CONTRIBUTOR_DIR/tron.bak"
-    fi
+    local new_commit
+    new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
 
     # Stop service
     print_status "Stopping service..."
     launchd_stop "$PLIST_NAME"
     sleep 1
 
-    # Create app bundle with new binary, sign with Developer ID (if available),
-    # and notarize + staple so the bundle is distribution-ready and TCC
-    # permissions persist across deploys.
+    # Create and locally sign the contributor helper. Production distribution
+    # signing and notarization belong only to the hosted Mac release workflow.
     print_status "Creating app bundle..."
-    create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
-    sign_and_notarize "$INSTALLED_BUNDLE"
-
-    # Install runtime CLI, shared library, and entitlements (only if changed)
-    for f in tron-cli tron-lib.sh tron-agent.entitlements AppIcon.icns; do
-        if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"; then
-            cp "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"
-            [ "$f" = "tron-cli" ] && chmod +x "$CONTRIBUTOR_DIR/$f"
-            print_success "Updated $f"
+    local preparation_failed=false
+    if ! create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"; then
+        preparation_failed=true
+    elif ! codesign_bundle "$INSTALLED_BUNDLE" \
+        || ! validate_contributor_bundle "$INSTALLED_BUNDLE"; then
+        preparation_failed=true
+    else
+        print_status "Updating launchd plist..."
+        if ! create_launchd_plist; then
+            preparation_failed=true
+        elif ! write_restart_sentinel \
+            "deploy" "$new_commit" "$previous_commit" "restarting"; then
+            preparation_failed=true
+        else
+            print_status "Starting service..."
+            if ! launchd_start "$PLIST_NAME"; then
+                preparation_failed=true
+            fi
         fi
-    done
-    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
-    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
-    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
-
-    # Record workspace path
-    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
-
-    # Regenerate plists so paths (e.g. log file) stay current
-    print_status "Updating launchd plist..."
-    create_launchd_plist
-
-    # Record candidate commit. DEPLOYED_COMMIT_FILE is updated only after
-    # the replacement helper passes health, so failed upgrades keep the
-    # previous deployed commit as durable truth.
-    local new_commit
-    new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
-
-    # Write restart sentinel so the contributor service records deploy restart state.
-    write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "restarting"
-
-    # Start service
-    print_status "Starting service..."
-    launchd_start "$PLIST_NAME"
+    fi
+    if $preparation_failed; then
+        record_failed_contributor_deploy "$new_commit" "$previous_commit" || return 1
+    fi
 
     if service_is_running && wait_for_service_health 12; then
         local pid
@@ -346,12 +389,18 @@ cmd_manual_deploy() {
         print_success "Service started (PID: ${pid:-unknown})"
 
         # Health check passed. Only now does the candidate become the deployed truth.
-        echo "$new_commit" > "$DEPLOYED_COMMIT_FILE"
-        write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "completed"
-        rm -f "$CONTRIBUTOR_DIR/tron.bak"
-        TRON_DEPLOYMENT_COMMIT="$new_commit" \
-            TRON_DEPLOYMENT_PREVIOUS_COMMIT="$previous_commit" \
-            write_deployment_result "success"
+        local finalization_failed=false
+        if ! printf '%s\n' "$new_commit" > "$DEPLOYED_COMMIT_FILE"; then
+            finalization_failed=true
+        elif ! write_restart_sentinel \
+            "deploy" "$new_commit" "$previous_commit" "completed"; then
+            finalization_failed=true
+        fi
+        if $finalization_failed; then
+            record_failed_contributor_deploy "$new_commit" "$previous_commit" || return 1
+        fi
+        discard_contributor_pair_backup || return 1
+        end_contributor_pair_update || return 1
     else
         if service_is_running; then
             print_error "Service started but did not pass /health; failing deploy closed."
@@ -359,18 +408,7 @@ cmd_manual_deploy() {
             print_error "Service failed to start!"
         fi
 
-        local failure_reason="Service failed to start or pass health"
-        if restore_contributor_backup; then
-            write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "rolled_back"
-            failure_reason="$failure_reason; rolled back to previous helper"
-        else
-            write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "failed"
-            failure_reason="$failure_reason; rollback failed"
-        fi
-        TRON_DEPLOYMENT_COMMIT="$new_commit" \
-            TRON_DEPLOYMENT_PREVIOUS_COMMIT="$previous_commit" \
-            write_deployment_result "failed" "$failure_reason"
-        return 1
+        record_failed_contributor_deploy "$new_commit" "$previous_commit" || return 1
     fi
 
     echo ""
@@ -381,147 +419,98 @@ cmd_manual_deploy() {
 }
 
 cmd_install() {
-    # --gui-helper: machine-readable contributor mode. Emits one JSON
-    # event per line on stdout, keeping stderr for anything else.
-    # Suppresses decorative banners and interactive prompts.
-    #
-    # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
-    # Phases (ordered): dirs, configs, build, bundle, plist, cli, symlink, launchd
-    # The distributed Mac app does not call this path. Production
-    # installs are `/Applications/Tron.app` + SMAppService only.
-    local gui_helper=0
-    local skip_service_start=0
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --gui-helper)       gui_helper=1; shift ;;
-            --skip-service-start) skip_service_start=1; shift ;;
-            *) shift ;;
-        esac
-    done
-
-    _emit_event() {
-        # $1=phase $2=status $3=detail
-        if [ "$gui_helper" -eq 1 ]; then
-            # JSON-escape detail: backslash + double-quote.
-            local detail="${3:-}"
-            detail="${detail//\\/\\\\}"
-            detail="${detail//\"/\\\"}"
-            printf '{"phase":"%s","status":"%s","detail":"%s"}\n' \
-                "$1" "$2" "$detail"
-        fi
-    }
+    if [ "$#" -gt 0 ]; then
+        print_error "Unknown install option: $1"
+        return 2
+    fi
 
     require_project_dir
 
-    if [ "$gui_helper" -eq 0 ]; then
-        print_header "Installing Tron Service"
-        echo "  Workspace: $PROJECT_DIR"
-        echo ""
-    fi
+    print_header "Installing Tron Service"
+    echo "  Workspace: $PROJECT_DIR"
+    echo ""
 
-    _emit_event dirs start ""
     mkdir -p "$BIN_DIR"
     mkdir -p "$CONTRIBUTOR_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
-    _emit_event dirs ok "$BIN_DIR,$CONTRIBUTOR_DIR,$HOME/Library/LaunchAgents"
 
-    _emit_event configs start ""
-    ensure_default_configs
-    _emit_event configs ok ""
+    if ! build_rust; then
+        return 1
+    fi
 
-    if [ ! -f "$RELEASE_BINARY" ]; then
-        _emit_event build start "cargo build --release"
-        if ! build_rust; then
-            _emit_event build fail "cargo build exited non-zero"
+    if ! begin_contributor_pair_update install; then
+        return 1
+    fi
+
+    # Publish either the complete prior pair or an explicit clean-install plan
+    # before replacing any helper, CLI, plist, entrypoint, or commit marker.
+    if ! backup_contributor_pair; then
+        return 1
+    fi
+    rm -f "$DEPLOYED_COMMIT_FILE"
+
+    if ! install_runtime_cli_payload; then
+        return 1
+    fi
+    print_success "Installed runtime CLI"
+
+    print_status "Creating app bundle..."
+    if ! create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY" \
+        || ! codesign_bundle "$INSTALLED_BUNDLE" \
+        || ! validate_contributor_bundle "$INSTALLED_BUNDLE"; then
+        return 1
+    fi
+    print_success "Installed app bundle"
+
+    print_status "Creating launchd service..."
+    if ! create_launchd_plist; then
+        return 1
+    fi
+    print_success "Created: $PLIST_PATH"
+
+    print_status "Installing tron CLI..."
+    if ! ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$BIN_DIR/tron"; then
+        return 1
+    fi
+    print_success "Installed: $BIN_DIR/tron -> $CONTRIBUTOR_DIR/tron-cli"
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+
+    print_status "Starting service..."
+    launchd_start "$PLIST_NAME"
+    sleep 2
+    if service_is_running && wait_for_service_health 12; then
+        local pid
+        pid=$(get_service_pid)
+        local current_commit
+        current_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+        if ! printf '%s\n' "$current_commit" > "$DEPLOYED_COMMIT_FILE"; then
             return 1
         fi
-        _emit_event build ok "$RELEASE_BINARY"
+        print_success "Service started (PID: ${pid:-unknown})"
     else
-        _emit_event build ok "prebuilt: $RELEASE_BINARY"
+        print_error "Installed contributor helper did not pass /health"
+        return 1
     fi
+    discard_contributor_pair_backup || return 1
+    end_contributor_pair_update || return 1
 
-    _emit_event bundle start "$INSTALLED_BUNDLE"
-    [ "$gui_helper" -eq 0 ] && print_status "Creating app bundle..."
-    create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
-    sign_and_notarize "$INSTALLED_BUNDLE"
-    [ "$gui_helper" -eq 0 ] && print_success "Installed app bundle"
-    _emit_event bundle ok "$INSTALLED_BUNDLE"
-
-    _emit_event plist start "$PLIST_PATH"
-    [ "$gui_helper" -eq 0 ] && print_status "Creating launchd service..."
-    create_launchd_plist
-    [ "$gui_helper" -eq 0 ] && print_success "Created: $PLIST_PATH"
-    _emit_event plist ok "$PLIST_PATH"
-
-    _emit_event cli start ""
-    cp "$SCRIPT_DIR/tron-lib.sh" "$CONTRIBUTOR_DIR/tron-lib.sh"
-    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
-    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
-    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
-    cp "$SCRIPT_DIR/tron-cli" "$CONTRIBUTOR_DIR/tron-cli"
-    cp "$SCRIPT_DIR/tron-agent.entitlements" "$CONTRIBUTOR_DIR/tron-agent.entitlements"
-    cp "$SCRIPT_DIR/AppIcon.icns" "$CONTRIBUTOR_DIR/AppIcon.icns" 2>/dev/null || true
-    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
-    [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
-    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
-    _emit_event cli ok "$CONTRIBUTOR_DIR/tron-cli"
-
-    _emit_event symlink start "$BIN_DIR/tron"
-    [ "$gui_helper" -eq 0 ] && print_status "Installing tron CLI..."
-    ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$BIN_DIR/tron"
-    [ "$gui_helper" -eq 0 ] && print_success "Installed: $BIN_DIR/tron -> $CONTRIBUTOR_DIR/tron-cli"
-    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-        [ "$gui_helper" -eq 0 ] && print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
-        _emit_event symlink ok "path-missing:$BIN_DIR"
-    else
-        _emit_event symlink ok ""
-    fi
-
-    local current_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
-    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
-
-    # Machine-readable contributor runs skip launchctl; interactive
-    # CLI-install runs keep the full behavior.
-    if [ "$skip_service_start" -eq 0 ] && [ "$gui_helper" -eq 0 ]; then
-        _emit_event launchd start ""
-        print_status "Starting service..."
-        launchd_start "$PLIST_NAME"
-        sleep 2
-        if service_is_running; then
-            local pid=$(get_service_pid)
-            print_success "Service started (PID: ${pid:-unknown})"
-            _emit_event launchd ok "pid=${pid:-unknown}"
-        else
-            print_warning "Service not running — check: tron errors"
-            _emit_event launchd fail "no-pid-after-bootstrap"
-        fi
-    else
-        _emit_event launchd ok "skipped (gui-helper or --skip-service-start)"
-    fi
-
-    if [ "$gui_helper" -eq 0 ]; then
-        echo ""
-        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-        echo -e "${GREEN}                    Tron Installation Complete!${NC}"
-        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo "  Server:  http://localhost:$PROD_PORT"
-        echo "  Health:  http://localhost:$PROD_PORT/health"
-        echo "  Binary:  $INSTALLED_BINARY"
-        echo "  CLI:     $BIN_DIR/tron"
-        echo ""
-        echo "  Next steps:"
-        echo "    tron login       # Authenticate with a provider"
-        echo "    tron dev         # Start dev server"
-        echo "    tron status      # Check service status"
-        echo ""
-        echo "  Code signing (one-time, only if you will deploy or distribute):"
-        echo "    xcrun notarytool store-credentials \"$NOTARIZE_PROFILE\" \\"
-        echo "      --apple-id <email> --team-id <TEAM_ID>"
-        echo ""
-        echo "  Get an app-specific password at: https://appleid.apple.com"
-        echo ""
-    fi
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                    Tron Installation Complete!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  Server:  http://localhost:$PROD_PORT"
+    echo "  Health:  http://localhost:$PROD_PORT/health"
+    echo "  Binary:  $INSTALLED_BINARY"
+    echo "  CLI:     $BIN_DIR/tron"
+    echo ""
+    echo "  Next steps:"
+    echo "    tron login       # Authenticate with a provider"
+    echo "    tron dev         # Start dev server"
+    echo "    tron status      # Check service status"
+    echo ""
 }
 
 cmd_setup() {
@@ -563,15 +552,6 @@ cmd_setup() {
 
     command -v git &> /dev/null && print_success "git $(git --version | cut -d' ' -f3) found"
 
-    # Create directory structure
-    print_status "Creating directory structure..."
-    ensure_tron_home
-    print_success "Created $TRON_HOME directory structure"
-
-    # Create default config files
-    print_status "Creating configuration files..."
-    ensure_default_configs
-
     # Build
     build_rust
 
@@ -579,23 +559,21 @@ cmd_setup() {
         run_tests || print_warning "Some tests failed (continuing anyway)"
     fi
 
-    # Install runtime CLI, shared library, and create symlink
+    # Keep development setup workspace-owned. The installed runtime CLI is a
+    # version-paired service artifact and is staged only by install/deploy.
     print_status "Setting up tron command..."
-    mkdir -p "$HOME/.local/bin"
-    mkdir -p "$CONTRIBUTOR_DIR"
-
-    cp "$SCRIPT_DIR/tron-lib.sh" "$CONTRIBUTOR_DIR/tron-lib.sh"
-    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
-    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
-    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
-    cp "$SCRIPT_DIR/tron-cli" "$CONTRIBUTOR_DIR/tron-cli"
-    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
-
-    # Record workspace path
-    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
-
-    ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$HOME/.local/bin/tron"
-    print_success "Created symlink: ~/.local/bin/tron -> $CONTRIBUTOR_DIR/tron-cli"
+    mkdir -p "$BIN_DIR"
+    begin_contributor_pair_update setup || return 1
+    if contributor_pair_is_complete; then
+        print_success "Preserved installed CLI: $BIN_DIR/tron"
+    elif contributor_pair_has_runtime_members; then
+        print_error "Contributor helper/CLI pair is incomplete; rollback it or uninstall before setup"
+        return 1
+    else
+        ln -sf "$SCRIPT_DIR/tron" "$BIN_DIR/tron" || return 1
+        print_success "Created symlink: $BIN_DIR/tron -> $SCRIPT_DIR/tron"
+    fi
+    end_contributor_pair_update || return 1
 
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         print_warning "~/.local/bin is not in your PATH"
@@ -609,12 +587,12 @@ cmd_setup() {
     echo -e "${GREEN}                      Tron Setup Complete!${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "  Data directory: $TRON_HOME"
+    echo "  Data directory: $TRON_HOME (completed on first server start)"
     echo "  Project path:   $PROJECT_DIR"
     echo ""
     echo "  Next steps:"
+    echo "    tron dev -d      # Start server and initialize runtime state"
     echo "    tron login       # Authenticate with a provider"
-    echo "    tron dev         # Start server in foreground"
     echo "    tron install     # Install as launchd service"
     echo ""
 }

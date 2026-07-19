@@ -579,11 +579,11 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
     )
     .with_namespace_claim("local_exec");
     runtime
-        .hello(session_hello(worker, "session-a"))
+        .accept_connection(
+            session_hello(worker, "session-a"),
+            Arc::new(EchoExternalInvoker),
+        )
         .await
-        .unwrap();
-    runtime
-        .attach_invoker(worker_id.clone(), Arc::new(EchoExternalInvoker))
         .unwrap();
     runtime
         .register_function(super::RegisterFunction {
@@ -637,4 +637,227 @@ async fn local_external_worker_hello_rejects_identity_mismatch() {
         error,
         EngineError::PolicyViolation(message) if message.contains("does not match definition")
     ));
+}
+
+#[tokio::test]
+async fn external_worker_connection_lease_rejects_duplicate_and_stale_cleanup() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("leased-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("leased-owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("leased_worker");
+    let hello = session_hello(worker, "leased-session");
+
+    let (first_lease, _) = runtime
+        .accept_connection(hello.clone(), Arc::new(EchoExternalInvoker))
+        .await
+        .unwrap();
+    let revision_before_duplicate = handle.catalog_revision().await;
+    let duplicate = runtime
+        .accept_connection(hello.clone(), Arc::new(EchoExternalInvoker))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        duplicate,
+        EngineError::PolicyViolation(message) if message.contains("already has an active connection")
+    ));
+    assert_eq!(handle.catalog_revision().await, revision_before_duplicate);
+    assert_eq!(runtime.connections(), vec![worker_id.clone()]);
+
+    runtime
+        .disconnect_connection(&first_lease, "first connection retired")
+        .await
+        .unwrap();
+    let (replacement_lease, _) = runtime
+        .accept_connection(hello, Arc::new(EchoExternalInvoker))
+        .await
+        .unwrap();
+    runtime
+        .disconnect_connection(&first_lease, "stale socket cleanup")
+        .await
+        .unwrap();
+    assert_eq!(runtime.connections(), vec![worker_id.clone()]);
+    assert!(handle.inspect_worker(&worker_id).await.is_ok());
+
+    runtime
+        .disconnect_connection(&replacement_lease, "replacement retired")
+        .await
+        .unwrap();
+    assert!(runtime.connections().is_empty());
+    assert!(matches!(
+        handle.inspect_worker(&worker_id).await,
+        Err(EngineError::NotFound { .. })
+    ));
+}
+
+#[tokio::test]
+async fn rejected_durable_reconnect_restores_prior_registration() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let worker_id = wid("durable-rollback-worker");
+    let mut prior_worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("durable-rollback-owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("durable_rollback");
+    prior_worker.lifecycle = WorkerLifecycleState::Stopped;
+    handle
+        .register_worker(prior_worker.clone(), false)
+        .await
+        .unwrap();
+    let function_id = fid("durable_rollback::read");
+    handle
+        .register_function(
+            FunctionDefinition::new(
+                function_id.clone(),
+                worker_id.clone(),
+                "durable function retained across failed reconnect",
+                VisibilityScope::Internal,
+                EffectClass::PureRead,
+            )
+            .with_health(FunctionHealth::Unhealthy),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    {
+        let mut host = handle.lock().await;
+        host.catalog_mut()
+            .unregister_function(&fid("stream::publish"), &wid("stream"))
+            .unwrap();
+    }
+
+    let mut reconnect_worker = prior_worker.clone();
+    reconnect_worker.lifecycle = WorkerLifecycleState::Ready;
+    let mut hello = session_hello(reconnect_worker, "durable-rollback-session");
+    hello.registration_mode = WorkerRegistrationMode::Durable;
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    assert!(
+        runtime
+            .accept_connection(hello, Arc::new(EchoExternalInvoker))
+            .await
+            .is_err()
+    );
+
+    assert!(runtime.connections().is_empty());
+    let restored = handle.inspect_worker(&worker_id).await.unwrap();
+    assert_eq!(restored.lifecycle, WorkerLifecycleState::Stopped);
+    assert_eq!(handle.worker_is_volatile(&worker_id).await, Some(false));
+    let admin = ActorContext::new(actor("admin"), ActorKind::System, grant("admin-grant"));
+    let retained_function = handle
+        .inspect_function(&function_id, Some(&admin))
+        .await
+        .unwrap();
+    assert_eq!(retained_function.health, FunctionHealth::Unhealthy);
+}
+
+#[tokio::test]
+async fn external_worker_connection_lease_authorizes_only_its_inbound_identity() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("lease-auth-worker");
+    let foreign_id = wid("foreign-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("lease-auth-owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("lease_auth");
+    let hello = session_hello(worker, "lease-auth-session");
+    let (lease, _) = runtime
+        .accept_connection(hello.clone(), Arc::new(EchoExternalInvoker))
+        .await
+        .unwrap();
+
+    let function = |owner: WorkerId| {
+        FunctionDefinition::new(
+            fid("lease_auth::read"),
+            owner,
+            "lease authorization probe",
+            VisibilityScope::Session,
+            EffectClass::PureRead,
+        )
+    };
+    let trigger = |owner: WorkerId| {
+        TriggerDefinition::new(
+            TriggerId::new("manual:lease_auth.read").unwrap(),
+            owner,
+            TriggerTypeId::new("manual").unwrap(),
+            fid("lease_auth::read"),
+            grant("external-grant"),
+        )
+    };
+    let publish = |owner: WorkerId| crate::engine::WorkerStreamPublish {
+        worker_id: owner,
+        topic: "lease_auth.events".to_owned(),
+        payload: json!({"probe": true}),
+        visibility: VisibilityScope::Session,
+        session_id: Some("lease-auth-session".to_owned()),
+        workspace_id: None,
+        trace_id: None,
+        parent_invocation_id: None,
+        idempotency_key: "lease-auth-publish".to_owned(),
+    };
+
+    let own_messages = vec![
+        WorkerProtocolMessage::Heartbeat(crate::engine::WorkerHeartbeat {
+            worker_id: worker_id.clone(),
+            sequence: 1,
+        }),
+        WorkerProtocolMessage::Result(WorkerInvocationResult {
+            invocation_id: InvocationId::generate(),
+            result: Some(json!({"ok": true})),
+            error: None,
+        }),
+    ];
+    for message in own_messages {
+        lease
+            .authorize_inbound(&message)
+            .unwrap_or_else(|error| panic!("own message rejected: {error}"));
+    }
+
+    let foreign_messages = vec![
+        WorkerProtocolMessage::RegisterFunction(Box::new(RegisterFunction {
+            definition: function(foreign_id.clone()),
+            default_visibility: VisibilityScope::Session,
+        })),
+        WorkerProtocolMessage::RegisterTrigger(crate::engine::RegisterTrigger {
+            definition: trigger(foreign_id.clone()),
+        }),
+        WorkerProtocolMessage::PublishStream(publish(foreign_id.clone())),
+        WorkerProtocolMessage::Heartbeat(crate::engine::WorkerHeartbeat {
+            worker_id: foreign_id.clone(),
+            sequence: 1,
+        }),
+        WorkerProtocolMessage::Disconnect(WorkerDisconnect {
+            worker_id: foreign_id,
+            reason: "foreign disconnect".to_owned(),
+        }),
+    ];
+    for message in foreign_messages {
+        let error = lease.authorize_inbound(&message).unwrap_err();
+        assert!(matches!(
+            error,
+            EngineError::PolicyViolation(message) if message.contains("does not match socket worker")
+        ));
+    }
+
+    let server_messages = vec![
+        WorkerProtocolMessage::Hello(Box::new(hello)),
+        WorkerProtocolMessage::CatalogSnapshot(crate::engine::CatalogSnapshot {
+            functions: Vec::new(),
+            triggers: Vec::new(),
+        }),
+    ];
+    for message in server_messages {
+        assert!(lease.authorize_inbound(&message).is_err());
+    }
 }

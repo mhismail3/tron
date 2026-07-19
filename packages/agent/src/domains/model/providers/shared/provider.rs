@@ -138,6 +138,13 @@ pub enum ProviderError {
         message: String,
     },
 
+    /// Provider stream closed before emitting a terminal event.
+    #[error("Provider stream ended early: {message}")]
+    StreamEnded {
+        /// Error description.
+        message: String,
+    },
+
     /// Authentication failed (expired token, invalid key, etc.).
     #[error("Auth error: {message}")]
     Auth {
@@ -159,6 +166,8 @@ pub enum ProviderError {
         retry_after_ms: u64,
         /// Error description.
         message: String,
+        /// Provider-specific error code, when supplied.
+        code: Option<String>,
     },
 
     /// Provider returned an API error.
@@ -166,6 +175,17 @@ pub enum ProviderError {
     Api {
         /// HTTP status code.
         status: u16,
+        /// Error description.
+        message: String,
+        /// Provider-specific error code.
+        code: Option<String>,
+        /// Whether this error can be retried.
+        retryable: bool,
+    },
+
+    /// Provider reported an API failure inside an already-open stream.
+    #[error("Streaming API error: {message}")]
+    StreamApi {
         /// Error description.
         message: String,
         /// Provider-specific error code.
@@ -198,8 +218,9 @@ impl ProviderError {
                     })
             }
             Self::RateLimited { .. } => true,
-            Self::Api { retryable, .. } => *retryable,
+            Self::Api { retryable, .. } | Self::StreamApi { retryable, .. } => *retryable,
             Self::SseParse { .. }
+            | Self::StreamEnded { .. }
             | Self::Auth { .. }
             | Self::UnsupportedModel { .. }
             | Self::Cancelled
@@ -220,11 +241,11 @@ impl ProviderError {
     pub fn category(&self) -> &str {
         match self {
             Self::Http(_) => "network",
-            Self::Json(_) | Self::SseParse { .. } => "parse",
+            Self::Json(_) | Self::SseParse { .. } | Self::StreamEnded { .. } => "parse",
             Self::Auth { .. } => "auth",
             Self::UnsupportedModel { .. } => "invalid_model",
             Self::RateLimited { .. } => "rate_limit",
-            Self::Api { .. } => "api",
+            Self::Api { .. } | Self::StreamApi { .. } => "api",
             Self::Cancelled => "cancelled",
             Self::Other { .. } => "unknown",
         }
@@ -235,11 +256,11 @@ impl ProviderError {
         match self {
             Self::Http(_) => PROVIDER_HTTP_ERROR,
             Self::Json(_) => PROVIDER_JSON_ERROR,
-            Self::SseParse { .. } => PROVIDER_SSE_PARSE_ERROR,
+            Self::SseParse { .. } | Self::StreamEnded { .. } => PROVIDER_SSE_PARSE_ERROR,
             Self::Auth { .. } => PROVIDER_AUTH_ERROR,
             Self::UnsupportedModel { .. } => PROVIDER_UNSUPPORTED_MODEL,
             Self::RateLimited { .. } => PROVIDER_RATE_LIMITED,
-            Self::Api { .. } => PROVIDER_API_ERROR,
+            Self::Api { .. } | Self::StreamApi { .. } => PROVIDER_API_ERROR,
             Self::Cancelled => PROVIDER_CANCELLED,
             Self::Other { .. } => PROVIDER_OTHER_ERROR,
         }
@@ -257,7 +278,9 @@ impl ProviderError {
     /// Provider-specific error code, when available.
     pub fn provider_code(&self) -> Option<String> {
         match self {
-            Self::Api { code, .. } => code.clone(),
+            Self::RateLimited { code, .. }
+            | Self::Api { code, .. }
+            | Self::StreamApi { code, .. } => code.clone(),
             _ => None,
         }
     }
@@ -290,6 +313,15 @@ impl ProviderError {
                 false,
                 Some(json!({ "message": redact_sensitive_content(message) })),
             ),
+            Self::StreamEnded { message } => (
+                FailureCategory::Parse,
+                "Provider stream ended before a terminal event".to_owned(),
+                true,
+                Some(json!({
+                    "kind": "unexpected_eof",
+                    "message": redact_sensitive_content(message),
+                })),
+            ),
             Self::Auth { message } => (
                 FailureCategory::Auth,
                 redact_sensitive_content(message),
@@ -305,11 +337,15 @@ impl ProviderError {
             Self::RateLimited {
                 retry_after_ms,
                 message,
+                code,
             } => (
                 FailureCategory::RateLimit,
                 redact_sensitive_content(message),
                 true,
-                Some(json!({ "retryAfterMs": retry_after_ms })),
+                Some(json!({
+                    "retryAfterMs": retry_after_ms,
+                    "providerCode": code,
+                })),
             ),
             Self::Api {
                 status,
@@ -323,6 +359,20 @@ impl ProviderError {
                 Some(json!({
                     "statusCode": status,
                     "providerCode": code,
+                })),
+            ),
+            Self::StreamApi {
+                message,
+                code,
+                retryable,
+            } => (
+                FailureCategory::Api,
+                redact_sensitive_content(message),
+                true,
+                Some(json!({
+                    "providerCode": code,
+                    "streamTerminal": true,
+                    "retryable": retryable,
                 })),
             ),
             Self::Cancelled => (
@@ -380,6 +430,9 @@ pub trait Provider: Send + Sync {
     /// Provider request envelope for Constitution audit/replay.
     ///
     /// Providers override this when they can expose their exact wire payload.
+    /// The responder audit boundary projects bulk inline values before durable
+    /// persistence; the request sent by [`stream`](Provider::stream) is not
+    /// modified.
     /// The default is a provider-independent request-input snapshot so custom
     /// providers still produce an audit record instead of disappearing.
     fn audit_payload(
@@ -501,6 +554,7 @@ mod tests {
         let err = ProviderError::RateLimited {
             retry_after_ms: 5000,
             message: "Too many requests".into(),
+            code: None,
         };
         assert!(err.is_retryable());
         assert_eq!(err.retry_after_ms(), Some(5000));
@@ -520,10 +574,47 @@ mod tests {
     }
 
     #[test]
+    fn provider_stream_api_error_preserves_code_without_inventing_http_status() {
+        let err = ProviderError::StreamApi {
+            message: "The model failed to generate a response.".into(),
+            code: Some("server_error".into()),
+            retryable: true,
+        };
+
+        let failure = err.to_failure("openai", "gpt-5.5");
+
+        assert_eq!(failure.code, PROVIDER_API_ERROR);
+        assert_eq!(failure.category, FailureCategory::Api);
+        assert_eq!(failure.status_code, None);
+        assert_eq!(failure.error_type.as_deref(), Some("server_error"));
+        assert!(failure.retryable);
+        assert!(failure.recoverable);
+        assert_eq!(failure.details.unwrap()["streamTerminal"], true);
+    }
+
+    #[test]
+    fn only_premature_stream_end_is_recoverable_parse_failure() {
+        let parse_failure = ProviderError::SseParse {
+            message: "frame exceeded configured limit".into(),
+        }
+        .to_failure("openai", "gpt-5.5");
+        let eof_failure = ProviderError::StreamEnded {
+            message: "provider stream ended before a terminal event".into(),
+        }
+        .to_failure("openai", "gpt-5.5");
+
+        assert!(!parse_failure.recoverable);
+        assert!(eof_failure.recoverable);
+        assert_eq!(eof_failure.code, PROVIDER_SSE_PARSE_ERROR);
+        assert_eq!(eof_failure.details.unwrap()["kind"], "unexpected_eof");
+    }
+
+    #[test]
     fn provider_error_to_failure_preserves_rate_limit_semantics() {
         let err = ProviderError::RateLimited {
             retry_after_ms: 1500,
             message: "slow down".to_owned(),
+            code: Some("rate_limit_exceeded".to_owned()),
         };
 
         let failure = err.to_failure("openai", "gpt-5.5");
@@ -533,6 +624,11 @@ mod tests {
         assert_eq!(failure.provider.as_deref(), Some("openai"));
         assert_eq!(failure.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(failure.retry_after_ms, Some(1500));
+        assert_eq!(failure.error_type.as_deref(), Some("rate_limit_exceeded"));
+        assert_eq!(
+            failure.details.as_ref().unwrap()["providerCode"],
+            "rate_limit_exceeded"
+        );
         assert!(failure.retryable);
         assert!(failure.recoverable);
     }
@@ -624,6 +720,11 @@ mod tests {
             message: "unexpected EOF".into(),
         };
         assert_eq!(err.to_string(), "SSE parse error: unexpected EOF");
+
+        let err = ProviderError::StreamEnded {
+            message: "missing Done".into(),
+        };
+        assert_eq!(err.to_string(), "Provider stream ended early: missing Done");
     }
 
     #[test]

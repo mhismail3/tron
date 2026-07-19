@@ -214,13 +214,41 @@ async fn engine_upgrade_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let client_id = uuid::Uuid::now_v7().to_string();
+    let shutdown = state.shutdown;
+    let shutdown_token = shutdown.token();
     let ctx = state.runtime_context;
     let clients = state.engine_clients;
     let max_message_size = state.config.max_message_size;
+    let heartbeat_interval = Duration::from_millis(state.config.heartbeat_interval_ms);
+    let heartbeat_timeout = Duration::from_millis(state.config.heartbeat_timeout_ms);
+    let (socket_tx, socket_rx) = tokio::sync::oneshot::channel();
+    let session_shutdown = shutdown_token.clone();
+    let session_task = tokio::spawn(async move {
+        tokio::select! {
+            biased;
+            () = shutdown_token.cancelled() => {}
+            socket = socket_rx => {
+                if let Ok(socket) = socket {
+                    run_engine_ws_session(
+                        socket,
+                        client_id,
+                        ctx,
+                        clients,
+                        session_shutdown,
+                        max_message_size,
+                        heartbeat_interval,
+                        heartbeat_timeout,
+                    )
+                    .await;
+                }
+            }
+        }
+    });
+    shutdown.register_task(session_task);
     Ok(ws
         .max_message_size(max_message_size)
         .on_upgrade(move |socket| async move {
-            run_engine_ws_session(socket, client_id, ctx, clients).await;
+            let _ = socket_tx.send(socket);
         }))
 }
 
@@ -231,9 +259,25 @@ async fn engine_worker_upgrade_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     ensure_worker_peer_is_loopback(addr)?;
+    let shutdown = state.shutdown;
+    let shutdown_token = shutdown.token();
     let runtime = state.external_workers;
+    let (socket_tx, socket_rx) = tokio::sync::oneshot::channel();
+    let session_shutdown = shutdown_token.clone();
+    let session_task = tokio::spawn(async move {
+        tokio::select! {
+            biased;
+            () = shutdown_token.cancelled() => {}
+            socket = socket_rx => {
+                if let Ok(socket) = socket {
+                    run_external_worker_socket(socket, runtime, session_shutdown).await;
+                }
+            }
+        }
+    });
+    shutdown.register_task(session_task);
     Ok(ws.on_upgrade(move |socket| async move {
-        run_external_worker_socket(socket, runtime).await;
+        let _ = socket_tx.send(socket);
     }))
 }
 
@@ -248,15 +292,17 @@ fn ensure_worker_peer_is_loopback(addr: SocketAddr) -> Result<(), StatusCode> {
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.engine_clients.connection_count();
-    let sessions = state.runtime_context.orchestrator.active_session_count();
-    let resp = health::health_check(state.start_time, connections, sessions);
+    // Wire compatibility: `active_sessions` reports cached session projections.
+    let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
+    let resp = health::health_check(state.start_time, connections, cached_sessions);
     Json(resp)
 }
 
 /// GET /health/deep — Deep health check with per-subsystem results.
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.engine_clients.connection_count();
-    let sessions = state.runtime_context.orchestrator.active_session_count();
+    // Wire compatibility: `active_sessions` reports cached session projections.
+    let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let event_store = state.runtime_context.event_store.clone();
     let tron_home = crate::domains::settings::profile::tron_home_dir();
     let response = state
@@ -265,7 +311,7 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
             Ok(health::deep_health_check(
                 state.start_time,
                 connections,
-                sessions,
+                cached_sessions,
                 &event_store,
                 &tron_home,
             ))
@@ -278,7 +324,7 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
             status: "unhealthy".into(),
             uptime_secs: state.start_time.elapsed().as_secs(),
             connections,
-            active_sessions: sessions,
+            active_sessions: cached_sessions,
             checks: vec![health::DeepHealthCheck {
                 name: "deepHealth".into(),
                 status: "fail".into(),
@@ -380,7 +426,7 @@ mod tests {
     fn runtime_context_accessible() {
         let server = make_server();
         let ctx = server.runtime_context();
-        assert!(ctx.orchestrator.can_accept_session());
+        assert_eq!(ctx.orchestrator.active_run_count(), 0);
     }
 
     #[tokio::test]

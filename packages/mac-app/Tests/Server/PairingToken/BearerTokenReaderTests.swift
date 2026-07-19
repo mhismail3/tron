@@ -6,7 +6,7 @@ import Testing
 struct BearerTokenReaderTests {
     /// Writes `data` to `path` and chmods to 0o600 so the reader's
     /// `permissionsAreSafe` guard accepts the file. Mirrors the writer
-    /// invariant in `packages/agent/src/server/onboarding/mod.rs`.
+    /// invariant in `packages/agent/src/app/lifecycle/onboarding/mod.rs`.
     private func writeSecureToken(_ data: Data, to path: URL) throws {
         try data.write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
@@ -104,24 +104,6 @@ struct BearerTokenReaderTests {
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         try writeSecureToken(Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8), to: path)
         #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
-    }
-
-    @Test("enforcePermissions: false bypasses the guard for tests")
-    func bypassFlagWorks() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
-        #expect(BearerTokenReader.read(at: path, enforcePermissions: false) == "abcdef1234567890")
-    }
-
-    @Test("missing file is treated as 'no permission failure'")
-    func missingFilePermissionGuardNeutral() {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        #expect(BearerTokenReader.permissionsAreSafe(at: path) == true)
     }
 
 }

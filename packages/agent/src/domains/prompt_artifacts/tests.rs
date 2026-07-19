@@ -6,10 +6,10 @@ use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRI
 use super::service::{
     inspect_prompt_artifact_value, list_prompt_artifact_value, record_prompt_artifact_value_at,
 };
-use super::{Deps, PROMPT_ARTIFACT_KIND, PROMPT_ARTIFACT_SCHEMA_ID};
+use super::{PROMPT_ARTIFACT_KIND, PROMPT_ARTIFACT_SCHEMA_ID};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, RiskLevel, TraceId,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -20,7 +20,7 @@ const IDEMPOTENCY_LEAK_PREFIX: &str = "PROMPT_ARTIFACT_IDEMPOTENCY_LEAK_PREFIX";
 const IDEMPOTENCY_LEAK_SUFFIX: &str = "PROMPT_ARTIFACT_IDEMPOTENCY_LEAK_SUFFIX";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -29,12 +29,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -48,7 +46,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[PROMPT_ARTIFACT_KIND],
@@ -57,7 +55,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -66,7 +64,7 @@ impl Fixture {
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
         let read_grant_id = derive_grant(
-            &self.deps,
+            &self.engine_host,
             &format!("{session_id}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[PROMPT_ARTIFACT_KIND],
@@ -75,7 +73,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps: self.deps.clone(),
+            engine_host: self.engine_host.clone(),
             session_id: session_id.to_owned(),
             write_grant_id: self.write_grant_id.clone(),
             read_grant_id,
@@ -88,15 +86,20 @@ impl Fixture {
 
     async fn record_at(&self, key: &str, payload: Value, operation_at: DateTime<Utc>) -> Value {
         let invocation = self.write_invocation(key, payload);
-        record_prompt_artifact_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
-            .await
-            .expect("record prompt artifact")
+        record_prompt_artifact_value_at(
+            &self.engine_host,
+            &invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await
+        .expect("record prompt artifact")
     }
 
     async fn record_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.write_invocation(key, payload);
         record_prompt_artifact_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -108,7 +111,7 @@ impl Fixture {
 
     async fn list(&self, key: &str, payload: Value) -> Value {
         let invocation = self.read_invocation(key, payload);
-        list_prompt_artifact_value(&self.deps, &invocation, &invocation.payload)
+        list_prompt_artifact_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("list prompt artifacts")
     }
@@ -116,7 +119,7 @@ impl Fixture {
     async fn inspect(&self, key: &str, resource_id: &str) -> Value {
         let invocation =
             self.read_invocation(key, json!({"promptArtifactResourceId": resource_id}));
-        inspect_prompt_artifact_value(&self.deps, &invocation, &invocation.payload)
+        inspect_prompt_artifact_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("inspect prompt artifact")
     }
@@ -124,7 +127,7 @@ impl Fixture {
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
         let invocation =
             self.read_invocation(key, json!({"promptArtifactResourceId": resource_id}));
-        inspect_prompt_artifact_value(&self.deps, &invocation, &invocation.payload)
+        inspect_prompt_artifact_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
@@ -132,7 +135,6 @@ impl Fixture {
 
     async fn raw_current_payload(&self, resource_id: &str) -> Value {
         let inspection = self
-            .deps
             .engine_host
             .inspect_resource(resource_id)
             .await
@@ -156,7 +158,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             scopes,
             &[PROMPT_ARTIFACT_KIND],
@@ -212,7 +214,6 @@ async fn record_list_inspect_prompt_artifact_schema_lifecycle_and_projection() {
     let resource_id = recorded["promptArtifactResourceId"].as_str().unwrap();
 
     let stored = fixture
-        .deps
         .engine_host
         .inspect_resource(resource_id)
         .await
@@ -275,7 +276,6 @@ async fn record_list_inspect_prompt_artifact_schema_lifecycle_and_projection() {
     );
 
     let streams = fixture
-        .deps
         .engine_host
         .replay_snapshot(&fixture.session_id)
         .await
@@ -325,7 +325,7 @@ async fn prompt_artifact_idempotency_evidence_is_fingerprinted_without_raw_key_l
     let mut invocation = fixture.write_invocation("idempotency-record", prompt_payload());
     invocation.causal_context.idempotency_key = Some(key.to_owned());
     let created = record_prompt_artifact_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -333,7 +333,7 @@ async fn prompt_artifact_idempotency_evidence_is_fingerprinted_without_raw_key_l
     .await
     .expect("create");
     let replayed = record_prompt_artifact_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation,
         &invocation.payload,
         default_operation_at(),
@@ -371,7 +371,7 @@ async fn prompt_artifact_authority_scope_replay_and_selector_checks_are_fail_clo
         &[READ_SCOPE, RESOURCE_READ_SCOPE],
     );
     let read_only_error = record_prompt_artifact_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &read_only_invocation,
         &read_only_invocation.payload,
         default_operation_at(),
@@ -406,7 +406,7 @@ async fn prompt_artifact_authority_scope_replay_and_selector_checks_are_fail_clo
         ],
     );
     let wildcard_error = record_prompt_artifact_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &wildcard_invocation,
         &wildcard_invocation.payload,
         default_operation_at(),
@@ -443,15 +443,14 @@ fn prompt_payload() -> Value {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("prompt-artifact-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

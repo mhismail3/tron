@@ -1,9 +1,10 @@
 //! Stream pipeline helpers for LLM provider streaming.
 //!
 //! Eliminates duplicated SSE→event stream conversion code across providers.
-//! All four providers (Anthropic, `OpenAI`, Google, `MiniMax`) use the same
-//! pattern: parse SSE lines → deserialize JSON → process through a handler →
-//! flatten → box. These helpers encapsulate that boilerplate.
+//! Anthropic, `OpenAI`, Google, Kimi, and `MiniMax` use the same
+//! pattern: parse SSE lines → deserialize JSON → process through a fallible
+//! handler → flatten → box. Provider-native terminal failures remain typed
+//! errors instead of being projected into transient canonical events.
 
 use futures::stream::{self, StreamExt};
 use tracing::{error, warn};
@@ -27,7 +28,7 @@ pub fn sse_to_event_stream<E, S, H>(
 where
     E: serde::de::DeserializeOwned + Send + 'static,
     S: Send + 'static,
-    H: FnMut(&E, &mut S) -> Vec<StreamEvent> + Send + 'static,
+    H: FnMut(&E, &mut S) -> ProviderResult<Vec<StreamEvent>> + Send + 'static,
 {
     let byte_stream = response.bytes_stream();
     let sse_lines = parse_sse_lines(byte_stream, options);
@@ -45,13 +46,14 @@ where
                     return std::future::ready(Some(vec![]));
                 }
             };
-            let events = handler(&event, state);
-            std::future::ready(Some(
-                events
+            let items = match handler(&event, state) {
+                Ok(events) => events
                     .into_iter()
                     .map(Ok::<StreamEvent, ProviderError>)
                     .collect(),
-            ))
+                Err(error) => vec![Err(error)],
+            };
+            std::future::ready(Some(items))
         })
         .flat_map(stream::iter);
 

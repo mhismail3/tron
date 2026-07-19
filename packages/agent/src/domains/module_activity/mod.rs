@@ -24,6 +24,8 @@
 //! dependencies, run package managers, access networks, mint approval evidence,
 //! expose raw commands/logs/env/code/file contents, raw grant/authority ids,
 //! raw trace/invocation ids, or touch repo-managed `packages/agent/skills`.
+//! Projection services borrow the engine host directly and own no parallel
+//! dependency or engine-state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -31,26 +33,13 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-        }
-    }
-}
-
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     crate::domains::registration::worker::domain_worker_module(
         contract::WORKER,
         &[],
-        service::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        service::function_registrations(contract::capabilities()?, deps.engine_host.clone())?,
     )
 }
 

@@ -1,11 +1,66 @@
 #!/bin/bash
 # auth.sh - sourced by tron-lib.sh; do not execute directly.
 
-base64url_encode() {
-    openssl base64 -A | tr '+/' '-_' | tr -d '='
+_auth_storage_is_initialized() {
+    [[ -f "$AUTH_FILE" ]] && jq -e '
+        type == "object" and
+        .version == 1 and
+        (.providers | type == "object") and
+        (.lastUpdated | type == "string") and
+        (.bearerToken | type == "string" and length > 0)
+    ' "$AUTH_FILE" >/dev/null 2>&1
+}
+
+_run_tron_auth_owner() {
+    local action="$1"
+    shift
+    if [[ ( "$action" == "begin-oauth" || "$action" == "complete-oauth" ) \
+        && -f "${RUST_WORKSPACE:-}/Cargo.toml" ]] \
+        && command -v cargo >/dev/null 2>&1; then
+        ( cd "$RUST_WORKSPACE" && cargo run --quiet --bin tron -- auth "$action" "$@" )
+        return
+    fi
+
+    if [[ -z "${RUST_WORKSPACE:-}" ]]; then
+        if [[ ! -x "$INSTALLED_BINARY" ]]; then
+            print_error "The installed Tron CLI has no paired helper binary. Run 'tron install' from the workspace."
+            return 1
+        fi
+        "$INSTALLED_BINARY" auth "$action" "$@"
+        return
+    fi
+
+    local binary=""
+    if [[ -x "${RELEASE_BINARY:-}" ]]; then
+        binary="$RELEASE_BINARY"
+    elif [[ -x "${DEV_SERVER_BINARY:-}" ]]; then
+        binary="$DEV_SERVER_BINARY"
+    fi
+    if [[ -z "$binary" ]]; then
+        print_error "No matching workspace Tron binary is available. Build with 'cargo build' first."
+        return 1
+    fi
+    "$binary" auth "$action" "$@"
+}
+
+_run_with_contributor_pair_read() {
+    if [ -n "${RUST_WORKSPACE:-}" ]; then
+        "$@"
+        return
+    fi
+
+    begin_contributor_pair_read || return 1
+    local status=0
+    "$@" || status=$?
+    end_contributor_pair_read || return 1
+    return "$status"
 }
 
 cmd_login() {
+    _run_with_contributor_pair_read _cmd_login "$@"
+}
+
+_cmd_login() {
     local label=""
     local host_override=""
     local provider=""
@@ -33,12 +88,15 @@ cmd_login() {
         esac
     done
 
-    # Show existing accounts for all providers
-    if [[ -f "$AUTH_FILE" ]]; then
-        local now_ms=$(( $(date +%s) * 1000 ))
-        _show_provider_accounts "anthropic" "Anthropic" "$now_ms"
-        _show_provider_accounts "openai-codex" "OpenAI" "$now_ms"
+    if ! _auth_storage_is_initialized; then
+        print_error "Auth storage is not initialized. Start the Tron server once, then retry login."
+        return 1
     fi
+
+    # Show existing accounts for all providers
+    local now_ms=$(( $(date +%s) * 1000 ))
+    _show_provider_accounts "anthropic" "Anthropic" "$now_ms"
+    _show_provider_accounts "openai-codex" "OpenAI" "$now_ms"
 
     # Provider selection
     if [[ -z "$provider" ]]; then
@@ -108,36 +166,27 @@ _prompt_account_label() {
     echo "$label"
 }
 
-_save_oauth_tokens() {
+_complete_oauth_login() {
     local provider_key="$1"
     local label="$2"
-    local access_token="$3"
-    local refresh_token="$4"
-    local expires_at="$5"
+    local code="$3"
+    local verifier="$4"
+    local expected_state="$5"
+    local completion_kind="$6"
+    local returned_state="$7"
 
-    if [[ ! -f "$AUTH_FILE" ]]; then
-        echo '{"version":1,"providers":{}}' > "$AUTH_FILE"
-        chmod 600 "$AUTH_FILE"
+    if ! printf '%s\0' \
+        "$provider_key" \
+        "$label" \
+        "$code" \
+        "$verifier" \
+        "$expected_state" \
+        "$completion_kind" \
+        "$returned_state" \
+        | _run_tron_auth_owner complete-oauth; then
+        print_error "Could not complete OAuth through the Rust auth owner."
+        return 1
     fi
-
-    local tmp_file="${AUTH_FILE}.tmp"
-
-    jq --arg pk "$provider_key" \
-       --arg label "$label" \
-       --arg at "$access_token" \
-       --arg rt "$refresh_token" \
-       --argjson ea "$expires_at" \
-       '
-       .providers[$pk].accounts //= [] |
-       (.providers[$pk].accounts | map(.label) | index($label)) as $idx |
-       if $idx != null then
-           .providers[$pk].accounts[$idx].oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea}
-       else
-           .providers[$pk].accounts += [{label: $label, oauth: {accessToken: $at, refreshToken: $rt, expiresAt: $ea}}]
-       end |
-       .lastUpdated = (now | todate)
-       ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
-    chmod 600 "$AUTH_FILE"
 }
 
 cmd_login_anthropic() {
@@ -146,16 +195,16 @@ cmd_login_anthropic() {
 
     label=$(_prompt_account_label "$label" "$host_override")
 
-    # Generate PKCE
-    local code_verifier
-    code_verifier=$(openssl rand 32 | base64url_encode)
-    local code_challenge
-    code_challenge=$(printf '%s' "$code_verifier" | openssl dgst -sha256 -binary | base64url_encode)
-
-    local encoded_redirect_uri encoded_scope
-    encoded_redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${ANTHROPIC_OAUTH_REDIRECT_URI}''', safe=''))")
-    encoded_scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${ANTHROPIC_OAUTH_SCOPES}''', safe=''))")
-    local auth_url="${ANTHROPIC_OAUTH_AUTH_ENDPOINT}?code=true&client_id=${ANTHROPIC_OAUTH_CLIENT_ID}&response_type=code&redirect_uri=${encoded_redirect_uri}&scope=${encoded_scope}&code_challenge=${code_challenge}&code_challenge_method=S256&state=${code_verifier}"
+    local flow_output code_verifier expected_state auth_url redirect_uri
+    if ! flow_output=$(_run_tron_auth_owner begin-oauth anthropic); then
+        print_error "Could not prepare Anthropic OAuth through the Rust auth owner."
+        return 1
+    fi
+    IFS=$'\t' read -r code_verifier expected_state auth_url redirect_uri <<< "$flow_output"
+    if [[ -z "$code_verifier" || -z "$expected_state" || -z "$auth_url" || -z "$redirect_uri" ]]; then
+        print_error "Rust auth owner returned an invalid Anthropic OAuth flow."
+        return 1
+    fi
 
     echo ""
     print_status "Opening browser for Anthropic authentication..."
@@ -179,21 +228,19 @@ cmd_login_anthropic() {
 
     local code=""
     local state=""
+    local completion_kind="manual"
 
     if [[ "$auth_input" == http* ]]; then
-        code=$(python3 -c "
+        completion_kind="callback"
+        local parsed_input
+        parsed_input=$(printf '%s' "$auth_input" | python3 -c '
 import sys, urllib.parse
-q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
-print(q.get('code',[''])[0])
-" "$auth_input" 2>/dev/null)
-        state=$(python3 -c "
-import sys, urllib.parse
-q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
-print(q.get('state',[''])[0])
-" "$auth_input" 2>/dev/null)
+query = urllib.parse.parse_qs(urllib.parse.urlparse(sys.stdin.read()).query)
+print(query.get("code", [""])[0] + "\t" + query.get("state", [""])[0], end="")
+' 2>/dev/null)
+        IFS=$'\t' read -r code state <<< "$parsed_input"
     else
         code="$auth_input"
-        state="$code_verifier"
     fi
 
     if [[ -z "$code" ]]; then
@@ -203,40 +250,18 @@ print(q.get('state',[''])[0])
 
     print_status "Exchanging authorization code..."
 
-    local response
-    response=$(curl -s -w "\n%{http_code}" -X POST "$ANTHROPIC_OAUTH_TOKEN_ENDPOINT" \
-        -H "Content-Type: application/json" \
-        -H "User-Agent: tron-agent/1.0" \
-        -d "{
-            \"grant_type\": \"authorization_code\",
-            \"client_id\": \"${ANTHROPIC_OAUTH_CLIENT_ID}\",
-            \"code\": \"${code}\",
-            \"state\": \"${state}\",
-            \"redirect_uri\": \"${ANTHROPIC_OAUTH_REDIRECT_URI}\",
-            \"code_verifier\": \"${code_verifier}\"
-        }")
-
-    local http_code
-    http_code=$(echo "$response" | tail -1)
-    local body
-    body=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" != "200" ]]; then
-        print_error "Token exchange failed (HTTP $http_code): $body"
-        return 1
-    fi
-
-    local access_token refresh_token expires_in expires_at
-    access_token=$(echo "$body" | jq -r '.access_token')
-    refresh_token=$(echo "$body" | jq -r '.refresh_token')
-    expires_in=$(echo "$body" | jq -r '.expires_in')
-    expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
-
-    _save_oauth_tokens "anthropic" "$label" "$access_token" "$refresh_token" "$expires_at"
+    local expires_at
+    expires_at=$(_complete_oauth_login \
+        "anthropic" "$label" "$code" "$code_verifier" "$expected_state" \
+        "$completion_kind" "$state") || return 1
 
     print_success "Saved Anthropic tokens for account \"${label}\""
 
-    local hours_left=$(( expires_in / 3600 ))
+    local now_ms=$(( $(date +%s) * 1000 ))
+    local hours_left=$(( (expires_at - now_ms) / 3600000 ))
+    if (( hours_left < 0 )); then
+        hours_left=0
+    fi
     echo -e "  ${DIM}Token expires in ~${hours_left}h${NC}"
     echo ""
 }
@@ -247,23 +272,32 @@ cmd_login_openai() {
 
     label=$(_prompt_account_label "$label" "$host_override")
 
-    # Check if port is available
-    if lsof -i ":${OPENAI_OAUTH_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-        print_error "Port ${OPENAI_OAUTH_PORT} is already in use. Cannot start OAuth callback server."
-        echo -e "  ${DIM}Check what's using it: lsof -i :${OPENAI_OAUTH_PORT}${NC}"
+    local flow_output code_verifier expected_state auth_url redirect_uri
+    if ! flow_output=$(_run_tron_auth_owner begin-oauth openai-codex); then
+        print_error "Could not prepare OpenAI OAuth through the Rust auth owner."
+        return 1
+    fi
+    IFS=$'\t' read -r code_verifier expected_state auth_url redirect_uri <<< "$flow_output"
+    if [[ -z "$code_verifier" || -z "$expected_state" || -z "$auth_url" || -z "$redirect_uri" ]]; then
+        print_error "Rust auth owner returned an invalid OpenAI OAuth flow."
         return 1
     fi
 
-    # Generate PKCE (OpenAI requires code_challenge)
-    local code_verifier
-    code_verifier=$(openssl rand 32 | base64url_encode)
-    local code_challenge
-    code_challenge=$(printf '%s' "$code_verifier" | openssl dgst -sha256 -binary | base64url_encode)
+    local callback_authority="${redirect_uri#*://}"
+    local callback_port_path="${callback_authority#*:}"
+    local callback_port="${callback_port_path%%/*}"
+    local callback_path="/${callback_port_path#*/}"
+    if [[ ! "$callback_port" =~ ^[0-9]+$ || "$callback_path" == "/$callback_port_path" ]]; then
+        print_error "Rust auth owner returned an invalid OpenAI callback URI."
+        return 1
+    fi
 
-    local encoded_redirect_uri encoded_scope
-    encoded_redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${OPENAI_OAUTH_REDIRECT_URI}''', safe=''))")
-    encoded_scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${OPENAI_OAUTH_SCOPES}''', safe=''))")
-    local auth_url="${OPENAI_OAUTH_AUTH_ENDPOINT}?response_type=code&client_id=${OPENAI_OAUTH_CLIENT_ID}&redirect_uri=${encoded_redirect_uri}&scope=${encoded_scope}&code_challenge=${code_challenge}&code_challenge_method=S256&state=${code_verifier}"
+    # Check if port is available
+    if lsof -i ":${callback_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+        print_error "Port ${callback_port} is already in use. Cannot start OAuth callback server."
+        echo -e "  ${DIM}Check what's using it: lsof -i :${callback_port}${NC}"
+        return 1
+    fi
 
     echo ""
     print_status "Opening browser for OpenAI authentication..."
@@ -276,7 +310,7 @@ cmd_login_openai() {
     local error_file
     error_file=$(mktemp)
 
-    python3 -c "
+python3 -c "
 import http.server, urllib.parse, sys, signal
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -284,7 +318,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
-        if parsed.path != '/auth/callback':
+        if parsed.path != '${callback_path}':
             self.send_response(404)
             self.end_headers()
             return
@@ -314,7 +348,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # suppress request logging
 
-server = http.server.HTTPServer(('127.0.0.1', ${OPENAI_OAUTH_PORT}), Handler)
+server = http.server.HTTPServer(('127.0.0.1', ${callback_port}), Handler)
 server.timeout = 300  # 5 minute timeout
 signal.signal(signal.SIGALRM, lambda *_: sys.exit(1))
 signal.alarm(300)
@@ -322,14 +356,14 @@ try:
     server.handle_request()
 except SystemExit:
     pass
-" &
+" 8>&- 9>&- &
     local server_pid=$!
 
     # Give server a moment to start
     sleep 0.3
 
     if ! kill -0 "$server_pid" 2>/dev/null; then
-        print_error "Failed to start OAuth callback server on port ${OPENAI_OAUTH_PORT}"
+        print_error "Failed to start OAuth callback server on port ${callback_port}"
         rm -f "$code_file" "$error_file"
         return 1
     fi
@@ -337,7 +371,7 @@ except SystemExit:
     echo "If browser doesn't open, visit:"
     echo "$auth_url"
     echo ""
-    echo -e "${DIM}Waiting for authorization (listening on port ${OPENAI_OAUTH_PORT})...${NC}"
+    echo -e "${DIM}Waiting for authorization (listening on port ${callback_port})...${NC}"
 
     open "$auth_url"
 
@@ -369,47 +403,20 @@ except SystemExit:
         return 1
     fi
 
-    # Validate state matches (CSRF protection — verifier was used as state)
-    if [[ "$recv_state" != "$code_verifier" ]]; then
-        print_error "State parameter mismatch (possible CSRF attack)"
-        return 1
-    fi
-
     print_status "Exchanging authorization code..."
 
-    local response
-    response=$(curl -s -w "\n%{http_code}" -X POST "$OPENAI_OAUTH_TOKEN_ENDPOINT" \
-        -H "Content-Type: application/json" \
-        -H "User-Agent: tron-agent/1.0" \
-        -d "{
-            \"grant_type\": \"authorization_code\",
-            \"client_id\": \"${OPENAI_OAUTH_CLIENT_ID}\",
-            \"code\": \"${code}\",
-            \"redirect_uri\": \"${OPENAI_OAUTH_REDIRECT_URI}\",
-            \"code_verifier\": \"${code_verifier}\"
-        }")
-
-    local http_code
-    http_code=$(echo "$response" | tail -1)
-    local body
-    body=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" != "200" ]]; then
-        print_error "Token exchange failed (HTTP $http_code): $body"
-        return 1
-    fi
-
-    local access_token refresh_token expires_in expires_at
-    access_token=$(echo "$body" | jq -r '.access_token')
-    refresh_token=$(echo "$body" | jq -r '.refresh_token // ""')
-    expires_in=$(echo "$body" | jq -r '.expires_in')
-    expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
-
-    _save_oauth_tokens "openai-codex" "$label" "$access_token" "$refresh_token" "$expires_at"
+    local expires_at
+    expires_at=$(_complete_oauth_login \
+        "openai-codex" "$label" "$code" "$code_verifier" "$expected_state" \
+        "callback" "$recv_state") || return 1
 
     print_success "Saved OpenAI tokens for account \"${label}\""
 
-    local hours_left=$(( expires_in / 3600 ))
+    local now_ms=$(( $(date +%s) * 1000 ))
+    local hours_left=$(( (expires_at - now_ms) / 3600000 ))
+    if (( hours_left < 0 )); then
+        hours_left=0
+    fi
     echo -e "  ${DIM}Token expires in ~${hours_left}h${NC}"
     echo ""
 }
@@ -487,7 +494,8 @@ cmd_auth() {
     case "$action" in
         rotate)
             shift
-            cmd_auth_rotate "$@"
+            # The Rust owner serializes rotation with every other auth writer.
+            _run_with_contributor_pair_read _run_tron_auth_owner rotate "$@"
             ;;
         ""|-h|--help)
             echo ""
@@ -509,33 +517,4 @@ cmd_auth() {
             return 1
             ;;
     esac
-}
-
-cmd_auth_rotate() {
-    # Pick the freshest contributor binary in priority order: installed
-    # service bundle > dev-server build > workspace `cargo run`. This mirrors how
-    # cmd_status / cmd_rollback select binaries — keeping a single
-    # source of truth means the rotated token always lands at the path
-    # the running daemon will actually consult.
-    local binary=""
-    if [[ -x "$INSTALLED_BINARY" ]]; then
-        binary="$INSTALLED_BINARY"
-    elif [[ -x "$DEV_BINARY" ]]; then
-        binary="$DEV_BINARY"
-    elif [[ -x "$RELEASE_BINARY" ]]; then
-        binary="$RELEASE_BINARY"
-    elif [[ -x "$DEV_SERVER_BINARY" ]]; then
-        binary="$DEV_SERVER_BINARY"
-    fi
-
-    if [[ -n "$binary" ]]; then
-        "$binary" auth rotate "$@"
-    else
-        # Workspace source path — dev tree, no built binary on disk yet.
-        if ! command -v cargo >/dev/null 2>&1; then
-            print_error "No tron binary found and cargo is unavailable. Build with 'cargo build' first."
-            return 1
-        fi
-        ( cd "$RUST_WORKSPACE" && cargo run --quiet --bin tron -- auth rotate "$@" )
-    fi
 }

@@ -1,21 +1,21 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use super::MODULE_VALIDATION_REPORT_KIND;
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::service::{
     inspect_module_validation_report_value, record_module_validation_report_value_at,
 };
-use super::{Deps, MODULE_VALIDATION_REPORT_KIND};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, ListResources, RiskLevel, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, ListResources, RiskLevel, TraceId,
 };
 use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-26T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
 }
@@ -23,12 +23,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -41,7 +39,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
         }
@@ -50,7 +48,7 @@ impl Fixture {
     async fn record(&self, key: &str, payload: Value) -> Value {
         let invocation = self.write_invocation(key, payload);
         record_module_validation_report_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -62,7 +60,7 @@ impl Fixture {
     async fn record_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.write_invocation(key, payload);
         record_module_validation_report_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -81,7 +79,7 @@ impl Fixture {
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &self.session_id,
         );
-        inspect_module_validation_report_value(&self.deps, &invocation, &invocation.payload)
+        inspect_module_validation_report_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("inspect module validation report")
     }
@@ -89,7 +87,7 @@ impl Fixture {
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MODULE_VALIDATION_REPORT_KIND],
@@ -100,7 +98,6 @@ impl Fixture {
 
     async fn raw_current_payload(&self, resource_id: &str) -> Value {
         let inspection = self
-            .deps
             .engine_host
             .inspect_resource(resource_id)
             .await
@@ -194,7 +191,6 @@ async fn validation_command_and_result_refs_reject_raw_shell_preview_or_summary(
     }
 
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(MODULE_VALIDATION_REPORT_KIND.to_owned()),
@@ -287,14 +283,13 @@ fn validation_payload() -> Value {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("module-validation-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

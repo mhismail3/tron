@@ -8,11 +8,9 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
-    @State private var workspaceExpansion = SessionListWorkspaceExpansion()
+    @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
-    @State private var agentBriefing = AgentBriefingViewModel()
     @State private var engineCockpit = AgentCockpitViewModel()
-    @State private var showAgentBriefing = false
     @State private var showEngineCockpit = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -28,20 +26,13 @@ struct SessionSidebar: View {
         Dictionary(uniqueKeysWithValues: workspaceGroups.map { ($0.id, $0.sessions.count) })
     }
 
-    private var briefingSessionId: String? {
+    private var dashboardSessionId: String? {
         selectedSessionId ?? eventStoreManager.sortedSessions.first?.id
-    }
-
-    private var briefingRefreshKey: AgentBriefingDashboardRefreshKey {
-        AgentBriefingDashboardRefreshKey(
-            sessionId: briefingSessionId,
-            isConnected: dependencies.connectionRepository.connectionState.isConnected
-        )
     }
 
     private var cockpitRefreshKey: EngineCockpitDashboardRefreshKey {
         EngineCockpitDashboardRefreshKey(
-            sessionId: briefingSessionId,
+            sessionId: dashboardSessionId,
             isConnected: dependencies.connectionRepository.connectionState.isConnected
         )
     }
@@ -49,18 +40,6 @@ struct SessionSidebar: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
-                Section {
-                    AgentBriefingDashboardBand(
-                        state: agentBriefing.state,
-                        isRefreshing: agentBriefing.isRefreshing
-                    ) {
-                        showAgentBriefing = true
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(SessionListLayout.briefingInsets)
-                }
-
                 Section {
                     EngineCockpitDashboardBand(
                         overview: engineCockpit.overview,
@@ -70,42 +49,74 @@ struct SessionSidebar: View {
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-                    .listRowInsets(SessionListLayout.briefingInsets)
+                    .listRowInsets(SessionListLayout.dashboardInsets)
                 }
 
                 ForEach(workspaceGroups) { group in
+                    let visibleSessions = sessionExpansion.visibleSessions(in: group)
+                    let canViewMore = sessionExpansion.canViewMore(
+                        groupId: group.id,
+                        totalCount: group.sessions.count
+                    )
+                    let canViewLess = sessionExpansion.canViewLess(
+                        groupId: group.id,
+                        totalCount: group.sessions.count
+                    )
+                    let hasExpansionControls = canViewMore || canViewLess
+                    let disclosureItemCount = visibleSessions.count + (hasExpansionControls ? 1 : 0)
+                    let rowsAreVisible = workspaceDisclosure.areRowsVisible(group.id)
+                    let paginationTransition = sessionExpansion.transition(for: group.id)
+                    let paginationIsTransitioning = sessionExpansion.isTransitioning(groupId: group.id)
+
                     Section {
-                        if workspaceExpansion.isExpanded(group.id) {
-                            ForEach(sessionExpansion.visibleSessions(in: group)) { session in
+                        if workspaceDisclosure.shouldRenderRows(group.id) {
+                            ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
+                                let paginationRowIsVisible = sessionExpansion.isRowVisible(
+                                    groupId: group.id,
+                                    index: index
+                                )
                                 sessionRow(session)
+                                    .opacity(paginationRowIsVisible ? 1 : 0)
+                                    .animation(
+                                        paginationRowAnimation(
+                                            transition: paginationTransition,
+                                            index: index,
+                                            isVisible: paginationRowIsVisible
+                                        ),
+                                        value: paginationRowIsVisible
+                                    )
+                                    .opacity(rowsAreVisible ? 1 : 0)
+                                    .animation(
+                                        SessionListLayout.disclosureRowAnimation(
+                                            index: index,
+                                            itemCount: disclosureItemCount,
+                                            isVisible: rowsAreVisible
+                                        ),
+                                        value: rowsAreVisible
+                                    )
                             }
 
-                            let canViewMore = sessionExpansion.canViewMore(
-                                groupId: group.id,
-                                totalCount: group.sessions.count
-                            )
-                            let canViewLess = sessionExpansion.canViewLess(
-                                groupId: group.id,
-                                totalCount: group.sessions.count
-                            )
-                            if canViewMore || canViewLess {
+                            if hasExpansionControls {
                                 SessionListExpansionControls(
                                     projectName: group.name,
                                     canViewLess: canViewLess,
                                     canViewMore: canViewMore,
+                                    isEnabled: !paginationIsTransitioning,
                                     onViewLess: {
-                                        withAnimation(SessionListLayout.expansionAnimation) {
-                                            sessionExpansion.showLess(groupId: group.id)
-                                        }
+                                        beginPaginationHide(group)
                                     },
                                     onViewMore: {
-                                        withAnimation(SessionListLayout.expansionAnimation) {
-                                            sessionExpansion.revealMore(
-                                                groupId: group.id,
-                                                totalCount: group.sessions.count
-                                            )
-                                        }
+                                        beginPaginationReveal(group)
                                     }
+                                )
+                                .opacity(rowsAreVisible ? 1 : 0)
+                                .animation(
+                                    SessionListLayout.disclosureRowAnimation(
+                                        index: visibleSessions.count,
+                                        itemCount: disclosureItemCount,
+                                        isVisible: rowsAreVisible
+                                    ),
+                                    value: rowsAreVisible
                                 )
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
@@ -115,11 +126,9 @@ struct SessionSidebar: View {
                     } header: {
                         SessionWorkspaceHeader(
                             title: group.name,
-                            isExpanded: workspaceExpansion.isExpanded(group.id)
+                            isExpanded: workspaceDisclosure.isExpanded(group.id)
                         ) {
-                            withAnimation(SessionListLayout.expansionAnimation) {
-                                workspaceExpansion.toggle(group.id)
-                            }
+                            toggleWorkspaceGroup(group.id, itemCount: disclosureItemCount)
                         }
                     }
                 }
@@ -154,53 +163,107 @@ struct SessionSidebar: View {
         }
         .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
                 .toolbar(removing: .sidebarToggle)
         .toolbar {
             ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
         }
         .onChange(of: workspaceGroupCounts, initial: true) { _, groupCounts in
             sessionExpansion.reconcile(groupCounts: groupCounts)
-        }
-        .task(id: briefingRefreshKey) {
-            await refreshBriefing()
+            reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
         .task(id: cockpitRefreshKey) {
             await refreshCockpit()
-        }
-        .sheet(isPresented: $showAgentBriefing) {
-            AgentBriefingSheet(
-                viewModel: agentBriefing,
-                repository: dependencies.workerLifecycleRepository,
-                sessionId: briefingSessionId,
-                workspaceId: nil,
-                connectionState: dependencies.connectionRepository.connectionState
-            )
         }
         .sheet(isPresented: $showEngineCockpit) {
             AgentCockpitSheet(
                 viewModel: engineCockpit,
                 repository: dependencies.workerLifecycleRepository,
-                sessionId: briefingSessionId,
+                sessionId: dashboardSessionId,
                 workspaceId: nil,
                 connectionState: dependencies.connectionRepository.connectionState
             )
         }
     }
 
-    private func refreshBriefing() async {
-        await agentBriefing.refresh(
-            repository: dependencies.workerLifecycleRepository,
-            sessionId: briefingSessionId,
-            workspaceId: nil,
-            connectionState: dependencies.connectionRepository.connectionState
+    private func toggleWorkspaceGroup(_ groupId: String, itemCount: Int) {
+        let direction = workspaceDisclosure.toggleDirection(for: groupId)
+        let transition: SessionListWorkspaceDisclosureTransition
+        switch direction {
+        case .collapse:
+            transition = workspaceDisclosure.beginToggle(groupId)
+        case .expand:
+            transition = withAnimation(SessionListLayout.expansionAnimation) {
+                workspaceDisclosure.beginToggle(groupId)
+            }
+        }
+
+        Task { @MainActor in
+            let delay = transition.direction == .collapse
+                ? SessionListLayout.disclosureCollapseDelay(itemCount: itemCount)
+                : SessionListLayout.disclosureLayoutDelay
+            try? await Task.sleep(for: delay)
+            if transition.direction == .collapse {
+                _ = withAnimation(SessionListLayout.expansionAnimation) {
+                    workspaceDisclosure.complete(transition)
+                }
+            } else {
+                workspaceDisclosure.complete(transition)
+            }
+        }
+    }
+
+    private func reconcileWorkspaceDisclosure(groupIds: Set<String>) {
+        workspaceDisclosure.reconcile(groupIds: groupIds)
+    }
+
+    private func paginationRowAnimation(
+        transition: SessionListPaginationTransition?,
+        index: Int,
+        isVisible: Bool
+    ) -> Animation? {
+        guard let transition, index >= transition.stableCount else { return nil }
+        return SessionListLayout.disclosureRowAnimation(
+            index: index - transition.stableCount,
+            itemCount: transition.affectedCount,
+            isVisible: isVisible
         )
+    }
+
+    private func beginPaginationReveal(_ group: SessionListWorkspaceGroup) {
+        guard let transition = withAnimation(SessionListLayout.expansionAnimation, {
+            sessionExpansion.beginRevealMore(groupId: group.id, totalCount: group.sessions.count)
+        }) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: SessionListLayout.disclosureLayoutDelay)
+            guard sessionExpansion.beginRevealRows(transition) else { return }
+            try? await Task.sleep(
+                for: SessionListLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            sessionExpansion.finish(transition)
+        }
+    }
+
+    private func beginPaginationHide(_ group: SessionListWorkspaceGroup) {
+        guard let transition = sessionExpansion.beginShowLess(
+            groupId: group.id,
+            totalCount: group.sessions.count
+        ) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(
+                for: SessionListLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            _ = withAnimation(SessionListLayout.expansionAnimation) {
+                sessionExpansion.finish(transition)
+            }
+        }
     }
 
     private func refreshCockpit() async {
         await engineCockpit.refresh(
             repository: dependencies.workerLifecycleRepository,
-            sessionId: briefingSessionId,
+            sessionId: dashboardSessionId,
             workspaceId: nil,
             connectionState: dependencies.connectionRepository.connectionState
         )
@@ -249,11 +312,6 @@ struct SessionSidebar: View {
             .tint(.tronEmerald)
         }
     }
-}
-
-private struct AgentBriefingDashboardRefreshKey: Equatable {
-    let sessionId: String?
-    let isConnected: Bool
 }
 
 private struct EngineCockpitDashboardRefreshKey: Equatable {

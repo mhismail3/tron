@@ -4,13 +4,32 @@ import XCTest
 
 @MainActor
 final class ChatAffordanceVisualRenderTests: XCTestCase {
+    private var testState: IsolatedTestState!
+
+    override func setUp() async throws {
+        testState = IsolatedTestState(label: "chat-affordance-render")
+        testState.registerTeardown(with: self)
+    }
+
+    override func tearDown() async throws {
+        await testState.cleanup()
+        testState = nil
+    }
+
     func testApprovedChatAffordancesRenderForVisualQA() throws {
         let samples: [(String, AnyView, CGSize)] = [
             ("chat-normal.png", AnyView(Self.normalChatView), CGSize(width: 430, height: 360)),
+            ("chat-response-presentation.png", AnyView(Self.responsePresentationView), CGSize(width: 430, height: 620)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-capability-chip.png", AnyView(Self.capabilityChipView), CGSize(width: 430, height: 180)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
+            ("chat-composer-context-ring.png", AnyView(ComposerContextRingFixture()), CGSize(width: 430, height: 180)),
+            (
+                "chat-composer-recording-waveform.png",
+                AnyView(ComposerContextRingFixture(isRecording: true)),
+                CGSize(width: 430, height: 180)
+            ),
         ]
 
         for (name, view, size) in samples {
@@ -39,6 +58,38 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ),
             onDetails: { _ in }
         )
+        .padding(20)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private static var responsePresentationView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ThinkingContentView(
+                content: "Checking the available operation before responding.",
+                isExpanded: false,
+                isStreaming: false,
+                kind: .reasoningSummary
+            )
+
+            StreamingContentView(text: "Streaming response text without a leading rail.")
+
+            MessageBubble(message: ChatMessage(
+                role: .assistant,
+                content: .text("I will inspect that first."),
+                model: "gpt-5.5",
+                latencyMs: 900
+            ))
+
+            CapabilityInvocationChip(data: fixtureInvocation, onTap: {}, onCancel: nil)
+
+            MessageBubble(message: ChatMessage(
+                role: .assistant,
+                content: .text("The final response keeps the single metadata row."),
+                model: "gpt-5.5",
+                latencyMs: 1_900,
+                isFinalAssistantResponse: true
+            ))
+        }
         .padding(20)
         .background(Color(uiColor: .systemBackground))
     }
@@ -85,6 +136,30 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         )
     }
 
+    private struct ComposerContextRingFixture: View {
+        @State private var state = InputBarState()
+        var isRecording = false
+
+        var body: some View {
+            VStack {
+                Spacer()
+                InputBar(
+                    state: state,
+                    config: InputBarConfig(
+                        isRecording: isRecording,
+                        recordingAudioLevel: 0.68,
+                        contextPercentage: 68,
+                        currentModelInfo: nil,
+                        readOnly: false
+                    ),
+                    actions: InputBarActions(onContextTap: {})
+                )
+            }
+            .padding(.bottom, 20)
+            .background(Color(uiColor: .systemBackground))
+        }
+    }
+
     private func render(view: AnyView, size: CGSize, outputName: String) throws -> URL {
         let windowScene = try XCTUnwrap(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
@@ -122,12 +197,6 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     }
 
     private func visualArtifactURL(outputName: String) throws -> URL {
-        let documentsURL = try XCTUnwrap(
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        )
-        let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
-            .map(URL.init(fileURLWithPath:))
-            ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        return artifactRoot.appendingPathComponent(outputName)
+        try testState.artifactURL(named: outputName)
     }
 }

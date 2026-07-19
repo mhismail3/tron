@@ -27,6 +27,24 @@ fn successful_details(operation: &str) -> Value {
                 "evidence": {"resourceRefs": []}
             }
         }),
+        "filesystem_read" => json!({
+            "primitiveOperation": operation,
+            "status": "ok",
+            "filesystem": {
+                "schemaVersion": "tron.filesystem_agent_tools.v1",
+                "status": "ok",
+                "operation": "read",
+                "path": {"root": "working_directory", "relativePath": "README.md"},
+                "file": {
+                    "exists": true,
+                    "isBinary": false,
+                    "sizeBytes": 12,
+                    "contentHash": "sha256-test",
+                    "truncated": false,
+                    "content": "hello world\n"
+                }
+            }
+        }),
         "web_robots_check" => json!({
             "primitiveOperation": operation,
             "status": "ok",
@@ -273,11 +291,7 @@ fn inline_image_blocks_fail_closed_to_text_only_transport() {
         is_error: None,
         stop_turn: None,
     };
-    let CapabilityResultMessageContent::Text(rendered) =
-        provider_result_content("observe", &result)
-    else {
-        panic!("provider transport must be text only");
-    };
+    let rendered = provider_result_text("observe", &result);
     assert!(rendered.contains("PROVIDER_OUTPUT_UNCUSTODIED_MEDIA"));
     assert!(!rendered.contains("base64-data"));
 }

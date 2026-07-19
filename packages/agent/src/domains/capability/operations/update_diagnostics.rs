@@ -13,11 +13,8 @@ pub(super) async fn update_diagnostic_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let update_diagnostics_deps = crate::domains::update_diagnostics::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::update_diagnostics::service::record_update_diagnostic_value_at(
-        &update_diagnostics_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn update_diagnostic_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let update_diagnostics_deps = crate::domains::update_diagnostics::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::update_diagnostics::service::list_update_diagnostics_value(
-        &update_diagnostics_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn update_diagnostic_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let update_diagnostics_deps = crate::domains::update_diagnostics::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::update_diagnostics::service::inspect_update_diagnostics_value(
-        &update_diagnostics_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

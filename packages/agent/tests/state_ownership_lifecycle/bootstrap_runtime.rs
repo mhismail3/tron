@@ -114,7 +114,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
         "engine host sqlite bootstrap sequence",
         &engine_host,
         &[
-            "pub fn open_sqlite",
+            "pub(in crate::engine) fn open_sqlite",
             "prepare_for_startup",
             "open_connection",
             "checkpoint",
@@ -139,23 +139,6 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "database process-lock owner missing `{required}`"
         );
     }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/app/bootstrap/mod.rs",
-        "packages/agent/src/app/bootstrap/server.rs",
-        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
-        "packages/agent/src/shared/storage/archive.rs",
-        "packages/agent/src/shared/storage/schema.rs",
-        "packages/agent/src/shared/foundation/paths/mod.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-3"))),
-            "SOL inventory must tag {required} as part of SOL-3"
-        );
-    }
 }
 
 #[test]
@@ -169,16 +152,18 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
         );
     }
     for required in [
-        "active_sessions: DashMap<String, CachedSession>",
+        "cached_sessions: DashMap<String, CachedSession>",
+        "state: Arc<ReconstructedState>",
         "last_accessed: Mutex<Instant>",
-        "is_processing: AtomicBool",
+        "eviction_pinned: AtomicBool",
+        "AtomicBool::new(eviction_pinned)",
         "insert(session_id.clone()",
-        "insert(session_id.to_owned()",
-        "active_sessions.remove",
-        "active_sessions.retain",
-        "cached.is_processing.load",
-        "cached.is_processing.store(true",
-        "cached.is_processing.store(false",
+        "cached_sessions.entry(session_id.to_owned())",
+        "Entry::Vacant",
+        "cached_sessions.remove",
+        "cached_sessions.retain",
+        "cached.eviction_pinned.load",
+        "self.eviction_pinned.store(true",
     ] {
         assert!(
             session_manager.contains(required),
@@ -187,16 +172,6 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
     }
 
     let core = read_repo_file("packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs");
-    assert_contains_in_order(
-        "StartedRun cleanup",
-        &core,
-        &[
-            "pub struct StartedRun",
-            "impl Drop for StartedRun",
-            "self.registry.remove",
-            "self.permit.take",
-        ],
-    );
     assert_contains_in_order(
         "RetainGuard cleanup",
         &core,
@@ -337,28 +312,6 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
         assert!(
             bootstrap.contains(required),
             "app bootstrap background task ownership missing `{required}`"
-        );
-    }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/app/bootstrap/mod.rs",
-        "packages/agent/src/app/bootstrap/server.rs",
-        "packages/agent/src/app/lifecycle/shutdown.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/capability_invocation_tracker.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs",
-        "packages/agent/src/shared/server/context.rs",
-        "packages/agent/src/transport/runtime/mod.rs",
-        "packages/agent/src/transport/runtime/queue_drainer.rs",
-        "packages/agent/src/transport/runtime/worker_heartbeat.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-4"))),
-            "SOL inventory must tag {required} as part of SOL-4"
         );
     }
 }

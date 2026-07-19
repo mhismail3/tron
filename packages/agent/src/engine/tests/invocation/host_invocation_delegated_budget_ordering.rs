@@ -164,7 +164,7 @@ async fn engine_host_handle_engine_invoke_exhausted_parent_budget_stops_before_c
             if message.contains("budget remainingInvocations is exhausted")
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    let records = handle.invocation_records().await;
+    let records = handle.lock().await.catalog().ledger_invocations().unwrap();
     assert!(
         !records
             .iter()

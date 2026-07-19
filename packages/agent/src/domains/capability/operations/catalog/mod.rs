@@ -254,12 +254,9 @@ fn execute_operation_inspect_projection_with_options(
         .expect("canonical input contract declares schema completeness");
     let capability_pool = operation_contextual_pool_projection(
         operation,
-        serde_json::to_value(
-            operation_pool_metadata(operation)
-                .expect("supported execute operation has canonical pool metadata")
-                .provider_projection(),
-        )
-        .expect("capability pool projection serializes"),
+        operation_pool_metadata(operation)
+            .expect("supported execute operation has canonical pool metadata")
+            .provider_projection(),
     );
     let model_facing_invocation = json!({
         "tool": "capability::execute",
@@ -1832,11 +1829,7 @@ fn operation_is_read_only_inspection_safe(operation: &str) -> bool {
 
 fn annotate_catalog_function_pool(object: &mut serde_json::Map<String, Value>, catalog_id: &str) {
     if let Some(metadata) = catalog_function_pool_metadata(catalog_id) {
-        object.insert(
-            "capabilityPool".to_owned(),
-            serde_json::to_value(metadata.provider_projection())
-                .expect("capability pool projection serializes"),
-        );
+        object.insert("capabilityPool".to_owned(), metadata.provider_projection());
     }
 }
 

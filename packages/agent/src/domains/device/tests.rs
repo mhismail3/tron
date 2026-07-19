@@ -42,6 +42,12 @@ async fn register_records_hash_only_token_and_redacted_projection() {
     assert_eq!(payload["apns"]["liveApnsEnabled"], json!(false));
     assert_ne!(payload["apns"]["tokenHash"], json!(APNS_TOKEN));
     assert!(payload["apns"].get("tokenPreview").is_none());
+    assert!(
+        payload["notificationPolicy"]["eventFamilies"]
+            .as_array()
+            .expect("event families")
+            .contains(&json!("agent_attention"))
+    );
     assert_no_token_fragments("stored device resource", &inspection, APNS_TOKEN);
     let token_hash = payload["apns"]["tokenHash"].as_str().unwrap().to_owned();
 
@@ -94,7 +100,12 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
     let missing_environment = fixture
         .register_error(
             "missing-environment",
-            json!({"deviceId": "ios-device", "apnsToken": APNS_TOKEN}),
+            json!({
+                "deviceId": "ios-device",
+                "platform": "ios",
+                "apnsToken": APNS_TOKEN,
+                "bundleId": "com.example.tron.beta"
+            }),
         )
         .await;
     assert!(
@@ -107,8 +118,10 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
             "invalid-environment",
             json!({
                 "deviceId": "ios-device",
+                "platform": "ios",
                 "apnsEnvironment": "sandbox",
-                "apnsToken": APNS_TOKEN
+                "apnsToken": APNS_TOKEN,
+                "bundleId": "com.example.tron.beta"
             }),
         )
         .await;
@@ -122,8 +135,10 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
             "push-without-opt-in",
             json!({
                 "deviceId": "ios-device",
+                "platform": "ios",
                 "apnsEnvironment": "development",
                 "apnsToken": APNS_TOKEN,
+                "bundleId": "com.example.tron.beta",
                 "pushEnabled": true
             }),
         )
@@ -131,6 +146,65 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
     assert!(
         push_without_opt_in.contains("pushOptIn"),
         "{push_without_opt_in}"
+    );
+}
+
+#[tokio::test]
+async fn side_by_side_apps_have_distinct_registration_resources() {
+    let fixture = Fixture::new("side-by-side-apps").await;
+    let beta = fixture.register("beta-register", register_payload()).await;
+    let mut production_payload = register_payload();
+    production_payload["bundleId"] = json!("com.example.tron");
+    let production = fixture
+        .register("production-register", production_payload)
+        .await;
+
+    assert_ne!(
+        beta["deviceRegistrationResourceId"], production["deviceRegistrationResourceId"],
+        "bundle-scoped APNs tokens must not overwrite one another"
+    );
+    let listed = fixture
+        .list("side-by-side-list", json!({"limit": 10}))
+        .await;
+    assert_eq!(listed["devices"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn matching_token_route_supersedes_older_registration() {
+    let fixture = Fixture::new("supersede-token-route").await;
+    let original = fixture
+        .register("original-register", register_payload())
+        .await;
+    let original_resource_id = original["deviceRegistrationResourceId"].as_str().unwrap();
+    let mut replacement_payload = register_payload();
+    replacement_payload["deviceId"] = json!("replacement-installation");
+    let replacement = fixture
+        .register("replacement-register", replacement_payload)
+        .await;
+
+    assert_ne!(
+        original["deviceRegistrationResourceId"],
+        replacement["deviceRegistrationResourceId"]
+    );
+    let active = fixture
+        .list("supersede-active-list", json!({"limit": 10}))
+        .await;
+    assert_eq!(active["devices"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        active["devices"][0]["deviceRegistrationResourceId"],
+        replacement["deviceRegistrationResourceId"]
+    );
+    let original_inspection = fixture
+        .deps
+        .engine_host
+        .inspect_resource(original_resource_id)
+        .await
+        .expect("inspect original")
+        .expect("original registration");
+    assert_eq!(original_inspection.resource.lifecycle, "unregistered");
+    assert_eq!(
+        current_payload(&original_inspection)["unregistered"]["reason"],
+        json!("superseded_by_current_registration")
     );
 }
 
@@ -236,46 +310,45 @@ async fn device_registration_rejects_broad_or_untrusted_authority() {
     let agent_error = fixture
         .register_error_with_actor("agent-denied", ActorKind::Agent, register_payload())
         .await;
-    assert!(agent_error.contains("system/admin"), "{agent_error}");
+    assert!(
+        agent_error.contains("engine-client authority"),
+        "{agent_error}"
+    );
 
-    let wildcard_grant = fixture
-        .derive_grant(
-            "wildcard",
-            &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
-            &["*"],
-            &["kind:device_registration"],
-            "none",
-        )
-        .await;
-    let wildcard_invocation = fixture.write_invocation_with_grant(
-        "wildcard-denied",
+    let mut wrong_function = fixture.write_invocation(
+        "wrong-function-denied",
         register_payload(),
         ActorKind::System,
-        wildcard_grant,
-        &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
-        &fixture.session_id,
     );
-    let wildcard = register_device_value_at(
+    wrong_function.function_id = FunctionId::new("capability::execute").unwrap();
+    let wrong_function = register_device_value_at(
         &fixture.deps,
-        &wildcard_invocation,
-        &wildcard_invocation.payload,
+        &wrong_function,
+        &wrong_function.payload,
         default_operation_at(),
     )
     .await
-    .expect_err("wildcard denied")
+    .expect_err("wrong function denied")
     .to_string();
-    assert!(wildcard.contains("wildcard"), "{wildcard}");
+    assert!(
+        wrong_function.contains("device::register"),
+        "{wrong_function}"
+    );
 }
 
 #[tokio::test]
-async fn device_reads_are_scoped_to_current_session() {
+async fn device_reads_use_global_redacted_registration_scope() {
     let fixture = Fixture::new("scope-a").await;
     let registered = fixture.register("scope-register", register_payload()).await;
     let resource_id = registered["deviceRegistrationResourceId"].as_str().unwrap();
     let other = fixture.clone_for_session("scope-b-session").await;
 
-    let error = other.inspect_error("scope-denied", resource_id).await;
-    assert!(error.contains("outside the current scope"), "{error}");
+    let inspected = other.inspect("scope-visible", resource_id).await;
+    assert_eq!(
+        inspected["device"]["payload"]["scope"]["kind"],
+        json!("system")
+    );
+    assert_eq!(inspected["apnsTokenReturned"], json!(false));
 }
 
 struct Fixture {
@@ -290,6 +363,7 @@ impl Fixture {
         let ctx = make_test_context();
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
@@ -401,11 +475,12 @@ impl Fixture {
         reason: &str,
         operation_at: DateTime<Utc>,
     ) -> Value {
-        let invocation = self.write_invocation(
+        let mut invocation = self.write_invocation(
             key,
             json!({"deviceRegistrationResourceId": resource_id, "reason": reason}),
             ActorKind::System,
         );
+        invocation.function_id = FunctionId::new("device::unregister").unwrap();
         unregister_device_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
             .await
             .expect("unregister")
@@ -424,15 +499,6 @@ impl Fixture {
         inspect_device_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("inspect device")
-    }
-
-    async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
-        let invocation =
-            self.read_invocation(key, json!({"deviceRegistrationResourceId": resource_id}));
-        inspect_device_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("inspect should fail")
-            .to_string()
     }
 
     async fn device_lifecycle_events(&self) -> Value {
@@ -478,7 +544,10 @@ impl Fixture {
         scopes: &[&str],
         session_id: &str,
     ) -> Invocation {
-        invocation(key, payload, grant_id, actor_kind, scopes, Some(session_id))
+        let mut invocation =
+            invocation(key, payload, grant_id, actor_kind, scopes, Some(session_id));
+        invocation.function_id = FunctionId::new("device::register").unwrap();
+        invocation
     }
 
     fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
@@ -576,7 +645,8 @@ fn register_payload() -> Value {
         "deviceId": "ios-device",
         "platform": "ios",
         "apnsEnvironment": "development",
-        "apnsToken": APNS_TOKEN
+        "apnsToken": APNS_TOKEN,
+        "bundleId": "com.example.tron.beta"
     })
 }
 

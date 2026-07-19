@@ -277,4 +277,96 @@ struct SessionRefreshServiceTests {
         await yieldAsync()
         #expect(counter.calls == 1)
     }
+
+    @Test("shutdown waits for accepted refresh and rejects late or pending work")
+    func shutdownDrainsAcceptedRefresh() async {
+        let gate = RefreshShutdownGate()
+        let completion = RefreshCompletionProbe()
+        let service = SessionRefreshService(
+            performRefresh: { await gate.perform() },
+            isConnected: { true },
+            clock: MockAsyncClock(mode: .instant),
+            foregroundDebounce: .milliseconds(1)
+        )
+
+        service.request(reason: .connectionEstablished)
+        await gate.waitUntilStarted()
+        let shutdown = Task { @MainActor in
+            await service.shutdown()
+            await completion.markComplete()
+        }
+        await Task.yield()
+        let completedBeforeRelease = await completion.value
+        #expect(completedBeforeRelease == false)
+
+        await gate.release()
+        await shutdown.value
+        service.request(reason: .settingsChanged)
+        service.deferUntilReconnect()
+        async let repeatedA: Void = service.shutdown()
+        async let repeatedB: Void = service.shutdown()
+        _ = await (repeatedA, repeatedB)
+
+        let completedAfterRelease = await completion.value
+        let acceptedCalls = await gate.callCount
+        #expect(completedAfterRelease)
+        #expect(acceptedCalls == 1)
+    }
+
+    @Test("shutdown cancels a pending debounce without respawning")
+    func shutdownCancelsPendingDebounce() async throws {
+        let clock = MockAsyncClock(mode: .manual)
+        let gate = RefreshShutdownGate()
+        let service = SessionRefreshService(
+            performRefresh: { await gate.perform() },
+            isConnected: { true },
+            clock: clock,
+            foregroundDebounce: .seconds(5)
+        )
+
+        service.request(reason: .foreground)
+        try await clock.waitUntilPendingCount()
+        #expect(clock.pendingCount == 1)
+
+        await service.shutdown()
+        #expect(clock.pendingCount == 0)
+
+        clock.advance(by: .seconds(5))
+
+        let acceptedCalls = await gate.callCount
+        #expect(acceptedCalls == 0)
+    }
+}
+
+private actor RefreshShutdownGate {
+    private(set) var callCount = 0
+    private var started = false
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func perform() async {
+        callCount += 1
+        started = true
+        startedWaiters.forEach { $0.resume() }
+        startedWaiters.removeAll()
+        await withCheckedContinuation { releaseContinuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { startedWaiters.append($0) }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor RefreshCompletionProbe {
+    private(set) var value = false
+
+    func markComplete() {
+        value = true
+    }
 }

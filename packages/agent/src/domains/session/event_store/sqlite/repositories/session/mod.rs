@@ -3,11 +3,12 @@
 //! Sessions are pointers into the event tree with denormalized counters
 //! (event count, token usage, cost) for efficient queries.
 //!
-//! Session-list projections live in `session/projections.rs`; this root stays
-//! on session lifecycle, listing, counters, and head/root mutation. Paginated
-//! listings traverse immutable creation keys under a server-issued snapshot
-//! boundary; activity remains mutable presentation data and cannot move rows
-//! between pages.
+//! Crate-private session-list projections, including the only retained
+//! multi-session ID batch reads, live in `session/projections.rs`; this root
+//! stays on session lifecycle, listing, counters, and head/root mutation.
+//! Paginated listings traverse immutable creation keys under a server-issued
+//! snapshot boundary; activity remains mutable presentation data and cannot
+//! move rows between pages.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -19,9 +20,9 @@ mod projections;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use projections::MessagePreview;
 #[cfg(test)]
 use projections::extract_text_from_payload;
-pub use projections::{ActivitySummaryLine, MessagePreview};
 
 /// Options for creating a new session.
 pub struct CreateSessionOptions<'a> {
@@ -371,40 +372,6 @@ impl SessionRepo {
     pub fn delete(conn: &Connection, session_id: &str) -> Result<bool> {
         let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
         Ok(changed > 0)
-    }
-
-    /// Batch-fetch sessions by IDs.
-    ///
-    /// Returns a map of `session_id → SessionRow`. Missing IDs are silently omitted.
-    /// Uses dynamic `IN (?)` placeholders — safe for reasonable batch sizes (<1000).
-    pub fn get_by_ids(
-        conn: &Connection,
-        session_ids: &[&str],
-    ) -> Result<std::collections::HashMap<String, SessionRow>> {
-        let mut result = std::collections::HashMap::new();
-        if session_ids.is_empty() {
-            return Ok(result);
-        }
-
-        let placeholders: Vec<String> = (1..=session_ids.len()).map(|i| format!("?{i}")).collect();
-        let sql = format!(
-            "SELECT * FROM sessions WHERE id IN ({})",
-            placeholders.join(", ")
-        );
-
-        let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = session_ids
-            .iter()
-            .map(|s| s as &dyn rusqlite::types::ToSql)
-            .collect();
-        let rows = stmt
-            .query_map(params.as_slice(), Self::map_row)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        for row in rows {
-            let _ = result.insert(row.id.clone(), row);
-        }
-        Ok(result)
     }
 
     fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {

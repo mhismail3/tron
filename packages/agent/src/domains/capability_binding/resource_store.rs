@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, PublishStreamEvent, WorkerId,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -22,27 +22,26 @@ use super::{
     CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_BINDING_SCHEMA_ID, CAPABILITY_ROUTE_EVENT_KIND,
     CAPABILITY_ROUTE_EVENT_SCHEMA_ID, CAPABILITY_ROUTE_ROLLBACK_KIND,
     CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
-    CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID, Deps,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
 };
 
 pub(super) async fn inspect_resource_required(
-    deps: &Deps,
+    host: &EngineHostHandle,
     resource_id: &str,
     label: &str,
 ) -> Result<EngineResourceInspection, CapabilityError> {
-    deps.engine_host
-        .inspect_resource(resource_id)
+    host.inspect_resource(resource_id)
         .await
         .map_err(engine_error)?
         .ok_or_else(|| invalid(format!("missing {label} {resource_id}")))
 }
 
 pub(super) async fn capability_binding_request_summary_for_resource(
-    deps: &Deps,
+    host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "capability binding request")
+        inspect_resource_required(host, &resource.resource_id, "capability binding request")
             .await?;
     let (version, payload) =
         current_payload(&inspection, "capability_binding_request_record projection")?;
@@ -54,11 +53,11 @@ pub(super) async fn capability_binding_request_summary_for_resource(
 }
 
 pub(super) async fn capability_binding_decision_summary_for_resource(
-    deps: &Deps,
+    host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "capability binding decision")
+        inspect_resource_required(host, &resource.resource_id, "capability binding decision")
             .await?;
     let (version, payload) =
         current_payload(&inspection, "capability_binding_decision_record projection")?;
@@ -70,11 +69,11 @@ pub(super) async fn capability_binding_decision_summary_for_resource(
 }
 
 pub(super) async fn capability_binding_policy_summary_for_resource(
-    deps: &Deps,
+    host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "capability binding policy").await?;
+        inspect_resource_required(host, &resource.resource_id, "capability binding policy").await?;
     let (version, payload) =
         current_payload(&inspection, "capability_binding_policy_activate projection")?;
     Ok(capability_binding_policy_summary(
@@ -243,53 +242,52 @@ pub(super) fn current_payload<'a>(
 }
 
 pub(super) async fn publish_lifecycle_event(
-    deps: &Deps,
+    host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
-        .publish_stream_event(PublishStreamEvent {
-            topic: CAPABILITY_BINDING_LIFECYCLE_TOPIC.to_owned(),
-            payload: json!({
-                "event": event_type,
-                "resource": resource_ref(resource, "subject"),
-                "details": payload,
-                "capabilityBindingBoundary": {
-                    "metadataOnly": true,
-                    "runtimeRoutingChanged": payload
-                        .get("runtimeRoutingChanged")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                    "dispatchTableMutated": false,
-                    "hotSwapPerformed": false,
-                    "moduleActivated": false,
-                    "moduleExecuted": false,
-                    "dependencyRestorePerformed": false,
-                    "packageManagerUsed": false,
-                    "manifestMutated": false,
-                    "lockfileMutated": false,
-                    "networkPolicy": "none",
-                    "networkAccessPerformed": false,
-                    "physicalWorkspaceDirectoryCreated": false,
-                    "repoManagedSkillsTouched": false,
-                    "rawCommandsStored": false,
-                    "rawLogsStored": false,
-                    "fileContentsStored": false,
-                    "rawGrantIdsStored": false,
-                    "rawAuthorityIdsStored": false
-                }
-            }),
-            visibility: crate::engine::VisibilityScope::Session,
-            session_id: invocation.causal_context.session_id.clone(),
-            workspace_id: invocation.causal_context.workspace_id.clone(),
-            producer: WORKER.to_owned(),
-            trace_id: Some(invocation.causal_context.trace_id.clone()),
-            parent_invocation_id: Some(invocation.id.clone()),
-        })
-        .await
-        .map_err(engine_error)?;
+    host.publish_stream_event(PublishStreamEvent {
+        topic: CAPABILITY_BINDING_LIFECYCLE_TOPIC.to_owned(),
+        payload: json!({
+            "event": event_type,
+            "resource": resource_ref(resource, "subject"),
+            "details": payload,
+            "capabilityBindingBoundary": {
+                "metadataOnly": true,
+                "runtimeRoutingChanged": payload
+                    .get("runtimeRoutingChanged")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                "dispatchTableMutated": false,
+                "hotSwapPerformed": false,
+                "moduleActivated": false,
+                "moduleExecuted": false,
+                "dependencyRestorePerformed": false,
+                "packageManagerUsed": false,
+                "manifestMutated": false,
+                "lockfileMutated": false,
+                "networkPolicy": "none",
+                "networkAccessPerformed": false,
+                "physicalWorkspaceDirectoryCreated": false,
+                "repoManagedSkillsTouched": false,
+                "rawCommandsStored": false,
+                "rawLogsStored": false,
+                "fileContentsStored": false,
+                "rawGrantIdsStored": false,
+                "rawAuthorityIdsStored": false
+            }
+        }),
+        visibility: crate::engine::VisibilityScope::Session,
+        session_id: invocation.causal_context.session_id.clone(),
+        workspace_id: invocation.causal_context.workspace_id.clone(),
+        producer: WORKER.to_owned(),
+        trace_id: Some(invocation.causal_context.trace_id.clone()),
+        parent_invocation_id: Some(invocation.id.clone()),
+    })
+    .await
+    .map_err(engine_error)?;
     Ok(())
 }
 

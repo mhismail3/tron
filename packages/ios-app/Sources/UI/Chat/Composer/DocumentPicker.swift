@@ -5,12 +5,12 @@ import UniformTypeIdentifiers
 struct DocumentPicker: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
     let capability: AttachmentCapability
-    let onDocumentPicked: (URL, String, String?) -> Void  // URL, mimeType, fileName
+    let onDocumentPicked: (Data, String, String?) -> Void  // data, mimeType, fileName
     let onSizeExceeded: ((Int, Int) -> Void)?  // actualSize, maxSize
 
     init(
         capability: AttachmentCapability = .default,
-        onDocumentPicked: @escaping (URL, String, String?) -> Void,
+        onDocumentPicked: @escaping (Data, String, String?) -> Void,
         onSizeExceeded: ((Int, Int) -> Void)? = nil
     ) {
         self.capability = capability
@@ -63,10 +63,12 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
             defer { url.stopAccessingSecurityScopedResource() }
 
-            // Check file size before loading into memory
+            // Read while the security-scoped resource is active. Images use a
+            // generous source bound because they are compressed after pickup;
+            // documents must already fit the model policy.
             let mimeType = mimeTypeForURL(url)
             let isImage = mimeType.hasPrefix("image/")
-            let maxBytes = isImage ? parent.capability.maxImageBytes : parent.capability.maxDocumentBytes
+            let maxBytes = isImage ? ImageProcessor.maximumSourceBytes : parent.capability.maxDocumentBytes
             if maxBytes > 0, let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
                let fileSize = attrs[.size] as? Int, fileSize > maxBytes {
                 parent.onSizeExceeded?(fileSize, maxBytes)
@@ -75,7 +77,11 @@ struct DocumentPicker: UIViewControllerRepresentable {
             }
 
             let fileName = url.lastPathComponent
-            parent.onDocumentPicked(url, mimeType, fileName)
+            guard let data = try? Data(contentsOf: url) else {
+                parent.dismiss()
+                return
+            }
+            parent.onDocumentPicked(data, mimeType, fileName)
             parent.dismiss()
         }
 

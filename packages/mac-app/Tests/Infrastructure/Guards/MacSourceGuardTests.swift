@@ -29,11 +29,15 @@ struct MacSourceGuardTests {
             "Sources/Wizard/Components",
             "Sources/Wizard/Flow",
             "Sources/Wizard/Steps",
+            "Tests/App",
             "Tests/Infrastructure/Fakes",
             "Tests/Infrastructure/Guards",
+            "Tests/MenuBar",
             "Tests/Server/Health",
             "Tests/Server/LaunchAgent",
+            "Tests/Support",
             "Tests/Support/Foundation",
+            "Tests/Wizard",
         ]
         for root in requiredRoots {
             #expect(
@@ -47,6 +51,9 @@ struct MacSourceGuardTests {
             "Sources/Theme",
             "Sources/Views",
             "Sources/Server/Health/LaunchAgent",
+            "Sources/Support/Observability",
+            "Tests/Mocks",
+            "Tests/Observability",
             "Tests/Services",
         ]
         for root in bannedRoots {
@@ -56,18 +63,81 @@ struct MacSourceGuardTests {
             )
         }
 
+        for root in ["Sources/App", "Sources/Server", "Sources/MenuBar", "Sources/Wizard"] {
+            let directSwiftFiles = try FileManager.default.contentsOfDirectory(
+                at: macRoot.appendingPathComponent(root),
+                includingPropertiesForKeys: nil
+            )
+            .filter { $0.pathExtension == "swift" }
+            .map(\.lastPathComponent)
+            .sorted()
+            #expect(
+                directSwiftFiles.isEmpty,
+                "source owner roots must contain subdomains, not loose Swift files: \(root): \(directSwiftFiles)"
+            )
+        }
+
         let serverPing = try Self.read(macRoot, "Sources/Server/Health/ServerPing.swift")
         for forbidden in ["SMAppService", "LiveLaunchAgentManager", "launchctl", "enum Subprocess"] {
             #expect(!serverPing.contains(forbidden), "ServerPing.swift must not own \(forbidden)")
         }
 
         let liveManager = try Self.read(macRoot, "Sources/Server/LaunchAgent/LiveLaunchAgentManager.swift")
+        let processProbe = try Self.read(macRoot, "Sources/Server/ProcessControl/ServerProcessProbe.swift")
         #expect(liveManager.contains("SMAppService"))
         #expect(liveManager.contains("LaunchAgentManaging"))
+        #expect(liveManager.contains("ServerProcessProbe.processElapsedTime(pid: pid)"))
+        #expect(!liveManager.contains("\"etime=\""))
+        #expect(processProbe.contains("\"etime=\""))
+
+        let launchAgentContract = try Self.read(macRoot, "Sources/Server/LaunchAgent/LaunchAgentManaging.swift")
+        let installStep = try Self.read(macRoot, "Sources/Wizard/Steps/InstallStep.swift")
+        #expect(launchAgentContract.contains("enum LaunchAgentLoader"))
+        #expect(!installStep.contains("enum LaunchAgentLoader"))
 
         let subprocess = try Self.read(macRoot, "Sources/Support/Foundation/Subprocess.swift")
         #expect(subprocess.contains("enum Subprocess"))
         #expect(subprocess.contains("ProcessResult"))
+
+        let menuController = try Self.read(macRoot, "Sources/MenuBar/Controller/MenuBarController.swift")
+        let actionHandler = try Self.read(macRoot, "Sources/MenuBar/Actions/MenuBarActionHandler.swift")
+        #expect(menuController.contains("private let setup: EnvironmentSetup"))
+        #expect(menuController.components(separatedBy: ".environment(\\.environmentSetup, setup)").count - 1 == 2)
+        for method in ["showPairingInfoWindow", "showLogsWindow"] {
+            #expect(menuController.contains("func \(method)()"))
+            #expect(actionHandler.contains("menuBarController?.\(method)()"))
+            #expect(!menuController.contains("\(method)(setup:"))
+        }
+        #expect(!actionHandler.contains("private func showPairingInfo()"))
+        #expect(!actionHandler.contains("private func viewLogs()"))
+
+        let project = try Self.read(macRoot, "project.yml")
+        for owner in [
+            "Debug:\n          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.dev",
+            "Release:\n          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac",
+            "PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.tests",
+        ] {
+            #expect(project.contains(owner), "project.yml must own \(owner)")
+        }
+        for configuration in ["Debug", "Release"] {
+            let xcconfig = try Self.read(macRoot, "Configuration/\(configuration).xcconfig")
+            #expect(!xcconfig.contains("PRODUCT_BUNDLE_IDENTIFIER"))
+        }
+    }
+
+    @Test("theme owns adaptive tokens without global gradient aliases")
+    func themeOwnsAdaptiveTokensWithoutGlobalGradientAliases() throws {
+        let macRoot = try Self.macAppRoot()
+        let source = try Self.read(macRoot, "Sources/Support/Theme/TronColors.swift")
+
+        #expect(source.contains("init(lightHex: String, darkHex: String)"))
+        #expect(source.contains("convenience init(hex: String)"))
+        #expect(source.components(separatedBy: "init(hex: String)").count - 1 == 1)
+        for token in ["tronEmerald", "tronEmeraldDeep", "tronMint", "tronSuccess"] {
+            #expect(source.contains("static let \(token) = Color(lightHex:"))
+        }
+        #expect(!source.contains("tronEmeraldGradient"))
+        #expect(!source.contains("extension ShapeStyle where Self == Color"))
     }
 
     @Test("diagnostics redactor keeps iOS auth-field parity")
@@ -99,6 +169,17 @@ struct MacSourceGuardTests {
         }
     }
 
+    @Test("status poller keeps a latest-only bounded stream")
+    func statusPollerKeepsLatestOnlyBoundedStream() throws {
+        let macRoot = try Self.macAppRoot()
+        let source = try Self.read(macRoot, "Sources/Server/Health/ServerStatusPoller.swift")
+
+        #expect(source.contains("struct ServerStatusPoller: Sendable"))
+        #expect(source.contains("AsyncStream(bufferingPolicy: .bufferingNewest(1))"))
+        #expect(source.contains("continuation.onTermination"))
+        #expect(source.contains("task.cancel()"))
+    }
+
     @Test("helper-resource layout preserves tracked helper skeletons")
     func helperResourceLayoutPreservesTrackedHelperSkeletons() throws {
         let macRoot = try Self.macAppRoot()
@@ -110,9 +191,7 @@ struct MacSourceGuardTests {
             "Sources/Resources/Library/LaunchAgents/com.tron.server.plist",
             "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist",
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist",
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Info.plist",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns",
         ]
 
         for relativePath in trackedResources {
@@ -125,6 +204,16 @@ struct MacSourceGuardTests {
             let isIgnored = try Self.gitIgnores(repoRelativePath, repoRoot: repoRoot)
             #expect(isTracked)
             #expect(!isIgnored)
+        }
+
+        for (relativePath, identifier, displayName) in [
+            ("Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist", "com.tron.server", "Tron Server"),
+            ("Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Info.plist", "com.tron.server.dev", "Tron Server Dev"),
+        ] {
+            let info = try Self.read(macRoot, relativePath)
+            #expect(info.contains("<key>CFBundleIdentifier</key>\n    <string>\(identifier)</string>"))
+            #expect(info.contains("<key>CFBundleName</key>\n    <string>\(displayName)</string>"))
+            #expect(info.contains("<key>CFBundleDisplayName</key>\n    <string>\(displayName)</string>"))
         }
 
         let releaseLaunchAgent = try Self.read(
@@ -148,23 +237,40 @@ struct MacSourceGuardTests {
                 "<string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>"
             )
         )
+
+        let bundleScript = try Self.read(macRoot, "scripts/bundle-agent.sh")
+        #expect(bundleScript.contains("tracked_plists=("))
+        #expect(bundleScript.contains("tracked helper metadata is missing"))
+        for destination in ["HELPER_RESOURCES", "DEV_HELPER_RESOURCES"] {
+            #expect(
+                bundleScript.contains("cp \"$RESOURCES_DIR/AppIcon.icns\" \"$\(destination)/AppIcon.icns\"")
+            )
+        }
+        for plistVariable in [
+            "HELPER_INFO_PLIST",
+            "DEV_HELPER_INFO_PLIST",
+            "LAUNCH_AGENT_PLIST",
+            "DEV_LAUNCH_AGENT_PLIST",
+        ] {
+            #expect(!bundleScript.contains("cat > \"$\(plistVariable)\""))
+        }
     }
 
-    @Test("staged-binary policy keeps helper executables ignored")
-    func stagedBinaryPolicyKeepsHelperExecutablesIgnored() throws {
+    @Test("generated helper payload policy keeps outputs ignored")
+    func generatedHelperPayloadPolicyKeepsOutputsIgnored() throws {
         let macRoot = try Self.macAppRoot()
         let repoRoot = macRoot
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let ignoredBinaries = [
+        let ignoredPayloads = [
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron-program-worker",
+            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns",
+            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns",
         ]
         let gitignore = try Self.read(macRoot, ".gitignore")
 
-        for relativePath in ignoredBinaries {
+        for relativePath in ignoredPayloads {
             let repoRelativePath = "packages/mac-app/\(relativePath)"
             #expect(!gitignore.contains("!\(relativePath)"))
             #expect(gitignore.contains(relativePath))
@@ -175,8 +281,8 @@ struct MacSourceGuardTests {
         }
     }
 
-    @Test("bundle-agent --clean removes only ignored staged binaries")
-    func bundleAgentCleanRemovesOnlyIgnoredStagedBinaries() throws {
+    @Test("bundle-agent --clean removes only ignored staged payloads")
+    func bundleAgentCleanRemovesOnlyIgnoredStagedPayloads() throws {
         let macRoot = try Self.macAppRoot()
         let script = try Self.read(macRoot, "scripts/bundle-agent.sh")
         let cleanBlock = try #require(script.range(of: "if [ \"$do_clean\" -eq 1 ]; then"))
@@ -186,43 +292,13 @@ struct MacSourceGuardTests {
         #expect(script.contains("--clean"))
         #expect(block.contains("rm -f"))
         #expect(block.contains("$STAGING_PATH"))
-        #expect(block.contains("$WORKER_STAGING_PATH"))
         #expect(block.contains("$DEV_STAGING_PATH"))
-        #expect(block.contains("$DEV_WORKER_STAGING_PATH"))
+        #expect(block.contains("$HELPER_RESOURCES/AppIcon.icns"))
+        #expect(block.contains("$DEV_HELPER_RESOURCES/AppIcon.icns"))
         #expect(!block.contains("rm -rf"))
         #expect(!block.contains("HELPER_BUNDLE"))
         #expect(!block.contains("LAUNCH_AGENT_PLIST"))
-        #expect(script.contains("remove ignored staged helper binaries"))
-    }
-
-    @Test("Mac Swift near-budget files require scorecard rows at 590 LOC")
-    func macSwiftNearBudgetFilesRequireScorecardRowsAt590LOC() throws {
-        let macRoot = try Self.macAppRoot()
-        let repoRoot = macRoot
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let nearBudgetWarningLineCount = 590
-        let scorecard = try String(
-            contentsOf: repoRoot.appendingPathComponent(
-                "packages/agent/docs/post-aha-adversarial-closeout-scorecard.md"
-            ),
-            encoding: .utf8
-        )
-        let roots = [
-            macRoot.appendingPathComponent("Sources"),
-            macRoot.appendingPathComponent("Tests"),
-        ]
-        let nearBudgetFiles = try roots.flatMap(Self.swiftFiles)
-            .map { ($0, try Self.sourceLineCount($0)) }
-            .filter { _, lineCount in lineCount >= nearBudgetWarningLineCount }
-
-        for (url, lineCount) in nearBudgetFiles {
-            let repoRelative = "packages/mac-app/\(Self.relativePath(url, from: macRoot))"
-            #expect(
-                scorecard.contains("| `\(repoRelative)` | \(lineCount) |"),
-                "\(repoRelative) has \(lineCount) LOC and needs a concrete split-plan scorecard row"
-            )
-        }
+        #expect(script.contains("remove ignored staged helper payloads"))
     }
 
     private static func macAppRoot(filePath: String = #filePath) throws -> URL {
@@ -246,34 +322,6 @@ struct MacSourceGuardTests {
 
     private static func read(_ root: URL, _ relativePath: String) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
-    }
-
-    private static func swiftFiles(in root: URL) throws -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        return enumerator.compactMap { entry -> URL? in
-            guard let url = entry as? URL else { return nil }
-            guard url.pathExtension == "swift" else { return nil }
-            return url
-        }
-    }
-
-    private static func sourceLineCount(_ url: URL) throws -> Int {
-        let source = try String(contentsOf: url, encoding: .utf8)
-        return source.split(separator: "\n", omittingEmptySubsequences: false).count
-    }
-
-    private static func relativePath(_ url: URL, from root: URL) -> String {
-        let rootPath = root.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        if path.hasPrefix(rootPath + "/") {
-            return String(path.dropFirst(rootPath.count + 1))
-        }
-        return path
     }
 
     private static func gitTracks(_ relativePath: String, repoRoot: URL) throws -> Bool {

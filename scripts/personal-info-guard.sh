@@ -80,12 +80,31 @@ done
 
 mode="${1:-full}"
 offenders_total=0
+STAGED_PATHS=()
+
+if [ "$mode" = "--staged" ]; then
+    staged_list=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
+        echo "personal-info-guard: could not allocate staged-file list" >&2
+        exit 2
+    }
+    trap 'rm -f "$staged_list"' EXIT
+    if ! git diff --cached --name-only --diff-filter=ACMR -z > "$staged_list"; then
+        echo "personal-info-guard: failed to read the staged index" >&2
+        exit 2
+    fi
+    while IFS= read -r -d '' staged_file; do
+        STAGED_PATHS+=(":(literal)$staged_file")
+    done < "$staged_list"
+    rm -f "$staged_list"
+    trap - EXIT
+fi
 
 scan_pattern() {
     local entry="$1"
     local pattern="${entry%%|*}"
     local desc="${entry##*|}"
     local hits
+    local grep_status
 
     if [ "$mode" = "--staged" ]; then
         # Pre-commit gate: scan the *staged blobs*, not the working tree.
@@ -96,19 +115,33 @@ scan_pattern() {
         #
         # Restrict to files actually staged (added/modified/copied/renamed —
         # `--diff-filter=ACMR`) so we don't re-scan the entire index every
-        # commit. `xargs -0r` avoids invoking grep with zero args (which
-        # would scan everything) when the staged set is empty.
-        local staged_files
-        staged_files=$(git diff --cached --name-only --diff-filter=ACMR -z)
-        if [ -z "$staged_files" ]; then
+        # commit. The checked loader above retains NUL-delimited names as
+        # literal pathspecs and fails closed before any pattern scan.
+        if [ "${#STAGED_PATHS[@]}" -eq 0 ]; then
             return
         fi
-        hits=$(printf '%s' "$staged_files" \
-            | xargs -0r git grep --cached -nE "$pattern" -- "${EXCLUDE_ARGS[@]}" 2>/dev/null \
-            || true)
+        if hits=$(git grep --cached -nE -e "$pattern" -- \
+            "${STAGED_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>&1); then
+            grep_status=0
+        else
+            grep_status=$?
+        fi
     else
         # Full repo scan via git grep (respects .gitignore).
-        hits=$(git grep -nE "$pattern" -- "${SCAN_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>/dev/null || true)
+        if hits=$(git grep -nE -e "$pattern" -- \
+            "${SCAN_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>&1); then
+            grep_status=0
+        else
+            grep_status=$?
+        fi
+    fi
+
+    if [ "$grep_status" -eq 1 ]; then
+        hits=""
+    elif [ "$grep_status" -ne 0 ]; then
+        echo "personal-info-guard: git grep failed while checking $desc" >&2
+        echo "$hits" >&2
+        exit 2
     fi
 
     if [ -n "$hits" ]; then
@@ -134,7 +167,7 @@ if [ "$offenders_total" -gt 0 ]; then
     echo "❌ FAIL — $offenders_total personal-info offender(s) found."
     echo ""
     echo "User-specific values belong in MEMORY.md or ~/.tron/ runtime files,"
-    echo "not the source tree. See packages/agent/src/shared/foundation/paths.rs"
+    echo "not the source tree. See packages/agent/src/shared/foundation/paths/"
     echo "for the regression-guard pattern that catches Rust offenders at test time."
     exit 1
 fi

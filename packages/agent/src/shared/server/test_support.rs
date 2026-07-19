@@ -1,6 +1,6 @@
 //! Shared test fixtures for server capability tests.
 //!
-//! Mock providers, factory wrappers, and an in-memory `ServerRuntimeContext` builder
+//! Mock providers, responder factories, and an in-memory `ServerRuntimeContext` builder
 //! are used by engine and service tests via
 //! `crate::shared::server::test_support::*`. Keeping the helpers in
 //! their own file (instead of an inline `#[cfg(test)] mod` in `mod.rs`)
@@ -20,7 +20,7 @@ use crate::domains::model::responder::{
     ModelResponseRequest,
 };
 use crate::domains::session::event_store::EventStore;
-use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
+use crate::shared::server::context::ServerRuntimeContext;
 
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -95,6 +95,7 @@ impl ModelResponderFactory for MockModelResponderFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         Ok(Arc::new(MockModelResponder::new(model)))
     }
@@ -107,6 +108,7 @@ impl ModelResponderFactory for ModelAwareMockFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         Ok(Arc::new(MockModelResponder::new(model)))
     }
@@ -119,6 +121,7 @@ impl ModelResponderFactory for StrictMockFactory {
     async fn create_for_model(
         &self,
         model: &str,
+        _api_settings: &crate::domains::settings::ApiSettings,
     ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         if model.starts_with("mock") || model.starts_with("claude") {
             Ok(Arc::new(MockModelResponder::new(model)))
@@ -127,13 +130,6 @@ impl ModelResponderFactory for StrictMockFactory {
                 "No auth for model '{model}'"
             )))
         }
-    }
-}
-
-/// Build `AgentDeps` for testing with a mock provider factory.
-pub fn make_test_agent_deps() -> AgentDeps {
-    AgentDeps {
-        responder_factory: Arc::new(MockModelResponderFactory),
     }
 }
 
@@ -154,28 +150,16 @@ pub fn make_test_context() -> ServerRuntimeContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
-    let settings = crate::domains::settings::profile::load_settings_from_path(&settings_path)
-        .expect("test profile settings should load from isolated Tron home");
-    #[cfg(test)]
-    {
-        // `init_settings` writes the process-global snapshot. Serialize test
-        // fixture seeding with settings tests that assert stable global reads.
-        let _settings_guard = crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        crate::domains::settings::init_settings(settings);
-    }
-    #[cfg(not(test))]
-    crate::domains::settings::init_settings(settings);
     let ctx = ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         settings_path,
         profile_runtime,
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
@@ -193,21 +177,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn make_test_context_seeds_global_settings_from_isolated_profile() {
+    fn make_test_context_owns_isolated_profile_runtime() {
         let ctx = make_test_context();
         assert!(
             ctx.settings_path.starts_with(std::env::temp_dir()),
             "test settings path must be isolated from the live user profile"
         );
-
-        let settings = crate::domains::settings::get_settings();
+        assert!(ctx.profile_runtime.home().starts_with(std::env::temp_dir()));
         assert_eq!(
-            settings.name,
+            ctx.profile_runtime.current().settings.name,
             crate::domains::settings::TronSettings::default().name
         );
-        let _guard = crate::domains::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        crate::domains::settings::reset_settings();
     }
 }

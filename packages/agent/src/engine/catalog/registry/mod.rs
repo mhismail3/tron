@@ -58,8 +58,6 @@ pub struct LiveCatalog {
     functions: BTreeMap<FunctionId, FunctionEntry>,
     trigger_types: BTreeMap<TriggerTypeId, TriggerTypeEntry>,
     triggers: BTreeMap<TriggerId, TriggerEntry>,
-    changes: Vec<CatalogChange>,
-    invocations: Vec<InvocationRecord>,
     ledger: Box<dyn EngineLedgerStore>,
     grants: Arc<StdMutex<EngineGrantStoreBackend>>,
 }
@@ -67,21 +65,19 @@ pub struct LiveCatalog {
 impl LiveCatalog {
     /// Create an empty live catalog.
     #[must_use]
-    pub fn new() -> Self {
+    pub(in crate::engine) fn new() -> Self {
         Self::with_ledger_store(Box::new(InMemoryEngineLedgerStore::new()))
     }
 
     /// Create an empty live catalog using a caller-supplied ledger store.
     #[must_use]
-    pub fn with_ledger_store(ledger: Box<dyn EngineLedgerStore>) -> Self {
+    pub(in crate::engine) fn with_ledger_store(ledger: Box<dyn EngineLedgerStore>) -> Self {
         Self {
             revision: CatalogRevision(0),
             workers: BTreeMap::new(),
             functions: BTreeMap::new(),
             trigger_types: BTreeMap::new(),
             triggers: BTreeMap::new(),
-            changes: Vec::new(),
-            invocations: Vec::new(),
             ledger,
             grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
                 InMemoryEngineGrantStore::new(),
@@ -103,20 +99,15 @@ impl LiveCatalog {
         self.revision
     }
 
-    /// Catalog change log.
-    #[must_use]
-    pub fn changes(&self) -> &[CatalogChange] {
-        &self.changes
+    /// All durable invocation records in append order for deep engine tests.
+    #[cfg(test)]
+    pub(in crate::engine) fn ledger_invocations(&self) -> Result<Vec<InvocationRecord>> {
+        self.ledger.list_invocations()
     }
 
-    /// Invocation ledger.
-    #[must_use]
-    pub fn invocations(&self) -> &[InvocationRecord] {
-        &self.invocations
-    }
-
-    /// Durable catalog changes recorded by the engine ledger.
-    pub fn catalog_changes_after(
+    /// Durable catalog changes recorded by the engine ledger for crate unit tests.
+    #[cfg(test)]
+    pub(in crate::engine) fn catalog_changes_after(
         &self,
         revision: CatalogRevision,
         limit: usize,

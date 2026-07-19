@@ -6,21 +6,10 @@ import Foundation
 /// without needing AppKit.
 enum MenuItemDescriptor: Equatable {
     case header(MenuHeaderContent)
-    case action(title: String, isEnabled: Bool, handler: @MainActor () -> Void)
+    case action(title: String, isEnabled: Bool, action: MenuBarAction)
     case openLink(title: String, url: URL)
     case separator
     case quit(title: String)
-
-    static func == (lhs: MenuItemDescriptor, rhs: MenuItemDescriptor) -> Bool {
-        switch (lhs, rhs) {
-        case (.header(let l), .header(let r)): return l == r
-        case (.action(let l1, let l2, _), .action(let r1, let r2, _)): return l1 == r1 && l2 == r2
-        case (.openLink(let l1, let l2), .openLink(let r1, let r2)): return l1 == r1 && l2 == r2
-        case (.separator, .separator): return true
-        case (.quit(let l), .quit(let r)): return l == r
-        default: return false
-        }
-    }
 
     var title: String {
         switch self {
@@ -40,51 +29,40 @@ enum MenuBarItemBuilder {
     /// `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift` pin the ordering.
     static func build(
         snapshot: ServerStatusSnapshot,
-        paths: EnvironmentSetup
+        tronHome: URL,
+        defaultServerPort: Int,
+        canManageLaunchAgent: Bool
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
         let controlsEnabled = !snapshot.state.isBusy
-        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive && paths.canManageLaunchAgent
+        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive && canManageLaunchAgent
 
-        items.append(.header(headerContent(snapshot: snapshot, paths: paths)))
+        items.append(.header(headerContent(
+            snapshot: snapshot,
+            defaultServerPort: defaultServerPort
+        )))
         items.append(.separator)
 
-        items.append(.action(title: "Show pairing info", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarShowPairingInfo, object: nil)
-        }))
+        items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
 
-        items.append(.openLink(title: "Open Tron folder", url: paths.tronHome))
+        items.append(.openLink(title: "Open Tron folder", url: tronHome))
 
-        items.append(.action(title: "Show logs", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarViewLogs, object: nil)
-        }))
+        items.append(.action(title: "Show logs", isEnabled: true, action: .viewLogs))
 
-        items.append(.action(title: "Send feedback", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarSendFeedback, object: nil)
-        }))
+        items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
 
         items.append(.separator)
         if snapshot.state.isRunning {
-            items.append(.action(title: "Pause server", isEnabled: serviceControlsEnabled, handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarPauseServer, object: nil)
-            }))
+            items.append(.action(title: "Pause server", isEnabled: serviceControlsEnabled, action: .pauseServer))
         } else {
-            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarResumeServer, object: nil)
-            }))
+            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
         }
-        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarRestartServer, object: nil)
-        }))
+        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: .restartServer))
         if snapshot.isDevServerActive {
-            items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarStopDevServer, object: nil)
-            }))
+            items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, action: .stopDevServer))
         }
-        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
-        }))
+        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
         items.append(.quit(title: "Quit Tron"))
 
         return items
@@ -107,24 +85,17 @@ enum MenuBarItemBuilder {
         }
     }
 
-    static func headerContent(snapshot: ServerStatusSnapshot, paths: EnvironmentSetup) -> MenuHeaderContent {
-        let address = snapshot.tailscaleIP.map { "\($0):\(paths.serverPort)" } ?? "Tailscale unavailable"
-        let health: MenuHeaderContent.Health
-        switch snapshot.state {
-        case .running:
-            health = .healthy
-        case .checking, .busy, .unauthorized:
-            health = .attention
-        case .paused:
-            health = .paused
-        case .failed:
-            health = .stopped
-        }
+    static func headerContent(
+        snapshot: ServerStatusSnapshot,
+        defaultServerPort: Int
+    ) -> MenuHeaderContent {
+        let port = snapshot.state.runningPort ?? defaultServerPort
+        let address = snapshot.tailscaleIP.map { "\($0):\(port)" } ?? "Tailscale unavailable"
         return MenuHeaderContent(
             endpoint: address,
             hasEndpoint: snapshot.tailscaleIP != nil,
             status: statusLabel(snapshot: snapshot),
-            health: health,
+            tone: snapshot.state.tone,
             pid: snapshot.processID,
             uptime: snapshot.uptime,
             modeDetail: modeDetail(snapshot: snapshot)
@@ -139,18 +110,20 @@ enum MenuBarItemBuilder {
     }
 }
 
-struct MenuHeaderContent: Equatable, Sendable {
-    enum Health: Equatable, Sendable {
-        case healthy
-        case attention
-        case paused
-        case stopped
-    }
+/// State-owned visual classification shared by the menu icon and header.
+/// Each renderer maps the tone to its own context-appropriate color.
+enum MenuBarTone: Equatable, Sendable {
+    case running
+    case attention
+    case paused
+    case failed
+}
 
+struct MenuHeaderContent: Equatable, Sendable {
     var endpoint: String
     var hasEndpoint: Bool
     var status: String
-    var health: Health
+    var tone: MenuBarTone
     var pid: Int?
     var uptime: String?
     var modeDetail: String?
@@ -195,6 +168,11 @@ enum ServerStatusState: Equatable, Sendable {
         return false
     }
 
+    var runningPort: Int? {
+        if case .running(_, let port) = self { return port }
+        return nil
+    }
+
     var tooltip: String {
         switch self {
         case .checking:
@@ -228,55 +206,28 @@ enum ServerStatusState: Equatable, Sendable {
 }
 
 /// Snapshot consumed by `MenuBarItemBuilder` and produced by
-/// `ServerStatusPoller`.
+/// `ServerStatusPoller`. Probe credentials remain with the health and pairing
+/// owners and never enter this presentation value.
 struct ServerStatusSnapshot: Equatable {
     var state: ServerStatusState
-    var tone: MenuBarTone
-    var version: String?
-    var port: Int?
     var tailscaleIP: String?
-    var bearerToken: String?
     var processID: Int?
     var uptime: String?
     var isDevServerActive: Bool
 
     init(
         state: ServerStatusState,
-        version: String? = nil,
-        port: Int? = nil,
         tailscaleIP: String? = nil,
-        bearerToken: String? = nil,
         processID: Int? = nil,
         uptime: String? = nil,
         isDevServerActive: Bool = false
     ) {
         self.state = state
-        self.tone = state.tone
-        switch state {
-        case .running(let stateVersion, let statePort):
-            self.version = version ?? stateVersion
-            self.port = port ?? statePort
-        default:
-            self.version = version
-            self.port = port
-        }
         self.tailscaleIP = tailscaleIP
-        self.bearerToken = bearerToken
         self.processID = processID
         self.uptime = uptime
         self.isDevServerActive = isDevServerActive
     }
 
     static let checking = ServerStatusSnapshot(state: .checking)
-}
-
-extension Notification.Name {
-    static let tronMenuBarShowPairingInfo = Notification.Name("com.tron.mac.menu.pairingInfo")
-    static let tronMenuBarRestartServer = Notification.Name("com.tron.mac.menu.restart")
-    static let tronMenuBarPauseServer = Notification.Name("com.tron.mac.menu.pause")
-    static let tronMenuBarResumeServer = Notification.Name("com.tron.mac.menu.resume")
-    static let tronMenuBarStopDevServer = Notification.Name("com.tron.mac.menu.stopDevServer")
-    static let tronMenuBarViewLogs = Notification.Name("com.tron.mac.menu.viewLogs")
-    static let tronMenuBarSendFeedback = Notification.Name("com.tron.mac.menu.feedback")
-    static let tronMenuBarUninstall = Notification.Name("com.tron.mac.menu.uninstall")
 }

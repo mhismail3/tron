@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with Agent Briefing and Engine Cockpit surfaces; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
+Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The `worker_lifecycle` domain owns local launchable-package lifecycle while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with one server-truth Dashboard cockpit; fixed product panels are absent from supported baseline behavior. Features follow an iii-aligned Worker / Function / Trigger contract: capabilities enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
 
 This document is the detailed cross-cutting reference behind the concise root
 README. The Rust codebase remains self-documenting: `packages/agent/src/lib.rs`
@@ -79,553 +79,55 @@ this reference and its owning source documentation in the same commit.
 5. Domain output is serialized at the transport boundary
 6. Runtime events publish neutral `ServerEventPayload` records to engine streams, and `/engine` subscriptions deliver stream records
 
+The `/engine` socket owner sends server-driven Ping frames using the configured
+heartbeat interval and retires peers that return no activity before the
+configured timeout. Each upgraded socket owns one registry lease plus bounded
+writer/subscription tasks. A shutdown-owned upgrade bridge is registered before
+the upgrade response completes, so disconnect, timeout, panic unwind, task
+cancellation, and graceful shutdown cannot strand the health connection count
+or child tasks. Subscription ids and cursors are connection-local rather than
+durable rows; startup narrowly deactivates exact legacy UUIDv7 socket rows left
+by older builds without touching caller-owned stream subscriptions.
+
 ---
 
-## Living Architecture Docs
+## Architecture Ownership
 
-The durable architecture docs live beside the code they describe. The root
-README is the map; source files, `mod.rs` docs, `INVARIANT:` comments, and
-concern-owned tests are the durable truth. One-off phase plans, migration
-rubrics, and audit snapshots are not kept as source-of-truth docs because they
-drift after the code changes.
+Durable architecture documentation lives beside the code it describes. This
+reference owns cross-cutting product behavior; it is not an audit ledger.
+Current code, module docs, package docs, focused tests, and Git history are the
+authoritative implementation and decision record.
 
-Current living entry points:
+Use these owners:
 
-- `packages/agent/src/lib.rs`: Rust crate/module tree.
-- `packages/agent/src/engine/mod.rs`: engine fabric ownership.
-- `packages/agent/src/engine/durability/resources/mod.rs`: resource substrate ownership.
-- `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
-- `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
-  primitive and provider export.
-- `packages/agent/docs/capability-modularity-scorecard.md`: active scorecard
-  for classifying all current `capability::execute` operations as
-  kernel-locked, governance-locked, record-plane, adapter-replaceable,
-  module-owned, or deferred so future modular replacement work is measurable.
-- `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 188-row inventory for the capability modularity scorecard.
-- `packages/agent/docs/capability-modularity-evidence-manifest.md`:
-  companion evidence manifest for capability modularity baseline facts and
-  Kernel Boundary Lockdown and Capability Binding Policy validation commands.
-- `packages/agent/docs/engine-capability-pool-scorecard.md`: active
-  scorecard for the unified capability pool. It classifies both model-facing
-  `capability::execute` operations and engine catalog functions as
-  runtime-routable, producer-extensible, or kernel-evolution-only, with
-  agent-facing visibility guidance for normal session work versus diagnostics
-  and kernel evolution.
-- `packages/agent/docs/engine-capability-pool-inventory.tsv`:
-  machine-readable inventory covering every current `capability::execute`
-  operation and every startup-registered catalog function exactly once.
-- `packages/agent/docs/engine-capability-pool-evidence-manifest.md`:
-  companion evidence manifest for the capability-pool classifier, catalog
-  projection, and exact-coverage invariant tests.
-- `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
-  scorecard for governed candidate, route, activation, event, rollback, and
-  supervised module-runtime replacement-route milestones.
-- `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
-  clean-break primitive engine teardown scorecard for stripping hard-coded
-  capabilities, policies, skills, rules, helper launch products, and fixed iOS product
-  surfaces down to the smallest provider loop, single `execute` primitive,
-  agent-owned state workspace, event/ledger truth, and dynamic client shell.
-- `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md`:
-  companion evidence manifest for the completed primitive engine teardown
-  scorecard.
-- `packages/agent/docs/primitive-engine-teardown-inventory.md`: PET-1
-  source-audited deletion map for every current Rust domain, engine primitive
-  worker, runner context plane, managed skill, doc, iOS source/view root, and
-  settings surface.
-- `packages/agent/docs/determinism-replayability-scorecard.md`: completed
-  Determinism Replayability Campaign scorecard for proving offline audit and
-  reconstruction replay from durable session, provider, trace, ledger, stream,
-  queue, and hash records.
-- `packages/agent/docs/determinism-replayability-evidence-manifest.md`:
-  companion evidence manifest for DRC row checkpoints, verification logs, and
-  residual replay risks.
-- `packages/agent/docs/determinism-replayability-inventory.md`: DRC replay
-  source, entropy, API, hash, and proof inventory.
-- `packages/agent/docs/determinism-replayability-inventory.tsv`:
-  machine-readable replay-critical source inventory used by DRC static gates.
-- `packages/agent/docs/primitive-code-cleanup-scorecard.md`: completed whole-repo
-  primitive cleanup scorecard for folder ownership, file budgets, generated
-  artifact hygiene, and final retained-surface proof.
-- `packages/agent/docs/primitive-code-cleanup-evidence-manifest.md`: companion
-  evidence manifest for the completed primitive cleanup scorecard.
-- `packages/agent/docs/primitive-code-cleanup-inventory.md`: PCC-1
-  whole-repo tracked-file inventory, classification summary, and canonical
-  cleanup target tree.
-- `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
-  machine-readable per-file cleanup classification used by static gates.
-- `packages/agent/docs/true-primitive-cleanup-scorecard.md`: completed
-  scorecard for the final strict primitive cleanup pass over oversized roots,
-  residue review, dead state, provider/model ownership, iOS shell flattening,
-  Mac/scripts helper scope, and closeout evidence.
-- `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`: companion
-  evidence manifest for the completed True Primitive Cleanup scorecard.
-- `packages/agent/docs/true-primitive-cleanup-retention-inventory.md`: completed
-  TPC retention inventory that classifies every tracked source/docs/script path
-  in scope as primitive, implementation, support, test, docs, or delete.
-- `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`:
-  machine-readable TPC retention inventory used by static gates.
-- `packages/agent/docs/true-modularity-boundary-scorecard.md`: completed
-  scorecard for proving Rust and iOS boundaries are black-boxed by ownership,
-  narrow APIs, and guarded dependency direction.
-- `packages/agent/docs/true-modularity-boundary-evidence-manifest.md`:
-  companion evidence manifest for the completed True Modularity Boundary campaign.
-- `packages/agent/docs/true-modularity-boundary-inventory.md`: completed TMB
-  boundary taxonomy, dependency-direction rules, and composition-root exception
-  list.
-- `packages/agent/docs/true-modularity-boundary-inventory.tsv`:
-  machine-readable Rust/Swift source ownership inventory used by TMB static
-  gates.
-- `packages/agent/docs/failure-semantics-scorecard.md`: completed Failure
-  Semantics Campaign scorecard for enforcing one canonical error envelope
-  across provider/model errors, runtime turn failures, capability results,
-  transport responses, durable events, replay, and iOS projections.
-- `packages/agent/docs/failure-semantics-evidence-manifest.md`: companion
-  evidence manifest for FSC row checkpoints, verification logs, and residual
-  failure-contract risks.
-- `packages/agent/docs/failure-semantics-inventory.md`: completed FSC inventory of
-  server, engine, provider, runtime, transport, durable replay, and iOS failure
-  surfaces.
-- `packages/agent/docs/failure-semantics-inventory.tsv`: machine-readable FSC
-  failure-surface inventory used by static gates.
-- `packages/agent/docs/state-ownership-lifecycle-scorecard.md`: completed State
-  Ownership And Lifecycle campaign scorecard proving every stateful server,
-  engine, iOS, script/CI, and docs-owned state claim has one owner, lifecycle
-  class, mutation boundary, hydration path, retirement path, and concurrency or
-  task guard.
-- `packages/agent/docs/state-ownership-lifecycle-evidence-manifest.md`:
-  companion evidence manifest for SOL row checkpoints, verification logs, and
-  residual lifecycle risks.
-- `packages/agent/docs/state-ownership-lifecycle-inventory.md`: completed SOL
-  state-surface lifecycle taxonomy and inventory notes.
-- `packages/agent/docs/state-ownership-lifecycle-inventory.tsv`:
-  machine-readable SOL state ownership inventory used by static gates.
-- `packages/agent/docs/concurrency-scheduling-discipline-scorecard.md`: completed
-  Concurrency Scheduling Discipline scorecard proving task ownership, bounded
-  queues/streams, timer fairness, blocking isolation, agent/session concurrency,
-  engine worker scheduling, iOS transport/update scheduling, and deterministic
-  scheduling tests.
-- `packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md`:
-  companion evidence manifest for CSD row checkpoints, verification logs, and
-  closed scheduling findings.
-- `packages/agent/docs/concurrency-scheduling-discipline-inventory.md`: completed
-  CSD taxonomy and scheduling-surface proof notes.
-- `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`:
-  machine-readable CSD scheduling inventory used by static gates.
-- `packages/agent/docs/security-authority-capability-boundaries-scorecard.md`:
-  completed Security Authority Capability Boundaries scorecard for public
-  transport auth, authority grants, capability execution, worker isolation,
-  secrets, redaction, and pairing lifecycle proof.
-- `packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md`:
-  companion evidence manifest for SACB row checkpoints, verification logs, and
-  security boundary findings.
-- `packages/agent/docs/security-authority-capability-boundaries-inventory.md`:
-  completed SACB boundary taxonomy and security-surface proof notes.
-- `packages/agent/docs/security-authority-capability-boundaries-inventory.tsv`:
-  machine-readable SACB security boundary inventory used by static gates.
-- `packages/agent/docs/observability-diagnostics-auditability-scorecard.md`:
-  completed Observability Diagnostics Auditability scorecard for proving
-  session events, provider audits, primitive trace records, engine ledger rows,
-  logs, diagnostics bundles, runtime decisions, and CLI/dev diagnostics remain
-  inspectable through stable IDs without leaking secrets.
-- `packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md`:
-  companion evidence manifest for ODA row checkpoints, verification logs, and
-  residual observability risks.
-- `packages/agent/docs/observability-diagnostics-auditability-inventory.md`:
-  completed ODA source inventory taxonomy and proof notes.
-- `packages/agent/docs/observability-diagnostics-auditability-inventory.tsv`:
-  machine-readable ODA source inventory used by static gates.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-scorecard.md`:
-  completed cleanup scorecard for removing the off-plan authorship work before
-  continuing the original primitive-engine hardening meta-slices.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-evidence-manifest.md`:
-  companion evidence manifest for cleanup row checkpoints, verification logs,
-  and residual risks.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.md`:
-  cleanup source inventory taxonomy and proof notes.
-- `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv`:
-  machine-readable cleanup inventory used by static gates.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md`:
-  completed Data Integrity Storage Evolution Migration Discipline scorecard for
-  SQLite storage ownership, schema drift rejection, generation/archive rules,
-  WAL/checkpoint behavior, runtime hygiene, and closeout proof.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md`:
-  companion evidence manifest for DSEMD command results and residual risks.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md`:
-  completed storage surface taxonomy and ownership notes.
-- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
-  machine-readable DSEMD storage inventory used by static gates.
-- `packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md`:
-  completed Public Protocol API Contract Discipline scorecard for `/engine`
-  public methods, wire schemas, context boundaries, response/error/event
-  payloads, DTO parity, iOS transport decoders/encoders, and closeout proof.
-- `packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md`:
-  companion evidence manifest for PPACD command results and corrected findings.
-- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.md`:
-  completed public protocol surface taxonomy and ownership notes.
-- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv`:
-  machine-readable PPACD public protocol inventory used by static gates.
-- `packages/agent/docs/provider-model-boundary-discipline-scorecard.md`:
-  completed Provider / Model Boundary Discipline scorecard for provider/model
-  request, stream, auth, retry, error, catalog, token, audit, and redaction
-  boundaries across OpenAI, Anthropic, Google, Kimi, MiniMax, and Ollama.
-- `packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md`:
-  companion evidence manifest for PMBD lineage, stale-branch quarantine,
-  verification commands, and residual risks.
-- `packages/agent/docs/provider-model-boundary-discipline-inventory.md`:
-  completed PMBD provider/model boundary taxonomy and proof notes.
-- `packages/agent/docs/provider-model-boundary-discipline-inventory.tsv`:
-  machine-readable PMBD provider/model boundary inventory used by static gates.
-- `packages/agent/docs/performance-resource-governance-scorecard.md`:
-  completed Performance / Resource Governance scorecard for queue,
-  concurrency, stream, payload, timeout, shutdown, retention, startup,
-  runtime/iOS boundary, docs, CI, and verification hardening.
-- `packages/agent/docs/performance-resource-governance-evidence-manifest.md`:
-  companion evidence manifest for PERF lineage, stale-branch quarantine,
-  resource-boundary proofs, verification commands, and residual risks.
-- `packages/agent/docs/performance-resource-governance-inventory.md`:
-  completed PERF resource-governance taxonomy and proof notes.
-- `packages/agent/docs/performance-resource-governance-inventory.tsv`:
-  machine-readable PERF resource-governance inventory used by static gates.
-- `packages/agent/docs/configuration-profile-environment-discipline-scorecard.md`:
-  completed Configuration / Profile / Environment Discipline scorecard for
-  settings schema/default parity, sparse overlays, profile recovery, env
-  ownership, iOS settings parity, docs, CI, and verification.
-- `packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md`:
-  companion evidence manifest for CPE lineage, stale-branch quarantine,
-  settings/profile/env proofs, verification commands, and residual risks.
-- `packages/agent/docs/configuration-profile-environment-discipline-inventory.md`:
-  completed CPE settings/profile/env taxonomy and proof notes.
-- `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
-  machine-readable CPE settings/profile/env inventory used by static gates.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md`:
-  completed Release / Install / Upgrade / Rollback Discipline scorecard for Mac
-  app install/update, LaunchAgent/SMAppService ownership, `tron dev`,
-  contributor deploy, rollback, setup/uninstall, generated projects, docs, CI,
-  and verification.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md`:
-  companion evidence manifest for RIURD lineage, stale-branch quarantine,
-  source findings, command results, and residual risks.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md`:
-  completed RIURD release/install lifecycle taxonomy and proof notes.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv`:
-  machine-readable RIURD release/install inventory used by static gates.
-- `packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`:
-  completed iOS Thin Client / Generic Runtime Shell scorecard for proving the
-  iOS app remains a thin `/engine` client with robust settings, pairing, logs,
-  chat, generic primitive/result display, server errors, simulator evidence,
-  generated-project discipline, docs, CI, and source guards.
-- `packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`:
-  companion evidence manifest for IOSTC lineage, stale-branch quarantine,
-  source findings, simulator commands, verification commands, and residual
-  risks.
-- `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`:
-  completed IOSTC iOS client surface taxonomy and ownership notes.
-- `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`:
-  machine-readable IOSTC inventory used by static gates.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md`:
-  completed Developer Experience / Repo Hygiene / Automation scorecard for
-  setup, dev server, local/GitHub CI parity, generated projects, docs upkeep,
-  ignored artifacts, version helpers, branch handoff, and closeout hygiene.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md`:
-  companion evidence manifest for DXRHA source findings, verification commands,
-  stale-branch quarantine, and residual workflow risks.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md`:
-  completed DXRHA contributor workflow taxonomy and ownership notes.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
-  machine-readable DXRHA workflow inventory used by static gates.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-scorecard.md`:
-  completed Documentation / Evidence / Scorecard Integrity scorecard for
-  active-doc truthfulness, command-evidence provenance, scorecard arithmetic,
-  inventory coverage, local/GitHub gate parity, branch handoff, and closeout
-  proof.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest.md`:
-  companion evidence manifest for DESI source findings, verification commands,
-  stale-branch quarantine, and residual documentation/evidence risks.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md`:
-  completed DESI documentation/evidence taxonomy and ownership notes.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv`:
-  machine-readable DESI artifact inventory used by static gates.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md`:
-  completed Self-Sufficient Agent Runtime Readiness scorecard for auditing
-  clean extension points for generated workers, learned rules/memory, tool
-  synthesis, and agent-authored state without implementing successor features.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md`:
-  companion evidence manifest for SSARR lineage, source audit, term
-  classification, verification commands, iOS no-touch rationale, and residual
-  readiness risks.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`:
-  completed SSARR readiness taxonomy and extension-point ownership notes.
-- `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv`:
-  machine-readable SSARR readiness inventory used by static gates.
-- `packages/agent/docs/primitive-minimality-closure-scorecard.md`: completed
-  Primitive Minimality Closure scorecard for the post-SSARR teardown pass over
-  dead provider helpers, stream residue, proof-layer parity, retained
-  suspicious surfaces, and final regression proof.
-- `packages/agent/docs/primitive-minimality-closure-evidence-manifest.md`:
-  companion evidence manifest for PMC baseline checks, removal batches, failed
-  attempts and fixes, retained-contract rationale, and final verification.
-- `packages/agent/docs/primitive-minimality-closure-inventory.md`: completed PMC
-  classification of removed runtime residue, retained provider/engine
-  contracts, historical evidence, and static gates.
-- `packages/agent/docs/primitive-minimality-closure-inventory.tsv`:
-  machine-readable PMC minimality inventory used by static gates.
-- `packages/agent/docs/baseline-pre-restoration-closure-scorecard.md`: completed
-  Baseline Pre-Restoration Closure scorecard for certifying the current
-  primitive baseline, iii-style worker/function/trigger alignment, restoration
-  backlog, active-doc cleanup, absence guards, entry contract, and final
-  pre-restoration verification.
-- `packages/agent/docs/baseline-pre-restoration-closure-evidence-manifest.md`:
-  companion evidence manifest for BPRC lineage, restoration backlog proof,
-  active-doc cleanup, gate wiring, validation commands, and residual risks.
-- `packages/agent/docs/baseline-pre-restoration-closure-inventory.md`:
-  completed BPRC classification of baseline artifacts, foundational substrate,
-  restoration backlog rows, and the pre-restoration entry contract.
-- `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`:
-  machine-readable BPRC inventory and restoration backlog used by static gates.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-scorecard.md`:
-  completed Self-Updating Worker Runtime Foundation scorecard for local package
-  lifecycle ownership, manifest validation, authority-derived launches,
-  conformance proof, resource/event evidence, rollback semantics, and
-  no fixed iOS/product-panel restoration.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-evidence-manifest.md`:
-  companion evidence manifest for SUWRF source changes, focused tests, static
-  gates, final closeout commands, iOS no-touch rationale, and failed
-  attempt/fix records.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md`:
-  completed SUWRF classification of new artifacts, lifecycle source files,
-  typed worker resource kinds, preserved boundaries, and validation gates.
-- `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv`:
-  machine-readable SUWRF inventory used by static gates.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`:
-  completed iOS Self-Adapting Agent Cockpit Baseline scorecard for the
-  user-facing worker lifecycle catalog, package actions, runtime `ui_surface`
-  rendering, and neutral glass cockpit shell; Phase 2 Slice 1 extends that
-  shell with catalog discovery and report evidence.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`:
-  companion evidence manifest for focused Swift tests, simulator validation,
-  static gates, and closeout commands.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md`:
-  completed IOSAC retained/absent surface inventory.
-- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`:
-  machine-readable IOSAC inventory used by static gates.
-- `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`:
-  completed iOS Affordance Restoration Map scorecard for exhaustively
-  classifying removed old iOS affordances before any Phase 1 restoration
-  implementation.
-- `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`:
-  companion evidence manifest for IARM old-tree coverage, failed-attempt
-  policy, validation commands, and Phase 1 handoff.
-- `packages/agent/docs/ios-affordance-restoration-map-inventory.md`:
-  completed IARM taxonomy, first-principles review rubric, historical Phase 1
-  queue, and original Phase 2 agent-execution anchor.
-- `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`:
-  machine-readable IARM coverage map used by static gates.
-- `packages/agent/docs/ios-affordance-restoration-progress.md`:
-  active execution ledger for completed iOS affordance restoration slices,
-  accepted off-plan UI/runtime work, validation evidence, deferred behavior, and
-  the Phase 1 closeout state.
-- `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`:
-  completed planning scorecard for the Phase 2 agent-execution restoration
-  roadmap, primitive-vs-capability classifications, memory architecture, slice
-  ordering, validation gates, and handoff packet.
-- `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`:
-  companion evidence manifest for the Phase 2 planning scorecard.
-- `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`:
-  narrative inventory for Phase 2 feature families and current gaps.
-- `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`:
-  machine-readable Phase 2 feature-family inventory used by future slice
-  handoffs.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`:
-  completed scorecard for the Phase 3 modular self-adapting engine roadmap,
-  minimal-core boundary, first-principles implementation standard, module-plane
-  slices, feature-pack activation order, review/fix/re-review execution
-  protocol, and closeout status.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`:
-  companion evidence manifest for the completed Phase 3 scorecard and closeout
-  evidence.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`:
-  narrative inventory for completed Phase 3 module-plane foundations, feature
-  module packs, rejected old shapes, and deferred product decisions.
-- `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`:
-  machine-readable Phase 3 slice inventory used by completed handoffs and
-  closeout audits.
-- `packages/agent/docs/restoration-retrospective-audit-status.md`: active
-  retrospective audit tracker for the ordered completed-slice queue, audit
-  constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A, accepted Slice 6A through Slice 6E source-control
-  foundations, accepted Slice 7A goal/question foundation, and accepted Slice
-  8A through Slice 8E web source/provenance, citation, extraction, retention,
-  and robots policy foundations.
-- `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
-  whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
-  scripts, docs, inventories, and static gates.
-- `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
-  companion evidence manifest for the completed hierarchical rearchitecture
-  scorecard.
-- `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: completed
-  closeout campaign for adversarial audit findings after hierarchical
-  rearchitecture completion.
-- `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md`:
-  companion evidence manifest for the post-HRA adversarial hardening campaign.
-- `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md`:
-  redacted in-repo digest of the operator post-HRA adversarial hardening plan.
-- `packages/agent/docs/post-aha-adversarial-closeout-scorecard.md`: completed
-  closeout campaign for adversarial audit findings after AHA completion.
-- `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md`:
-  companion evidence manifest for the post-AHA adversarial closeout campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-inventory.md`: HRA
-  live-tree inventory summary and target architecture notes.
-- `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`: in-repo
-  summary of the operator HRA handoff plan and provenance boundary.
-- `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`:
-  machine-readable tracked-file inventory for the hierarchical rearchitecture
-  campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv`:
-  machine-readable current ownership map for the hierarchical rearchitecture
-  campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv`:
-  HRA-8 source/test Swift current ownership map for the iOS hierarchy phases.
-- `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md`:
-  HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership map.
-- `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
-  absence, traceability, schema, registration, and documentation gates for the
-  primitive branch.
-- `packages/agent/tests/determinism_replayability_invariants.rs`: completed DRC
-  gates for scorecard state, replay source inventory, entropy scan coverage,
-  provider request audit wiring, replay manifest hashing, stable ordering,
-  cross-record replay references, offline roundtrip proof, docs parity, and
-  closeout.
-- `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
-  scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
-  gates.
-- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: completed
-  hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
-  large-file-budget gates.
-- `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: completed
-  post-HRA adversarial hardening gates for source identity, deleted-doc
-  residue, CI parity, Rust ownership, iOS transport, inventory, and provenance.
-- `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
-  post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
-  ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
-- `packages/agent/tests/true_primitive_cleanup_invariants.rs`: completed TPC
-  scorecard, evidence, initial red-finding, and tracked-source setup gates.
-- `packages/agent/tests/true_modularity_boundary_invariants.rs`: completed TMB
-  scorecard, boundary inventory, responder, facade, domain, storage, transport,
-  iOS engine-access, boundary-error, and final closeout gates.
-- `packages/agent/tests/failure_semantics_invariants.rs`: completed FSC scorecard,
-  inventory, failure-surface, canonical-envelope, event-emission, transport,
-  provider, iOS parity, replay, and closeout gates.
-- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: completed SOL
-  scorecard, inventory, stateful-marker coverage, runtime task lifecycle,
-  iOS local-state classification, owner-private settings/auth writes, and final
-  closeout gates, with focused modules under
-  `packages/agent/tests/state_ownership_lifecycle/`.
-- `packages/agent/tests/observability_diagnostics_auditability_invariants.rs`:
-  completed ODA scorecard, evidence, inventory, source guard, logs filter,
-  diagnostics bundle, provider audit, runtime decision, CLI/dev UX, and final
-  closeout gates, with focused modules under
-  `packages/agent/tests/observability_diagnostics_auditability/`.
-- `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
-  completed CSD scorecard, inventory, scheduling-marker coverage, spawn/task
-  ownership, bounded channel/stream, Swift banned-pattern, stored-task
-  cancellation, timer/deadline, blocking-isolation, and closeout gates, with
-  focused modules under `packages/agent/tests/concurrency_scheduling_discipline/`.
-- `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`:
-  completed SACB scorecard, inventory, CI wiring, and security boundary gates, with
-  focused modules under
-  `packages/agent/tests/security_authority_capability_boundaries/`.
-- `packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs`:
-  cleanup scorecard, evidence, inventory, provider execute narrowing,
-  memory/rule removal, static target, README, and predecessor-inventory gates.
-- `packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`:
-  completed Data Integrity Storage Evolution Migration Discipline gates for
-  scorecard/evidence, inventory coverage, README/CI wiring, storage source
-  contracts, negative corruption guards, and final closeout claims.
-- `packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs`:
-  completed Public Protocol API Contract Discipline gates for scorecard/evidence,
-  inventory coverage, README/CI wiring, public `/engine` method/schema shape,
-  iOS context/decoder narrowness, predecessor inventory rows, and final closeout
-  claims.
-- `packages/agent/tests/provider_model_boundary_discipline_invariants.rs`:
-  completed Provider / Model Boundary Discipline gates for scorecard/evidence,
-  inventory coverage, README/CI wiring, provider-native import confinement,
-  provider wire marker confinement, provider audit redaction/bounding, retry and
-  failure redaction, provider family test anchors, and predecessor inventory rows.
-- `packages/agent/tests/performance_resource_governance_invariants.rs`:
-  completed Performance / Resource Governance gates for scorecard/evidence,
-  resource inventory coverage, README/CI wiring, queue burst and payload
-  rejection, stream/frame/accumulator/WebSocket bounds, cancellation, shutdown,
-  retention, startup, runtime/iOS boundary, and predecessor inventory rows.
-- `packages/agent/tests/configuration_profile_environment_discipline_invariants.rs`:
-  completed CPE gates for scorecard/evidence, inventory coverage, default drift,
-  strict schema, sparse overlay, env ownership, iOS settings parity, Mac sparse
-  seed, README/CI wiring, and predecessor inventory rows.
-- `packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs`:
-  completed RIURD gates for scorecard/evidence, inventory coverage, port/process
-  ownership, hidden deploy absence, setup/install/uninstall preservation,
-  fail-closed deploy/rollback, generated project policy, README/CI wiring, and
-  predecessor inventory rows.
-- `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`:
-  completed IOSTC gates for scorecard/evidence, inventory coverage, README/CI
-  wiring, deleted iOS product panels, successor/server-ownership residue,
-  settings parity references, generated project policy, focused simulator
-  evidence, and predecessor inventory rows.
-- `packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs`:
-  completed DXRHA gates for scorecard/evidence, inventory coverage, local and
-  GitHub static-gate parity, generated/ignored artifact policy, setup/dev
-  runtime-state docs, version/release helper checks, branch handoff, and
-  predecessor inventory rows.
-- `packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs`:
-  completed DESI gates for active scorecard/evidence/inventory integrity,
-  present-tense docs, command provenance, predecessor inventory coverage,
-  local/GitHub closeout target parity, stale branch quarantine, and final
-  closeout proof.
-- `packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs`:
-  completed SSARR gates for readiness scorecard/evidence/inventory integrity,
-  successor-term classification, negative generated-worker/learned-memory/tool
-  synthesis guards, local/GitHub target parity, README wiring, stale branch
-  quarantine, and final closeout proof.
-- `packages/agent/tests/primitive_minimality_closure_invariants.rs`:
-  completed PMC gates for minimality scorecard/evidence/inventory integrity,
-  deleted provider helper absence, retained-contract classification,
-  local/GitHub target parity, README wiring, predecessor inventory rows, and
-  no public protocol/iOS behavior expansion.
-- `packages/agent/tests/baseline_pre_restoration_closure_invariants.rs`:
-  completed BPRC gates for pre-restoration scorecard/evidence/inventory
-  integrity, iii-style worker/function/trigger alignment, restoration backlog
-  coverage, active-doc current-baseline wording, old product-surface absence,
-  provider-visible execute minimality, and local/GitHub target parity.
-- `packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs`:
-  completed SUWRF gates for scorecard/evidence/inventory integrity, package
-  lifecycle separation from `/engine/workers`, worker resource-kind coverage,
-  provider-visible execute minimality, local/GitHub target parity, and no fixed
-  product-panel restoration.
-- `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`:
-  completed IOSAC gates for cockpit scorecard/evidence/inventory integrity,
-  worker lifecycle client function ids, dynamic `ui_surface` rendering,
-  protocol/repository boundaries, neutral glass theme tokens, focused Swift
-  test coverage, README/iOS docs, and local/GitHub static-gate parity. Phase 2
-  catalog discovery coverage is recorded in the P2AER inventory/evidence.
-- `packages/agent/tests/ios_affordance_restoration_map_invariants.rs`:
-  completed IARM gates for old iOS tree coverage, affordance classification
-  vocabulary, Phase 1 review queue, Phase 2 deferral anchor, README/iOS docs,
-  and local/GitHub static-gate parity.
-- `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
-- `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
-
-Historical scorecard artifacts are retained as evidence only; live architecture
-guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
-scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
-scorecard, the IOSAC cockpit baseline scorecard, the IARM restoration map
-scorecard, and the OPSAA cleanup scorecard.
+- Rust topology and dependency direction: `packages/agent/src/lib.rs` and the
+  nearest `mod.rs` and `INVARIANT:` comments.
+- Engine fabric, resources, and primitive execution:
+  `packages/agent/src/engine/` and
+  `packages/agent/src/domains/capability/`.
+- Public transport and event contracts:
+  `packages/agent/src/transport/engine/` and
+  `packages/agent/src/shared/protocol/events/`.
+- Settings, credentials, and database schema:
+  `packages/agent/src/domains/settings/profile/types/`,
+  `packages/agent/src/domains/auth/credentials/`, and
+  `packages/agent/src/domains/session/event_store/sqlite/migrations/`.
+- iOS architecture and validation: `packages/ios-app/docs/` and the
+  authoritative `packages/ios-app/project.yml`.
+- Mac composition and packaging: `packages/mac-app/docs/` and the
+  authoritative `packages/mac-app/project.yml`.
+- CLI, configuration, and release behavior: `scripts/tron --help`,
+  `scripts/tron.d/`, `scripts/tron-lib.d/`, `VERSION.env`,
+  `scripts/tron-version`, and `.github/workflows/`.
+- Cross-boundary guards: focused targets under `packages/agent/tests/`,
+  discovered dynamically by `scripts/tron ci test`. Tests validate the owners
+  above; they do not make campaign artifacts part of the live architecture.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
-generated UI resources; domain-owned hidden files or tables are acceptable only
-as explicitly documented low-level cache/substrate boundaries with static gates,
-and they are not policy, lineage, or product truth.
+generated UI resources. Owner-private files or tables are acceptable only as
+documented cache or substrate boundaries with source-owned static guards; they
+are not policy, lineage, or product truth.
 
 ---
 
@@ -640,22 +142,21 @@ tron/
 |   +-- mac-app/            SwiftUI Mac menu-bar wrapper (Tron.app) — install wizard + server lifecycle
 +-- scripts/
 |   +-- tron                CLI dispatcher for build, manual deploy, service management
-|   +-- tron.d/             Workspace CLI command-family modules
+|   +-- tron.d/             Workspace CLI command-family + bundle/signing modules
 |   +-- tron-version        Version print/check/sync helper used by CI + releases
 |   +-- tron-release-notes  Deterministic tagged-release changelog generator
 |   +-- tron-lib.sh         Shared bash configuration and module loader
-|   +-- tron-lib.d/         Runtime CLI service/log/auth/bundle modules
+|   +-- tron-lib.d/         Runtime CLI service/log/auth modules
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
 |   +-- benchmarks/         Performance benchmark runner and baselines
-|   +-- asc-jwt             Local App Store Connect JWT helper
+|   +-- asc-jwt             Release-workflow App Store Connect JWT helper
 |   +-- install-hooks.sh    Installs repo-managed commit hooks
 |   +-- personal-info-guard.sh
-|   +-- reset-db            Local database reset helper
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
-|   +-- dependabot.yml      Weekly Cargo + GitHub Actions updates, monthly Swift
+|   +-- dependabot.yml      Weekly Cargo + GitHub Actions dependency updates
 |   +-- pull_request_template.md
 ```
 
@@ -677,7 +178,7 @@ transport/
 └── runtime/      Runtime services, external-worker socket, stream projection, setup
 engine/
 ├── authority/    Grants, leases, and compensation audit records
-├── catalog/      Discovery, capability client, live registry, catalog changes
+├── catalog/      Discovery, live registry, catalog changes
 ├── durability/   Ledger, queue, resources, state, streams, and SQLite codecs
 ├── invocation/   Invocation model, host, handles, dispatch, idempotency flow
 ├── kernel/       IDs, errors, policy, schemas, and core catalog type contracts
@@ -699,7 +200,7 @@ main.rs           Thin binary entry point
 |--------|---------|-----------|
 | `app` | CLI, startup/bootstrap, health, metrics, onboarding, and shutdown | `Cli`, `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
-| `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
+| `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel; `EngineHostHandle` is the production composition boundary while the raw host and catalog remain engine-owned | `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and the post-baseline worker lifecycle owner | `DomainRegistrationContext`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor integrations | paired-device broker |
 | `shared` | Foundation vocabulary, protocol DTOs, server context/errors, observability, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
@@ -708,7 +209,12 @@ The domain package is intentionally vertical. A domain root is only docs,
 exports, and crate-private worker registration. Shared worker registration
 types live in `domains::registration::worker`; transport setup enters the
 crate-private startup aggregator in `domains::registration`, which iterates
-each domain's `worker_module(...)`.
+each domain's `worker_module(...)`. That aggregator constructs and validates
+the complete domain composition before installing manifest resources or
+mutating the live catalog. It returns a one-shot jobs/worker-lifecycle
+activation token; transport setup consumes the token only after transport
+trigger registration also succeeds, so failed setup cannot leave startup tasks
+or shutdown callbacks running.
 `contract.rs` owns canonical function ids, schemas, authority, risk, and stream
 topics; each domain then keeps executable bodies under behavior owners rather
 than a shared boilerplate shape. Examples: `domains/agent/prompt`,
@@ -751,7 +257,7 @@ text and raw body pointers. It does not implement semantic retrieval,
 embeddings, vector stores, generated summaries, episodic event retrieval,
 procedural rules, hidden prompt memory, automatic retention, or network-backed
 memory behavior.
-`domains/context_control` is the implementation-candidate owner for user and
+`domains/context_control` is the authoritative server owner for user and
 agent context-management visibility. It exposes `context_control_status` for
 read-only current-session context composition without recording a snapshot or
 action; model-facing calls pass only `operation` because the trusted runtime
@@ -781,16 +287,18 @@ policy snapshots provide the server-owned evidence packet used to verify that
 replaceable summarizers honored those refs. Policy refs are typed,
 kind-matched, non-wildcard provider-safe refs with required rationale, and
 policy snapshot/list projections fail closed if active records exceed the
-bounded projection instead of silently truncating custody evidence. The iOS Session Briefing sheet renders this substrate from the chat
-timeline/model pill and audited timeline pills as a Context Breakdown section,
+bounded projection instead of silently truncating custody evidence. The iOS
+Session Briefing sheet renders this substrate from the prompt composer's
+proportional context ring and audited timeline actions as a Context Breakdown section,
 alongside the same model picker used by new-session setup. Native Session Briefing
 uses first-party `context_control::ui_*` wrappers that validate the current
 session and record through the same server-owned context-control service instead
 of widening model-facing authority. It does not restore memory retain/edit,
 skill activation, source-control controls, or prompt-library controls. Broader
-pre-primitive UI families are tracked as review-gated
-candidate cards in
-`packages/agent/docs/context-control-primitive-ui-audit.md`.
+fixed pre-primitive UI families remain absent. Any future surface must establish
+a current module owner, server contract, and source-owned tests; the
+[iOS architecture](../../ios-app/docs/architecture.md) owns current mobile
+composition rather than a historical candidate ledger.
 `domains/filesystem` owns two separate surfaces: the iOS workspace-browser
 functions for home/list/create-dir selection and the Phase 2 agent filesystem
 toolbox. Agent operations resolve only from trusted working-directory metadata,
@@ -808,9 +316,12 @@ minting, conformance reports, and `worker_package` resource/event evidence.
 It is host lifecycle infrastructure, not a provider-visible toolbox, and it
 does not add fixed iOS product panels.
 `domains/module_registry` owns the Phase 3 Slice 23A inspect-only module
-manifest registry. It seeds first-party `module_manifest` resources in the
-generic resource store and exposes provider-safe `module_list` and
-`module_inspect` projections behind `capability::execute`. The registry
+manifest resource contract, stored-payload validation, and provider-safe
+projections. The sole domain composition root in
+`domains/registration/module_manifests/mod.rs` owns the ordered first-party
+seed set. Domain registration installs the type and reconciles the seeds
+through generic engine boundaries before registering any domain worker.
+`module_list` and `module_inspect` remain behind `capability::execute`. The registry
 revalidates stored kind/schema/system scope/payload shape and returns bounded
 identity, capability/resource declarations, authority needs, settings and
 dependency intents, validation, provenance, lifecycle, and redaction proof
@@ -839,13 +350,14 @@ device/notification operation authority needs, kind-selector-bounded generic
 resource authority needs, and validation gates for APNs
 credential custody, APNs environment labels, entitlement proof, physical-device
 validation, delivery-failure evidence, provider redaction, and native inbox
-product decisions. It does not enable APNs transport, native inbox UI,
-entitlements, public notification APIs, provider payload leakage, or network
-behavior.
+product decisions. The current platform adapter enables opt-in APNs relay
+delivery and iOS entitlements without changing that provider-visible manifest.
+Native inbox UI, public notification APIs, provider payload leakage, and hidden
+background behavior remain absent.
 Device registration and unregistration are not provider-visible operations and
-there is currently no production token-registration transport seam. Their
-hash-only custody and lifecycle behavior remain test fixtures for a future
-trusted native transport; the agent cannot submit APNs token material.
+the agent cannot submit APNs token material. The trusted iOS client registers
+through internal engine functions; raw tokens remain in private platform
+custody while durable resources and model projections retain redacted evidence.
 Accepted Phase 3 Slice 24H also seeds a pending-review
 `import_update_module` manifest for existing `import_history_record`,
 `repository_tree_snapshot`, `import_preview`, and `update_diagnostic_record`
@@ -1010,18 +522,11 @@ semantics in iOS, add fixed product panels, or expose raw payloads, paths,
 commands, logs, stdout/stderr, env values, secrets, code, file contents, raw
 grant ids, raw authority ids, trace/invocation ids, token-like material, or
 personal-info literals.
-`domains/agent_briefing` owns the implementation-candidate read-only Agent
-Briefing projection for the iOS dashboard and briefing sheet. It is deliberately
-thin: `agent_briefing::overview` delegates to the accepted, invocation-scoped
-`module_activity::overview` server truth, then reshapes those already-redacted
-facts into chief-of-staff sections: what Tron has been doing, how Tron adapted,
-active work, needs you, weak points/failures, memory and learned state, and
-audit trail. The projection exists server-side so the dashboard and full sheet
-share identical scope, redaction, empty-state, drill-down, and evidence
-semantics; it does not create resources, compact/clear context, schedule work,
-learn, activate modules, install packages, execute runtime code, add autonomy
-behavior, expose raw ids, paths, commands, logs, prompt bodies, secrets, or
-replace Engine Cockpit diagnostics.
+The Dashboard consumes this projection directly as the sole source of module
+activity truth. Its iOS presentation groups each explicit server status once
+into Needs review, Needs you, Active work, or Recent activity without a second
+request, wrapper projection, or parallel dashboard model. Unknown and completed
+states remain recent activity rather than being inferred from visual position.
 Accepted Phase 3 Slice 24I records fixed old iOS product panels as an
 accepted rejected-shape baseline: the iOS source guard explicitly rejects old
 approval/work panels and work dashboards alongside the existing source-control,
@@ -1086,7 +591,8 @@ Prerequisites:
 First-time setup:
 
 ```bash
-./scripts/tron setup       # Check prerequisites, build, create ~/.tron/
+./scripts/tron setup       # Check prerequisites, build, link the workspace CLI
+./scripts/tron dev -d      # Start the server and initialize runtime state
 ./scripts/tron login       # Authenticate with Claude (OAuth browser flow)
 ```
 
@@ -1158,17 +664,17 @@ See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for commit conventions, TDD expe
 
 ## CLI Reference
 
-The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. When adding or renaming a subcommand, update the dispatcher and the owning module together.
+The `scripts/tron` CLI manages workspace development and contributor service workflows. Its bottom-level dispatch and configuration own workspace-only commands and the contributor helper bundle identifier, while `scripts/tron-lib.sh::dispatch_runtime_command` and `show_runtime_command_help` are the single route and help owners for runtime commands shared with the installed `tron-cli`; command-family and contributor bundle/signing bodies live in `scripts/tron.d/`, and runtime service/log/auth helpers live in `scripts/tron-lib.d/`. Low-level `launchd_start` and `launchd_restart` are contributor-only; the shared `service_start` owner alone selects installed Release command mode or the contributor fallback. Manual deploy owns its installed-contributor prerequisite rather than exporting that workspace check through the installed shared library. Development setup takes the pair lock and links the workspace entrypoint only when no installed pair exists; rerunning it preserves an installed CLI. `scripts/tron.d/manual-deploy.sh::install_runtime_cli_payload` is the single installer for the contributor CLI, shared runtime helpers, signing resources, the Mac-owned helper icon, and workspace delegation path used by install and manual deploy. It rejects callers that do not own the contributor-pair writer lock. Before either command mutates an installed artifact, the shared service owner atomically publishes an immutable rollback plan: a reinstall/deploy plan contains the prior complete signed helper bundle, CLI payload and resources, optional `deployed-commit`, launchd plist, and CLI entrypoint; a clean install records `no-prior-pair` plus any pre-existing plist or entrypoint. Mutable workspace build output is never accepted as recovery proof. Install, deploy, rollback, uninstall, and setup entrypoint changes are exclusive writers, while installed login and `auth rotate` hold the same OS mutex as readers for their complete Rust-helper calls. A crashed writer leaves `deploy.in-progress` and its published rollback plan, so authentication remains closed until rollback or successful completion even though the OS releases the dead process's mutex automatically. The installed CLI clears inherited Rust-workspace input and uses only its paired helper. When adding or renaming a subcommand, update the shared or workspace dispatcher and the owning module together.
 
 ### Development (workspace only)
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
-| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step is the single owner of serial lib/bin tests, closeout invariant targets, primitive trace, database-path, and serial integration targets |
+| `tron dev` | Start the dev-profile server in the foreground. The command builds exactly once before stopping the installed helper: `-b` places that build before optional `-t` tests, while without `-b` tests run first; `-d` selects the launchd-backed background takeover. It then stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and delegates every exit, stop, or candidate preparation/launch failure restore to the same `service_start` owner as `tron start`. That owner uses `/Applications/Tron.app` and its SMAppService command mode when installed, retains the contributor LaunchAgent fallback otherwise, and reports restoration only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
+| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
-| `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
-| `tron setup` | First-time project setup |
+| `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`, `test`, and hosted-CI `github-output`). `VERSION.env` is the only hand-edited release identity source; validated `print` output owns contributor helper-bundle metadata, `sync` updates active platform project mirrors, and `check` is the sole read-only validator and rejects duplicate iOS Base.xcconfig version fields. |
+| `tron setup` | Check prerequisites, build, and link `~/.local/bin/tron` to the workspace entrypoint when no installed pair owns it; an installed CLI is preserved. Complete runtime/profile initialization remains owned by first server startup. |
 
 ### Manual Deployment (workspace only)
 
@@ -1176,8 +682,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check, and fail-closed rollback (`--force` skips confirms; `--ci` is non-interactive). `deployed-commit` and the restart sentinel advance only after `/health` passes. No automatic deploy watcher or shorter deploy alias is retained. |
-| `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
-| `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
+| `tron install` | Contributor-only helper/CLI pair install for workspace testing. It always rebuilds, publishes a clean-install or prior-pair rollback plan, and holds the writer lock through bundle, payload, plist, symlink, service start, and health validation; `deployed-commit` advances only after `/health` passes. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 
 ### Runtime
 
@@ -1186,12 +691,13 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron start` | Start `com.tron.server`. When `/Applications/Tron.app` is installed, this enters the wrapper's `--tron-start-server-and-quit` path so `SMAppService` owns production registration and success is reported only after `/health` passes; the older contributor `~/Library/LaunchAgents` path is used only when no installed Release wrapper is available. |
 | `tron stop` | Stop the service |
 | `tron restart` | Stop and start the service through the same health-gated path as `tron start`. |
+| `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
 | `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
-| `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm); success requires the restored helper to pass `/health` |
-| `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
-| `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
+| `tron rollback` | Restore the complete prior contributor installation state (`--yes` skips confirm), or remove an interrupted clean install. A restored prior helper must pass `/health` before its rollback plan is retired. |
+| `tron login` | Authenticate with a provider after the server has initialized auth storage (`--label <name>` for multi-account) |
+| `tron auth rotate` | Rotate the WebSocket bearer token from either the workspace or installed CLI (forces every paired iOS device to pair again) |
 | `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
-| `tron errors` | Show recent errors |
+| `tron errors` | Show the newest 20 error-or-higher rows through the canonical `tron logs --level error --limit 20` query |
 
 ### Build Profiles
 
@@ -1253,34 +759,24 @@ fuzzy operation matches, while valid prefixes still expand to supported
 operations. Inspecting an unsupported `execute::<operation>` id returns bounded
 recovery guidance rather than an opaque catalog failure.
 
-Capability modularity is tracked in
-`packages/agent/docs/capability-modularity-scorecard.md`, with the
-machine-readable inventory in
-`packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
-in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 188
-operation baseline, registry/dispatch parity, and the ownership classes used for
-future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
-`adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
-governed contract-compatible substitution with authority, evidence, visibility,
-and rollback constraints; it does not mean arbitrary hot swapping. Kernel and
-module-governance operations are intentionally non-replaceable in v1 because
-they are the substrate that validates future replacement. Kernel Boundary
-Lockdown evidence now source-checks authority/grants, event/session log,
-resource store, redaction/provider-safety, trace/audit/replay/catalog,
-transport boundary, and the module governance pipeline before those areas can
-move toward binding policy. The Capability Binding Policy follow-on adds
+Operation ownership and evolution metadata live in the exhaustive
+`OperationId` match in
+`packages/agent/src/domains/capability/operations/operation_contract/metadata.rs`.
+Runtime consumers use its `kernel_locked`, `governance_locked`, `record_plane`,
+`adapter_replaceable`, and `module_owned` classifications directly. Source-owned
+tests require every operation to have metadata, keep protected kernel,
+governance, record-plane, and module-owned boundaries locked, and require
+replaceable/module/record-plane targets to name their safety constraints.
+Replacement means governed contract-compatible substitution with
+authority, evidence, visibility, replay, and rollback constraints; it does not
+mean arbitrary hot swapping. Kernel and module-governance operations remain
+non-replaceable because they validate future replacement. Capability Binding adds
 metadata-only `capability_binding_request`, `capability_binding_decision`, and
 `capability_binding_policy` records for future shadow/extend/replace proposals;
 active binding policy records do not route execution, hot-swap modules, mutate
 dispatch, install or activate modules, restore dependencies, run package
 managers, inherit `agent_state`, access networks, or expose raw paths, secrets,
 commands, logs, grant IDs, authority IDs, or debug payloads.
-Adapter Seam Hardening now source-checks the replaceable filesystem, Git,
-jobs/process, web, subagent, and compaction strategy seams. Those rows name
-required authority, evidence, side-effect, provider-safety,
-replay/idempotency, and rollback/disable prerequisites before any future
-shadow or replacement trial can move past metadata-only policy records.
 The Shadow Replacement Trial adds metadata-only
 `capability_shadow_trial_request`, `capability_shadow_trial_decision`,
 `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` records
@@ -1310,7 +806,7 @@ envelope, lifecycle authorization, version refs, scope, network policy, or
 projection shape are unsafe, candidate recording or routing fails closed and does
 not substitute a built-in success projection for the unsafe route.
 Cockpit Visibility adds the system-visible pure-read
-`capability_binding::cockpit_overview` projection for Engine Cockpit clients.
+`capability_binding::cockpit_overview` projection for Dashboard clients.
 It joins registry ownership metadata with scoped binding-policy, shadow-trial,
 dynamic route records, and the Engine Capability Pool role classification so
 iOS can show one provider-visible operation count, total versus returned
@@ -1327,24 +823,22 @@ without exposing raw resource IDs, paths, commands, logs, grants, authority
 IDs, or token-like material, package-manager output, dependency artifacts, or
 candidate module payloads. `capability_binding` is the projection source for
 these facts, not the operation owner.
-The Minimal Kernel Self-Adaptation Hardening capstone in
-`packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md`
-ties these slices together without adding another runtime surface. Its
-invariant test proves that the irreducible kernel/governance substrate remains
-authority, transport, event log, resource custody, redaction,
-trace/replay/catalog, module governance, context policy, route resolution, and
-server-owned visibility; replaceable behavior must pass through exact evidence,
-provider-safety, route events, and rollback/disable contracts. This foundation
-proves the first scoped read-only `git_status` route and the contract future
-routes must satisfy. It does not claim broad autonomous self-update across every
-operation.
+Self-adaptation remains constrained by canonical operation metadata and the
+route, context-policy, and cockpit source owners. Authority, transport, event
+history, resource custody, redaction, trace/replay/catalog, module governance,
+context policy, route resolution, and server-owned visibility remain protected
+substrate. Replaceable behavior must pass through exact evidence,
+provider-safety, route events, and rollback/disable contracts. The current
+runtime proves one scoped read-only `git_status` route; it does not claim broad
+autonomous self-update across every operation.
 `catalog_inspect` also projects operation-specific contracts for provider-safe
 trace and web operations. `execute::trace_list` and `execute::trace_get` show the
 model the safe record shape and redaction guarantees before invocation.
-Canonical operations start a safe trace before their exact payload and trusted
-runtime-context gates, so structural or context rejection remains inspectable
-without storing the raw request; unknown operation names use the same redacted
-failed-trace contract. Whole
+Canonical operations verify trusted actor/session context and exact durable
+operation authority before any trace mutation, then start a trace before exact
+payload validation so structural rejection remains inspectable. Unknown
+operation names use the redacted failed-trace contract only when a trusted
+rejection grant carries that exact unsupported-operation claim. Whole
 session trace proof is point-in-time: agents call `trace_list` after the
 operations being audited or explicitly qualify that later operations are not
 covered. Final answers should explicitly say provider transcript tool-call ids
@@ -1383,9 +877,18 @@ validated operation per call.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
-scoped to the exact primitive function, no
-namespace authority, state read/write support, and `networkPolicy: none`; the
-worker rejects bootstrap grants, public caller contexts, and system-scoped
+scoped to the exact primitive function and operation, no namespace authority,
+a bounded wrapper-compatible risk covering the canonical operation risk, the
+static authority scopes for that operation, and
+the operation's base resource kinds/selectors and network policy. Before
+dispatch, the capability domain resolves the durable grant and revalidates all
+of those static facts, so a surviving read-only or rejection grant cannot be
+replayed as a mutating operation. Conditional selectors and resource kinds,
+file roots, and payload-specific authority remain enforced by their owning
+domain and the engine authorizer. The
+production bootstrap set excludes test fixture grants, and opening the durable
+authority store revokes any retired engine-bootstrap root and its descendants.
+The worker rejects bootstrap grants, public caller contexts, and system-scoped
 state. File and process operations additionally require trusted working
 directory metadata before resolving paths. Trace records use those trusted facts
 directly instead of inferring provider ownership from model id strings.
@@ -1433,12 +936,12 @@ Current primitive operations:
 | `state_get` | Read an agent-owned state value. |
 | `state_set` | Write an agent-owned state value. |
 | `state_list` | List agent-owned state entries for a scope/namespace. |
-| `filesystem_read` | Read a bounded text preview under the trusted working-directory root; binary content bodies are omitted. |
-| `filesystem_list` | List bounded directory entries under the trusted working-directory root. |
-| `filesystem_find` | Walk bounded entries matching a simple name/path pattern without following symlinks. |
-| `filesystem_glob` | Walk bounded entries matching a glob-style pattern without following symlinks. |
-| `filesystem_search_text` | Search bounded UTF-8 file previews under the trusted root while skipping binary content. |
-| `filesystem_diff` | Produce a bounded preview diff between current file content and proposed text. |
+| `filesystem_read` | Read a bounded text preview under the trusted working-directory root; binary content bodies are omitted. The provider projection carries relative path, size/binary facts, and line-aware bounded redacted text chunks with explicit source/provider truncation proof. Whole Authorization header values for every scheme, escape-aware quoted JSON and labeled credentials, complete private-key blocks, `file://` URIs, UNC/Windows paths, and local absolute/parent-relative paths remain outside provider context. A slash literal is retained only in explicit quoted route-call syntax such as `router.get("/api/users")`; unquoted, generic quoted, and ambiguous slash paths fail closed as local paths. `writeSafeFromProjection` is true and the full-content hash is exposed only when the complete unredacted text is present, preventing a partial/redacted view from becoming an unsafe full-file write precondition. |
+| `filesystem_list` | List bounded directory entries under the trusted working-directory root. The provider projection preserves nonempty entry rows with validated relative paths; `sourceTotalItems` / `sourceReturnedItems` / `sourceOmittedItems` truthfully describe source-level limiting, while the canonical provider collection separately owns post-projection and byte-budget `total` / `returned` / truncation counts. |
+| `filesystem_find` | Walk bounded entries matching a simple name/path pattern without following symlinks. Provider-visible match rows retain only bounded metadata and validated relative paths; source truncation is reported only after an extra matching entry or the walk bound is actually observed. |
+| `filesystem_glob` | Walk bounded entries matching a glob-style pattern without following symlinks. Provider-visible match rows retain only bounded metadata and validated relative paths; source truncation is reported only after an extra matching entry or the walk bound is actually observed. |
+| `filesystem_search_text` | Search bounded UTF-8 file previews under the trusted root while skipping binary content. Provider-visible matches include bounded redacted preview, relative path, line, and content-hash evidence. Each preview reports source/provider byte omission, exact result overflow is distinguished from an exact-limit complete search, and files searched through only a bounded prefix are counted as `truncatedInputFiles` and mark the search incomplete. Canonical provider collections own final returned/omitted row counts after byte-budget reduction. Raw credentials, `file://` URIs, and arbitrary local absolute/parent-relative paths are redacted. |
+| `filesystem_diff` | Produce a bounded preview diff between current file content and proposed text. The read-only provider projection exposes redacted diff chunks and before/after metadata with explicit truncation; write/edit/apply-patch results remain metadata/resource-only and never echo proposed file bodies or diffs. |
 | `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
 | `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
@@ -1481,7 +984,7 @@ Current primitive operations:
 | `web_research_source_record` | Accepted Slice 24F operation that records one bounded source/citation artifact metadata record linked by exact request or review selectors, with source/citation/robots/dependency/current-scope/evidence refs, idempotency fingerprint, and no raw page dumps, browser logs, cookies, credentials, commands, raw file contents, or network behavior. |
 | `web_research_source_list` | List scoped `web_research_source` artifact records as bounded provider-safe source/citation summaries after kind/schema/scope/current-version revalidation. |
 | `web_research_source_inspect` | Inspect one scoped `web_research_source` through exact `kind:web_research_source` plus `resource:<id>` selector authorization, returning bounded citation/source artifact metadata and refs only. |
-| `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
+| `tool_source_list` | List a bounded number of current-session inert `tool_source_proposal` records with source identity, state/summary, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
 | `subagent_launch` | Accepted Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
 | `subagent_status` | Inspect one scoped `subagent_task`, then inspect the delegated module runtime/job binding through `module_program_execution_status`, returning bounded/redacted task and delegated job refs without raw output payloads. |
@@ -1536,7 +1039,7 @@ Current primitive operations:
 | `capability_binding_policy_activate` | Capability Binding Policy operation that records one active scoped `capability_binding_policy` resource from an approved decision after exact decision selector authority and expected decision version freshness, carrying rollback/disable refs and active metadata policy evidence only; it does not route execution, mutate dispatch, hot-swap, install, activate, execute, restore dependencies, run package managers, or access networks. |
 | `capability_binding_policy_list` | Capability Binding Policy operation that lists scoped `capability_binding_policy` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with active policy metadata, request/decision linkage, `networkPolicy: none`, and no runtime side effects. |
 | `capability_binding_policy_inspect` | Capability Binding Policy operation that inspects one scoped `capability_binding_policy` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning approved metadata policy evidence, activation proof, rollback/disable refs, and audit history without raw paths, secrets, commands, logs, file contents, raw grant ids, raw authority ids, `agent_state`, or debug payloads. |
-| `capability_binding_cockpit_overview` | Provider-visible read-only operation that projects Engine Cockpit truth for current `capability::execute` operations: operation-pool role, replacement class, agent usage/preflight guidance, route/binding/shadow state, operation-list completeness, and redacted verification context. Broad system calls return the bounded cockpit overview used by the UI, while the model-context digest is a compact operation directory with summary/family coverage and exact `targetOperation` next steps instead of deep per-operation preflight payloads. Exact `targetOperation` calls return the compact durable target row for one operation, including role/effect, readiness, scoped shadow/route/binding counts, bounded exact shadow-evidence inspect payloads when such evidence exists, completion verdict, exact governed next steps, and required final-answer suffix. The discovery sequence already consumed before the targeted call stays in durable audit data instead of being repeated in provider context. This lets the agent verify replacement readiness without broad scans, unsupported list guesses, invoking adapters, mutating routing, invoking modules, running package managers, using network, flooding context with all operation paths, or exposing raw paths, commands, logs, grants, authority ids, trace ids, invocation ids, or token-like material. |
+| `capability_binding_cockpit_overview` | Provider-visible read-only operation that projects Dashboard truth for current `capability::execute` operations: friendly display name and concise behavior description, operation-pool role, replacement class, agent usage/preflight guidance, route/binding/shadow state, operation-list completeness, and redacted verification context. Broad system calls return the bounded cockpit overview used by the UI, while the model-context digest is a compact operation directory with summary/family coverage and exact `targetOperation` next steps instead of deep per-operation preflight payloads. Exact `targetOperation` calls return the compact durable target row for one operation, including role/effect, readiness, scoped shadow/route/binding counts, bounded exact shadow-evidence inspect payloads when such evidence exists, completion verdict, exact governed next steps, and required final-answer suffix. The discovery sequence already consumed before the targeted call stays in durable audit data instead of being repeated in provider context. This lets the agent verify replacement readiness without broad scans, unsupported list guesses, invoking adapters, mutating routing, invoking modules, running package managers, using network, flooding context with all operation paths, or exposing raw paths, commands, logs, grants, authority ids, trace ids, invocation ids, or token-like material. |
 | `capability_shadow_trial_request_record` | Shadow Replacement Trial operation that records one scoped `capability_shadow_trial_request` for the exact `git_status` target, with authoritative built-in owner/class metadata, deterministic metadata-only candidate adapter description, exact selector authority constraints, stale guards, rollback/disable/abort refs, idempotency, `networkPolicy: none`, and no routing or candidate execution. |
 | `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. The model-facing schema names the required top-level fields: `capabilityShadowTrialRequestResourceId`, `expectedCapabilityShadowTrialRequestVersionId`, `decision`, and `reason`. |
 | `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. The model-facing schema names the required top-level fields: `capabilityShadowTrialDecisionResourceId`, `expectedCapabilityShadowTrialDecisionVersionId`, `builtInProjection`, and `candidateProjection`; both projections are bounded provider-safe `git_status` comparison objects with concrete evidence refs. |
@@ -1552,7 +1055,7 @@ Current primitive operations:
 | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
 | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
 | `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded accepted-shadow-projection replay state, route results, fail-closed status, and rollback/disable history. |
-| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all current `capability::execute` operations, joining registry ownership classes, Engine Capability Pool role classifications, agent usage guidance, and current-session/workspace binding-policy, shadow-trial, and route facts so native clients can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
+| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Dashboard projection over all current `capability::execute` operations, joining canonical friendly names and concise descriptions, registry ownership classes, Engine Capability Pool role classifications, agent usage guidance, and current-session/workspace binding-policy, shadow-trial, and route facts so native clients can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -1562,7 +1065,6 @@ Current primitive operations:
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
 | `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked/degraded status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
-| `agent_briefing::overview` | Implementation-candidate system-visible pure-read function that returns a bounded Agent Briefing projection for dashboard and sheet clients by reshaping the accepted `module_activity::overview` facts into scoped narrative sections, empty states, and evidence labels; it is not provider-visible and has no write, autonomy, compact/clear, learn, schedule, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
 | `procedural_definition_record` | Accepted Slice 24E operation that records one scoped `procedural_record` for metadata-only skill/rule/hook/procedure definitions, including validation evidence, review state, trigger declarations, conflict/ordering metadata, scoped-authority proof, trace/replay refs, bounded refs, content hash, and idempotency fingerprint without storing raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, trigger registration, prompt injection, dependency restoration, or code execution. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
@@ -1662,7 +1164,16 @@ shutdown cancellation, and retention cleanup. Startup and lifecycle
 read/cleanup reconciliation scans scoped running jobs internally so older
 pre-startup stale records cannot be hidden behind a public list page of live or
 post-startup rows; targeted status/log/cancel also rechecks the addressed
-resource after scope validation without mutating unrelated scopes.
+resource after scope validation without mutating unrelated scopes. Domain
+composition creates one jobs runtime and startup boundary per server instance;
+the direct jobs worker and all `capability::execute` jobs/program adapters share
+that state rather than a process-global registry or independent cutoffs. Jobs
+dependency construction is inert; startup reconciliation and shutdown
+cancellation registration begin only when the complete engine setup consumes
+its lifecycle activation token. Production registers the one-shot
+reconciliation handle with the server shutdown coordinator instead of
+detaching it; coordinator-free embeddings reconcile on the first lifecycle
+read/cancel/cleanup operation instead.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, job-owned network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
@@ -1716,12 +1227,18 @@ The accepted Slice 13 foundation adds `domains/device` and
 `domains/notifications` as server-owned resource foundations behind the same
 single `capability::execute` primitive. `domains/device` owns the durable
 `device_registration` schema and production redacted list/inspect projections.
-Only `device_list` and `device_inspect` are model-facing. Production registers
-no device writer or lifecycle publisher; registration/unregistration fixtures
-are test-only and verify the deferred trusted transport's hash-only token,
-environment, opt-in, retention, and lifecycle contract. The production engine
-accepts no APNs token input, and raw APNs tokens or full token hashes are never
-returned.
+Only `device_list` and `device_inspect` are model-facing. A trusted engine
+client may call internal `device::register` and `device::unregister` functions;
+models cannot. Durable resources retain a token hash while raw APNs tokens live
+only in the private platform store under the internal notifications directory.
+Registration records explicit environment, bundle, opt-in, retention, and
+lifecycle evidence. Registration resource identity includes scope, platform,
+APNs environment, bundle id, and app-install identity so side-by-side variants
+cannot overwrite each other's token policy. A current registration durably
+retires older active resources for the same token route, preventing duplicate
+relay sends while preserving lifecycle history. Raw tokens, token fragments,
+and full token hashes are never returned in provider projections, lifecycle
+events, or logs.
 `domains/notifications` owns durable `notification` inbox/read-state records,
 `notification_delivery` evidence, unread-count badge semantics, trace/replay
 refs, retention defaults, and `notifications.lifecycle` stream evidence.
@@ -1729,9 +1246,20 @@ Provider-visible access is limited to `notification_send`,
 `notification_list`, `notification_inspect`, `notification_mark_read`, and
 `notification_mark_all_read`, with explicit non-wildcard resource grants.
 Push-requested sends record inbox-only, no-device, policy-disabled,
-family-opt-out, or transport-disabled delivery evidence; live APNs transport,
-APNs entitlements, public notification APIs, native iOS inbox/deep links,
-hidden background loops, and fake client-local inboxes remain deferred.
+family-opt-out, relay-disabled, delivered, or failed evidence. Eligible sends
+delegate to the injected HMAC APNs relay adapter; the notification domain does
+not own tokens or credentials. Device registration and notification sends use
+one canonical event-family taxonomy; the default `agent_attention` family is
+enabled by the default device policy. Send results distinguish durable inbox
+recording from APNs acceptance, partial delivery, policy/configuration skips,
+and transport failure, including on idempotent replay. iOS versions its token
+registration idempotency key when registration policy changes so an existing
+token can acquire the current policy without duplicate transport sends. Each
+iOS app installation persists its own random identity and retries the trusted
+registration path after pairing, connection, token refresh, and foreground.
+iOS owns permission and token lifecycle plus safe session deep-link handling.
+Public notification APIs, a native inbox, hidden background loops, and fake
+client-local inboxes remain absent.
 Accepted Slice 14A adds `domains/media` as a narrow server-owned resource
 foundation for media artifacts and voice-note metadata behind the same single
 `capability::execute` primitive. Media records are
@@ -1917,25 +1445,17 @@ artifacts. Actual fetch and robots network use remains in `web_fetch` and
 `web_robots_check`; search providers, browser drivers, crawling, sitemap
 traversal, logged-in cookie custody, and native research cockpit UI remain
 future module/runtime decisions.
-The accepted Slice 9A foundation adds the `tool_sources` domain as an inert
-external source-proposal and provenance boundary. Trusted internal system/admin
-callers can create
-resource-backed `tool_source_proposal` records and bounded
-`tool_source_conformance_report` evidence only with derived non-bootstrap
-`tool_sources.propose` and `resource.write` authority, explicit non-wildcard
-resource grants for the resource kind being written, `networkPolicy: none`,
-idempotency, source identity, provenance, sandbox policy, declared tool/schema
-metadata, expected worker/package linkage, trace/replay refs, and evidence
-refs. Proposal validation rejects inline secrets, credential-looking values,
-unsafe paths, unbounded schemas, wildcard sandbox authority, execution fields
-such as command or env, and active/passive/noun activation or registration
-intent while preserving explicit inert prohibition prose. Agent-visible access
-is read-only through `tool_source_list` and `tool_source_inspect` under
-`capability::execute`; those operations require current-session context,
-`tool_sources.read`, `resource.read`, explicit resource-kind grants plus
-matching `kind:tool_source_*` selectors, stored kind/schema revalidation, and
-`networkPolicy: none`, and they return bounded/redacted resource evidence
-without network I/O. Slice 9A does
+The `tool_sources` domain is the read-only projection boundary over existing
+`tool_source_proposal` and `tool_source_conformance_report` resources. It does
+not register a production proposal or report writer; a future accepted writer
+must own creation authority and payload validation rather than hiding that
+lifecycle in the read domain. Agent-visible access is limited to
+`tool_source_list` and `tool_source_inspect` under `capability::execute`; those
+operations require current-session context, `tool_sources.read`,
+`resource.read`, explicit resource-kind grants plus matching
+`kind:tool_source_*` selectors, stored kind/schema revalidation, and
+`networkPolicy: none`; list cardinality and inspected schema previews are
+bounded, and neither operation performs network I/O. This boundary does
 not start or restart MCP servers, install packages, register catalog tools,
 execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
@@ -2037,10 +1557,11 @@ catalog registration, proposed-tool execution, trust promotion, public
 `/engine` expansion, or fixed native source/package UI.
 
 Phase 3 Slice 23A adds the inspect-only module manifest registry foundation.
-The generic resource store registers `module_manifest` with resource schema
+The module-registry domain defines `module_manifest` with resource schema
 `tron.resource.module_manifest.v1` and payload schema version
-`tron.module_manifest.v1`; bootstrap seeding creates narrow first-party
-metadata for the registry, capability domain, the pending-review
+`tron.module_manifest.v1`. Domain registration installs that contract through
+the generic resource-store boundary, then reconciles the ordered narrow
+first-party metadata for the registry, capability domain, the pending-review
 `file_git_module` operation pack, the accepted Slice 24B pending-review
 `jobs_program_execution_module` pack, the accepted Slice 24D pending-review
 `memory_engine_module` pack, and the accepted Slice 24E pending-review
@@ -2265,7 +1786,12 @@ proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
 recording, treats recording startup as cancellation-aware, cancels capture and
 in-flight transcription when leaving chat, and the server reports explicit
-disabled/loading/ready/failed model state. Slice 14A adds backend-only
+disabled/loading/ready/failed model state. Its pinned Parakeet MLX environment
+is disposable and health-checked on each enabled server startup: a missing
+Homebrew interpreter, failed import, or package-version drift rebuilds only the
+venv from an available Python 3.10+ runtime while preserving the independently
+cached model. Readiness is published only after the exact-version import and
+worker model load both succeed. Slice 14A adds backend-only
 `media_artifact` resource custody for blob refs and bounded metadata; native
 voice-note UI, capture flows, and server-side transcription orchestration are
 still absent. Slice 14B adds a backend-only `import_history_record` lineage
@@ -2310,7 +1836,15 @@ The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,
 `agent::abort_invocation`, and `agent::status`. Hidden internal functions
 `agent::prompt_apply` and `agent::run_turn` serialize accepted prompts into the
-provider loop and keep session truth consistent. On completion, the durable
+provider loop and keep session truth consistent. Their success contracts carry
+a run id and only `acknowledged: true`; validation failures and busy sessions
+return canonical child errors rather than negative success acknowledgements.
+`agent::abort` returns `aborted: true` only when it signals a currently
+registered run, or `false` when no run matches. That acknowledgement is not a
+terminal outcome: durable `turn.failed` cancellation evidence and the later
+agent completion/ready lifecycle remain authoritative, including for reconnect
+and replay.
+On completion, the durable
 `agent_result` resource derives its final answer and source event reference from
 the flushed event-store reconstruction, so replay uses the same canonical text
 as session history rather than a parallel runtime copy.
@@ -2353,7 +1887,8 @@ read/write authority, so operation search and schema inspection cannot carry
 scratch-state write privileges. Unsupported operation names derive a
 rejection-only `capability::execute` child grant with no resources, selectors,
 or network authority so the canonical validator can return structured recovery
-and record a redacted failed trace; that grant cannot dispatch domain behavior.
+and record a redacted failed trace after matching trusted actor/session and
+operation-claim checks; that grant cannot dispatch domain behavior.
 Public wire context does not accept `authorityScopes` or
 `runtimeMetadata`; runtime metadata is reserved for trusted engine and
 agent-owned execution paths. `execute` is the primitive operation boundary.
@@ -2392,24 +1927,35 @@ metadata as in-process domain workers. The hello must be loopback bearer
 authenticated, register `WorkerKind::External`, bind session/workspace-visible
 workers through the scoped token, and reference an active grant at the token
 revision and policy hash. Namespace checks use exact segment/prefix matching,
-not substring matching. Triggers must use the worker token grant and target
-functions owned by the same accepted worker. Workers publish events by asking
-the engine to invoke `stream::publish`; stream visibility, topic selectors, and
-session/workspace scope are checked against the accepted token and connection.
-There is no direct socket event bypass.
+not substring matching. The first valid hello binds the socket to one opaque
+runtime generation. Active duplicate identities are rejected; pre-hello
+operations, second hellos, foreign worker ids, and stale-socket teardown cannot
+mutate or disconnect another generation. Triggers must use the worker token
+grant and target functions owned by the same accepted worker. Workers publish
+events by asking the engine to invoke `stream::publish`; stream visibility,
+topic selectors, and session/workspace scope are checked against the accepted
+token and connection. There is no direct socket event bypass.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the
 worker disconnects, so invocation fails closed until the worker reconnects and
 re-registers. On SQLite-backed server restart, durable external worker/function
 definitions hydrate as stopped/unhealthy with no handler, so an unclean socket
-loss cannot become an optimistic callable function. Worker
+loss cannot become an optimistic callable function. Runtime retirement first
+closes outbound admission for the socket and every captured invocation proxy,
+wakes pending calls with `WORKER_DISCONNECTED`, and closes the owning socket;
+no call waits for the per-invocation timeout after heartbeat or explicit runtime
+retirement. Worker
 connect/register/disconnect/heartbeat-timeout events are stored on
 `worker.lifecycle` through the stream primitive and are visible through retained
 ledger/log records. Invocation
 results are owned by the socket connection's pending invocation map; disconnects
 and outbound backpressure drain or fail pending calls as worker transport
-failures.
+failures. Every upgraded worker socket is registered with graceful shutdown
+before the HTTP upgrade completes. Server shutdown interrupts socket reads and
+bounded outbound sends, closes outbound admission, immediately fails pending
+calls with `WORKER_DISCONNECTED`, applies the normal volatile/durable disconnect
+policy, and joins the writer before reporting the socket session drained.
 
 Agents do not receive a server-authored helper-launch loop. The retained
 `/engine/workers` protocol is host infrastructure for already-running external
@@ -2430,7 +1976,11 @@ enable it, launch it with an allowlisted environment and scoped
 `worker_package_conformance_report` resources on `worker.lifecycle`. Stop
 returns package/installation state to `enabled` for immediate relaunch, while
 startup reconciliation runs before lifecycle requests and marks durable running
-launch attempts `unhealthy` if process ownership was lost. A failed launch,
+launch attempts `unhealthy` if process ownership was lost. Dependency
+construction does not start reconciliation; the task begins only after domain
+and transport-trigger registration both succeed, and production shutdown owns
+the task handle until it completes. Coordinator-free embeddings defer the same
+reconciliation to their first lifecycle request. A failed launch,
 conformance mismatch, digest mismatch, or unowned stop is recorded or rejected
 fail-closed. The provider-visible model tool remains `execute`; lifecycle
 mutation operations are engine capabilities invoked through the authenticated
@@ -2470,8 +2020,8 @@ metadata-only catalog targets as non-callable, derives only catalog-scoped
 runtime authority for search/inspect calls, and writes only append-oriented
 `catalog_discovery_report` evidence. Tool-source inspection reads scoped
 `tool_source_proposal` and
-`tool_source_conformance_report` resources only; internal proposal/report
-writes are provenance evidence and explicitly do not activate external tools.
+`tool_source_conformance_report` resources only; it neither writes those
+records nor activates external tools.
 Failures rejected before an effectful trace record is inserted still rely on
 the direct capability failure result projection for bounded error code/path
 evidence; durable pre-trace failure records remain a deferred tracing slice.
@@ -2515,9 +2065,9 @@ VCS revision when available, result/error hashes, and file attribution with
 content hashes. Model-facing trace reads intentionally project only safe trace
 and invocation refs, hashes, status/timing, safe errors, and redaction proof;
 provider tool-call ids and raw authority/idempotency metadata stay internal.
-The retained substrate workers are covered by completed primitive cleanup,
-state, scheduling, security, observability, storage, and resource-governance
-scorecards.
+The retained substrate workers are covered by the source-owned state,
+scheduling, security, observability, storage, and resource-governance boundary
+tests under `packages/agent/tests/`.
 
 Fixed helper-orchestration routes are not registered on the primitive teardown
 branch. Any future parallel helper behavior must be created by the agent
@@ -2537,10 +2087,18 @@ representative unsupported product event names so product lifecycle streams stay
 outside the persisted session enum.
 
 Event-store ownership is folder-backed: `event_store/envelope`,
-`event_store/factory`, `event_store/reconstruction`, `event_store/store`, and
-`event_store/sqlite` expose normal Rust modules without `#[path]` aliases. The
-high-level `EventStore` facade lives under `event_store/store/event_store`,
-while SQLite repositories stay under `event_store/sqlite/repositories`.
+`event_store/reconstruction`, `event_store/store`, and `event_store/sqlite`
+expose normal Rust modules without `#[path]` aliases. The high-level
+`EventStore` facade under `event_store/store/event_store` exclusively owns
+session root/fork creation, identity-aware append, parent/sequence allocation,
+and durable writes, while SQLite repositories stay under
+`event_store/sqlite/repositories`.
+Prompt execution appends `message.user` after reconstructing prior history but
+before constructing or calling a provider. If that append fails, the runtime
+emits a canonical persistence error, releases the active run, and creates no
+provider audit or assistant event. Prior-history reconstruction is also
+fail-closed; the runtime never substitutes an empty conversation for unavailable
+durable history.
 
 ### Event Categories
 
@@ -2578,8 +2136,26 @@ capability identity. Server-authored capability identity only promotes
 `operationName` after the actual `operation` value matches the canonical
 execute operation registry; caller-supplied aliases or stale names remain
 requested arguments instead of becoming authoritative UI labels.
-Live `agent.turn_failed` and `error` runtime events are emitted through
-canonical server builders. New runtime emissions carry stable code/category,
+Live turn lifecycle and `error` runtime events are emitted through canonical
+server builders. Starts, ends, and failures persist before broadcast and reuse
+the durable row sequence, so reconnect and live rendering observe the same
+ordering. Cancellation is terminalized inside the active turn runner, where the
+session-global ordinal and partial content are authoritative; partial assistant
+content plus failure commit atomically. Capability starts commit as one batch
+before execution; executed and skipped completions then commit as one ordered
+terminal batch before any completion broadcast. The streaming journal remains
+until capability results and the turn terminal are durable. Journal writes fail closed before an
+unrecoverable delta is broadcast, and provider/network stream failures retain
+already visible partial content in the same atomic batch as `turn.failed`.
+Compaction cancellation restores its pre-summary checkpoint and emits a paired
+failed completion before the turn is terminalized, so clients cannot remain in
+a compacting state. The next prompt advances from the
+greatest reconstructed, completed, or started turn even when cancellation had
+no assistant content; corrupt, exhausted, or unreadable sequence/turn high-water
+state fails closed. Startup recovery recognizes legacy rows without starts,
+does not duplicate an already durable assistant, repairs incomplete capability
+invocations, atomically closes the interrupted turn, and sweeps durable starts
+with no terminal even when no stream journal was created. New runtime emissions carry stable code/category,
 retryability, recoverability, origin, and `details.failure`; provider-backed
 failures also preserve provider/model/status/error-type semantics when known.
 iOS decodes the same server-authored envelope through `CanonicalFailurePayload`
@@ -2607,9 +2183,33 @@ Live `/engine` subscriptions are not history loaders. Session screens reconstruc
 persisted history through `session::reconstruct`; their `events.session`
 subscription then starts at the current topic tail and carries only future
 records. Stateless stream polling and non-session catch-up remain explicit cursor
-operations. Stream polling applies engine visibility before pagination, so a
+operations. The socket map is the sole owner of live subscription ids, filters,
+scope, and cursors; direct topic polling reuses the engine's visibility and
+pagination logic without creating durable subscription rows. Durable
+`stream::subscribe` rows remain available to engine consumers that intentionally
+own resumable state. Stream polling applies engine visibility before pagination, so a
 session subscriber is never blocked behind older stream rows owned by unrelated
 sessions.
+The runtime-to-engine projection queue is bounded. If it ever overruns, the
+pump stores a system-scoped `stream.recovery_required` control event directly
+in `events.session` before processing later source events. That control event
+crosses session/workspace narrowing (while still respecting an explicit event
+type filter), and mounted clients reconstruct their current session. If the
+control record itself cannot be stored, projection stops rather than presenting
+a discontinuous stream as complete.
+The reconstruction `lastSequence` cursor is representation-backed. During an
+active run, the event emitter snapshots turn state and its source sequence in
+the same ordered dispatch critical section, before broadcast; the top-level DB
+window is capped to that cut before its result limit is applied. Run/turn
+transitions retry the read, raw allocator state cannot advance it, and parent
+sequences in a forked ancestor chain never advance the child's live cursor. iOS
+applies this cut only on top-level reconnect, then drains buffered child-session
+continuations above it. Older pagination responses do not redefine the live
+watermark. The same projection owns terminal processing phase, active compaction,
+and current capability progress/run status, so reconnect cannot acknowledge a
+frame while losing the UI state it established. Dropping the matching run guard
+removes that projection without affecting a replacement run; post-run engine
+resource publication occurs after the active run is released.
 `session::reconstruct` paginates with `beforeEventId` / `oldestEventId` event
 IDs, not session-local sequence cursors. Forked sessions reconstruct from the
 ordered ancestor chain ending at the child head so inherited parent history and
@@ -2681,60 +2281,33 @@ Settings are loaded from three layers (highest priority last):
 2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
 3. **Environment variables** (`TRON_DEFAULT_MODEL`, `TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID`)
 
-Settings are server-authoritative. Engine-native clients read the current valid `ProfileRuntime` snapshot by invoking `settings::get` and write sparse user overrides through `settings::update` / `settings::reset_to_defaults` with explicit idempotency keys. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an engine/transport error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active.
+Settings are server-authoritative. `settings::get` returns the complete current valid `TronSettings` snapshot; this includes provider, retry, runtime, tmux, and TUI configuration in addition to mobile product settings. Engine-native clients write sparse user overrides through `settings::update` and clear the complete sparse server overlay through `settings::reset_to_defaults`; both operations require explicit idempotency keys. The iOS client intentionally admits a narrower product projection from the full response and ignores unrelated profile keys; every admitted field must still map through its snapshot/state owner to a read-only row or editable control, and only editable fields receive a write DTO. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an engine/transport error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then compiled and atomically swapped by `ProfileRuntime`, with no parallel settings cache. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active. Prompt admission captures one immutable settings value; both the main response provider and background title provider are constructed from that run's `ApiSettings`, while the long-lived responder factory retains only the shared HTTP connection pool and provider-health state. Therefore an in-flight run stays internally consistent and the next admitted run observes a successful provider-setting update.
 
-The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings, unknown nested settings keys, invalid TOML, and non-object `[settings]` fail fast. iOS decodes server-owned settings as authoritative fields instead of substituting local defaults; device-only iOS preferences live in iOS storage/Keychain, not in the server settings profile.
+The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings, unknown nested settings keys, invalid TOML, and non-object `[settings]` fail fast. iOS decodes its admitted server-owned fields strictly instead of substituting local defaults, while unrelated full-profile keys remain server-owned; device-only iOS preferences live in iOS storage/Keychain, not in the server settings profile.
 
-The schema is defined in `packages/agent/src/domains/settings/profile/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
+The strict root schema is defined in `packages/agent/src/domains/settings/profile/types/`; `ServerSettings` owns the local transcription Engine policy. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
 ### Key Configuration
 
-```jsonc
-{
-  "version": "0.1.0",
-  "name": "tron",
+The canonical defaults and field-level comments live in
+`packages/agent/defaults/profiles/default/profile.toml`; the strict Rust schema
+and validation bounds live in `domains/settings/profile/types/`. Keep examples
+out of this reference so they cannot become a second copy of profile defaults.
 
-  "server": {
-    "heartbeatIntervalMs": 30000,   // WebSocket heartbeat; 1000-600000 ms
-    "defaultModel": "claude-sonnet-4-6",
-    "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
-    "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
-    "transcription": {
-      "enabled": false              // Opt-in local Parakeet/MLX composer speech-to-text
-    }
-  },
+Database diagnostic verbosity is fixed at the managed `info` level with
+managed dependency filters. `RUST_LOG` may filter optional terminal output but
+cannot change persisted evidence. The engine always runs diagnostic cleanup
+with a seven-day horizon and checks a managed 512 MB soft budget for the active
+database. Manual `storage::retention_run` calls may request `dryRun`, but cannot
+select a different horizon. This cleanup covers verbose iOS diagnostic rows,
+expired diagnostic/pending payload refs, and unowned blobs. It does not define
+or delete chat, session, message, memory, or audit-owned retention.
 
-  "agent": {
-    "maxTurns": 250
-  },
-
-  "context": {
-    "compactor": {
-      "maxTokens": 25000,           // Context budget
-      "compactionThreshold": 0.85,  // Hard ceiling that triggers compaction
-      "targetTokens": 10000,        // Target token count after compaction
-      "charsPerToken": 4,           // Token estimation factor
-      "bufferTokens": 4000,         // Response buffer
-      "triggerTokenThreshold": 0.70,// Soft threshold for proactive compaction
-      "preserveRecentCount": 5      // Always preserve N most recent messages
-    }
-  },
-
-  "observability": {
-    "logLevel": "info",                         // "trace" | "debug" | "info" | "warn" | "error"
-    "verboseRetentionDays": 7                   // Short retention window for verbose diagnostics
-  },
-
-  "storage": {
-    "retentionEnabled": true,                   // Startup/manual retention may prune low-signal diagnostics
-    "maxDatabaseMb": 512                        // Soft cap surfaced by storage reports
-  },
-
-  "retry":  { "maxRetries": 3 },
-
-  "session": {}
-}
-```
+The strict settings schema accepts transcription only at
+`server.transcription`; `logging`, `observability`, `storage`, and root-level
+`transcription` are unknown fields. Managed profiles are reseeded from the
+bundled profile when stale; a sparse user overlay containing those invalid keys
+must be corrected before the updated server can start.
 
 ---
 
@@ -2744,18 +2317,24 @@ The schema is defined in `packages/agent/src/domains/settings/profile/types/`. A
 
 The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types/mod.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
-Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file.
+First server startup has Constitution create the exact empty JSON compatibility sentinel `{}` atomically at mode `0o600`, because active-profile validation requires its declared raw auth store to exist. Startup immediately materializes that sentinel through the secure auth writer into the full schema, including `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Rust writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file. The contributor login shell owns only prompts, browser opening, pasted-redirect parsing, and the localhost callback. Hidden Rust CLI actions share the auth domain's provider configuration, PKCE URL construction, token exchange, actual-expiry calculation, canonical auth-file lock, state re-read, and secure writer. Callback completion validates an independent CSRF state; the explicitly user-entered Anthropic code path is marked as manual and cannot synthesize returned state. Authorization codes, state, and verifiers reach completion over stdin rather than process arguments, and the verifier never enters the browser URL. Installed login holds the contributor-pair reader mutex across the entire browser flow. A hidden stdin-only `store-oauth` compatibility action accepts completion from a pre-transaction shell that was already in flight when the helper changed; new flows do not exchange or parse tokens in shell. `/engine` OAuth retains its existing authenticated `flowId`/`code` wire contract and therefore omits an authorization-state parameter rather than emitting one it cannot validate.
 
 OAuth refresh is owned by `domains/auth/credentials/`: Anthropic, OpenAI, and Google refresh paths take a process-local refresh mutex, acquire the auth-file `flock`, re-read `auth.json` after the lock, persist refreshed tokens while holding the lock, and fail the refresh if persistence fails. Model providers receive ephemeral token copies for request execution and do not write durable auth state directly.
 
 Provider-derived errors, retry events, client logs, and provider request audit
 payloads share the same server redaction policy. Audit payloads are body-only,
-versioned as `tron.model_provider_request.v1`, classified as exact provider
-envelopes or provider-independent snapshots, redacted recursively, and rejected
-if they exceed the provider-audit payload bound before the provider stream
-opens. Raw provider reasoning payload fields are omitted from audit storage,
-and secret/token-like strings plus unsafe or absolute path-like debug strings
-are redacted before persistence.
+versioned as `tron.model_provider_request.v2`, and classified as exact provider
+envelopes, bounded provider-envelope projections, or provider-independent
+snapshots. Bulk inline strings such as media data are replaced in audit evidence
+with their byte count and SHA-256 digest; the exact request bytes still go to the
+provider unchanged. If the remaining request structure is still too large, the
+audit stores a whole-envelope byte count and digest. The resulting audit is
+recursively redacted and stays within the provider-audit payload bound before
+the provider stream opens. Raw provider reasoning payload fields are omitted
+from audit storage, and secret/token-like strings plus unsafe or absolute
+path-like debug strings are redacted before persistence.
+Historical `tron.model_provider_request.v1` events remain readable; v2 is used
+for newly persisted audits.
 
 OpenAI credential selection is owned by auth credentials through `OpenAIAuthPath`: ChatGPT OAuth accounts route model metadata and requests to the Codex backend, while OpenAI API keys route to Platform metadata and `/v1/responses`.
 
@@ -2781,6 +2360,22 @@ tron login --label personal
 
 OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth credentials route to `chatgpt.com/backend-api/codex` and use Codex catalog limits such as `gpt-5.5` and `gpt-5.3-codex` at 272K context. OpenAI API keys route to `api.openai.com/v1/responses` and use Platform limits such as `gpt-5.5` at 1.05M context and `gpt-5.3-codex` at 400K context. `model.list` is auth-path-aware: OAuth shows the live Codex catalog plus documented Codex previews, while API keys show all streaming text/image-in-to-text-out Responses models Tron can serve without a separate image, audio, video, embedding, moderation, realtime, or background provider path. Dated snapshots like `gpt-5.5-2026-04-23` are accepted as hidden aliases and preserve the exact request model ID. Retired OpenAI models remain listed with replacement metadata, but `model.switch` rejects them so they cannot be newly selected; non-streaming models such as `gpt-5.5-pro`, `o3-pro`, and `o1-pro` stay hidden and are rejected by the streaming provider.
 
+Every `model.list` row also carries a required `attachmentPolicy`. The model
+domain combines accepted MIME types and provider dimensions with Tron's
+effective inline byte budget, then `agent::prompt` enforces that same policy.
+Clients may resize or transcode images to satisfy the contract, but provider
+names and limits are not duplicated in client code. PDF support and text-file
+extraction remain explicit policy fields, and malformed, unsupported, or
+oversized attachments fail before provider invocation.
+
+The `/engine` WebSocket transport has one runtime-owned message budget:
+`ServerConfig.max_message_size`. The upgrade enforces it and `hello.ok`
+advertises the same `maxMessageSize` value so clients can reject an encoded
+prompt locally before transmission. This transport budget is intentionally
+larger than provider attachment budgets; provider policy remains the owner of
+which media reaches a model, while transport only bounds the complete request
+envelope.
+
 ### Auth Precedence
 
 1. A session-pinned credential, when present
@@ -2794,7 +2389,7 @@ OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth c
 
 Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. If the installer seeded `{}`, startup rewrites that sentinel into the full auth schema at the same time. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
+The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. Constitution's private exact `{}` sentinel is upgraded through the secure auth writer during that same startup; the reader retains the sentinel interpretation for interrupted or older installs. The Mac onboarding wizard and iOS pairing flow both display the token for the user to copy into the iOS pairing step.
 
 ```bash
 # Rotate the token (forces every paired iOS device to pair again)
@@ -2803,7 +2398,12 @@ tron auth rotate
 # Then use the iOS re-pair action for each affected server to scan or paste the fresh token.
 ```
 
-Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
+Rotation is serialized through a process-wide mutex plus the canonical auth-file `flock`, then persisted atomically (`tempfile + sync_all + rename`). It therefore cannot lose a concurrent provider refresh or contributor OAuth update from another process. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
+
+Both `scripts/tron` and the installed `tron-cli` route this runtime command
+directly to the shared `scripts/tron-lib.d/auth.sh::cmd_auth` owner. Its `rotate`
+arm keeps the installed contributor-pair reader lock around the complete Rust
+auth-owner invocation instead of delegating to a workspace checkout.
 
 The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
@@ -2903,6 +2503,8 @@ Default production server storage lives in `~/.tron/internal/database/tron.sqlit
 
 The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
 
+Tron intentionally exposes no database-only reset script. `session::delete` owns one session's destructive transaction: it removes that session's event and session rows, clears its in-memory sequence/compaction state, and emits the session-deleted lifecycle event. Blob retention and other audit/durability records remain governed by their own owners; session deletion is not a whole-database reset. For a complete local reset, stop every process that owns the resolved Tron home and reversibly move that entire home aside before restarting; do not delete selected SQLite tables, blobs, or WAL/SHM files in place.
+
 Retained session rows, event rows, Agent Trace-style records, bounded
 server/iOS logs, and compressed content-addressed blobs share that same SQLite
 file. Large correctness and audit payloads flow through blob refs where the
@@ -2983,6 +2585,11 @@ The events table enforces correctness with `UNIQUE(session_id, sequence)` and a 
 
 **Minimum iOS:** 26.0 | **Swift:** 6.0 | **Build system:** XcodeGen
 
+The iOS 26 deployment baseline is shared by Xcode 26 and Xcode 27 builds. A
+single source tree and binary contract runs on iOS 26 and iOS 27; choosing the
+iOS 26 or iOS 27 SDK changes the build toolchain, not the product identity or
+deployment target.
+
 ### Architecture
 
 The app uses MVVM with coordinators, event plugins, and SwiftUI's `@Observable` macro. The authoritative architecture document is `packages/ios-app/docs/architecture.md`.
@@ -2998,10 +2605,9 @@ packages/ios-app/Sources/
                          pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
                          surfaces, capabilities, components, system sheets
-+-- Resources/            Fonts and generated app-icon source layers
++-- Resources/            Bundled fonts
 +-- Assets.xcassets/      Icons and images
 +-- Resources/Fonts/      Bundled typography assets
-+-- Resources/IconLayers/ Source layers for the app icon
 +-- Info.plist            App metadata
 +-- PrivacyInfo.xcprivacy Apple privacy manifest
 ```
@@ -3010,7 +2616,7 @@ packages/ios-app/Sources/
 
 - **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols. Chat view-local async work is ticketed through `ChatViewTaskCoordinator`, and transcript mutations go through `MessageMutating` so message-id and capability-id indexes stay synchronized during streaming, pagination, and reconnect reconstruction.
-- **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`; registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
+- **Event plugins**: Live engine events arrive through `SessionEventRepository`; `EventRegistry` owns plugin parsing, lookup, and dispatch to the per-call `ChatViewModel` target. Registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
 - **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries, persisted duplicate thinking snapshots inside one assistant message are collapsed defensively, reasoning summaries stay labeled separately from raw append-only thinking, and reconnect reconstruction preserves expanded visible history, in-flight generating capability chips, and bounded event gaps before rebuilding the displayed window.
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
@@ -3028,7 +2634,7 @@ packages/ios-app/Sources/
   shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
   inline folder creation, prompt input with clearable
   device-local recent-input reuse, the
-  Session Briefing sheet opened from the timeline/model pill for model switching,
+  Session Briefing sheet opened from the composer context ring for model switching,
   provider-safe context breakdown, compact, clear, read-only memory status, and
   recent action audit detail,
   functional-only native composer attachment menu that preserves keyboard
@@ -3049,15 +2655,9 @@ packages/ios-app/Sources/
   panels, extension-source surfaces, voice-note storage, memory-retain, rules,
   skills, prompt-library panels, prompt queues, and parallel tree-only
   projections are removed from the primary source tree.
-- **Agent briefing and cockpit**: the session dashboard keeps the existing
-  workspace-grouped chat list and adds small Agent Briefing and Engine Cockpit
-  bands above the groups. The briefing band opens an Agent Briefing sheet backed by
-  `agent_briefing::overview`, with narrative sections for activity,
-  adaptation, active work, user-needed work, weak points/failures, memory and
-  learned state, and audit evidence. The sheet uses the standard Tron
-  typography, theme, and sheet chrome, includes empty/degraded states and
-  drill-down evidence rows, and avoids raw paths, commands, logs, grants,
-  authority ids, and secrets at top level. The dashboard Engine Cockpit band is
+- **Dashboard cockpit**: the session dashboard keeps the existing
+  workspace-grouped chat list and adds one Dashboard band above the groups.
+  The Dashboard band is
   the core engine summary: connection state, visible capability count, issue
   count, and plain verification state such as verified, needs review,
   or unchecked. The cockpit sheet opens on
@@ -3082,7 +2682,9 @@ packages/ios-app/Sources/
   active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context, and active
   `ui_surface` resources through generic engine data using the standard
   liquid-glass sheet chrome and shared segmented tab control. The Activity tab
-  does not fabricate catalog/package activity locally
+  groups every explicit server status exactly once into Needs review, Needs you,
+  Active work, or Recent activity. It does not issue a parallel summary request,
+  retain a duplicate projection model, or fabricate catalog/package activity locally,
   and does not restore fixed source-control, memory, process, subagent,
   notification, skill, approval, work, or work-dashboard panels; Slice 24I
   accepts that absence as source-guarded rejected-shape scope. Slice 24J keeps
@@ -3092,66 +2694,29 @@ packages/ios-app/Sources/
   catalog entries surface catalog decode degradation instead of disappearing
   from projected counts. The primary chat shell does not mount a passive
   worker-runtime banner.
-- **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`.
-- **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
+- **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`. `DependencyContainerRuntimeIO` selects immutable transport-attempt, pairing-probe, and paired-token backends once at that boundary and forwards the attempt directive into both the initial `EngineClient` and every active-server rebuild. Production remains live URL-session transport plus `URLSessionPairingProbe` and the production Keychain backend; hosted unit tests inject handled attempts, a test-target inert pairing probe, and a task-owned in-memory token backend without environment checks inside those owners.
+- **Generic runtime rendering**: server-owned runtime data, including data
+  written through agent operations, renders through
+  `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into
+  custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
-- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`.
-- **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor.
+- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while the production `PairedServerTokenStore.Backend` preserves the exact `KeychainItem(service: "com.tron.mobile.bearer", account: serverId)` contract. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`. Hosted token backends are injected, memory-only, and emit balanced secret-free `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` identity records; they never call Keychain.
+- **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor. `EventStoreManager` predecessor-chains client replacement and load ownership, awaits database/completion effects for every accepted event, and uses one idempotent terminal drain: cancel/join the global lane, await `SessionRefreshService.shutdown()`, then cancel/join the load chain before an outer fixture closes its database. Shutdown does not finish the shared event bus or invent a process-termination hook.
+- **Hosted unit-test ownership**: `IsolatedTestState` is the only general hosted container/storage factory. It retains every manager, database, handled-attempt recorder, stub pairing probe, and token backend. Cleanup awaits the same terminal task for repeated callers and orders manager drain → token clear/proof/lifecycle emission → database close → root/defaults cleanup → process-fallback deregistration. Separate `TRON_TEST_SUITE_LIFECYCLE_V1` and `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` ledgers must be complete, unique, set-equal, and secret-free; hosted tests prove no live network, OAuth, pairing-probe, or production Keychain owner is constructed.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
-- **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
-- **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings also exposes the Logs sheet in every iOS build configuration from the toolbar and the Servers page Diagnostics section so production installs can inspect or copy redacted local iOS logs without enabling verbose production logging. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with the active session id attached to each batch, client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic session-scoped batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
-- **IOSTC proof**: `packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`,
-  `packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
-  `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`,
-  `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`, and
-  `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`
-  are the current static proof that iOS stays a generic runtime shell.
-- **IOSAC proof**:
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`,
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`,
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md`,
-  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`,
-  and
-  `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`
-  are the baseline static proof for the Agent cockpit, worker lifecycle catalog
-  bridge, package action confirmations, dynamic `ui_surface` rendering, and
-  neutral glass baseline; P2AER Slice 1 adds catalog discovery evidence on top.
-- **IARM proof**:
-  `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`,
-  `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`,
-  `packages/agent/docs/ios-affordance-restoration-map-inventory.md`,
-  `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`, and
-  `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` are the
-  current static proof for the functional-only iOS affordance restoration map.
-  The map exhaustively classifies deleted or renamed old iOS paths and preserves
-  the original Phase 1 review queue as historical planning evidence. It does
-  not mean those affordances are restored.
-  `packages/agent/docs/ios-affordance-restoration-progress.md` tracks Phase 1
-  closeout, shipped slices, accepted off-plan work, validation, and deferred
-  behavior. The durable Phase 2 agent-execution restoration plan is recorded in
-  `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`,
-  `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
-  `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and
-  `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`.
-  The durable Phase 3 modular self-adapting engine plan is recorded in
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`,
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`,
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`, and
-  `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`.
-  Retrospective audit ordering and review-only constraints are tracked in
-  `packages/agent/docs/restoration-retrospective-audit-status.md`.
+- **Forgetting a server**: Settings → Engine → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Engine shows the onboarding CTA.
+- **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings exposes the Logs sheet in every iOS build configuration from its toolbar so production installs can inspect or copy redacted local iOS logs without enabling verbose production logging; pairing lives under Settings -> Engine -> Servers without a duplicate Logs row. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with the active session id attached to each batch, client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic session-scoped batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
 
 ### Data Flow
 
 ```
-Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
+Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
-Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
+Dashboard: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
 The camera child sheet mounts before AVFoundation warm-up and uses the viewport
@@ -3206,89 +2771,22 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, and profile defaults under `Contents/Resources/Constitution/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, confirms permissions, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
-
-```
-packages/mac-app/Sources/
-+-- App/
-|   +-- Lifecycle/             App entry, runtime variant, and startup maintenance
-|   +-- CommandMode/           Internal start/uninstall command modes
-|   +-- Composition/           Sendable environment setup and live/test DI
-+-- Server/
-|   +-- LaunchAgent/           SMAppService-backed LaunchAgent boundary
-|   +-- Health/                Server ping, health wait, and status polling
-|   +-- Paths/                 TronPaths and profile settings TOML cache
-|   +-- PairingToken/          Bearer-token reader
-|   +-- ProcessControl/        Dev stopper, process probe, lock, uninstall
-+-- MenuBar/
-|   +-- Controller/            NSStatusItem lifecycle
-|   +-- Actions/               Menu command handlers and feedback action
-|   +-- Presentation/          Menu descriptors, log reader, logs window
-+-- Wizard/
-|   +-- Flow/                  Wizard state machine and shell view
-|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, iOS Beta, Pairing, Done
-|   +-- Components/            Window and visual layout primitives
-+-- Support/
-|   +-- Diagnostics/           Redaction for diagnostics and logs
-|   +-- Feedback/              GitHub issue composer
-|   +-- Foundation/            Shared foundation helpers, subprocess, and display formatting
-|   +-- Onboarding/            Wizard models, probes, install planning
-|   +-- Pairing/               Pairing URL, QR, local computer-name helpers
-|   +-- Theme/                 Colors, font loading, typography
-+-- Resources/
-+-- Assets.xcassets/
-+-- Info.plist
-```
-
-### Wizard Steps
-
-1. **Welcome** — introduces Tron.
-2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `/engine` `invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles macOS Login Items authorization by opening Settings when needed, and polls `system::ping` after the initial `hello.ok` frame.
-4. **Permissions** — Full Disk Access only. Deep-links to System Settings, labels the exact wrapper app entry to enable, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after the wizard-opened Settings pane, and keeps Re-check as a non-restarting probe.
-5. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
-6. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it in `profiles/user/profile.toml`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`. The QR builder uses the same bare-host and `1...65535` port contract as iOS, so it does not emit URL/path/userinfo/bracketed-host payloads.
-7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
-
-### Menu-bar Actions
-
-| Item | Action |
-|------|--------|
-| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, normalized live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
-| Show pairing info | Opens a pairing-only window that shows one emerald resolving spinner directly on the window background until the QR + manual copy buttons for host, port, token, and server name crossfade in; copy actions quickly show a checkmark for two seconds on success |
-| Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; start-like actions post success only after `/health` passes |
-| Update finalization | On the first menu-bar launch or command-mode start for a new app build, refreshes stale SMAppService metadata and restarts the bundled server once; the app-version marker is recorded only after `/health` passes, and `tron dev` takeover defers this until the production server is active again |
-| Stop dev server | Appears with the server controls whenever `Tron-Dev.app` owns port 9847; stops the dev process and resumes the installed Login Item through the same health-gated path. Pause, restart, and uninstall are disabled while dev takeover is active. |
-| Show logs | Opens the native logs window backed by the read-only `logs::recent` capability |
-| Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
-| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. The database and workspace are always preserved. |
-| Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
-
-### Variants & Workflows
-
-The wrapper coexists with local Release testing, Xcode Debug UI dogfood, an isolated Xcode install sandbox, and the `tron dev` agent-only workflow. Production workflows share `port 9847` and the `~/.tron/internal/` data tree; the isolated install scheme deliberately uses `port 9848`, `~/.tron-dev`, `com.tron.server.dev`, and the separate `Tron Server Dev.app` helper whose bundle identifier matches that LaunchAgent label.
-
-| Workflow | Build product | Bundle ID | Lives at | What it is |
-|---|---|---|---|---|
-| **Production (DMG)** | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Notarized SwiftUI wrapper + bundled headless agent — what end users install |
-| **Local Release test** (Xcode Release copied into place) | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Same installed-release path as the DMG; useful for validating local changes before packaging |
-| **Debug companion** (default Xcode Run) | `TronMac.app` | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/TronMac.app` | SwiftUI wrapper dogfood that coexists with `/Applications/Tron.app`; it observes the production server but does not register, pause, restart, or uninstall it |
-| **Isolated install test** (`TronMac Isolated Install` scheme) | `TronMac.app` | `com.tron.mac.dev` | DerivedData | First-run/reinstall sandbox with separate LaunchAgent label, port, and data root |
-| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/internal/run/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
-
-Mutual exclusion:
-- Duplicate wrappers of the same bundle ID — guarded by `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`). Release and Debug companion wrappers intentionally use different lock files so their menu icons can coexist.
-- Production agents — guarded by `~/.tron/internal/database/tron.sqlite.lock` (cross-process exclusive `flock`).
-- LaunchAgent ownership — installed Release is authoritative for `com.tron.server` and repairs stale Debug/DerivedData registrations before restart; default Xcode Debug is companion-only. The `TronMac Isolated Install` scheme owns `com.tron.server.dev` on port `9848` with `TRON_HOME_NAME=.tron-dev` and a Debug-first `AssociatedBundleIdentifiers` list so ServiceManagement attributes the job to `TronMac.app`.
-- Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the installed helper is paused while dev-mode runs.
-- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `internal/database/tron.sqlite.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
-
-A contributor can have the DMG installed AND run the default Xcode Debug wrapper for menu/wizard UI work; both menu icons can coexist and both observe the production server. Running `tron dev` is still the explicit server-takeover path for Rust-agent iteration: the wrapper's menu bar keeps pinging port 9847, reports the `Tron-Dev.app` PID/uptime, and shows `Dev Server active` while dev owns the port. Quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app; the CLI reports the installed service as restarted only after `/health` passes, records the finalized app-version marker on success, and stale installed helpers that cannot parse current profile defaults must be updated rather than papered over. The menu-bar Stop Dev action follows the same rule, showing `Resume failed` when ServiceManagement loads an unhealthy installed helper instead of posting a false recovery. Pre-onboarding production cleanup uses the installed app's paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd; Debug companion command mode refuses to uninstall production. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](../../mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
+`Tron.app` is the SwiftUI wrapper around the headless Rust agent. Production
+runs only from `/Applications/Tron.app`; it owns `com.tron.server` registration
+through `SMAppService`, waits for server health, and switches from a regular
+wizard window to accessory/menu-bar presentation after onboarding. The bundle
+contains signed production and isolated-test helper apps plus Constitution
+defaults. Default Xcode Debug is a companion observer; the isolated scheme uses
+`~/.tron-dev`, port `9848`, and `com.tron.server.dev`.
 
 ### Documentation
 
-- `packages/mac-app/docs/architecture.md` — wizard + menu bar + helper-binary lifecycle
-- `packages/mac-app/docs/development.md` — workflow quick reference for Xcode Debug, local Release install testing, `tron dev`, and DMG release, plus XcodeGen/signing setup
+- [`packages/mac-app/docs/architecture.md`](../../mac-app/docs/architecture.md)
+  owns wrapper composition, wizard/menu behavior, lifecycle, and workflow
+  identities.
+- [`packages/mac-app/docs/development.md`](../../mac-app/docs/development.md)
+  owns XcodeGen, local build/test commands, helper staging, and DMG contributor
+  workflow.
 
 ---
 
@@ -3314,7 +2812,7 @@ tron manual-deploy --force  # Skip uncommitted-changes / test-failure prompts
 tron manual-deploy --ci     # Non-interactive: any failure aborts
 ```
 
-`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The command has no shorter deploy alias.
+`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. It creates a locally signed helper and validates that signature, but never submits developer builds to Apple's notary service. Production signing and notarization belong exclusively to the hosted DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The command has no shorter deploy alias.
 
 The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`) is retained for local contributor workflows:
 
@@ -3323,15 +2821,19 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 3. Builds the release binary (`cargo build --release`).
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
-6. Uses contributor-only artifacts directly under `~/.tron/internal/run/`.
-7. Seeds managed defaults and runtime support.
+6. Under the deploy lock, atomically publishes the prior signed helper bundle, CLI payload, launchd plist, entrypoint, and commit marker as one immutable rollback plan before replacing any of them.
+7. Leaves complete Tron Home, managed-profile, and secure auth initialization to Rust server startup.
 8. Starts the contributor service and waits for `/health`.
 9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.
-10. If start or health fails, attempts to restore `tron.bak`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, writes `last-deployment.json`, and exits nonzero.
+10. If start or health fails, restores `contributor-pair.bak/`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, and exits nonzero.
+
+`restart-sentinel.json` is the sole durable manual-deploy outcome projection.
+Its status drives the preflight blocker, while its commit fields retain
+transition context without a second write-only result file.
 
 ### Install Directory
 
-Base directories for `profiles`, `workspace`, and `internal` in the tree below are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename one of those directories, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
+Rust server startup completes the `profiles`, `workspace`, and `internal` roots in the tree below through Constitution and auth-storage owners. Contributor shell tooling creates only the `internal/run` payload it directly owns before startup. Base-directory paths are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename one of those directories, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
 
 ```
 ~/.tron/
@@ -3351,7 +2853,6 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |       +-- profile.toml           Sparse `[settings]` overrides
 +-- workspace/                    Active work and generated artifacts
 |   +-- projects/                  Project-local active work
-|   +-- plans/                     Plan files and task lists
 |   +-- reports/                   Analysis and investigation reports
 |   +-- renders/                   Rendered pages displayed in chat
 |   +-- screenshots/               Saved screenshots from runtime execution
@@ -3361,9 +2862,6 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
 |   +-- workers/                   Approved local package root for `tron.worker_package.v1` manifests
-+-- memory/                       User-authored memory/rule notes reserved for explicit future import
-|   +-- rules/                     Reserved detail files; not auto-injected by the current memory contract
-|   +-- sessions/                  Reserved session-scoped material; not a hidden prompt plane
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
     |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
@@ -3372,12 +2870,13 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock
-    |   +-- deploy.lock            Manual deploy concurrency lock
+    |   +-- deploy.lock            Persistent BSD mutex for pair readers/writers
+    |   +-- deploy.in-progress     Writer sentinel; survives a crashed pair update
+    |   +-- contributor-pair.bak/  Immutable signed-bundle/CLI/launch rollback plan during updates
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
     |   +-- deployed-commit        Last contributor helper commit that passed `/health`
-    |   +-- last-deployment.json   Last manual deploy/rollback result
     |   +-- restart-sentinel.json  Manual deploy restart state; `restarting` is a preflight blocker
     |   +-- Tron-Deploy.app        Contributor-only service bundle used by `tron install` / `manual-deploy`
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
@@ -3389,54 +2888,79 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 ```
 
 Notes:
-- The seeded top-level homes are `profiles`, `workspace`, `memory`, and `internal`; for a clean reset, move `~/.tron` aside rather than deleting individual subtrees.
+- The server-owned top-level homes are exactly `profiles`, `workspace`, and `internal`; for a clean reset, move `~/.tron` aside rather than deleting individual subtrees.
 - Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
 - Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
 
 ### Service (SMAppService)
 
-The production Mac app registers `com.tron.server` with `SMAppService.agent(plistName: "com.tron.server.plist")`. The notarized app must live at `/Applications/Tron.app`; the bundled LaunchAgent lives inside the app at `Contents/Library/LaunchAgents/com.tron.server.plist`, and its `BundleProgram` points at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` with `ProgramArguments` of `tron --port 9847 --quiet`. `AssociatedBundleIdentifiers` lists the wrapper bundle IDs (`com.tron.mac`, then `com.tron.mac.dev`) so Login Items/TCC attribution follows the responsible wrapper app. No production code writes `~/Library/LaunchAgents` or copies an app bundle into `~/.tron/internal/`. An enabled Login Item registration without a loaded launchd job is not treated as installed/running; the current app replaces that registration through SMAppService and still waits for the server heartbeat. If `launchctl print` reveals a stale event trigger pointing at a missing/mismatched helper executable, a stale parent bundle build number for the same installed app, stale launch constraints such as `needs LWCR update`, or a Debug/DerivedData parent owns the production label, the installed app boots it out, unregisters the stale registration, and re-registers `/Applications/Tron.app` before restarting.
+The installed `/Applications/Tron.app` is the only production owner of
+`com.tron.server`. Its tracked LaunchAgent points at the bundled
+`Tron Server.app` executable with `tron --port 9847 --quiet`; registration and
+repair go through `SMAppService`, never a writable `~/Library/LaunchAgents`
+copy. Loaded state is not health: install, restart, resume, command-mode start,
+and version finalization wait for the server before reporting success.
 
-Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; reopen `/Applications/Tron.app` or run `tron start`/`tron restart` so the wrapper repairs SMAppService before launchd executes the bundled server. Start-like menu actions, command-mode starts, contributor CLI start/restart, and update finalization wait for `/health` after ServiceManagement reports loaded; the app-version marker is recorded only after that health gate succeeds. Loaded-but-unhealthy helpers remain visible failures until `/Applications/Tron.app` is updated or reinstalled. Default Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData, and are companion-only: they can show the menu bar and observe the production server, but server pause/restart/uninstall/install actions are disabled. Use the `TronMac Isolated Install` scheme when testing the first-run/reinstall wizard from Xcode; it registers `com.tron.server.dev`, points `BundleProgram` at `Tron Server Dev.app`, runs on port `9848`, and stores data under `~/.tron-dev`. For agent-only iteration, `tron dev` stops the production LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only production registration path.
+Default Debug is companion-only. Isolated Debug owns `com.tron.server.dev`,
+port `9848`, and `~/.tron-dev`. `tron dev` temporarily takes over production
+port `9847` and restores the installed helper through the wrapper command-mode
+entry point. The Mac
+[architecture owner](../../mac-app/docs/architecture.md#workflows--variants)
+documents registration repair, variants, and mutual exclusion.
 
 ### DMG Release Pipeline
 
-End-users install `Tron.app` via a notarized DMG published to GitHub Releases. Release identity is centralized in `VERSION.env`: the first beta is canonical `0.1.0-beta.1`, Apple bundles receive numeric `MARKETING_VERSION = 0.1.0` / `CURRENT_PROJECT_VERSION = 1`, and human-facing UI renders `v0.1 (Beta 1)`. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on a matching `server-v*` tag push:
+Release identity is centralized in `VERSION.env`. Both hosted release workflows
+delegate mirror validation, release-tag matching, and GitHub step outputs to
+`scripts/tron version github-output`; the workflows do not parse version fields
+themselves. On a matching `server-v*` tag,
+[`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml)
+checks every version mirror, builds the locked Rust agent, verifies the tracked
+helper metadata, stages the executable into both helper bundles, generates the
+Xcode project, and archives `Tron.app`. Publication signs inside-out, notarizes
+the app, builds the DMG from a dedicated source directory, remounts it to
+require the production helper and `Applications` link, then signs/notarizes the
+DMG separately. `scripts/tron-release-notes` owns the dynamic release body and
+asset names; compare-link identity comes from hosted workflow context or an
+explicit local `--repo-url`, never Git remotes. The validated title comes from
+`scripts/tron-version`. The workflow creates a draft when no release exists, or
+updates existing assets without changing an already-published release's state, title,
+or notes.
 
-1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
-2. `scripts/tron version check` verifies `VERSION.env`, Cargo, Cargo.lock, Mac/iOS `project.yml`, custom bundle canonical version keys, and release docs agree before any artifact is built. A tag push must equal `server-v$(TRON_VERSION)`.
-3. `cargo build --release --bin tron --locked` in `packages/agent/`.
-4. Install XcodeGen + `create-dmg`.
-5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into both bundled helpers (`Tron Server.app` and `Tron Server Dev.app`) and writes both LaunchAgent plists.
-6. `xcodegen generate` inside `packages/mac-app/`.
-7. Create an isolated release keychain from the signing/notarization secrets, or use dry-run ad-hoc signing when secrets are absent.
-8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-9. Verify the bundled helper app, both helper executables, LaunchAgent plist, and profile defaults are present in the archive.
-10. Sign the helper apps first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
-11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
-12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
-13. Keep dSYMs in the Xcode archive/release artifacts for Apple crash diagnostics.
-14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 pump recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
-15. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
+Manual dispatch defaults to structural dry-run and never publishes; with
+`dry_run=false` and signing credentials it may exercise signed/notarized
+packaging. Only the explicit manual dry-run may omit the five required
+signing/notarization secrets; tag and manual live runs reject incomplete
+credentials before the build. PR coverage is an unsigned structural proof.
+Both remain fail-closed. Exact contributor commands live in the Mac
+[development guide](../../mac-app/docs/development.md#ci-pipeline).
 
-A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
+The iOS TestFlight pipeline lives at `.github/workflows/release-ios.yml` and triggers on the same `server-v*` tag push. It regenerates `packages/ios-app/TronMobile.xcodeproj` from XcodeGen, verifies `VERSION.env` mirrors, runs the iOS simulator tests, archives the `Tron` scheme with the `Prod` configuration (`com.tron.mobile` / App ID `6761511764`), exports an App Store Connect IPA with Xcode's `app-store-connect` export method, uploads with `asc builds upload`, waits for the Apple build to become valid, resolves TestFlight export compliance, updates What to Test notes, submits TestFlight beta review when Apple requires it for external testing, and branches on the ASC review state. First external builds for a new marketing version normally enter `WAITING_FOR_BETA_REVIEW`; CI treats that as a successful pending-review checkpoint instead of timing out. Once Apple approves the version, rerunning the workflow or uploading later builds in the same version continues to group validation and assigns the build to the public external TestFlight group when one is configured or can be auto-discovered. The public group is the same TestFlight link shown by the Mac onboarding QR code. The workflow installs current Homebrew `asc` and uses `asc testflight groups list` as its single fail-closed group-list command instead of carrying legacy command aliases. TestFlight group checks are warning-only after the build is uploaded and processed because successful public distribution must not be blocked by stale or renamed group variables that CI does not need to create the beta build. Reruns are idempotent: if the Apple build number already exists in App Store Connect, CI skips the binary upload and reuses that build for processing/distribution. Manual workflow runs default to `dry_run=true` and stop before ASC upload. Tag runs and manual `dry_run=false` runs require all three ASC secrets and reject incomplete credentials before the build; only the explicit manual dry-run may omit them.
 
-The iOS TestFlight pipeline lives at `.github/workflows/release-ios.yml` and triggers on the same `server-v*` tag push. It regenerates `packages/ios-app/TronMobile.xcodeproj` from XcodeGen, verifies `VERSION.env` mirrors, runs the iOS simulator tests, archives the `Tron` scheme with the `Prod` configuration (`com.tron.mobile` / App ID `6761511764`), exports an App Store Connect IPA with Xcode's `app-store-connect` export method, uploads with `asc builds upload`, waits for the Apple build to become valid, resolves TestFlight export compliance, updates What to Test notes, submits TestFlight beta review when Apple requires it for external testing, and branches on the ASC review state. First external builds for a new marketing version normally enter `WAITING_FOR_BETA_REVIEW`; CI treats that as a successful pending-review checkpoint instead of timing out. Once Apple approves the version, rerunning the workflow or uploading later builds in the same version continues to group validation and assigns the build to the public external TestFlight group when one is configured or can be auto-discovered. The public group is the same TestFlight link shown by the Mac onboarding QR code. TestFlight group checks are warning-only after the build is uploaded and processed because successful public distribution must not be blocked by stale or renamed group variables that CI does not need to create the beta build. Reruns are idempotent: if the Apple build number already exists in App Store Connect, CI skips the binary upload and reuses that build for processing/distribution. Manual workflow runs default to `dry_run=true` and stop before ASC upload.
-
-Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8_BASE64`. `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` and `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` are optional repository variables used for group assignment diagnostics; CI can auto-discover a single public-link group and otherwise skips group assignment without failing an uploaded/processed build. CI can export with automatic Xcode cloud signing through the ASC key, or with local signing secrets when `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_APPSTORE_PROFILE_BASE64`, and `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` are set. Local signing supports both manually managed App Store profiles and matching Xcode-managed App Store profiles. `ASC_KEY_ID` and the `.p8` path can be checked locally with `asc auth status --verbose` / `asc auth doctor`; `ASC_ISSUER_ID` is shown in App Store Connect under Users and Access -> Integrations -> App Store Connect API -> Team Keys. The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`; CI verifies that key in the archive/export and can apply the same App Store Connect API build setting to already-uploaded builds that predate the plist key. TestFlight/App Store Connect remains the distribution and audit surface for iOS binaries. Do not create separate GitHub releases for iOS unless an iOS artifact is intentionally published through GitHub too; the shared `VERSION.env` keeps Mac/server and iOS version labels aligned without adding duplicate tags.
+Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8_BASE64`. `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` and `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` are optional repository variables used for group assignment diagnostics; CI can auto-discover a single public-link group and otherwise skips group assignment without failing an uploaded/processed build. CI can export with automatic Xcode cloud signing through the ASC key, or with local signing secrets when `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_APPSTORE_PROFILE_BASE64`, and `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` are set. Local signing supports both manually managed App Store profiles and matching Xcode-managed App Store profiles. ASC reads its key from the job environment rather than a persisted local profile. Manual signing snapshots the user keychain list/default, reuses identical existing provisioning profiles, and records only profiles it creates; one fail-closed `always()` teardown restores the keychain preferences and removes all job-owned key, certificate, keychain, and profile material. `ASC_KEY_ID` and the `.p8` path can be checked locally with `asc auth status --verbose` / `asc auth doctor`; `ASC_ISSUER_ID` is shown in App Store Connect under Users and Access -> Integrations -> App Store Connect API -> Team Keys. The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`; CI verifies that key in the archive/export and can apply the same App Store Connect API build setting to already-uploaded builds that predate the plist key. TestFlight/App Store Connect remains the distribution and audit surface for iOS binaries. Do not create separate GitHub releases for iOS unless an iOS artifact is intentionally published through GitHub too; the shared `VERSION.env` keeps Mac/server and iOS version labels aligned without adding duplicate tags.
 
 ## Testing
 
 ### Rust Tests
 
 ```bash
+scripts/tron ci test                                    # Owned full Rust schedule
 cd packages/agent
-cargo test                   # Full suite (single `tron` crate)
-cargo test paths::           # Filter by module path
-cargo test --quiet           # Quiet output
+cargo test --lib paths::                                # Focused unit-test filter
+cargo test --test db_path_guard -- --nocapture          # Focused integration target
 ```
 
-The agent is a single `tron` crate, so `cargo test` runs everything: library unit tests, app/bootstrap tests, integration tests, doc tests, and static gates. Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
+The agent is a single `tron` crate. The repository-owned schedule runs its library and binary tests serially, then executes every top-level integration target discovered from `packages/agent/tests/*.rs`, with the process-global `integration` target last. Test counts are intentionally not hardcoded here because they drift quickly.
+
+For repository CI, Cargo's default auto-discovery of top-level
+`packages/agent/tests/*.rs` files owns the integration-target fact set. The
+source-owned guard is `packages/agent/tests/repository_workflow_invariants.rs`.
+`scripts/tron.d/quality.sh::run_tests` derives that set from the same source layout,
+runs each target once in deterministic order, and reserves `integration` for the
+final serial invocation because it shares process-global test-server plumbing. The
+repository workflow invariant compares the derived schedule with
+Cargo and verifies GitHub Actions delegates to `scripts/tron ci test` rather
+than carrying a second target list.
 
 ### iOS Tests
 
@@ -3449,48 +2973,19 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 ### CI
 
 ```bash
-tron ci                      # Run every check (fmt, check, clippy, test, bench, doc)
-tron ci fmt check            # Subset: formatting + compilation
-tron ci clippy test          # Subset: linting + tests
+scripts/tron ci                      # Run every Rust check (fmt, check, clippy, test, bench, doc)
+scripts/tron ci fmt check            # Subset: formatting + compilation
+scripts/tron ci clippy test          # Subset: linting + tests
 ```
 
-`tron ci test` runs Rust lib/bin tests serially first, then the named closeout targets:
-`db_path_guard`, `primitive_engine_teardown_plan_invariants`,
-`determinism_replayability_invariants`, `primitive_code_cleanup_invariants`,
-`hierarchical_rearchitecture_invariants`,
-`post_hra_adversarial_hardening_invariants`,
-`post_aha_adversarial_closeout_invariants`,
-`concurrency_scheduling_discipline_invariants`,
-`security_authority_capability_boundaries_invariants`,
-`observability_diagnostics_auditability_invariants`,
-`off_plan_saa_authorship_teardown_cleanup_invariants`,
-`data_integrity_storage_evolution_migration_discipline_invariants`,
-`public_protocol_api_contract_discipline_invariants`,
-`provider_model_boundary_discipline_invariants`,
-`performance_resource_governance_invariants`,
-`configuration_profile_environment_discipline_invariants`,
-`release_install_upgrade_rollback_discipline_invariants`,
-`ios_thin_client_generic_runtime_shell_invariants`,
-`developer_experience_repo_hygiene_automation_invariants`,
-`documentation_evidence_scorecard_integrity_invariants`,
-`self_sufficient_agent_runtime_readiness_invariants`,
-`primitive_minimality_closure_invariants`,
-`baseline_pre_restoration_closure_invariants`,
-`self_updating_worker_runtime_foundation_invariants`,
-`ios_self_adapting_agent_cockpit_baseline_invariants`,
-`ios_affordance_restoration_map_invariants`,
-`primitive_trace_execution`, and
-serial `integration`. GitHub delegates to this command instead of maintaining a
-second closeout-target list, and runs the Rust quality path for every repository
-change because the invariant targets inspect code, docs, scripts, workflows,
-and client source.
-
-Before restoring any feature from the primitive baseline feature index, the
-feature slice must satisfy the BPRC pre-restoration entry contract: worker or
-module owner, function/trigger contracts, resource/event schemas, authority
-policy, iOS parity decision, tests, docs, migration and retention policy,
-rollback strategy, and proof that the change is not a hardcoded harness
-expansion.
+`scripts/tron ci test` runs Rust lib/bin tests serially first, then derives and executes
+each top-level Cargo integration target sequentially and fail-fast. The
+`integration` target runs last with one test thread. GitHub delegates to this
+command instead of maintaining a second target list, and runs the Rust quality
+path for every repository change because integration targets may inspect code,
+docs, scripts, workflows, and client source. The aggregate check requires
+successful path detection and accepts skipped client jobs only for
+path-filtered pull requests; pushes and manual runs require both clients.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

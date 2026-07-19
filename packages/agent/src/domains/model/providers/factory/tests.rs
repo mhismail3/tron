@@ -1,18 +1,21 @@
 use super::*;
 
+fn test_factory(settings: &crate::domains::settings::ApiSettings) -> DefaultProviderFactory {
+    DefaultProviderFactory::with_client(settings, DefaultProviderFactory::build_http_client())
+}
+
 /// Build a factory that reads from a non-existent auth file (no credentials).
 fn no_auth_factory() -> DefaultProviderFactory {
     let settings = crate::domains::settings::TronSettings::default();
-    DefaultProviderFactory::new(&settings)
-        .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"))
+    test_factory(&settings.api).with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"))
 }
 
 #[test]
-fn factory_captures_anthropic_settings() {
+fn factory_projects_anthropic_settings_for_one_construction() {
     let mut settings = crate::domains::settings::TronSettings::default();
     settings.api.anthropic.client_id = "test-client-id".into();
 
-    let factory = DefaultProviderFactory::new(&settings);
+    let factory = test_factory(&settings.api);
     assert_eq!(factory.anthropic.client_id, "test-client-id");
 }
 
@@ -84,7 +87,7 @@ async fn factory_openai_api_key_uses_platform_profile() {
     .unwrap();
 
     let settings = crate::domains::settings::TronSettings::default();
-    let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+    let factory = test_factory(&settings.api).with_auth_path(path);
     let provider = factory.create_for_model("gpt-5.5").await.unwrap();
     assert_eq!(provider.model(), "gpt-5.5");
     assert_eq!(provider.context_window(), 1_050_000);
@@ -108,7 +111,7 @@ async fn factory_openai_oauth_uses_codex_profile() {
     .unwrap();
 
     let settings = crate::domains::settings::TronSettings::default();
-    let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+    let factory = test_factory(&settings.api).with_auth_path(path);
     let provider = factory.create_for_model("gpt-5.5").await.unwrap();
     assert_eq!(provider.model(), "gpt-5.5");
     assert_eq!(provider.context_window(), 272_000);
@@ -127,7 +130,7 @@ async fn factory_rejects_openai_model_unavailable_for_active_auth_path() {
     .unwrap();
 
     let settings = crate::domains::settings::TronSettings::default();
-    let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+    let factory = test_factory(&settings.api).with_auth_path(path);
     let err = match factory.create_for_model("gpt-5.3-codex-spark").await {
         Ok(_) => panic!("expected auth-path availability error"),
         Err(err) => err,
@@ -200,7 +203,7 @@ async fn factory_uses_api_key_when_no_oauth_exists() {
     std::fs::write(&path, "{}").unwrap();
 
     let settings = crate::domains::settings::TronSettings::default();
-    let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+    let factory = test_factory(&settings.api).with_auth_path(path);
 
     // No OAuth, no auth.json credentials → should fail with auth error
     let err = expect_auth_error(&factory, "claude-opus-4-6").await;
@@ -231,7 +234,7 @@ async fn factory_errors_when_oauth_fails_and_no_api_key() {
     .unwrap();
 
     let settings = crate::domains::settings::TronSettings::default();
-    let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+    let factory = test_factory(&settings.api).with_auth_path(path);
 
     // Should fail: OAuth exists but refresh fails, and no API key is available.
     let err = expect_auth_error(&factory, "claude-opus-4-6").await;
@@ -278,12 +281,12 @@ async fn factory_creates_ollama_26b() {
 }
 
 #[test]
-fn factory_captures_ollama_base_url() {
+fn factory_projects_ollama_base_url_for_one_construction() {
     let mut settings = crate::domains::settings::TronSettings::default();
     settings.api.ollama = Some(crate::domains::settings::OllamaApiSettings {
         base_url: "http://192.168.1.100:11434".into(),
     });
-    let factory = DefaultProviderFactory::new(&settings);
+    let factory = test_factory(&settings.api);
     assert_eq!(
         factory.ollama_base_url.as_deref(),
         Some("http://192.168.1.100:11434")
@@ -293,7 +296,7 @@ fn factory_captures_ollama_base_url() {
 #[test]
 fn factory_ollama_base_url_none_by_default() {
     let settings = crate::domains::settings::TronSettings::default();
-    let factory = DefaultProviderFactory::new(&settings);
+    let factory = test_factory(&settings.api);
     assert!(factory.ollama_base_url.is_none());
 }
 

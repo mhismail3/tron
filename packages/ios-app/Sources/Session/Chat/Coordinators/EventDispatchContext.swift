@@ -19,7 +19,9 @@ import Foundation
 
 @MainActor protocol TurnLifecycleEventHandler: AnyObject {
     func handleTurnStart(_ result: TurnStartPlugin.Result)
+    func handleResponseComplete(_ result: AgentResponseCompletePlugin.Result)
     func handleTurnEnd(_ result: TurnEndPlugin.Result)
+    func handleTurnFailed(_ result: TurnFailedPlugin.Result)
     func handleComplete()
     func handleAgentReady()
     func handleAgentError(_ message: String)
@@ -35,6 +37,7 @@ import Foundation
 
 @MainActor protocol ServerEventHandler: AnyObject {
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result)
+    func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result)
 }
 
 @MainActor protocol DisplayStreamEventHandler: AnyObject {

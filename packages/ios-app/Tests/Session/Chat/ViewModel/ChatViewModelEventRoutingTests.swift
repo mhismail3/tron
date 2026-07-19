@@ -95,7 +95,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         tokenRecord: TokenRecord? = nil,
         stopReason: String? = "end_turn",
         cost: Double? = nil,
-        contextLimit: Int? = nil
+        contextLimit: Int? = nil,
+        model: String? = nil
     ) -> TurnEndPlugin.Result {
         TurnEndPlugin.Result(
             turnNumber: turnNumber,
@@ -103,7 +104,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             tokenRecord: tokenRecord,
             stopReason: stopReason,
             cost: cost,
-            contextLimit: contextLimit
+            contextLimit: contextLimit,
+            model: model
         )
     }
 
@@ -255,24 +257,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.count, initialCount + 1)
     }
 
-    func test_capabilityInvocationStarted_tracksCapabilityInvocation() {
-        // Given
-        XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        let result = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
-            invocationId: "toolu_read123",
-            arguments: ["file_path": AnyCodable("/test.txt")]
-        )
-
-        // When
-        viewModel.handleCapabilityInvocationStarted(result)
-
-        // Then - capability invocation should be tracked
-        XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.count, 1)
-        XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.invocationId, "toolu_read123")
-        XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.modelPrimitiveName, "execute")
-    }
-
     // MARK: - Capability Progress Routing Tests
 
     func test_capabilityProgress_updatesChipProgressFields() {
@@ -348,7 +332,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     // MARK: - Capability Completion Routing Tests
 
-    func test_capabilityInvocationCompleted_updatesTrackedCapabilityInvocation() {
+    func test_capabilityInvocationCompleted_updatesCapabilityMessage() {
         // Given - start a capability first
         let invocationId = "toolu_test456"
         let startResult = makeCapabilityInvocationStartResult(
@@ -366,17 +350,20 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             durationMs: 50
         )
         viewModel.handleCapabilityInvocationCompleted(endResult)
+        viewModel.flushUIUpdateQueue()
 
-        // Then - tracked capability invocation should have result
-        if let record = viewModel.currentTurnCapabilityInvocations.first(where: { $0.invocationId == invocationId }) {
-            XCTAssertEqual(record.result, "hello\n")
-            XCTAssertFalse(record.isError)
-        } else {
-            XCTFail("Capability invocation record not found")
+        guard let index = viewModel.messages.lastIndex(where: {
+            if case .capabilityInvocation(let invocation) = $0.content { return invocation.id == invocationId }
+            return false
+        }) else { return XCTFail("Capability invocation message not found") }
+        guard case .capabilityInvocation(let invocation) = viewModel.messages[index].content else {
+            return XCTFail("Expected capability invocation content")
         }
+        XCTAssertEqual(invocation.result, "hello\n")
+        XCTAssertEqual(invocation.status, .success)
     }
 
-    func test_capabilityInvocationCompleted_error_marksCapabilityInvocationAsError() {
+    func test_capabilityInvocationCompleted_error_marksCapabilityMessageAsError() {
         // Given - start a capability
         let invocationId = "toolu_error789"
         let startResult = makeCapabilityInvocationStartResult(
@@ -394,11 +381,16 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             durationMs: 10
         )
         viewModel.handleCapabilityInvocationCompleted(endResult)
+        viewModel.flushUIUpdateQueue()
 
-        // Then - capability invocation should be marked as error
-        if let record = viewModel.currentTurnCapabilityInvocations.first(where: { $0.invocationId == invocationId }) {
-            XCTAssertTrue(record.isError)
+        guard let index = viewModel.messages.lastIndex(where: {
+            if case .capabilityInvocation(let invocation) = $0.content { return invocation.id == invocationId }
+            return false
+        }) else { return XCTFail("Capability invocation message not found") }
+        guard case .capabilityInvocation(let invocation) = viewModel.messages[index].content else {
+            return XCTFail("Expected capability invocation content")
         }
+        XCTAssertEqual(invocation.status, .error)
     }
 
     // MARK: - Turn Lifecycle Routing Tests
@@ -444,20 +436,29 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.agentPhase, .idle)
     }
 
+    func test_streamRecoveryRequiredAdvancesReconstructionRequest() {
+        let initialGeneration = viewModel.streamRecoveryRequestGeneration
+
+        viewModel.handleStreamRecoveryRequired(
+            StreamRecoveryRequiredPlugin.Result(
+                reason: "source_lag",
+                droppedEventCount: 3
+            )
+        )
+
+        XCTAssertEqual(viewModel.streamRecoveryRequestGeneration, initialGeneration + 1)
+    }
+
     func test_turnStart_resetsCapabilityTracking() {
         // Given - have some capability invocations from previous turn
-        viewModel.currentTurnCapabilityInvocations = [
-            CapabilityInvocationRecord(invocationId: "old1", modelPrimitiveName: "execute", arguments: "{}")
-        ]
-        viewModel.currentCapabilityInvocationMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
+        viewModel.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
         // Then - capability tracking should be cleared
-        XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     func test_turnStart_clearsThinkingMessageId() {
@@ -513,7 +514,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     func test_complete_setsProcessingFalse() {
         // Given
-        viewModel.isProcessing = true
+        viewModel.agentPhase = .processing
 
         // When
         viewModel.handleComplete()
@@ -525,17 +526,13 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     func test_complete_clearsCapabilityTracking() {
         // Given: agent must be processing for handleComplete to transition
         viewModel.agentPhase = .processing
-        viewModel.currentTurnCapabilityInvocations = [
-            CapabilityInvocationRecord(invocationId: "t1", modelPrimitiveName: "execute", arguments: "{}")
-        ]
-        viewModel.currentCapabilityInvocationMessages = [UUID(): ChatMessage(role: .assistant, content: .text("test"))]
+        viewModel.currentTurnCapabilityMessageIds = [UUID()]
 
         // When
         viewModel.handleComplete()
 
         // Then
-        XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
     }
 
     // MARK: - Full Turn Flow Integration Test
@@ -543,7 +540,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     func test_fullTurnFlow_startToComplete() {
         // Given - initial state
         let initialMessageCount = viewModel.messages.count
-        viewModel.isProcessing = true
+        viewModel.agentPhase = .processing
 
         // When - simulate a full turn
 
@@ -591,8 +588,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         // Then - verify final state
         XCTAssertFalse(viewModel.isProcessing)
-        XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
-        XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
+        XCTAssertTrue(viewModel.currentTurnCapabilityMessageIds.isEmpty)
 
         // Should have: thinking message + capability message = at least 2 new messages
         XCTAssertGreaterThanOrEqual(viewModel.messages.count, initialMessageCount + 2)

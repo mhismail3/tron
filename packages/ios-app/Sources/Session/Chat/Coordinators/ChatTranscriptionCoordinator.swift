@@ -1,12 +1,11 @@
 import Foundation
 
 @MainActor
-protocol ChatTranscriptionContext: LoggingContext {
+protocol ChatTranscriptionContext: AnyObject {
     var isRecording: Bool { get }
     var isProcessing: Bool { get }
     var isTranscribing: Bool { get set }
     var inputText: String { get set }
-    var maxRecordingDuration: TimeInterval { get }
 
     func requireTranscriptionReady() async throws
     func startRecording() async throws

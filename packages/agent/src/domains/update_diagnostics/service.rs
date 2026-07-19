@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    WorkerId,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -16,19 +16,19 @@ use super::contract::{
 };
 use super::projection::{inspected_update_diagnostic, update_diagnostic_summary};
 use super::validation::*;
-use super::{Deps, UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID};
+use super::{UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID};
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.update_diagnostics.idempotency.v1";
 const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.update_diagnostics.idempotency.v1\0";
 
 pub(crate) async fn record_update_diagnostic_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_raw_update_fields(payload)?;
-    ensure_write_authority(deps, invocation, "update_diagnostic_record").await?;
+    ensure_write_authority(engine_host, invocation, "update_diagnostic_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let diagnostic_id = optional_string(payload, "diagnosticId")?
@@ -68,8 +68,7 @@ pub(crate) async fn record_update_diagnostic_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = update_diagnostic_resource_id(&scope, &diagnostic_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -112,8 +111,7 @@ pub(crate) async fn record_update_diagnostic_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: UPDATE_DIAGNOSTIC_RECORD_KIND.to_owned(),
@@ -139,7 +137,7 @@ pub(crate) async fn record_update_diagnostic_value_at(
         invalid("update diagnostic resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "update_diagnostics.recorded",
         &resource,
@@ -162,17 +160,17 @@ pub(crate) async fn record_update_diagnostic_value_at(
         "idempotentReplay": false,
         "updateDiagnosticResourceId": resource.resource_id,
         "updateDiagnosticVersionId": version_id,
-        "record": update_diagnostic_summary_for_resource(deps, &resource).await?,
+        "record": update_diagnostic_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "update_diagnostic")]
     }))
 }
 
 pub(crate) async fn list_update_diagnostics_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "update_diagnostic_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "update_diagnostic_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -182,8 +180,7 @@ pub(crate) async fn list_update_diagnostics_value(
     let release_channel = optional_string(payload, "releaseChannel")?;
     let diagnostic_status = optional_string(payload, "diagnosticStatus")?;
     let signature_status = optional_string(payload, "signatureStatus")?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(UPDATE_DIAGNOSTIC_RECORD_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -199,8 +196,7 @@ pub(crate) async fn list_update_diagnostics_value(
     let truncated = resources.len() > limit;
     let mut records = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -246,16 +242,15 @@ pub(crate) async fn list_update_diagnostics_value(
 }
 
 pub(crate) async fn inspect_update_diagnostics_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "update_diagnostic_inspect").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "update_diagnostic_inspect").await?;
     let resource_id = required_string(payload, "updateDiagnosticResourceId")?;
     validate_update_diagnostic_resource_id(&resource_id)?;
     let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -349,11 +344,10 @@ fn update_diagnostic_record(input: UpdateDiagnosticRecordInput<'_>) -> Value {
 }
 
 async fn update_diagnostic_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?
@@ -423,13 +417,13 @@ fn validate_update_diagnostic_resource_id(value: &str) -> Result<(), CapabilityE
 }
 
 async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: UPDATE_DIAGNOSTICS_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

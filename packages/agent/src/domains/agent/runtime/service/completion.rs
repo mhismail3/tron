@@ -1,19 +1,20 @@
 //! Prompt-run completion and recovery.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 
 use tracing::{info, warn};
 
 use super::{
-    PromptEngineCausality, PromptRunCleanup, load_session_update_data,
+    PromptEngineCausality, PromptRunCleanup, load_session_update_event,
     publish_prompt_runtime_stream,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
 };
-use crate::shared::protocol::events::{BaseEvent, error_event};
+use crate::shared::protocol::events::{BaseEvent, TronEvent, error_event};
 use crate::shared::server::failure::{
-    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED, RUNTIME_RUN_ERROR,
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_RUN_ERROR,
 };
 
 #[derive(Debug, PartialEq)]
@@ -24,11 +25,7 @@ struct AgentResultMessage {
 
 pub(super) struct PromptRunCompletion<'a> {
     pub(super) result: crate::domains::agent::r#loop::types::RunResult,
-    pub(super) persister:
-        Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
     pub(super) run_cleanup: &'a mut PromptRunCleanup,
-    pub(super) session_manager:
-        Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(super) broadcast: Arc<crate::domains::agent::r#loop::EventEmitter>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
@@ -37,14 +34,13 @@ pub(super) struct PromptRunCompletion<'a> {
     pub(super) run_id: String,
     pub(super) provider_type: String,
     pub(super) model_for_error: String,
+    pub(super) sequence_counter: Option<Arc<AtomicI64>>,
 }
 
 pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     let PromptRunCompletion {
         result,
-        persister,
         run_cleanup,
-        session_manager,
         event_store,
         broadcast,
         engine_host,
@@ -53,6 +49,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         run_id,
         provider_type,
         model_for_error,
+        sequence_counter,
     } = args;
 
     info!(
@@ -67,17 +64,32 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         has_error = result.error.is_some(),
         "agent prompt run finalizing"
     );
-    let _ = persister.flush().await;
-    persist_interrupted_if_needed(&persister, &session_id, &result).await;
-    emit_run_error_if_needed(
-        &broadcast,
-        &session_id,
-        &provider_type,
-        &model_for_error,
-        &result,
-    );
     let agent_result_message =
         resolve_agent_result_message(&event_store, &session_id, result.error.as_deref());
+    // INVARIANT: the active-run slot owns every event that consumes its shared
+    // sequence counter. Publish the final session metadata first. Terminal
+    // error/idle/ready events and matching run release then share one registry
+    // boundary, so event-triggered prompt admission cannot observe SessionBusy
+    // and no old terminal event can race a replacement run.
+    emit_session_update(
+        &event_store,
+        &broadcast,
+        &session_id,
+        sequence_counter.as_deref(),
+    )
+    .await;
+    let terminal_failure =
+        run_error_event_if_needed(&session_id, &provider_type, &model_for_error, &result);
+    let _ = run_cleanup.release_with_terminal(|| {
+        publish_terminal_lifecycle(
+            &broadcast,
+            &session_id,
+            result.error.clone(),
+            sequence_counter.as_deref(),
+            terminal_failure,
+        );
+    });
+
     let agent_result_refs = create_agent_result_resource(
         &engine_host,
         engine_causality.as_ref(),
@@ -88,9 +100,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     )
     .await;
     let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
-
-    run_cleanup.release();
-    emit_session_update(&session_manager, &event_store, &broadcast, &session_id).await;
 
     info!(
         component = "agent.runtime",
@@ -119,6 +128,49 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         }),
     )
     .await;
+}
+
+pub(super) fn publish_terminal_lifecycle(
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+    session_id: &str,
+    error: Option<String>,
+    sequence_counter: Option<&AtomicI64>,
+    failure_event: Option<TronEvent>,
+) {
+    emit_maybe_sequenced(
+        broadcast,
+        TronEvent::AgentEnd {
+            base: BaseEvent::now(session_id),
+            error,
+        },
+        sequence_counter,
+    );
+    if let Some(event) = failure_event {
+        emit_maybe_sequenced(broadcast, event, sequence_counter);
+    }
+    for event in [
+        TronEvent::SessionProcessingChanged {
+            base: BaseEvent::now(session_id),
+            is_processing: false,
+        },
+        TronEvent::AgentReady {
+            base: BaseEvent::now(session_id),
+        },
+    ] {
+        emit_maybe_sequenced(broadcast, event, sequence_counter);
+    }
+}
+
+fn emit_maybe_sequenced(
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+    event: TronEvent,
+    sequence_counter: Option<&AtomicI64>,
+) {
+    if let Some(counter) = sequence_counter {
+        let _ = broadcast.emit_sequenced(event, counter);
+    } else {
+        let _ = broadcast.emit(event);
+    }
 }
 
 async fn create_agent_result_resource(
@@ -260,59 +312,14 @@ fn assistant_content_text(content: &serde_json::Value) -> String {
     }
 }
 
-async fn persist_interrupted_if_needed(
-    persister: &Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
-    session_id: &str,
-    result: &crate::domains::agent::r#loop::types::RunResult,
-) {
-    if !result.interrupted {
-        return;
-    }
-    let failure = FailureEnvelope::new(
-        RUNTIME_CANCELLED,
-        FailureCategory::Cancelled,
-        "Interrupted by user",
-        false,
-        true,
-        FailureOrigin::AgentRuntime,
-    )
-    .with_session_id(Some(session_id.to_owned()));
-    if let Err(error) = persister
-        .append(
-            session_id,
-            crate::domains::session::event_store::EventType::TurnFailed,
-            serde_json::json!({
-                "turn": result.turns_executed,
-                "error": failure.message.clone(),
-                "code": failure.code.clone(),
-                "category": failure.category.as_str(),
-                "retryable": failure.retryable,
-                "recoverable": failure.recoverable,
-                "origin": failure.origin.as_str(),
-                "details": failure.details_with_failure(),
-                "partialContent": null,
-            }),
-        )
-        .await
-    {
-        tracing::error!(
-            session_id = %session_id,
-            error = %error,
-            "failed to persist interrupted turn failure"
-        );
-    }
-    let _ = persister.flush().await;
-}
-
-fn emit_run_error_if_needed(
-    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
+fn run_error_event_if_needed(
     session_id: &str,
     provider_type: &str,
     model_for_error: &str,
     result: &crate::domains::agent::r#loop::types::RunResult,
-) {
+) -> Option<TronEvent> {
     let Some(ref error_message) = result.error else {
-        return;
+        return None;
     };
     let failure = FailureEnvelope::new(
         RUNTIME_RUN_ERROR,
@@ -324,58 +331,29 @@ fn emit_run_error_if_needed(
     )
     .with_provider_model(provider_type, model_for_error)
     .with_details(Some(serde_json::json!({ "source": "run_result" })));
-    let _ = broadcast.emit(error_event(BaseEvent::now(session_id), &failure, None));
+    Some(error_event(BaseEvent::now(session_id), &failure, None))
 }
 
 async fn emit_session_update(
-    session_manager: &Arc<
-        crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager,
-    >,
     event_store: &Arc<crate::domains::session::event_store::EventStore>,
     broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     session_id: &str,
+    sequence_counter: Option<&AtomicI64>,
 ) {
-    match load_session_update_data(
-        session_manager.clone(),
-        event_store.clone(),
-        session_id.to_owned(),
-    )
-    .await
-    {
-        Ok(Some(update)) => {
-            let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::SessionUpdated {
-                base: crate::shared::protocol::events::BaseEvent::now(session_id),
-                title: update.session.title.clone(),
-                model: Some(update.session.latest_model.clone()),
-                event_count: Some(update.session.event_count),
-                turn_count: Some(update.session.turn_count),
-                message_count: Some(update.session.message_count),
-                input_tokens: Some(update.session.total_input_tokens),
-                output_tokens: Some(update.session.total_output_tokens),
-                last_turn_input_tokens: Some(update.session.last_turn_input_tokens),
-                cache_read_tokens: Some(update.session.total_cache_read_tokens),
-                cache_creation_tokens: Some(update.session.total_cache_creation_tokens),
-                cost: Some(update.session.total_cost),
-                last_activity: update.session.last_activity_at.clone(),
-                is_active: false,
-                last_user_prompt: update
-                    .preview
-                    .as_ref()
-                    .and_then(|preview| preview.last_user_prompt.clone()),
-                last_assistant_response: update
-                    .preview
-                    .as_ref()
-                    .and_then(|preview| preview.last_assistant_response.clone()),
-                parent_session_id: update.session.parent_session_id.clone(),
-                activity_lines: Some(update.activity_lines),
-            });
+    match load_session_update_event(event_store.clone(), session_id.to_owned()).await {
+        Ok(Some(event)) => {
+            if let Some(counter) = sequence_counter {
+                let _ = broadcast.emit_sequenced(event, counter);
+            } else {
+                let _ = broadcast.emit(event);
+            }
         }
         Ok(None) => {}
         Err(error) => {
             warn!(
                 session_id = %session_id,
                 error = %error,
-                "failed to load session update data"
+                "failed to load session update event"
             );
         }
     }
@@ -457,6 +435,50 @@ mod tests {
                 text: "run failed".into(),
                 event_ref: Some("evt-call".into()),
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_lifecycle_is_contiguous_and_ready_is_last() {
+        let broadcast = Arc::new(crate::domains::agent::r#loop::EventEmitter::new());
+        let mut events = broadcast.subscribe();
+        let sequence = AtomicI64::new(10);
+        let failure = FailureEnvelope::new(
+            RUNTIME_RUN_ERROR,
+            FailureCategory::Unknown,
+            "provider stopped",
+            false,
+            false,
+            FailureOrigin::AgentRuntime,
+        );
+
+        publish_terminal_lifecycle(
+            &broadcast,
+            "session-a",
+            Some("provider stopped".to_owned()),
+            Some(&sequence),
+            Some(error_event(BaseEvent::now("session-a"), &failure, None)),
+        );
+
+        let received = [
+            events.recv().await.unwrap(),
+            events.recv().await.unwrap(),
+            events.recv().await.unwrap(),
+            events.recv().await.unwrap(),
+        ];
+        assert!(matches!(&received[0], TronEvent::AgentEnd { .. }));
+        assert!(matches!(&received[1], TronEvent::Error { .. }));
+        assert!(matches!(
+            &received[2],
+            TronEvent::SessionProcessingChanged {
+                is_processing: false,
+                ..
+            }
+        ));
+        assert!(matches!(&received[3], TronEvent::AgentReady { .. }));
+        assert_eq!(
+            received.iter().map(TronEvent::sequence).collect::<Vec<_>>(),
+            vec![Some(11), Some(12), Some(13), Some(14)]
         );
     }
 }

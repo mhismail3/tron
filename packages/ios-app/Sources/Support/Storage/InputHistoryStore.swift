@@ -9,20 +9,22 @@ import Foundation
 final class InputHistoryStore {
     private let storageKey = "tron.inputHistory"
     private let maxHistorySize = 100
+    private let defaults: UserDefaults
 
     private(set) var history: [String] = []
     private(set) var currentIndex: Int = -1
 
     private var tempInput: String = ""
 
-    init() {
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
         loadHistory()
     }
 
     // MARK: - Persistence
 
     private func loadHistory() {
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+        if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([String].self, from: data) {
             history = decoded
             logger.debug("Loaded \(decoded.count) history items", category: .general)
@@ -31,7 +33,7 @@ final class InputHistoryStore {
 
     private func saveHistory() {
         if let data = try? JSONEncoder().encode(history) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            defaults.set(data, forKey: storageKey)
         }
     }
 
@@ -112,6 +114,6 @@ final class InputHistoryStore {
         history = []
         currentIndex = -1
         tempInput = ""
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        defaults.removeObject(forKey: storageKey)
     }
 }

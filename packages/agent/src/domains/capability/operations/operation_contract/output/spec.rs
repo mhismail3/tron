@@ -52,6 +52,13 @@ const COMMON_EXCLUSIONS: &[&str] = &[
     "absolute and parent-relative local paths",
 ];
 
+const FILESYSTEM_CONTENT_EXCLUSIONS: &[&str] = &[
+    "secrets and credentials",
+    "absolute and parent-relative local paths",
+    "raw authority grant and provider invocation identifiers",
+    "unbounded file content search previews and diffs",
+];
+
 pub(super) const fn contract(operation: OperationId) -> OutputContract {
     OutputContract {
         profile: profile(operation),
@@ -76,6 +83,99 @@ pub(super) const fn unsupported_contract() -> OutputContract {
 
 const fn semantic_evidence(operation: OperationId) -> SemanticEvidenceContract {
     match operation {
+        OperationId::FilesystemRead => SemanticEvidenceContract {
+            description: "Bounded redacted file-text chunks plus trusted-root relative path, hash, size, binary state, and explicit source/provider truncation proof.",
+            required_fact_fields: &[
+                "primitiveOperation",
+                "status",
+                "filesystem.schemaVersion",
+                "filesystem.operation",
+                "filesystem.path.root",
+                "filesystem.path.relativePath",
+                "filesystem.file.sizeBytes",
+                "filesystem.file.isBinary",
+                "filesystem.file.textAvailable",
+                "filesystem.file.writeSafeFromProjection",
+                "filesystem.file.contentProjection.sourceTruncated",
+                "filesystem.file.contentProjection.providerTruncated",
+                "filesystem.file.contentProjection.truncated",
+                "filesystem.file.contentProjection.redactionPerformed",
+            ],
+            expected_collection_fields: &["filesystem.file.contentProjection.chunks"],
+            expected_resource_kinds: &[],
+            safety_exclusions: FILESYSTEM_CONTENT_EXCLUSIONS,
+        },
+        OperationId::FilesystemList => SemanticEvidenceContract {
+            description: "Bounded directory-entry rows with trusted-root relative paths and explicit source/provider truncation proof.",
+            required_fact_fields: &[
+                "primitiveOperation",
+                "status",
+                "filesystem.schemaVersion",
+                "filesystem.operation",
+                "filesystem.path.root",
+                "filesystem.path.relativePath",
+                "filesystem.resultProjection.sourceTruncated",
+                "filesystem.resultProjection.sourceResultLimitReached",
+                "filesystem.resultProjection.sourceWalkLimitReached",
+                "filesystem.resultProjection.sourceTotalItems",
+                "filesystem.resultProjection.sourceReturnedItems",
+                "filesystem.resultProjection.sourceOmittedItems",
+            ],
+            expected_collection_fields: &["filesystem.entries"],
+            expected_resource_kinds: &[],
+            safety_exclusions: FILESYSTEM_CONTENT_EXCLUSIONS,
+        },
+        OperationId::FilesystemFind | OperationId::FilesystemGlob => SemanticEvidenceContract {
+            description: "Bounded filesystem match rows with trusted-root relative paths and explicit source/provider truncation proof.",
+            required_fact_fields: &[
+                "primitiveOperation",
+                "status",
+                "filesystem.schemaVersion",
+                "filesystem.operation",
+                "filesystem.path.root",
+                "filesystem.path.relativePath",
+                "filesystem.resultProjection.sourceTruncated",
+                "filesystem.resultProjection.sourceResultLimitReached",
+                "filesystem.resultProjection.sourceWalkLimitReached",
+            ],
+            expected_collection_fields: &["filesystem.matches"],
+            expected_resource_kinds: &[],
+            safety_exclusions: FILESYSTEM_CONTENT_EXCLUSIONS,
+        },
+        OperationId::FilesystemSearchText => SemanticEvidenceContract {
+            description: "Bounded redacted text-match previews with relative paths, line/hash evidence, and explicit source/provider truncation proof.",
+            required_fact_fields: &[
+                "primitiveOperation",
+                "status",
+                "filesystem.schemaVersion",
+                "filesystem.operation",
+                "filesystem.path.root",
+                "filesystem.path.relativePath",
+                "filesystem.resultProjection.sourceTruncated",
+                "filesystem.resultProjection.sourceResultLimitReached",
+                "filesystem.resultProjection.sourceWalkLimitReached",
+            ],
+            expected_collection_fields: &["filesystem.matches"],
+            expected_resource_kinds: &[],
+            safety_exclusions: FILESYSTEM_CONTENT_EXCLUSIONS,
+        },
+        OperationId::FilesystemDiff => SemanticEvidenceContract {
+            description: "Bounded redacted read-only diff chunks plus relative path, before/after hashes, and explicit source/provider truncation proof.",
+            required_fact_fields: &[
+                "primitiveOperation",
+                "status",
+                "filesystem.schemaVersion",
+                "filesystem.path.root",
+                "filesystem.path.relativePath",
+                "filesystem.diffProjection.sourceTruncated",
+                "filesystem.diffProjection.providerTruncated",
+                "filesystem.diffProjection.truncated",
+                "filesystem.diffProjection.redactionPerformed",
+            ],
+            expected_collection_fields: &["filesystem.diffProjection.chunks"],
+            expected_resource_kinds: &[],
+            safety_exclusions: FILESYSTEM_CONTENT_EXCLUSIONS,
+        },
         OperationId::GitStatus => SemanticEvidenceContract {
             description: "Provider-safe repository status facts, bounded change counts, optional durable resource evidence, and explicitly non-durable content-free navigation inputs for repository tree custody.",
             required_fact_fields: &[

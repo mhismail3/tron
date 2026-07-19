@@ -9,6 +9,8 @@
 //! - `response.reasoning_text.delta` → `ThinkingStart` + `ThinkingDelta` (full reasoning)
 //! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta` (summary delta)
 //! - `response.completed` → `ThinkingEnd`, `TextEnd`, `CapabilityInvocationDraftEnd`, `Done`
+//! - `response.incomplete` → the same terminal lifecycle with a normalized incomplete stop reason
+//! - `response.failed` / `error` → typed [`ProviderError`] values
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
 //! shared `stream_common` module. OpenAI-specific reasoning dedup and capability invocation
@@ -17,6 +19,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
+use crate::domains::model::providers::shared::provider::{ProviderError, ProviderResult};
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::domains::model::providers::{
     CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
@@ -72,12 +75,21 @@ pub fn create_stream_state() -> StreamState {
     }
 }
 
-/// Process a single SSE event and return corresponding [`StreamEvent`]s.
+/// Process one provider SSE event, retaining failed terminal responses as
+/// provider-native errors instead of transient canonical stream events.
 #[must_use]
-pub fn process_stream_event(
+pub(super) fn process_provider_stream_event(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
-) -> Vec<StreamEvent> {
+) -> ProviderResult<Vec<StreamEvent>> {
+    match event.event_type {
+        SseEventType::Failed | SseEventType::Error => Err(provider_terminal_error(event)),
+        _ => Ok(process_stream_event(event, state)),
+    }
+}
+
+/// Process a non-failing SSE event and return corresponding [`StreamEvent`]s.
+fn process_stream_event(event: &ResponsesSseEvent, state: &mut StreamState) -> Vec<StreamEvent> {
     match event.event_type {
         SseEventType::OutputTextDelta => handle_content_part_delta(event, state),
         SseEventType::OutputItemAdded => handle_output_item_added(event, state),
@@ -89,7 +101,50 @@ pub fn process_stream_event(
         }
         SseEventType::FunctionCallArgsDelta => handle_function_call_args_delta(event, state),
         SseEventType::Completed => handle_response_completed(event, state),
-        SseEventType::Unknown => Vec::new(),
+        SseEventType::Incomplete => handle_response_incomplete(event, state),
+        SseEventType::Failed | SseEventType::Error | SseEventType::Unknown => Vec::new(),
+    }
+}
+
+fn provider_terminal_error(event: &ResponsesSseEvent) -> ProviderError {
+    let (code, message) = match event.event_type {
+        SseEventType::Failed => event.response.as_ref().and_then(|response| {
+            response
+                .error
+                .as_ref()
+                .map(|error| (error.code.clone(), error.message.clone()))
+        }),
+        SseEventType::Error => Some((
+            event.code.clone(),
+            event.message.clone().unwrap_or_default(),
+        )),
+        _ => None,
+    }
+    .unwrap_or_else(|| (None, String::new()));
+    let message = if message.trim().is_empty() {
+        match event.event_type {
+            SseEventType::Failed => "OpenAI response failed without error details",
+            _ => "OpenAI stream reported an error without details",
+        }
+        .to_owned()
+    } else {
+        message
+    };
+    if code.as_deref() == Some("rate_limit_exceeded") {
+        return ProviderError::RateLimited {
+            retry_after_ms: 0,
+            message,
+            code,
+        };
+    }
+    let retryable = matches!(
+        code.as_deref(),
+        Some("server_error" | "vector_store_timeout")
+    );
+    ProviderError::StreamApi {
+        message,
+        code,
+        retryable,
     }
 }
 
@@ -235,7 +290,25 @@ fn handle_response_completed(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
 ) -> Vec<StreamEvent> {
-    process_completed_response(event, state)
+    process_terminal_response(event, state, None)
+}
+
+/// Handle `response.incomplete` as a terminal partial result.
+fn handle_response_incomplete(
+    event: &ResponsesSseEvent,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
+    let stop_reason = event
+        .response
+        .as_ref()
+        .and_then(|response| response.incomplete_details.as_ref())
+        .and_then(|details| details.reason.as_deref())
+        .map_or("incomplete", |reason| match reason {
+            "max_output_tokens" => "max_tokens",
+            "content_filter" => "refusal",
+            _ => "incomplete",
+        });
+    process_terminal_response(event, state, Some(stop_reason))
 }
 
 /// Handle `response.output_item.done` — extract reasoning summary if not already streamed.
@@ -317,9 +390,10 @@ fn capability_invocation_from_item_state(
 }
 
 /// Process the `response.completed` event and emit final events.
-fn process_completed_response(
+fn process_terminal_response(
     event: &ResponsesSseEvent,
     state: &mut StreamState,
+    stop_reason_override: Option<&str>,
 ) -> Vec<StreamEvent> {
     let mut events = Vec::new();
     let Some(response) = &event.response else {
@@ -376,7 +450,7 @@ fn process_completed_response(
 
     // Build final done event
     if !state.capability_argument_failed {
-        events.push(build_done_event(state, response));
+        events.push(build_done_event(state, response, stop_reason_override));
     }
 
     events
@@ -474,6 +548,7 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
 fn build_done_event(
     state: &StreamState,
     response: &super::types::ResponsesResponse,
+    stop_reason_override: Option<&str>,
 ) -> StreamEvent {
     let mut content: Vec<AssistantContent> = Vec::new();
     let mut has_valid_capability_invocation = false;
@@ -605,7 +680,7 @@ fn build_done_event(
     let stop_reason = if has_valid_capability_invocation {
         "capability_invocation"
     } else {
-        "end_turn"
+        stop_reason_override.unwrap_or("end_turn")
     };
 
     StreamEvent::Done {

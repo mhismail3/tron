@@ -6,7 +6,6 @@ struct ChatSheetModifier: ViewModifier {
     let sheetCoordinator: SheetCoordinator
     let viewModel: ChatViewModel
     let sessionId: String
-    let workspaceDeleted: Bool
 
     func body(content: Content) -> some View {
         let observedActiveSheet = sheetCoordinator.activeSheet
@@ -16,7 +15,6 @@ struct ChatSheetModifier: ViewModifier {
                     sheet: sheet,
                     viewModel: viewModel,
                     sessionId: sessionId,
-                    workspaceDeleted: workspaceDeleted,
                     sheetCoordinator: sheetCoordinator
                 )
             }
@@ -44,14 +42,12 @@ extension View {
     func chatSheets(
         coordinator: SheetCoordinator,
         viewModel: ChatViewModel,
-        sessionId: String,
-        workspaceDeleted: Bool
+        sessionId: String
     ) -> some View {
         modifier(ChatSheetModifier(
             sheetCoordinator: coordinator,
             viewModel: viewModel,
-            sessionId: sessionId,
-            workspaceDeleted: workspaceDeleted
+            sessionId: sessionId
         ))
     }
 }

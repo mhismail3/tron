@@ -9,16 +9,14 @@ extension SourceGuardTests {
         let checkedFiles = [
             "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
             "Sources/Engine/Transport/Clients/AgentClient.swift",
-            "Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
-            "Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
             "Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
             "Tests/Engine/Transport/Clients/AgentClientTests.swift",
-            "Tests/Engine/Transport/Clients/Repositories/DefaultAgentRepositoryTests.swift",
             "Tests/Engine/Protocol/EngineProtocolTypesTests.swift",
         ]
         let forbiddenNeedles: [(String, String)] = [
-            ("Image" + "Attachment", "image-only prompt DTO"),
+            ("struct Image" + "Attachment", "image-only prompt DTO"),
+            ("Image" + "Attachment(", "image-only prompt DTO construction"),
             ("last" + "Images", "image-only mock state"),
             ("last" + "Send" + "Prompt" + "Images", "image-only repository mock state"),
             ("images:", "image-only prompt argument"),

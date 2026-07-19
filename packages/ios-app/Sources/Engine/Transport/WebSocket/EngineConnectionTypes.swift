@@ -66,6 +66,7 @@ enum EngineConnectionError: Error, LocalizedError, Sendable, Equatable {
     case connectionFailed(String)
     case encodingError
     case decodingError(String)
+    case messageTooLarge(actualBytes: Int, maxBytes: Int)
     /// Server returned HTTP 401 on the WS upgrade — bearer token missing,
     /// wrong, or rotated. Surfaces as `ConnectionState.unauthorized`.
     case unauthorized(String)
@@ -78,6 +79,10 @@ enum EngineConnectionError: Error, LocalizedError, Sendable, Equatable {
         case .connectionFailed(let reason): return "Connection failed: \(reason)"
         case .encodingError: return "Failed to encode request"
         case .decodingError(let detail): return "Failed to decode response: \(detail)"
+        case .messageTooLarge(let actualBytes, let maxBytes):
+            let actual = ByteCountFormatter.string(fromByteCount: Int64(actualBytes), countStyle: .file)
+            let maximum = ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)
+            return "Message is too large to send (\(actual); server limit \(maximum)). Remove one or more attachments and try again."
         case .unauthorized(let reason): return "Unauthorized: \(reason)"
         }
     }

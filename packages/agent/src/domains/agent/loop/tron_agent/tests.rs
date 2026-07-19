@@ -214,24 +214,32 @@ fn test_context_manager(model: &str) -> ContextManager {
     })
 }
 
-fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
+fn make_deps_with_host(
+    responder: impl ModelResponder + 'static,
+    engine_host: crate::engine::EngineHostHandle,
+) -> AgentDeps {
     AgentDeps {
         responder: Arc::new(responder),
         context_manager: test_context_manager("mock-model"),
         compaction_trigger_config:
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
-        engine_host: None,
+        invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
+        engine_host,
     }
+}
+
+fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
+    make_deps_with_host(
+        responder,
+        crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+    )
 }
 
 fn make_primitive_loop_deps(
     responder: impl ModelResponder + 'static,
     engine_host: crate::engine::EngineHostHandle,
 ) -> AgentDeps {
-    AgentDeps {
-        engine_host: Some(engine_host),
-        ..make_deps(responder)
-    }
+    make_deps_with_host(responder, engine_host)
 }
 
 #[test]
@@ -325,7 +333,7 @@ async fn resumed_session_offset_is_used_for_turn_events_and_token_record() {
         make_deps(TokenUsageResponder),
         "resumed-offset-session".into(),
     );
-    agent.set_completed_turn_offset(4);
+    agent.set_turn_offset(4);
     let mut events = agent.subscribe();
 
     let result = agent
@@ -372,4 +380,36 @@ async fn resumed_session_offset_is_used_for_turn_events_and_token_record() {
     assert_eq!(response_record_turn, Some(5));
     assert_eq!(turn_end, Some(5));
     assert_eq!(turn_end_record_turn, Some(5));
+}
+
+#[tokio::test]
+async fn exhausted_session_turn_ordinal_fails_without_reusing_max() {
+    let mut agent = TronAgent::new(
+        AgentConfig {
+            max_turns: 1,
+            ..AgentConfig::default()
+        },
+        make_deps(TokenUsageResponder),
+        "exhausted-turn-session".into(),
+    );
+    agent.set_turn_offset(u32::MAX);
+    let mut events = agent.subscribe();
+
+    let result = agent
+        .run(
+            "hello",
+            crate::domains::agent::r#loop::types::RunContext::default(),
+        )
+        .await;
+
+    assert_eq!(result.turns_executed, 0);
+    assert_eq!(result.stop_reason, StopReason::Error);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("Session turn ordinal exhausted")
+    );
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .all(|event| !matches!(event, TronEvent::TurnStart { .. }))
+    );
 }

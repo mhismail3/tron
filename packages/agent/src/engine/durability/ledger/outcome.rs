@@ -175,6 +175,11 @@ impl StoredEngineError {
                 message: error.to_string(),
                 details: serde_json::json!({ "code": code, "message": message }),
             },
+            EngineError::InvocationCancelled => Self {
+                kind: "invocation_cancelled".to_owned(),
+                message: error.to_string(),
+                details: serde_json::json!({}),
+            },
             EngineError::HandlerFailed(message) => Self {
                 kind: "handler_failed".to_owned(),
                 message: error.to_string(),
@@ -267,6 +272,9 @@ impl StoredEngineError {
                     .unwrap_or(&self.message)
                     .to_owned(),
             };
+        }
+        if self.kind == "invocation_cancelled" {
+            return EngineError::InvocationCancelled;
         }
         EngineError::StoredInvocationError {
             kind: self.kind.clone(),

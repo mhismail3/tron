@@ -11,7 +11,7 @@ use crate::shared::server::errors::CapabilityError;
 
 use super::errors::engine_error;
 use super::params::{
-    effect_key, health_key, optional_str, privileged_actor_context, query_from_payload, risk_key,
+    effect_key, health_key, optional_str, privileged_actor_context, query_from_payload,
     visibility_key,
 };
 
@@ -72,7 +72,7 @@ pub(super) fn catalog_summary(
     let mut non_routable = 0_u64;
     for function in functions {
         increment(&mut by_effect, effect_key(function.effect_class));
-        increment(&mut by_risk, risk_key(function.risk_level));
+        increment(&mut by_risk, function.risk_level.as_str());
         increment(&mut by_health, health_key(&function.health));
         increment(&mut by_namespace, function.id.namespace());
         if function.request_schema.is_none() {
@@ -118,7 +118,7 @@ pub(super) fn function_summary(function: &FunctionDefinition) -> Value {
         "description": function.description,
         "visibility": visibility_key(&function.visibility),
         "effectClass": effect_key(function.effect_class),
-        "riskLevel": risk_key(function.risk_level),
+        "riskLevel": function.risk_level.as_str(),
         "health": health_key(&function.health),
         "tags": function.tags,
         "schema": function_schema_hints(function),

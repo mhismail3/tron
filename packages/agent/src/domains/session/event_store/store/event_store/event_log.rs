@@ -15,9 +15,9 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::TokenTotals;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::domains::session::event_store::{EventRow, SessionRow};
+use crate::shared::foundation::redaction::redact_sensitive_content;
 
-use super::{AppendOptions, EventStore};
-use crate::domains::session::event_store::redaction::redact_sensitive_content;
+use super::{AppendBatchItem, AppendOptions, EventStore};
 
 fn resolve_payload_for_row(conn: &rusqlite::Connection, row: &EventRow) -> Result<Value> {
     crate::shared::storage::resolve_stored_json_value(conn, &row.payload).map_err(|error| {
@@ -77,7 +77,12 @@ pub(super) fn append_event_in_tx_with_identity(
                 )
                 .optional()?
                 .flatten();
-            max.unwrap_or(0) + 1
+            max.unwrap_or(0).checked_add(1).ok_or_else(|| {
+                EventStoreError::InvalidOperation(format!(
+                    "event sequence exhausted for session {}",
+                    opts.session_id
+                ))
+            })?
         }
     };
 
@@ -201,6 +206,50 @@ impl EventStore {
         tx.commit()?;
 
         EventRepo::get_by_id(&conn, &event.id)?.ok_or(EventStoreError::EventNotFound(event.id))
+    }
+
+    /// Append multiple events atomically while preserving their parent chain.
+    pub(crate) fn append_batch(
+        &self,
+        session_id: &str,
+        items: &[AppendBatchItem],
+    ) -> Result<Vec<EventRow>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.with_session_write_lock(session_id, || {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let mut session = SessionRepo::get_by_id(&tx, session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_owned()))?;
+            let mut event_ids = Vec::with_capacity(items.len());
+
+            for item in items {
+                let event = append_event_in_tx_with_identity(
+                    &tx,
+                    &session,
+                    &AppendOptions {
+                        session_id,
+                        event_type: item.event_type,
+                        payload: item.payload.clone(),
+                        parent_id: None,
+                        sequence: item.sequence,
+                    },
+                    EventIdentity::generate_current(),
+                )?;
+                session.head_event_id = Some(event.id.clone());
+                event_ids.push(event.id);
+            }
+
+            tx.commit()?;
+            event_ids
+                .into_iter()
+                .map(|event_id| {
+                    EventRepo::get_by_id(&conn, &event_id)?
+                        .ok_or(EventStoreError::EventNotFound(event_id))
+                })
+                .collect()
+        })
     }
 
     /// Delete a message by appending a `message.deleted` event.
@@ -383,6 +432,50 @@ impl EventStore {
     ) -> Result<Option<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_latest_by_type(&conn, session_id, event_type)
+    }
+
+    /// Get the latest event of a specific type for one session-turn ordinal.
+    pub(crate) fn get_latest_event_by_type_and_turn(
+        &self,
+        session_id: &str,
+        event_type: EventType,
+        turn: u32,
+    ) -> Result<Option<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_latest_by_type_and_turn(
+            &conn,
+            session_id,
+            event_type.as_str(),
+            i64::from(turn),
+        )
+    }
+
+    /// Get the greatest durable turn ordinal for one event type in a session.
+    pub(crate) fn get_max_turn_by_type(
+        &self,
+        session_id: &str,
+        event_type: EventType,
+    ) -> Result<Option<u32>> {
+        let conn = self.conn()?;
+        EventRepo::get_max_turn_by_type(&conn, session_id, event_type.as_str())?.map_or(
+            Ok(None),
+            |turn| {
+                u32::try_from(turn).map(Some).map_err(|_| {
+                    EventStoreError::Internal(format!(
+                        "invalid negative or oversized turn {turn} for {} in session {session_id}",
+                        event_type.as_str()
+                    ))
+                })
+            },
+        )
+    }
+
+    /// Get latest durable turn starts that still lack a later terminal row.
+    /// Called before the server accepts connections so no live turn can race
+    /// this startup repair.
+    pub(crate) fn get_unterminalized_turn_starts(&self) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_unterminalized_turn_starts(&conn)
     }
 
     /// Count events of a specific type in a session with `sequence > after_sequence`.

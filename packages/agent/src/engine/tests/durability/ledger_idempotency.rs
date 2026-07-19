@@ -243,7 +243,7 @@ async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() 
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-    let records = catalog.invocations();
+    let records = catalog.ledger_invocations().unwrap();
     assert_eq!(records.len(), 3);
     assert_eq!(records[0].idempotency_key.as_deref(), Some("same-key"));
     assert_eq!(records[1].replayed_from, Some(first.invocation_id));
@@ -322,7 +322,7 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
     let db_path = dir.path().join("tron.sqlite");
     let calls = Arc::new(AtomicUsize::new(0));
 
-    {
+    let first_invocation_id = {
         let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
         let mut catalog = LiveCatalog::with_ledger_store(Box::new(store));
         catalog
@@ -348,10 +348,14 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
             .await;
         assert_eq!(first.error, None);
         assert_eq!(first.value.as_ref().unwrap()["call"], 1);
-    }
+        first.invocation_id
+    };
 
     let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
     let mut restarted = LiveCatalog::with_ledger_store(Box::new(store));
+    let persisted = restarted.ledger_invocations().unwrap();
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].invocation_id, first_invocation_id);
     restarted
         .register_worker(worker("w1", "alpha"), true)
         .unwrap();

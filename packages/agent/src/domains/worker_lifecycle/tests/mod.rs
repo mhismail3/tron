@@ -232,6 +232,31 @@ async fn test_deps() -> (TempDir, Deps, PathBuf) {
     (temp, deps, package)
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn activation_without_shutdown_owner_defers_startup_reconciliation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let pause_hook = Arc::new(PauseBeforeRunningList::default());
+    let deps = Deps::for_test_pending_startup_reconciliation(
+        crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+        temp.path().join("workers"),
+        Arc::new(FakeLauncher::default()),
+        Some(pause_hook.clone()),
+    );
+
+    deps.activate_after_registration(None);
+    tokio::task::yield_now().await;
+
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            pause_hook.reached.notified(),
+        )
+        .await
+        .is_err(),
+        "reconciliation without a shutdown owner must wait for a lifecycle request"
+    );
+}
+
 async fn register_expected_worker(handle: &crate::engine::EngineHostHandle) {
     let worker_id = WorkerId::new("local_echo").unwrap();
     let worker = WorkerDefinition::new(
@@ -901,10 +926,22 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
         Some(pause_hook.clone()),
     );
 
-    let reconcile_deps = pending_deps.clone();
-    let reconcile_task =
-        tokio::spawn(async move { reconcile_deps.ensure_startup_reconciled().await });
+    let premature_reconciliation = tokio::time::timeout(
+        std::time::Duration::from_millis(25),
+        pause_hook.reached.notified(),
+    )
+    .await;
+    assert!(
+        premature_reconciliation.is_err(),
+        "constructing worker lifecycle dependencies must not start reconciliation"
+    );
+
+    let shutdown = Arc::new(crate::app::lifecycle::shutdown::ShutdownCoordinator::new());
+    pending_deps
+        .clone()
+        .activate_after_registration(Some(shutdown.clone()));
     pause_hook.reached.notified().await;
+    assert_eq!(shutdown.tracked_task_count(), 1);
 
     let launch_deps = pending_deps.clone();
     let current_invocation = invocation_with_suffix(
@@ -930,12 +967,19 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
 
     pause_hook.release.notify_waiters();
     assert_eq!(
-        reconcile_task
+        pending_deps
+            .ensure_startup_reconciled()
             .await
-            .expect("reconcile task join")
             .expect("startup reconciliation"),
         1
     );
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while shutdown.tracked_task_count() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("startup reconciliation task should leave shutdown tracking");
     let current_launch = launch_task
         .await
         .expect("launch task join")

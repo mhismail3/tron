@@ -13,15 +13,12 @@ final class SettingsState {
 
     var defaultModel: String = ""
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
+    var tailscaleIp: String?
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
 
-    // MARK: - Observability And Storage
+    // MARK: - Engine Policy
 
-    var observabilityLogLevel: String = "info"
-    var observabilityVerboseRetentionDays: UInt64 = 7
-    var storageRetentionEnabled: Bool = true
-    var storageMaxDatabaseMb: UInt64 = 512
     var transcriptionEnabled: Bool = false
 
     @ObservationIgnored
@@ -30,8 +27,6 @@ final class SettingsState {
     // MARK: - Load State
 
     var isLoaded = false
-    var availableModels: [ModelInfo] = []
-    var isLoadingModels = false
     var loadError: String?
 
     // MARK: - Init
@@ -62,34 +57,6 @@ final class SettingsState {
         }
     }
 
-    func reload(
-        settingsRepository: any SettingsRepository,
-        modelRepository: any ModelRepository,
-        acceptResult: @escaping @MainActor () -> Bool = { true }
-    ) async {
-        clearServerSnapshot()
-        await load(using: settingsRepository, acceptResult: acceptResult)
-        guard acceptResult() else { return }
-        await loadModels(using: modelRepository, acceptResult: acceptResult)
-    }
-
-    func loadModels(
-        using modelRepository: any ModelRepository,
-        acceptResult: @escaping @MainActor () -> Bool = { true }
-    ) async {
-        isLoadingModels = true
-        do {
-            let models = try await modelRepository.list(forceRefresh: false)
-            guard acceptResult() else { return }
-            availableModels = models
-        } catch {
-            guard acceptResult() else { return }
-            // Silently fail — models are optional
-        }
-        guard acceptResult() else { return }
-        isLoadingModels = false
-    }
-
     // MARK: - Reset
 
     /// Reset settings to server defaults through the engine. The server applies its own defaults
@@ -110,9 +77,8 @@ final class SettingsState {
     func clearServerSnapshot() {
         isLoaded = false
         loadError = nil
-        availableModels = []
-        isLoadingModels = false
         lastLoadedSettings = nil
+        tailscaleIp = nil
     }
 
     func rollbackToLastLoadedSettings(message: String) {
@@ -127,19 +93,15 @@ final class SettingsState {
     ///
     /// Every field is overwritten from the active server's effective settings.
     /// That keeps the iOS UI honest when switching between Macs: a value that
-        /// was present on server A cannot linger after server B reports its own
-        /// default or a missing optional field.
+    /// was present on server A cannot linger after server B reports its own
+    /// default or a missing optional field.
     func applyServerSettings(_ settings: ServerSettingsSnapshot) {
         lastLoadedSettings = settings
         defaultModel = settings.defaultModel
+        tailscaleIp = settings.tailscaleIp
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        observabilityLogLevel = settings.observabilityLogLevel
-        observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays
-        storageRetentionEnabled = settings.storageRetentionEnabled
-        storageMaxDatabaseMb = settings.storageMaxDatabaseMb
         transcriptionEnabled = settings.transcriptionEnabled
-
     }
 }

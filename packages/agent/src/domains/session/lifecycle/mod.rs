@@ -1,10 +1,12 @@
 //! Session lifecycle services and operation wrappers.
 //!
 //! This module owns the capability-facing lifecycle commands for sessions.
-//! Durable truth is still the session event store: lifecycle commands delegate
-//! to [`SessionManager`], which updates the event-store facade and then clears
-//! reconstructable runtime projections such as sequence counters, compaction
-//! handlers, and active-session cache entries.
+//! Durable truth is still the session event store. Commands use
+//! [`SessionManager`] when a mutation must also update reconstructed-session
+//! cache state; durable-only mutations may call the event-store facade directly.
+//! The capability owner retires runtime projections according to mutation
+//! semantics: archive clears active compaction state but preserves live event
+//! sequencing for a reversible unarchive, while delete clears both.
 //!
 //! ## Submodules
 //!
@@ -18,8 +20,8 @@
 //!
 //! ## Invariants
 //!
-//! - Session lifecycle commands mutate durable truth only through
-//!   [`SessionManager`] and the session event-store facade.
+//! - Session lifecycle commands mutate durable truth through the session
+//!   event-store facade; [`SessionManager`] coordinates cache-affecting changes.
 //! - Archive/unarchive is reversible session-row state (`ended_at`); it does
 //!   not delete event history.
 //! - Deleting a session is the only physical event-row cleanup path and is
@@ -27,9 +29,10 @@
 //!   owned by the source session.
 //! - Message deletion is represented by a `message.deleted` event, never by
 //!   physically deleting one event from the log.
-//! - Runtime sequence counters and compaction handlers are projections and are
-//!   removed after archive/delete, then rebuilt from event-store truth on
-//!   resume/reconstruction.
+//! - Archive clears the active compaction handler but preserves the live
+//!   sequence counter so unarchive cannot reuse a provider-visible sequence.
+//!   Permanent delete clears both projections; shutdown clears all remaining
+//!   process-local projections.
 
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 

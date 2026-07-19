@@ -4,19 +4,21 @@ import SwiftUI
 @MainActor
 @Observable
 final class FontSettings {
-    static let shared = FontSettings()
+    static let shared = FontSettings(defaults: .standard)
+
+    private let defaults: UserDefaults
 
     /// Selected font family for proportional UI text
     var selectedFamily: FontFamily {
         didSet {
-            UserDefaults.standard.set(selectedFamily.rawValue, forKey: "fontFamily")
+            defaults.set(selectedFamily.rawValue, forKey: "fontFamily")
         }
     }
 
     /// Selected font family for monospace/code text
     var selectedMonoFamily: FontFamily {
         didSet {
-            UserDefaults.standard.set(selectedMonoFamily.rawValue, forKey: "monoFontFamily")
+            defaults.set(selectedMonoFamily.rawValue, forKey: "monoFontFamily")
         }
     }
 
@@ -43,37 +45,9 @@ final class FontSettings {
 
     // MARK: - Init
 
-    private init() {
-        // Load selected family
-        if let raw = UserDefaults.standard.string(forKey: "fontFamily"),
-           let family = FontFamily(rawValue: raw) {
-            self.selectedFamily = family
-        } else {
-            self.selectedFamily = .sourceSerif4
-        }
-
-        // Load selected mono family
-        if let raw = UserDefaults.standard.string(forKey: "monoFontFamily"),
-           let family = FontFamily(rawValue: raw),
-           FontFamily.monoFamilies.contains(family) {
-            self.selectedMonoFamily = family
-        } else {
-            self.selectedMonoFamily = .recursive
-        }
-
-        // Load axis values
-        if let data = UserDefaults.standard.data(forKey: "fontAxisValues"),
-           let decoded = try? JSONDecoder().decode([String: [String: Double]].self, from: data) {
-            self.axisValues = decoded
-        } else {
-            self.axisValues = [:]
-        }
-    }
-
-    // MARK: - Init for testing
-
-    /// Creates an isolated instance backed by the given UserDefaults suite (for testing)
+    /// Creates an instance backed by the supplied persistence domain.
     init(defaults: UserDefaults) {
+        self.defaults = defaults
         if let raw = defaults.string(forKey: "fontFamily"),
            let family = FontFamily(rawValue: raw) {
             self.selectedFamily = family
@@ -99,7 +73,7 @@ final class FontSettings {
 
     private func persistAxisValues() {
         if let data = try? JSONEncoder().encode(axisValues) {
-            UserDefaults.standard.set(data, forKey: "fontAxisValues")
+            defaults.set(data, forKey: "fontAxisValues")
         }
     }
 }

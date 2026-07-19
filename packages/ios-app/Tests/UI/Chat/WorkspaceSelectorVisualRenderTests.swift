@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class WorkspaceSelectorVisualRenderTests: XCTestCase {
+    private var testState: IsolatedTestState!
+
+    override func setUp() async throws {
+        testState = IsolatedTestState(label: "workspace-selector-render")
+        testState.registerTeardown(with: self)
+    }
+
+    override func tearDown() async throws {
+        await testState.cleanup()
+        testState = nil
+    }
+
     func testWorkspaceSelectorNavigationHierarchyRendersForVisualQA() throws {
         var selectedPath = "/tmp/tron-fixtures/home"
         let view = WorkspaceSelector(
@@ -69,26 +81,15 @@ final class WorkspaceSelectorVisualRenderTests: XCTestCase {
     }
 
     private func visualArtifactURL(outputName: String) throws -> URL {
-        let documentsURL = try XCTUnwrap(
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        )
-        let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
-            .map(URL.init(fileURLWithPath:))
-            ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        return artifactRoot.appendingPathComponent(outputName)
+        try testState.artifactURL(named: outputName)
     }
 }
 
 @MainActor
 private final class WorkspaceSelectorVisualConnectionRepository: AppConnectionRepository {
     var connectionState: ConnectionState { .connected }
-    var isConnected: Bool { true }
 
     func connect() async {}
-    func disconnect() async {}
-    func verifyConnection() async -> Bool { true }
-    func manualRetry() async {}
-    func setBackgroundState(_ inBackground: Bool) {}
 }
 
 @MainActor

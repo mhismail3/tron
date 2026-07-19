@@ -78,7 +78,6 @@ struct OAuthLoginSheet: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(provider.displayName)

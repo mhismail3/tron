@@ -5,7 +5,7 @@ fn empty_catalog_starts_at_revision_zero() {
     let catalog = LiveCatalog::new();
     assert_eq!(catalog.revision(), CatalogRevision(0));
     assert!(catalog.workers().is_empty());
-    assert!(catalog.changes().is_empty());
+    assert!(catalog.ledger_catalog_changes().unwrap().is_empty());
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn catalog_changes_increment_by_one_and_record_subjects() {
     catalog
         .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
         .unwrap();
-    let changes = catalog.changes();
+    let changes = catalog.ledger_catalog_changes().unwrap();
     assert_eq!(changes.len(), 2);
     assert_eq!(changes[0].before.0, 0);
     assert_eq!(changes[0].after.0, 1);
@@ -420,8 +420,9 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
         Some("workspace-a")
     );
     assert!(promoted.provenance.session_id.is_none());
+    let changes = catalog.ledger_catalog_changes().unwrap();
     assert_eq!(
-        catalog.changes().last().unwrap().kind,
+        changes.last().unwrap().kind,
         CatalogChangeKind::VisibilityChanged
     );
 
@@ -475,12 +476,13 @@ fn unregister_function_removes_targeting_triggers_and_revisions_remain_monotonic
             .is_err()
     );
     assert_eq!(catalog.revision().0, before.0 + 2);
+    let changes = catalog.ledger_catalog_changes().unwrap();
     assert_eq!(
-        catalog.changes()[catalog.changes().len() - 2].kind,
+        changes[changes.len() - 2].kind,
         CatalogChangeKind::TriggerUnregistered
     );
     assert_eq!(
-        catalog.changes().last().unwrap().kind,
+        changes.last().unwrap().kind,
         CatalogChangeKind::FunctionUnregistered
     );
 }
@@ -560,5 +562,5 @@ fn catalog_change_ledger_failure_does_not_mutate_registered_catalog_entries() {
     ));
     assert_eq!(catalog.revision(), CatalogRevision(0));
     assert!(catalog.worker(&wid("w1")).is_none());
-    assert!(catalog.changes().is_empty());
+    assert!(catalog.ledger_catalog_changes().unwrap().is_empty());
 }

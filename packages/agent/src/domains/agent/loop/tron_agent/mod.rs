@@ -1,4 +1,7 @@
 //! `TronAgent` multi-turn primitive loop.
+//!
+//! The agent owns one required engine host for its lifetime. Turn contexts and
+//! capability execution borrow that host; they do not model a hostless runtime.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
@@ -14,6 +17,7 @@ use crate::domains::agent::r#loop::types::{AgentConfig, RunContext, RunResult};
 use crate::domains::model::responder::ModelResponder;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::protocol::messages::{Message, TokenUsage, UserMessageContent};
+#[cfg(test)]
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
@@ -40,7 +44,8 @@ pub struct AgentDeps {
     pub responder: Arc<dyn ModelResponder>,
     pub context_manager: ContextManager,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
-    pub engine_host: Option<crate::engine::EngineHostHandle>,
+    pub invocation_abort_registry: Arc<InvocationAbortRegistry>,
+    pub engine_host: crate::engine::EngineHostHandle,
 }
 
 pub struct TronAgent {
@@ -50,15 +55,15 @@ pub struct TronAgent {
     emitter: Arc<EventEmitter>,
     compaction: Arc<CompactionHandler>,
     session_id: String,
-    completed_turn_offset: AtomicU32,
+    turn_offset: AtomicU32,
     current_turn: AtomicU32,
     is_running: AtomicBool,
     abort_token: CancellationToken,
     external_abort_token: bool,
     persister: Option<Arc<EventPersister>>,
     sequence_counter: Option<Arc<AtomicI64>>,
-    invocation_abort_registry: Option<Arc<InvocationAbortRegistry>>,
-    engine_host: Option<crate::engine::EngineHostHandle>,
+    invocation_abort_registry: Arc<InvocationAbortRegistry>,
+    engine_host: crate::engine::EngineHostHandle,
 }
 
 impl TronAgent {
@@ -70,14 +75,14 @@ impl TronAgent {
             emitter: Arc::new(EventEmitter::new()),
             compaction: Arc::new(CompactionHandler::new(deps.compaction_trigger_config)),
             session_id,
-            completed_turn_offset: AtomicU32::new(0),
+            turn_offset: AtomicU32::new(0),
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
             external_abort_token: false,
             persister: None,
             sequence_counter: None,
-            invocation_abort_registry: None,
+            invocation_abort_registry: deps.invocation_abort_registry,
             engine_host: deps.engine_host,
         }
     }
@@ -157,15 +162,21 @@ impl TronAgent {
         );
 
         let max_turns = self.config.max_turns;
-        let turn_offset = self.completed_turn_offset.load(Ordering::Relaxed);
+        let turn_offset = self.turn_offset.load(Ordering::Relaxed);
         let mut run_turn = 0u32;
         let mut exited_via_break = false;
         let mut previous_context_baseline =
             self.context_manager.get_api_context_tokens().unwrap_or(0);
 
         while run_turn < max_turns {
-            run_turn += 1;
-            let session_turn = turn_offset.saturating_add(run_turn);
+            let next_run_turn = run_turn.saturating_add(1);
+            let Some(session_turn) = turn_offset.checked_add(next_run_turn) else {
+                final_stop_reason = StopReason::Error;
+                error = Some("Session turn ordinal exhausted".to_owned());
+                exited_via_break = true;
+                break;
+            };
+            run_turn = next_run_turn;
             self.current_turn.store(session_turn, Ordering::Relaxed);
             debug!(
                 component = "agent.loop",
@@ -193,7 +204,7 @@ impl TronAgent {
                 server_origin: self.config.server_origin.as_deref(),
                 sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),
                 invocation_abort_registry: self.invocation_abort_registry.as_ref(),
-                engine_host: self.engine_host.as_ref(),
+                engine_host: &self.engine_host,
             })
             .await;
 
@@ -252,8 +263,10 @@ impl TronAgent {
             final_stop_reason = StopReason::MaxTurns;
         }
 
-        self.completed_turn_offset
-            .store(turn_offset.saturating_add(run_turn), Ordering::Relaxed);
+        self.turn_offset.store(
+            turn_offset.checked_add(run_turn).unwrap_or(u32::MAX),
+            Ordering::Relaxed,
+        );
 
         info!(
             component = "agent.loop",
@@ -268,15 +281,6 @@ impl TronAgent {
             has_error = error.is_some(),
             "agent run completed"
         );
-
-        self.emit_run_event(TronEvent::AgentEnd {
-            base: run_base(&self.session_id),
-            error: error.clone(),
-        });
-        self.emit_run_event(TronEvent::SessionProcessingChanged {
-            base: run_base(&self.session_id),
-            is_processing: false,
-        });
 
         RunResult {
             turns_executed: run_turn,
@@ -320,14 +324,21 @@ impl TronAgent {
         self.sequence_counter = Some(counter);
     }
 
-    pub fn set_completed_turn_offset(&mut self, offset: u32) {
-        self.completed_turn_offset.store(offset, Ordering::Relaxed);
+    /// Route this run's events through the orchestrator-owned emitter.
+    ///
+    /// Production installs the canonical emitter before each run so live
+    /// broadcast and the synchronous reconstruction projection observe the
+    /// exact same event stream without a lossy forwarding channel.
+    pub(crate) fn set_emitter(&mut self, emitter: Arc<EventEmitter>) {
+        self.emitter = emitter;
     }
 
-    pub fn set_invocation_abort_registry(&mut self, registry: Arc<InvocationAbortRegistry>) {
-        self.invocation_abort_registry = Some(registry);
+    /// Seed the session-global turn ordinal immediately preceding this run.
+    pub fn set_turn_offset(&mut self, offset: u32) {
+        self.turn_offset.store(offset, Ordering::Relaxed);
     }
 
+    #[cfg(test)]
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {
         self.emitter.subscribe()
     }

@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 
+/// Commits durable onboarding before emitting the process-local mode switch;
+/// throwing prevents AppDelegate from entering a mode that cannot survive relaunch.
+@MainActor
+func commitWizardCompletion(
+    touchSentinel: @Sendable () throws -> Void,
+    notificationCenter: NotificationCenter = .default
+) throws {
+    try touchSentinel()
+    notificationCenter.post(name: .tronWizardDidComplete, object: nil)
+}
+
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (top-bar with progress,
 /// fixed action bar, glass canvas, animated step transitions) is shared
@@ -33,7 +44,7 @@ struct WizardView: View {
             case .pairingInfo:
                 PairingInfoStep(state: state)
             case .done:
-                DoneStep(state: state)
+                DoneStep()
             }
         }
         .environment(state)
@@ -182,7 +193,7 @@ struct WizardShell<Content: View>: View {
                 .animation(WizardLayout.transitionAnimation, value: displayStep)
 
             // Layer 2 (pinned): bottom bar has an explicit height and
-            // absolute bottom alignment inside the 480×H canvas. Only
+            // absolute bottom alignment inside the 480×440 canvas. Only
             // its labels/styles switch with `displayStep`; the bar's
             // frame never gets remeasured by the sliding content.
             bottomBar
@@ -200,10 +211,9 @@ struct WizardShell<Content: View>: View {
                 .padding(.horizontal, WizardLayout.horizontalPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        // Fixed wizard canvas: width stays 480 and height stays at the
-        // tallest step's requirement. Lower-density pages get breathing
-        // room, and every horizontal page slide runs inside identical
-        // clipping geometry.
+        // Fixed wizard canvas: every page gets the same 480×440 viewport,
+        // so horizontal transitions cannot resize the window or change
+        // their clipping geometry.
         .frame(width: WizardLayout.width, height: WizardLayout.height)
         .configureHostingWindow { window in
             window.isMovableByWindowBackground = true
@@ -386,7 +396,7 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
         case .pairingInfo:
             Button {
-                state.complete()
+                state.advance()
             } label: {
                 Text("I'm paired")
             }
@@ -394,9 +404,7 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
             .disabled(state.pairingPayload == nil)
         case .done:
-            Button {
-                NotificationCenter.default.post(name: .tronWizardDidComplete, object: nil)
-            } label: {
+            Button(action: completeOnboarding) {
                 Text("Open menu bar")
             }
             .buttonStyle(.wizardPrimary)
@@ -404,8 +412,18 @@ struct WizardShell<Content: View>: View {
         }
     }
 
+    /// A failed durable commit leaves Done visible for retry instead of
+    /// asking AppDelegate to enter menu-bar mode.
+    private func completeOnboarding() {
+        do {
+            try commitWizardCompletion(touchSentinel: setup.touchOnboardedSentinel)
+        } catch {
+            NSLog("[Tron] Failed to write onboarded sentinel: \(error.localizedDescription)")
+        }
+    }
+
     /// Gate for the Permissions step's Continue button. Full Disk Access
-    /// must be granted before pairing so primitive file-backed execution
+    /// must be granted before pairing so agent file-backed execution
     /// does not start from a half-working install.
     private var permissionsCanContinue: Bool {
         Permission.allCases.allSatisfy { permission in

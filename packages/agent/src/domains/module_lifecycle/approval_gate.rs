@@ -2,16 +2,16 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::domains::approval::types::ApprovalCheckRequirement;
-use crate::engine::EngineResourceScope;
+use crate::engine::{EngineHostHandle, EngineResourceScope};
 use crate::shared::server::errors::CapabilityError;
 
 use super::MODULE_LIFECYCLE_STATE_KIND;
+use super::MODULE_LIFECYCLE_STATE_KIND as KIND;
 use super::records::scope_ref;
 use super::validation::invalid;
-use super::{Deps, MODULE_LIFECYCLE_STATE_KIND as KIND};
 
 pub(super) async fn check_lifecycle_approval(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     scope: &EngineResourceScope,
     lifecycle_resource_id: &str,
     install_decision_resource_id: &str,
@@ -37,7 +37,7 @@ pub(super) async fn check_lifecycle_approval(
         ],
     };
     let check = crate::domains::approval::service::check_approval_at(
-        &deps.engine_host,
+        engine_host,
         requirement,
         operation_at,
     )

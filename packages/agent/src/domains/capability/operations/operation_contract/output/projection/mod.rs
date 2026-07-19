@@ -30,14 +30,25 @@
 //! content-free navigation facts; complete copy-ready ref objects remain JSON
 //! strings so the generic evidence normalizer cannot misclassify them as
 //! resource-store records.
+//! Filesystem reads use an operation-specific projection rather than the
+//! generic metadata allowlist: bounded text chunks, directory/path matches,
+//! search previews, and read-only diffs remain useful to the provider while
+//! relative-path validation, credential redaction, and explicit source/provider
+//! truncation keep local data under the provider boundary. Source owners report
+//! actual result/walk overflow, while canonical normalized collections own final
+//! provider item counts after structural byte-budget reduction. Filesystem mutations
+//! retain the metadata/resource-only projection and never echo proposed file
+//! bodies or diffs.
+//! Filesystem text redaction preserves a slash literal only when explicit source
+//! syntax owns it as a quoted route-call argument (for example,
+//! `router.get("/api/users")`). Generic quoted, unquoted, Markdown-code, Windows,
+//! UNC, and ambiguous absolute paths fail closed as local paths.
+//! Regression fixtures use generic identities so this boundary remains portable
+//! under the repository-wide personal-information guard.
 
 use std::sync::LazyLock;
 
 use crate::shared::foundation::redaction::redact_sensitive_content;
-#[cfg(test)]
-use crate::shared::protocol::content::CapabilityResultContent;
-#[cfg(test)]
-use crate::shared::protocol::messages::CapabilityResultMessageContent;
 #[cfg(test)]
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use regex::Regex;
@@ -45,19 +56,11 @@ use serde_json::{Map, Value, json};
 
 use super::spec::OutputProfile;
 
+mod filesystem;
+
 #[cfg(test)]
 fn extract_model_context_result_text(result: &CapabilityResult) -> String {
-    match extract_result_content(result) {
-        CapabilityResultMessageContent::Text(text) => text,
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text.as_str()),
-                CapabilityResultContent::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
+    super::provider_result_text(tested_operation(result), result)
 }
 
 #[cfg(test)]
@@ -78,11 +81,6 @@ const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
 const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
 const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 12;
 const MODEL_CONTEXT_OBJECT_MAX_KEYS: usize = 80;
-
-#[cfg(test)]
-fn extract_result_content(result: &CapabilityResult) -> CapabilityResultMessageContent {
-    super::provider_result_content(tested_operation(result), result)
-}
 
 pub(super) fn project_evidence(
     operation: &str,
@@ -113,10 +111,11 @@ pub(super) fn project_evidence(
                 project_capability_cockpit_evidence(details)
             }
             OutputProfile::Web => project_web_evidence(operation, details),
-            OutputProfile::Summary
-            | OutputProfile::Filesystem
-            | OutputProfile::Runtime
-            | OutputProfile::Governance => project_metadata_operation_evidence(operation, details),
+            OutputProfile::Filesystem => filesystem::project_evidence(operation, details)
+                .or_else(|| project_metadata_operation_evidence(operation, details)),
+            OutputProfile::Summary | OutputProfile::Runtime | OutputProfile::Governance => {
+                project_metadata_operation_evidence(operation, details)
+            }
         }?
     };
     if let (Value::Object(projected), Some(outcome)) =

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 @MainActor
@@ -7,9 +8,24 @@ enum RecentInputHistoryPresentation {
     nonisolated static let emptyMessage = "Messages you send from this device will appear here."
     nonisolated static let clearSystemImage = "trash"
     nonisolated static let clearAccessibilityLabel = "Clear recent inputs"
+    nonisolated static let clearConfirmationTitle = "Clear recent inputs?"
+    nonisolated static let clearConfirmationMessage = "This removes every recent input stored on this device."
+    nonisolated static let clearConfirmationActionTitle = "Clear Recent Inputs"
     nonisolated static let rowFontSize = TronTypography.sizeBody
-    nonisolated static let rowLineLimit = 2
-    nonisolated static let rowVerticalPadding: CGFloat = 2
+    nonisolated static let rowLineLimit = 1
+    nonisolated static let rowVerticalInset: CGFloat = 5
+    nonisolated static let rowHorizontalInset: CGFloat = 18
+
+    nonisolated static func preview(for input: String) -> String {
+        let normalized = input.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let firstLine = lines.first else { return "" }
+        guard lines.count > 1 else { return firstLine }
+        return firstLine.hasSuffix("…") ? firstLine : firstLine + "…"
+    }
 
     static func shouldShowMenuAction(
         inputHistory: InputHistoryStore?,
@@ -26,6 +42,7 @@ struct RecentInputHistorySheet: View {
     let onSelect: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showClearConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -37,7 +54,6 @@ struct RecentInputHistorySheet: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: RecentInputHistoryPresentation.title, color: .tronEmerald)
@@ -45,7 +61,7 @@ struct RecentInputHistorySheet: View {
                 if !historyStore.history.isEmpty {
                     ToolbarItem(placement: .topBarLeading) {
                         Button(role: .destructive) {
-                            historyStore.clearHistory()
+                            showClearConfirmation = true
                         } label: {
                             Image(systemName: RecentInputHistoryPresentation.clearSystemImage)
                                 .foregroundStyle(.red)
@@ -58,6 +74,18 @@ struct RecentInputHistorySheet: View {
                 }
             }
         }
+        .confirmationDialog(
+            RecentInputHistoryPresentation.clearConfirmationTitle,
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(RecentInputHistoryPresentation.clearConfirmationActionTitle, role: .destructive) {
+                historyStore.clearHistory()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(RecentInputHistoryPresentation.clearConfirmationMessage)
+        }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
     }
@@ -69,18 +97,24 @@ struct RecentInputHistorySheet: View {
                     onSelect(input)
                     dismiss()
                 } label: {
-                    Text(input)
+                    Text(RecentInputHistoryPresentation.preview(for: input))
                         .font(TronTypography.sans(size: RecentInputHistoryPresentation.rowFontSize))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(RecentInputHistoryPresentation.rowLineLimit)
+                        .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, RecentInputHistoryPresentation.rowVerticalPadding)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Insert recent input")
                 .accessibilityValue(input)
                 .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(
+                    top: RecentInputHistoryPresentation.rowVerticalInset,
+                    leading: RecentInputHistoryPresentation.rowHorizontalInset,
+                    bottom: RecentInputHistoryPresentation.rowVerticalInset,
+                    trailing: RecentInputHistoryPresentation.rowHorizontalInset
+                ))
                 .listRowSeparator(.hidden)
             }
         }

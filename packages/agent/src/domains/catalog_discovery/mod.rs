@@ -5,9 +5,10 @@
 //! discovered capabilities. Search and inspect are pure reads; conformance
 //! report generation writes only a `catalog_discovery_report` resource plus a
 //! catalog-discovery stream event. Report replay is owned by the engine ledger:
-//! the bounded caller `idempotencyKey` determines both the invocation ledger
+//! the bounded invocation-envelope idempotency key determines both the ledger
 //! identity and a hashed, scope-bound report resource id, while the raw key is
-//! never stored in report payloads or returned projections.
+//! never duplicated in request payloads, stored in report resources, or
+//! returned in projections.
 //!
 //! ## Submodules
 //!
@@ -26,6 +27,8 @@
 //! This domain may read catalog definitions, resource metadata, and stream
 //! cursors, and may write its own report resources. It must never invoke a
 //! discovered target function as part of search, inspect, or conformance.
+//! Handler registrations retain the engine host directly; discovery services
+//! borrow it and own no parallel dependency container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -46,20 +49,6 @@ pub(crate) const SEARCH_FUNCTION: &str = "catalog_discovery::search";
 pub(crate) const INSPECT_FUNCTION: &str = "catalog_discovery::inspect";
 pub(crate) const CONFORMANCE_REPORT_FUNCTION: &str = "catalog_discovery::conformance_report";
 
-/// Catalog discovery dependencies narrowed from server setup.
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-        }
-    }
-}
-
 /// Build the domain worker registration.
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -67,7 +56,7 @@ pub(crate) fn worker_module(
     crate::domains::registration::worker::domain_worker_module(
         WORKER,
         &[CATALOG_DISCOVERY_TOPIC],
-        handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        handlers::function_registrations(contract::capabilities()?, deps.engine_host.clone())?,
     )
 }
 

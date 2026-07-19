@@ -4,23 +4,19 @@ import Foundation
 
 /// Server-authoritative settings decoded from `settings::get`.
 ///
-/// This mirrors the primitive server settings surface. Product policy planes
-/// and fixed workflow settings are intentionally absent.
+/// The server returns its complete validated profile. This DTO intentionally
+/// admits only the mobile product-settings projection, ignores unrelated
+/// provider/runtime/TUI keys, and decodes every admitted field strictly.
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
 
     let compaction: CompactionSettings
-
-    let observabilityLogLevel: String
-    let observabilityVerboseRetentionDays: UInt64
-    let storageRetentionEnabled: Bool
-    let storageMaxDatabaseMb: UInt64
     let transcriptionEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
-        case server, context, observability, storage
+        case server, context
     }
 
     private enum ServerKeys: String, CodingKey {
@@ -29,14 +25,6 @@ struct ServerSettings: Decodable {
 
     private enum ContextKeys: String, CodingKey {
         case compactor
-    }
-
-    private enum ObservabilityKeys: String, CodingKey {
-        case logLevel, verboseRetentionDays
-    }
-
-    private enum StorageKeys: String, CodingKey {
-        case retentionEnabled, maxDatabaseMb
     }
 
     private enum TranscriptionKeys: String, CodingKey {
@@ -50,26 +38,13 @@ struct ServerSettings: Decodable {
         defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
         defaultWorkspace = try serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
         tailscaleIp = try serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
-        if serverContainer.contains(.transcription) {
-            let transcriptionContainer = try serverContainer.nestedContainer(
-                keyedBy: TranscriptionKeys.self,
-                forKey: .transcription
-            )
-            transcriptionEnabled = try transcriptionContainer.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
-        } else {
-            transcriptionEnabled = false
-        }
-
+        let transcriptionContainer = try serverContainer.nestedContainer(
+            keyedBy: TranscriptionKeys.self,
+            forKey: .transcription
+        )
+        transcriptionEnabled = try transcriptionContainer.decode(Bool.self, forKey: .enabled)
         let contextContainer = try container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context)
         compaction = try contextContainer.decode(CompactionSettings.self, forKey: .compactor)
-
-        let observabilityContainer = try container.nestedContainer(keyedBy: ObservabilityKeys.self, forKey: .observability)
-        observabilityLogLevel = try observabilityContainer.decode(String.self, forKey: .logLevel)
-        observabilityVerboseRetentionDays = try observabilityContainer.decode(UInt64.self, forKey: .verboseRetentionDays)
-
-        let storageContainer = try container.nestedContainer(keyedBy: StorageKeys.self, forKey: .storage)
-        storageRetentionEnabled = try storageContainer.decode(Bool.self, forKey: .retentionEnabled)
-        storageMaxDatabaseMb = try storageContainer.decode(UInt64.self, forKey: .maxDatabaseMb)
     }
 
     struct CompactionSettings: Decodable {
@@ -96,13 +71,10 @@ struct ServerSettings: Decodable {
 struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
-    var observability: ObservabilityUpdate?
-    var storage: StorageUpdate?
 
     struct ServerUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
-        var tailscaleIp: String?
         var transcription: TranscriptionUpdate?
     }
 
@@ -117,15 +89,5 @@ struct ServerSettingsUpdate: Encodable {
             var preserveRecentCount: Int?
             var triggerTokenThreshold: Double?
         }
-    }
-
-    struct ObservabilityUpdate: Encodable {
-        var logLevel: String?
-        var verboseRetentionDays: UInt64?
-    }
-
-    struct StorageUpdate: Encodable {
-        var retentionEnabled: Bool?
-        var maxDatabaseMb: UInt64?
     }
 }

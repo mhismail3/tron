@@ -1,9 +1,25 @@
 import SwiftUI
 import PhotosUI
 
+/// Narrow adapter for the external PhotosPicker transfer boundary.
+///
+/// The value keeps PhotosUI transfer lifetime outside `ChatViewModel`; the live
+/// implementation delegates directly to Apple's transferable loader.
+struct PhotoPickerDataLoader: Sendable {
+    let load: @Sendable (PhotosPickerItem) async -> Data?
+
+    static let live = Self { item in
+        try? await item.loadTransferable(type: Data.self)
+    }
+}
+
 // MARK: - MessagingContext Conformance
 
 extension ChatViewModel: MessagingContext {
+
+    func removeMessage(id: UUID) {
+        removeFromMessages { $0.id == id }
+    }
 
     func sendPromptToServer(
         text: String,
@@ -24,20 +40,8 @@ extension ChatViewModel: MessagingContext {
         try await services.events.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
     }
 
-    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
+    func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
         try await services.agent.abort(idempotencyKey: idempotencyKey)
-    }
-
-    func appendInterruptedMessage() {
-        appendToMessages(.interrupted())
-    }
-
-    func finalizeThinkingMessage() {
-        markThinkingMessageCompleteIfNeeded()
-    }
-
-    func clearThinkingCaption() {
-        thinkingState.clearCurrentStreaming()
     }
 
     // Note: The following methods are already defined in other extensions:
@@ -74,8 +78,14 @@ extension ChatViewModel {
     }
 
     /// Abort the currently running agent.
+    ///
+    /// Stop is a session mutation, not mounted-view work. Its short-lived
+    /// request therefore survives transient view disappearance; canonical
+    /// terminal events or reconstruction still own the final phase.
     func abortAgent() {
-        Task { await messagingCoordinator.abortAgent(context: self) }
+        Task {
+            await messagingCoordinator.abortAgent(context: self)
+        }
     }
 
     /// Cooperatively abort a single in-flight capability invocation without stopping the turn.
@@ -159,47 +169,57 @@ extension ChatViewModel {
 
     // MARK: - Image Handling
 
-    func processSelectedImages(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            // Load the image data
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  UIImage(data: data) != nil else {
-                continue
+    func startSelectedImageProcessing(_ items: [PhotosPickerItem]) {
+        selectedImageTask?.cancel()
+        selectedImageTask = nil
+        guard !items.isEmpty else { return }
+
+        let dataLoader = photoPickerDataLoader
+        let events = services.events
+        let modelPickerState = modelPickerState
+        let inputBarState = inputBarState
+
+        selectedImageTask = Task { @MainActor [weak self] in
+            for item in items {
+                guard !Task.isCancelled,
+                      inputBarState.selectedImages == items else { return }
+                guard let data = await dataLoader.load(item) else {
+                    continue
+                }
+                guard !Task.isCancelled,
+                      inputBarState.selectedImages == items else { return }
+                guard UIImage(data: data) != nil else {
+                    continue
+                }
+
+                let limits = modelPickerState.currentModelInfo(
+                    current: events.currentModel
+                )?.providerImageLimits ?? .default
+                guard let attachment = await AttachmentImagePreparer.prepare(
+                    data: data,
+                    limits: limits
+                ) else {
+                    guard !Task.isCancelled,
+                          inputBarState.selectedImages == items else { return }
+                    logger.warning("Failed to process library image", category: .chat)
+                    self?.appendLocalError(
+                        dedupKey: "attachment.photo.failed",
+                        title: "Could not attach photo",
+                        message: "The selected photo could not be processed."
+                    )
+                    continue
+                }
+
+                guard !Task.isCancelled,
+                      inputBarState.selectedImages == items else { return }
+                self?.attachments.append(attachment)
             }
 
-            // Process image with provider-aware limits, preserving format
-            let detectedMime = ImageProcessor.detectMimeType(from: data)
-            let limits = await MainActor.run {
-                self.modelPickerState.currentModelInfo(current: self.currentModel)?.providerImageLimits ?? .default
-            }
-            guard let result = await ImageProcessor.process(
-                originalData: data,
-                mimeType: detectedMime,
-                limits: limits
-            ) else {
-                logger.warning("Failed to process library image", category: .chat)
-                appendLocalError(dedupKey: "attachment.photo.failed", title: "Could not attach photo", message: "The selected photo could not be processed.")
-                continue
-            }
-
-            let attachment = Attachment(
-                type: .image,
-                data: result.data,
-                mimeType: result.mimeType,
-                fileName: nil,
-                originalSize: data.count,
-                wasConverted: result.wasConverted,
-                originalMimeType: result.wasConverted ? detectedMime : nil
-            )
-
-            await MainActor.run {
-                self.attachments.append(attachment)
-            }
-        }
-
-        // Clear the picker selection
-        await MainActor.run {
-            self.selectedImages = []
+            guard !Task.isCancelled,
+                  inputBarState.selectedImages == items,
+                  self != nil else { return }
+            inputBarState.selectedImages = []
+            self?.selectedImageTask = nil
         }
     }
 

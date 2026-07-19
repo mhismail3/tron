@@ -81,30 +81,30 @@ final class ConnectionManager {
 
     private func startObserving() {
         observationTask?.cancel()
-        observationTask = Task { [weak self] in
+        guard let provider else { return }
+        observationTask = Task { [weak self, weak provider] in
             var hasInstalledObservation = false
             while !Task.isCancelled {
-                guard let self, let provider = self.provider else { return }
+                guard let provider else { return }
 
                 // Always read current state at the top of the loop so we never miss a transition
                 // that happened between callbacks.
                 let currentState = provider.connectionState
-                if self.state != currentState {
-                    self.applyStateChange(currentState)
-                } else if hasInstalledObservation && currentState.isConnected {
-                    // Observation can wake for a rapid connected -> reconnecting -> connected
-                    // cycle after the provider has already returned to `.connected`. Hooks that
-                    // explicitly asked for a future reconnect edge should still run.
-                    self.drainHooks()
+                do {
+                    guard let self else { return }
+                    if state != currentState {
+                        applyStateChange(currentState)
+                    } else if hasInstalledObservation && currentState.isConnected {
+                        // Observation can wake for a rapid connected -> reconnecting -> connected
+                        // cycle after the provider has already returned to `.connected`. Hooks that
+                        // explicitly asked for a future reconnect edge should still run.
+                        drainHooks()
+                    }
                 }
 
                 hasInstalledObservation = true
-                await withCheckedContinuation { continuation in
-                    withObservationTracking {
-                        _ = provider.connectionState
-                    } onChange: {
-                        continuation.resume()
-                    }
+                await waitForObservationChange {
+                    provider.connectionState
                 }
             }
         }

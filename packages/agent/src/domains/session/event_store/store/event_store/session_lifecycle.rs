@@ -7,12 +7,12 @@ use crate::domains::session::event_store::identity::{
 };
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::{
-    ActivitySummaryLine, CreateSessionOptions, IncrementCounters, ListSessionsOptions,
-    MessagePreview, SessionRepo,
+    CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
+use crate::shared::protocol::events::ActivitySummaryLine;
 
 use super::{CreateSessionResult, EventStore, ForkOptions, ForkResult};
 
@@ -371,18 +371,10 @@ impl EventStore {
         Ok(deleted)
     }
 
-    /// Batch-fetch sessions by IDs.
-    ///
-    /// Returns a map of `session_id → SessionRow`. IDs not found are omitted.
-    pub fn get_sessions_by_ids(&self, session_ids: &[&str]) -> Result<HashMap<String, SessionRow>> {
-        let conn = self.conn()?;
-        SessionRepo::get_by_ids(&conn, session_ids)
-    }
-
     /// Get message previews for a list of sessions.
     ///
     /// Returns the last user prompt and last assistant response per session.
-    pub fn get_session_message_previews(
+    pub(crate) fn get_session_message_previews(
         &self,
         session_ids: &[&str],
     ) -> Result<HashMap<String, MessagePreview>> {
@@ -391,7 +383,7 @@ impl EventStore {
     }
 
     /// Get activity summary lines for a single session list item.
-    pub fn get_session_activity_summaries(
+    pub(crate) fn get_session_activity_summaries(
         &self,
         session_id: &str,
     ) -> Result<Vec<ActivitySummaryLine>> {
@@ -400,7 +392,7 @@ impl EventStore {
     }
 
     /// Get activity summaries for multiple sessions (batch).
-    pub fn get_session_activity_summaries_batch(
+    pub(crate) fn get_session_activity_summaries_batch(
         &self,
         session_ids: &[&str],
     ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {

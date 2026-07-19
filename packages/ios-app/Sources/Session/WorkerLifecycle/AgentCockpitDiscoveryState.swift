@@ -36,7 +36,10 @@ struct AgentCockpitCapabilityGroupRow: Equatable, Identifiable, Sendable {
 
     var workerTriggerExplanation: String? {
         guard operationCount > 0 || functionCount > 0, workerCount == 0, triggerCount == 0 else { return nil }
-        return "These are built-in engine operations. Worker and trigger counts appear when a module publishes autonomous runtime owners."
+        if operationCount > 0 {
+            return "These actions are engine-owned. Worker and trigger counts appear when a module publishes autonomous runtime owners."
+        }
+        return "These interfaces are built into the engine and do not require an autonomous module worker."
     }
 }
 
@@ -65,6 +68,10 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var reports: [AgentCockpitDiscoveryReportRow]
     var families: [AgentCockpitCapabilityFamilyRow]
     var groups: [AgentCockpitCapabilityGroupRow]
+    var engineGroups: [AgentCockpitCapabilityGroupRow]
+    var agentOperationCount: Int
+    var engineOperationCount: Int
+    var engineFunctionCount: Int
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
 
     static let empty = AgentCockpitDiscoveryOverview(
@@ -84,6 +91,10 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
         reports: [],
         families: [],
         groups: [],
+        engineGroups: [],
+        agentOperationCount: 0,
+        engineOperationCount: 0,
+        engineFunctionCount: 0,
         capabilityVisibility: nil
     )
 }
@@ -101,7 +112,11 @@ extension AgentCockpitProjection {
     ) -> AgentCockpitDiscoveryOverview {
         let reportRows = reports.compactMap(discoveryReportRow)
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
-        let hasOperationProjection = capabilityVisibility != nil && !modularityOperations.isEmpty
+        // A present cockpit projection is authoritative even when it contains
+        // zero operations. Falling back to catalog interfaces in that state
+        // would turn a truthful empty action set into a misleading capability
+        // inventory.
+        let hasOperationProjection = capabilityVisibility != nil
         let degraded = functions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count
         let missingSchemas = functions.filter { !$0.schemaComplete }.count
         let topLevelDegraded = hasOperationProjection ? 0 : degraded
@@ -118,13 +133,38 @@ extension AgentCockpitProjection {
             }
             return lhs.missingSchemaCount > rhs.missingSchemaCount
         }
-        let groups = capabilityGroups(
-            workers: workers,
-            functions: functions,
-            modularityOperations: modularityOperations,
-            triggers: triggers,
-            hasOperationProjection: hasOperationProjection
-        )
+        let agentOperations = modularityOperations.filter(\.isAgentFunctionalCapability)
+        let engineOperations = modularityOperations.filter { !$0.isAgentFunctionalCapability }
+        let groups: [AgentCockpitCapabilityGroupRow]
+        let engineGroups: [AgentCockpitCapabilityGroupRow]
+        if hasOperationProjection {
+            groups = capabilityGroups(
+                workers: workers,
+                functions: [],
+                modularityOperations: agentOperations,
+                triggers: [],
+                hasOperationProjection: true,
+                includesLockedOwnership: false
+            )
+            engineGroups = capabilityGroups(
+                workers: workers,
+                functions: functions,
+                modularityOperations: engineOperations,
+                triggers: triggers,
+                hasOperationProjection: true,
+                includesLockedOwnership: true
+            )
+        } else {
+            groups = []
+            engineGroups = capabilityGroups(
+                workers: workers,
+                functions: functions,
+                modularityOperations: [],
+                triggers: triggers,
+                hasOperationProjection: false,
+                includesLockedOwnership: true
+            )
+        }
 
         let latestReport = reportRows.first
         let normalizedLatest = latestReport.map { normalized($0.lifecycle) }
@@ -152,13 +192,21 @@ extension AgentCockpitProjection {
             detail = latestReport?.updatedAt ?? "Latest report needs review"
             image = "exclamationmark.shield"
         } else if functions.isEmpty && workers.isEmpty && modularityOperations.isEmpty {
-            title = "No Operations"
-            detail = "No operations are available"
+            title = hasOperationProjection ? "No Actions" : "No Engine Interfaces"
+            detail = hasOperationProjection
+                ? "No agent actions are available"
+                : "No engine interfaces are available, and the agent action inventory is unavailable"
             image = "questionmark.folder"
         } else {
             title = "Unverified"
-            let visibleOperations = modularityOperations.isEmpty ? functions.count : modularityOperations.count
-            detail = "\(visibleOperations) operations across \(groups.count) capability areas"
+            if hasOperationProjection {
+                detail = "\(agentOperations.count) agent actions across \(groups.count) capability areas"
+            } else {
+                let interfacePhrase = functions.count == 1
+                    ? "1 engine interface remains"
+                    : "\(functions.count) engine interfaces remain"
+                detail = "Agent action inventory unavailable; \(interfacePhrase) inspectable"
+            }
             image = "shield.lefthalf.filled"
         }
 
@@ -179,6 +227,10 @@ extension AgentCockpitProjection {
             reports: reportRows,
             families: families,
             groups: groups,
+            engineGroups: engineGroups,
+            agentOperationCount: hasOperationProjection ? agentOperations.count : 0,
+            engineOperationCount: hasOperationProjection ? engineOperations.count : 0,
+            engineFunctionCount: functions.count,
             capabilityVisibility: capabilityVisibility
         )
     }
@@ -188,7 +240,8 @@ extension AgentCockpitProjection {
         functions: [AgentCockpitFunctionRow],
         modularityOperations: [AgentCockpitOperationRow],
         triggers: [AgentCockpitTriggerRow],
-        hasOperationProjection: Bool
+        hasOperationProjection: Bool,
+        includesLockedOwnership: Bool
     ) -> [AgentCockpitCapabilityGroupRow] {
         var claimedNamespaces = Set<String>()
         var claimedFamilies = Set<String>()
@@ -216,7 +269,12 @@ extension AgentCockpitProjection {
                 title: definition.title,
                 question: definition.question,
                 narrative: definition.narrative,
-                ownerSummary: ownerSummary(workers: groupWorkers, functions: groupFunctions, operations: groupOperations),
+                ownerSummary: ownerSummary(
+                    workers: groupWorkers,
+                    functions: groupFunctions,
+                    operations: groupOperations,
+                    includesLockedOwnership: includesLockedOwnership
+                ),
                 operationCount: groupOperations.count,
                 functionCount: groupFunctions.count,
                 workerCount: groupWorkers.count,
@@ -249,7 +307,12 @@ extension AgentCockpitProjection {
                     title: "Other Capabilities",
                     question: "What else has Tron learned or exposed?",
                     narrative: "Additional namespaces, including future agent-authored capabilities that do not fit the built-in groups yet.",
-                    ownerSummary: ownerSummary(workers: otherWorkers, functions: otherFunctions, operations: otherOperations),
+                    ownerSummary: ownerSummary(
+                        workers: otherWorkers,
+                        functions: otherFunctions,
+                        operations: otherOperations,
+                        includesLockedOwnership: includesLockedOwnership
+                    ),
                     operationCount: otherOperations.count,
                     functionCount: otherFunctions.count,
                     workerCount: otherWorkers.count,
@@ -338,8 +401,8 @@ extension AgentCockpitProjection {
                 id: "diagnostics_audit",
                 title: "Diagnostics & Audit",
                 question: "Can Tron prove what changed and why it is safe?",
-                narrative: "Capability verification, module activity, approvals, agent briefing, and provider-safe evidence.",
-                namespaces: ["catalog_discovery", "module_activity", "approval", "agent_briefing"],
+                narrative: "Capability verification, module activity, approvals, and provider-safe evidence.",
+                namespaces: ["catalog_discovery", "module_activity", "approval"],
                 operationFamilies: ["trace", "logs", "update_diagnostics", "tool_sources", "web", "web_research"]
             )
         ]
@@ -348,26 +411,36 @@ extension AgentCockpitProjection {
     private static func ownerSummary(
         workers: [AgentCockpitWorkerRow],
         functions: [AgentCockpitFunctionRow],
-        operations: [AgentCockpitOperationRow]
+        operations: [AgentCockpitOperationRow],
+        includesLockedOwnership: Bool
     ) -> String {
         if !operations.isEmpty {
             let locked = operations.filter(\.isLocked).count
             let replaceable = operations.filter(\.canReplace).count
+            let extensible = operations.filter { $0.canExtend && !$0.canReplace }.count
+            if !includesLockedOwnership {
+                var summaries: [String] = []
+                if replaceable > 0 { summaries.append("\(replaceable) replaceable") }
+                if extensible > 0 { summaries.append("\(extensible) extensible") }
+                return summaries.isEmpty
+                    ? "\(operations.count) modular action\(operations.count == 1 ? "" : "s")"
+                    : summaries.joined(separator: ", ")
+            }
             if replaceable > 0 {
                 return "\(replaceable) replaceable, \(locked) locked"
             }
             if locked > 0 {
-                return "\(locked) locked operation\(locked == 1 ? "" : "s")"
+                return "\(locked) locked action\(locked == 1 ? "" : "s")"
             }
-            return "\(operations.count) governed operation\(operations.count == 1 ? "" : "s")"
+            return "\(operations.count) governed action\(operations.count == 1 ? "" : "s")"
         }
         if !workers.isEmpty {
             return "\(workers.count) worker owner\(workers.count == 1 ? "" : "s")"
         }
         if functions.isEmpty {
-            return "No published operations"
+            return "No published actions"
         }
-        return "Built-in engine operations"
+        return "Built-in engine interfaces"
     }
 
     private static func capabilityFamily(

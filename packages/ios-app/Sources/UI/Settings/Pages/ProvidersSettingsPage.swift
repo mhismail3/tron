@@ -34,8 +34,6 @@ struct ProvidersSettingsPage: View {
 
     @ViewBuilder
     private var stackedContent: some View {
-        providersInfoCard
-
         ForEach(ProviderInfo.modelProviders) { provider in
             modelProviderSection(provider)
         }
@@ -49,8 +47,6 @@ struct ProvidersSettingsPage: View {
 
     private var landscapeContent: some View {
         VStack(spacing: 16) {
-            providersInfoCard
-
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(ProviderInfo.modelProviders.prefix(3))) { provider in
@@ -95,35 +91,6 @@ struct ProvidersSettingsPage: View {
             serviceAuth: authState?.services[service.id],
             onSave: { params in await saveProvider(params) },
             onClear: { await clearService(service.id) }
-        )
-    }
-
-    private var providersInfoCard: some View {
-        SettingsInfoCard(
-            icon: ServerSettingsCategory.providers.icon,
-            title: ProvidersSettingsSummary.title(for: summaryContext),
-            description: ProvidersSettingsSummary.description(for: summaryContext)
-        )
-    }
-
-    private var summaryContext: ProvidersSettingsSummary.Context {
-        let configuredModelProviderCount = authState.map { state in
-            ProviderInfo.modelProviders.filter {
-                ProviderStatusHelpers.isProviderConfigured(state.providers[$0.id])
-            }.count
-        } ?? 0
-        let configuredServiceCount = authState.map { state in
-            ProviderInfo.services.filter {
-                ProviderStatusHelpers.isServiceConfigured(state.services[$0.id])
-            }.count
-        } ?? 0
-
-        return ProvidersSettingsSummary.Context(
-            isLoaded: authState != nil,
-            configuredModelProviderCount: configuredModelProviderCount,
-            totalModelProviderCount: ProviderInfo.modelProviders.count,
-            configuredServiceCount: configuredServiceCount,
-            totalServiceCount: ProviderInfo.services.count
         )
     }
 

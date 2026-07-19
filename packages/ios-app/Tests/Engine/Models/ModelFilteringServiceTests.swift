@@ -87,6 +87,14 @@ final class ModelFilteringServiceTests: XCTestCase {
             "supportsThinking": supportsThinking,
             "supportsImages": supportsImages,
             "supportsDocuments": supportsDocuments,
+            "attachmentPolicy": [
+                "supportsPdfContent": supportsDocuments,
+                "supportsTextFiles": true,
+                "maxImageDimension": supportsImages ? 1_568 : 0,
+                "maxImageBytes": supportsImages ? 1_400_000 : 0,
+                "maxDocumentBytes": 20_971_520,
+                "supportedImageMimeTypes": supportsImages ? ["image/jpeg", "image/png"] : []
+            ],
             "providerDisplayName": Self.providerDisplayName(provider),
             "providerSortOrder": Self.providerSortOrder(provider)
         ]

@@ -100,6 +100,36 @@ fn auto_sequence_resumes_from_pre_assigned_max() {
 }
 
 #[test]
+fn auto_sequence_exhaustion_fails_without_wrapping() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+    store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::MetadataUpdate,
+            payload: serde_json::json!({"kind": "sequence ceiling"}),
+            parent_id: None,
+            sequence: Some(i64::MAX),
+        })
+        .unwrap();
+
+    let error = store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::MetadataUpdate,
+            payload: serde_json::json!({"kind": "must not wrap"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .expect_err("auto sequence must fail at i64::MAX");
+
+    assert!(error.to_string().contains("event sequence exhausted"));
+    assert_eq!(store.count_events(&cr.session.id).unwrap(), 2);
+}
+
+#[test]
 fn append_with_identity_persists_explicit_event_entropy() {
     let store = setup();
     let cr = store

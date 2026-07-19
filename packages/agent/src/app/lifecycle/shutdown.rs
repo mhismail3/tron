@@ -2,9 +2,10 @@
 //!
 //! Subsystems register two ways:
 //!
-//! 1. [`ShutdownCoordinator::register_task`] — for fire-and-forget
-//!    background tasks that observe [`ShutdownCoordinator::token`] to
-//!    cooperatively stop. These are drained at the end of
+//! 1. [`ShutdownCoordinator::register_task`] — for background tasks whose
+//!    completion shutdown must own. Long-lived tasks observe
+//!    [`ShutdownCoordinator::token`] to cooperatively stop; finite tasks may
+//!    simply complete. All are drained at the end of
 //!    [`ShutdownCoordinator::graceful_shutdown`].
 //! 2. [`ShutdownCoordinator::register_phase_callback`] — for subsystems
 //!    that need a specific async "please drain now" callback. Callbacks run
@@ -13,6 +14,11 @@
 //!
 //! The order is intentional: agent loops finish turns -> capabilities drain ->
 //! DB pool closes. See [`ShutdownPhase`].
+//!
+//! INVARIANT: task registration and registry closure are one atomic decision.
+//! Once closure wins, new handles are aborted; once registration wins, shutdown
+//! observes and drains that handle. Drain waiters register before inspecting
+//! the count, so fast final-task completion cannot strand any shutdown caller.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -91,12 +97,22 @@ impl TaskRegistry {
         }
     }
 
-    fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+    fn close(&self) {
+        // Registration and closure share the task-map lock so shutdown cannot
+        // observe an empty registry while a pre-close registration slips in.
+        let _registration_gate = self.abort_handles.lock();
+        self.closed.store(true, Ordering::SeqCst);
     }
 
-    fn close(&self) {
-        self.closed.store(true, Ordering::SeqCst);
+    fn register(&self, abort_handle: AbortHandle) -> Option<(u64, usize)> {
+        let mut abort_handles = self.abort_handles.lock();
+        if self.closed.load(Ordering::SeqCst) {
+            return None;
+        }
+        let task_id = self.next_task_id.fetch_add(1, Ordering::Relaxed);
+        let count = self.task_count.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = abort_handles.insert(task_id, abort_handle);
+        Some((task_id, count))
     }
 
     fn tracked_count(&self) -> usize {
@@ -123,8 +139,14 @@ impl TaskRegistry {
     }
 
     async fn wait_for_empty(&self) {
-        while self.tracked_count() > 0 {
-            self.drained.notified().await;
+        loop {
+            let notified = self.drained.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.tracked_count() == 0 {
+                return;
+            }
+            notified.await;
         }
     }
 }
@@ -172,27 +194,24 @@ impl ShutdownCoordinator {
         });
     }
 
+    #[cfg(test)]
+    pub(crate) fn registered_phase_callback_count(&self) -> usize {
+        self.callbacks.lock().len()
+    }
+
     /// Register a background task handle for graceful shutdown.
     ///
     /// Completed tasks self-prune automatically. If shutdown has already begun,
     /// the task is aborted immediately instead of being retained.
     pub fn register_task(&self, handle: JoinHandle<()>) {
-        if self.registry.is_closed() {
+        let abort_handle = handle.abort_handle();
+        let Some((task_id, count)) = self.registry.register(abort_handle) else {
             counter!("shutdown_tasks_rejected_total").increment(1);
             handle.abort();
             return;
-        }
-
-        let task_id = self.registry.next_task_id.fetch_add(1, Ordering::Relaxed);
-        let abort_handle = handle.abort_handle();
-        let count = self.registry.task_count.fetch_add(1, Ordering::SeqCst) + 1;
+        };
         gauge!("shutdown_tracked_tasks").set(count as f64);
         counter!("shutdown_tasks_registered_total").increment(1);
-        let _ = self
-            .registry
-            .abort_handles
-            .lock()
-            .insert(task_id, abort_handle);
 
         let registry = Arc::clone(&self.registry);
         drop(tokio::spawn(async move {
@@ -526,6 +545,43 @@ mod tests {
             completed.load(Ordering::SeqCst),
             "registered task should complete during shutdown"
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_shutdown_waiters_observe_final_task_completion() {
+        let coord = Arc::new(ShutdownCoordinator::new());
+        let token = coord.token();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        coord.register_task(tokio::spawn(async move {
+            token.cancelled().await;
+            let _ = release_rx.await;
+        }));
+
+        let first_coord = Arc::clone(&coord);
+        let first = tokio::spawn(async move {
+            first_coord
+                .graceful_shutdown(vec![], Some(Duration::from_secs(5)))
+                .await;
+        });
+        let second_coord = Arc::clone(&coord);
+        let second = tokio::spawn(async move {
+            second_coord
+                .graceful_shutdown(vec![], Some(Duration::from_secs(5)))
+                .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!first.is_finished());
+        assert!(!second.is_finished());
+        release_tx.send(()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            first.await.unwrap();
+            second.await.unwrap();
+        })
+        .await
+        .expect("every shutdown waiter must observe the final task completion");
+        assert_eq!(coord.tracked_task_count(), 0);
     }
 
     #[tokio::test]

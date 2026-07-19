@@ -49,7 +49,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `authority` | Binding/resource grant and exact selector checks |
-//! | `cockpit_visibility` | Redacted Engine Cockpit projection over registry metadata and binding records |
+//! | `cockpit_visibility` | Redacted Dashboard projection with server-owned operation presentation, registry metadata, and binding records |
 //! | `contract` | Worker id, stream topic, scope, and schema constants |
 //! | `payload_safety` | Unsafe-field, path, prompt, command, and token denial |
 //! | `projection` | Bounded provider-safe request, decision, and policy projections |
@@ -61,6 +61,9 @@
 //! | `validation` | Text, ref, registry-derived target metadata, binding-mode, authority, and stale-guard checks |
 //! | `tests` | Schema, authority, replay, stale guard, locked-class, shadow-trial, and no-routing regressions |
 //!
+//! Registration and execute adapters pass the composition-owned engine host
+//! directly; the domain owns no parallel dependency container.
+//!
 //! # INVARIANT: routing is governed, scoped, and reversible
 //!
 //! This domain stores review, policy, shadow, and route metadata, and it owns
@@ -68,9 +71,13 @@
 //! install or activate modules, restore dependencies, run package managers,
 //! mutate manifests, create physical workspaces, access networks, touch
 //! repo-managed `packages/agent/skills`, expose raw commands/logs/env/code/file
-//! contents, or return raw grant/authority ids. Target operation owner/class
-//! metadata is derived from the server-owned execute registry; caller-supplied
-//! owner/class assertions must match it. `kernel_locked` and
+//! contents, or return raw grant/authority ids. Target operation metadata is
+//! derived from the server-owned execute registry; caller-supplied owner,
+//! ownership-class, and replacement-target assertions must match it. Validation
+//! passes that canonical registry value through directly, and route projections
+//! derive their target metadata from the same owner rather than maintaining
+//! copied strings.
+//! `kernel_locked` and
 //! `governance_locked` operations cannot request or activate replacement.
 //! Cockpit visibility follows a fail-closed rule: if operation-list limits or
 //! bounded resource scans make the projection partial, it reports
@@ -90,19 +97,6 @@ pub(crate) mod route;
 pub(crate) mod service;
 pub(crate) mod shadow_trial;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-        }
-    }
-}
 
 pub(crate) use crate::engine::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
@@ -125,7 +119,7 @@ pub(crate) fn worker_module(
     crate::domains::registration::worker::domain_worker_module(
         contract::WORKER,
         &[contract::CAPABILITY_BINDING_LIFECYCLE_TOPIC],
-        service::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        service::function_registrations(contract::capabilities()?, deps.engine_host.clone())?,
     )
 }
 

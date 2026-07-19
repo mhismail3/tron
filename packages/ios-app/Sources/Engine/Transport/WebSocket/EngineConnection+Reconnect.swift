@@ -7,6 +7,7 @@ extension EngineConnection {
     func handleDisconnect() async {
         logger.warning("Handling disconnect...", category: .websocket)
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         if !isDeployRestarting {
             connectionState = isInBackground
                 ? .disconnected
@@ -17,7 +18,11 @@ extension EngineConnection {
         openTimeoutTask = nil
         openContinuation?.resume(throwing: EngineConnectionError.notConnected)
         openContinuation = nil
-        engineConnectionTask?.cancel(with: .abnormalClosure, reason: nil)
+        pingTask?.cancel()
+        pingTask = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        engineConnectionTask?.cancel(with: .goingAway, reason: nil)
         engineConnectionTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil

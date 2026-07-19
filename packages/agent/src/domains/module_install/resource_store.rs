@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, PublishStreamEvent, WorkerId,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -11,16 +11,16 @@ use super::projection::{module_install_decision_summary, module_install_request_
 use super::records::resource_ref;
 use super::validation::invalid;
 use super::{
-    Deps, MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID,
-    MODULE_INSTALL_REQUEST_KIND, MODULE_INSTALL_REQUEST_SCHEMA_ID,
+    MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_INSTALL_REQUEST_KIND,
+    MODULE_INSTALL_REQUEST_SCHEMA_ID,
 };
 
 pub(super) async fn inspect_resource_required(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource_id: &str,
     label: &str,
 ) -> Result<EngineResourceInspection, CapabilityError> {
-    deps.engine_host
+    engine_host
         .inspect_resource(resource_id)
         .await
         .map_err(engine_error)?
@@ -28,11 +28,12 @@ pub(super) async fn inspect_resource_required(
 }
 
 pub(super) async fn module_install_request_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "module install request").await?;
+        inspect_resource_required(engine_host, &resource.resource_id, "module install request")
+            .await?;
     let (version, payload) =
         current_payload(&inspection, "module_install_request_record projection")?;
     Ok(module_install_request_summary(
@@ -43,11 +44,15 @@ pub(super) async fn module_install_request_summary_for_resource(
 }
 
 pub(super) async fn module_install_decision_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "module install decision").await?;
+    let inspection = inspect_resource_required(
+        engine_host,
+        &resource.resource_id,
+        "module install decision",
+    )
+    .await?;
     let (version, payload) =
         current_payload(&inspection, "module_install_decision_record projection")?;
     Ok(module_install_decision_summary(
@@ -127,13 +132,13 @@ pub(super) fn current_payload<'a>(
 }
 
 pub(super) async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: MODULE_INSTALL_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

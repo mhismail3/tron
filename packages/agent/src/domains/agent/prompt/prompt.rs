@@ -1,9 +1,12 @@
 //! Agent workflow operations.
+use std::sync::Arc;
+
 use super::{
     AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest, errors,
 };
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::engine::{FunctionId, Invocation};
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::opt_array;
@@ -58,7 +61,8 @@ pub(crate) async fn prompt_apply_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
-    let (submission, _session, _agent_deps) = validate_prompt_submission(params, deps).await?;
+    let (submission, _session, _responder_factory) =
+        validate_prompt_submission(params, deps).await?;
 
     publish_prompt_stream(
         invocation,
@@ -85,7 +89,7 @@ pub(crate) async fn run_turn_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
-    let (submission, session, agent_deps) = validate_prompt_submission(params, deps).await?;
+    let (submission, session, responder_factory) = validate_prompt_submission(params, deps).await?;
 
     let started_run = deps
         .orchestrator
@@ -109,7 +113,7 @@ pub(crate) async fn run_turn_value(
     .await;
     spawn_prompt_run(
         &deps.prompt_runtime(),
-        &agent_deps,
+        responder_factory,
         &session,
         started_run,
         run_id.clone(),
@@ -135,7 +139,7 @@ pub(crate) async fn validate_prompt_submission(
     (
         PromptSubmission,
         crate::domains::session::event_store::SessionRow,
-        crate::shared::server::context::AgentDeps,
+        Arc<dyn ModelResponderFactory>,
     ),
     CapabilityError,
 > {
@@ -143,7 +147,6 @@ pub(crate) async fn validate_prompt_submission(
     let prompt = require_string_param(params, "prompt")?;
     validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
     let attachments = opt_array(params, "attachments").cloned();
-    validate_attachment_array(attachments.as_deref())?;
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
         return Err(CapabilityError::Custom {
@@ -154,10 +157,25 @@ pub(crate) async fn validate_prompt_submission(
     }
 
     let session = AgentCommandService::load_prompt_session(deps, &session_id).await?;
-    let agent_deps =
-        deps.agent_deps
-            .as_ref()
-            .cloned()
+    if attachments.as_ref().is_some_and(|items| !items.is_empty()) {
+        let auth_path =
+            crate::domains::auth::credentials::openai::infer_auth_path(&deps.auth_path, None)
+                .unwrap_or(crate::domains::auth::credentials::OpenAIAuthPath::ChatGptCodex);
+        let policy = crate::domains::model::routing::attachments::for_model(
+            &session.latest_model,
+            auth_path,
+        )
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message: format!(
+                "Attachments are unavailable because model '{}' has no attachment policy",
+                session.latest_model
+            ),
+        })?;
+        validate_attachment_array(attachments.as_deref(), &policy)?;
+    }
+    let responder_factory =
+        deps.responder_factory
+            .clone()
             .ok_or_else(|| CapabilityError::NotAvailable {
                 message: "Agent execution dependencies are not configured".into(),
             })?;
@@ -169,18 +187,57 @@ pub(crate) async fn validate_prompt_submission(
             attachments,
         },
         session,
-        agent_deps,
+        responder_factory,
     ))
 }
 
 pub(crate) fn validate_attachment_array(
     attachments: Option<&[Value]>,
+    policy: &crate::domains::model::routing::attachments::AttachmentPolicy,
 ) -> Result<(), CapabilityError> {
     if let Some(attachments) = attachments {
         for attachment in attachments {
-            if let Some(data) = attachment.get("data").and_then(Value::as_str) {
-                validation::validate_attachment_size(data)?;
-            }
+            let data = attachment
+                .get("data")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: "Attachment is missing base64 data".into(),
+                })?;
+            let mime_type = attachment
+                .get("mimeType")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: "Attachment is missing mimeType".into(),
+                })?;
+
+            let max_bytes = if mime_type.starts_with("image/") {
+                if policy.max_image_bytes == 0 || !policy.accepts_image_mime_type(mime_type) {
+                    return Err(CapabilityError::InvalidParams {
+                        message: format!("Model does not accept attachment type '{mime_type}'"),
+                    });
+                }
+                policy.max_image_bytes
+            } else if mime_type == "application/pdf" {
+                if !policy.supports_pdf_content {
+                    return Err(CapabilityError::InvalidParams {
+                        message: "Model does not accept PDF content".into(),
+                    });
+                }
+                policy.max_document_bytes
+            } else if matches!(mime_type, "text/plain" | "application/json") {
+                if !policy.supports_text_files {
+                    return Err(CapabilityError::InvalidParams {
+                        message: "Model does not accept text file content".into(),
+                    });
+                }
+                policy.max_document_bytes
+            } else {
+                return Err(CapabilityError::InvalidParams {
+                    message: format!("Unsupported attachment type '{mime_type}'"),
+                });
+            };
+
+            validation::validate_attachment_size_with_limit(data, max_bytes)?;
         }
     }
     Ok(())
@@ -274,7 +331,29 @@ pub(crate) async fn publish_prompt_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::registration::worker::DomainRegistrationContext;
     use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+    use crate::shared::server::test_support::make_test_context;
+
+    #[tokio::test]
+    async fn prompt_validation_requires_a_responder_factory() {
+        let context = make_test_context();
+        let session_id = context
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+        let registration = DomainRegistrationContext::from_context(&context);
+        let deps = crate::domains::agent::Deps::from_engine(&registration);
+        let params = json!({"sessionId": session_id, "prompt": "hello"});
+
+        let result = validate_prompt_submission(Some(&params), &deps).await;
+
+        assert!(matches!(
+            result,
+            Err(CapabilityError::NotAvailable { message })
+                if message == "Agent execution dependencies are not configured"
+        ));
+    }
 
     #[test]
     fn hidden_prompt_child_context_is_engine_owned_not_public_caller() {
@@ -311,6 +390,40 @@ mod tests {
                 .idempotency_key
                 .as_deref()
                 .is_some_and(|key| key.starts_with("agent::prompt_apply:"))
+        );
+    }
+
+    #[test]
+    fn attachment_validation_enforces_model_policy() {
+        let policy = crate::domains::model::routing::attachments::AttachmentPolicy {
+            supports_pdf_content: false,
+            supports_text_files: true,
+            max_image_dimension: 1_568,
+            max_image_bytes: 10,
+            max_document_bytes: 20,
+            supported_image_mime_types: &["image/jpeg"],
+        };
+
+        assert!(
+            validate_attachment_array(
+                Some(&[json!({"data": "YWJj", "mimeType": "image/jpeg"})]),
+                &policy,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_attachment_array(
+                Some(&[json!({"data": "YWJj", "mimeType": "image/png"})]),
+                &policy,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_attachment_array(
+                Some(&[json!({"data": "YWJj", "mimeType": "application/pdf"})]),
+                &policy,
+            )
+            .is_err()
         );
     }
 }

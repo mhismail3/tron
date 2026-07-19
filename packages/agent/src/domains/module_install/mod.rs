@@ -24,6 +24,9 @@
 //! | `validation` | Text, ref, approval, lifecycle, and bounded metadata checks |
 //! | `tests` | Schema, authority, replay, approval, prerequisite, and redaction regressions |
 //!
+//! Services and execute adapters borrow the composition-owned engine host
+//! directly; this metadata-only domain owns no separate dependency state.
+//!
 //! # INVARIANT: install candidates are metadata gate state only
 //!
 //! This domain stores review-gate metadata only. It must not install modules,
@@ -45,11 +48,6 @@ mod records;
 mod resource_store;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{
     MODULE_INSTALL_DECISION_KIND, MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_INSTALL_REQUEST_KIND,

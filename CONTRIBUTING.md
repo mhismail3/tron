@@ -9,12 +9,12 @@ exactly what you need to make a green PR.
 git clone <repository-url>
 cd tron
 scripts/install-hooks.sh                                           # one-time
-cd packages/agent && cargo check && cargo test -- --quiet          # baseline
+scripts/tron ci test                                               # Rust baseline
 ```
 
-Open a PR against `main`. CI always runs the personal-info/version guards, runs
-the Rust closeout target set for docs/template/iOS/Mac surfaces, and runs the
-full Rust, iOS, or Mac jobs when their source paths or labels apply. Fill out
+Open a PR against `main`. CI always runs the personal-info/version guards and
+the Rust quality path, then runs the full iOS or Mac jobs when their source
+paths or labels apply. Fill out
 the PR template — the checklist exists because `README.md` and the in-tree
 progressive-disclosure docs drift fast.
 
@@ -24,7 +24,7 @@ progressive-disclosure docs drift fast.
 packages/
   agent/      Rust server (cargo workspace member)
   ios-app/    SwiftUI iOS app (XcodeGen)
-  mac-app/    SwiftUI macOS wrapper (lands in Phase 5)
+  mac-app/    SwiftUI macOS wrapper and server installer
 scripts/      Bash entrypoints — `tron`, `install-hooks.sh`, `personal-info-guard.sh`
 ```
 
@@ -38,10 +38,12 @@ identifies the right owner for each kind of change.
 Tron uses a **takeover model**: a long-running production server lives inside
 `/Applications/Tron.app` and is registered through ServiceManagement. When you
 run `tron dev`, the dev binary takes over port 9847 from the prod server until
-you stop it.
+you stop it. The command completes exactly one dev-profile build before it
+stops the installed helper; `-b` places that build before optional `-t` tests,
+while without `-b` the tests run first.
 
 ```bash
-# One-time setup (installs LaunchAgent, builds initial binary, etc.).
+# One-time setup (checks prerequisites, builds, and links the workspace CLI).
 scripts/tron setup
 
 # Build and run the dev server in the foreground (takeover mode).
@@ -73,10 +75,9 @@ for App ID `6761511764`; contributor PRs do not need App Store Connect access.
 The Mac SwiftUI wrapper lives at `packages/mac-app/`. It's a SwiftUI app that
 bundles the headless Rust agent inside helper apps under
 `Contents/Library/LoginItems/Tron Server*.app/Contents/MacOS/tron` and presents
-a first-run wizard + menu bar icon. Both Debug and Release configurations
-build `TronMac.app` (the bundle name follows the XcodeGen target); Debug uses
-bundle ID `com.tron.mac.dev` (lives in DerivedData), Release uses
-`com.tron.mac` and ships as a notarized DMG (`Tron.app` to the end user). This
+a first-run wizard + menu bar icon. Debug builds `TronMac.app` with bundle ID
+`com.tron.mac.dev` in DerivedData. Release overrides the product name to build
+`Tron.app` with bundle ID `com.tron.mac` and ships it in a notarized DMG. This
 is wholly separate from `tron dev`'s headless agent at
 `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) — see
 [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants).
@@ -95,54 +96,59 @@ xcodebuild test \
   -configuration Debug
 ```
 
-CI exercises the same flow on every PR that touches `packages/mac-app/**` or
-`packages/agent/**` (the agent binary is embedded, so a Rust change affects
-the Mac app bundle). It verifies XcodeGen leaves the tracked project unchanged,
-runs focused non-flaky wrapper tests for paths/status/Tailscale coverage, and
-keeps a dry-run DMG assembly to catch breakage in `release-mac.yml` before tag
-push.
+CI exercises the same flow on every PR that touches `packages/mac-app/**`,
+`packages/agent/**`, or `release-mac.yml` (the agent binary is embedded, so a
+Rust change affects the Mac app bundle). The iOS and Mac `project.yml` files are
+authoritative; CI generates their ignored Xcode projects before building. It
+also runs focused non-flaky wrapper tests for paths/status/Tailscale coverage
+before packaging. PR CI and `release-mac.yml` both delegate DMG assembly and
+mounted-image verification to `packages/mac-app/scripts/package-dmg.sh`.
+Missing apps, failed packaging, empty images, or images without the wrapper,
+helper, and `Applications` link fail the job.
 
 ## Testing
 
-Project rule: **code, tests, and docs ship together**. Every PR that adds or
-changes behavior must include the corresponding tests in the same commit. We
-work test-first whenever practical — write the failing test, then make it pass.
+Project rule: **code, tests, and docs ship together**. Reuse existing tests for
+the changed owner; add or update tests when behavior changes or a genuine
+coverage gap exists.
 
 | Surface | Command |
 |---------|---------|
-| Rust agent | `cd packages/agent && cargo check && cargo test -- --quiet` |
+| Rust agent | `scripts/tron ci test` |
 | iOS app | `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` |
+| Mac wrapper | `cd packages/mac-app && xcodegen generate && xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug` |
 | Personal-info guard | `scripts/personal-info-guard.sh` |
-| All-in-one (workspace only) | `scripts/tron ci` |
+| Rust commit milestone | `scripts/tron ci fmt check clippy test` |
 
 CI runs `scripts/tron ci fmt`, `check`, `clippy`, and `test` as its one Rust
-quality path for every repository change. The test command owns the named
-closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
-database-path, and serial integration targets; the workflow does not duplicate
-that list. iOS and Mac jobs only run for their package paths, relevant labels,
-or full validation on `main` and manual dispatch (macOS minutes are ~10× the
-cost of Linux minutes). The Rust job checks out full history because accepted
-baseline invariants verify commit ancestry. `CI summary` is the required
-mainline check.
-
-Repository invariants must not depend on developer-local branch refs. Historical
-or quarantined branches belong in tracked evidence with immutable commit hashes;
-only commits reachable from the checked-out repository may be queried at test
-time.
+quality path for every repository change. Cargo's default auto-discovery of
+top-level `packages/agent/tests/*.rs` files owns the integration-target fact
+set. The test command derives that set from the same source layout, runs each
+target once in deterministic order, and reserves `integration` for the final
+serial invocation. The
+[repository workflow invariant](packages/agent/tests/repository_workflow_invariants.rs)
+compares that schedule with Cargo and verifies GitHub delegates to this local
+owner. The same invariant owns generated-project hygiene by requiring iOS and
+Mac XcodeGen output to stay ignored and untracked; client workflows own project
+generation and the consuming builds, tests, and archives. On pull requests,
+iOS and Mac jobs run for their package paths, their release workflows, or
+relevant labels. Both run on `main` and manual dispatch. `CI summary` requires
+successful change detection and all unconditional jobs; it accepts a skipped
+client job only on a successfully path-filtered pull request.
 
 ## Commits
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/) loosely:
 
 ```
-feat(rpc): add system.checkForUpdates handler
-fix(ios-connection): resume backoff after foreground transition
-docs(readme): refresh RPC API table
-chore(ci): bump actions/checkout to v4
+feat(capability): add bounded workspace search
+fix(events): preserve session ownership during reconstruction
+docs(storage): clarify resource cleanup ownership
+ci: fail closed when path detection fails
 ```
 
 Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `style`.
-Common scopes mirror the touched module (`rpc`, `events`, `ios-onboarding`,
+Common scopes mirror the touched module (`capability`, `events`, `ios-session`,
 `mac-wizard`, `scripts`, `cargo`).
 
 The pre-commit hook (`scripts/install-hooks.sh`) runs Rust formatting check
@@ -181,9 +187,8 @@ into every session) or `~/.tron/memory/rules/`. Skill-owned secrets go through
 the `vault` skill at `~/.tron/workspace/vault/`; Tron-owned provider auth lives
 in `~/.tron/profiles/auth.json`. Never paste secrets anywhere in the tree.
 
-If you legitimately need to write your username (e.g. as a test fixture), add
-your file path to the allowlist in `scripts/personal-info-guard.sh` AND
-explain why in the same commit.
+Tests that need identity-shaped data must use synthetic, nonpersonal fixtures;
+personal literals are not allowlisted into the repository.
 
 ## Documentation
 
@@ -212,12 +217,12 @@ Two release lanes:
 | What | How | Cadence |
 |---|---|---|
 | iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, resolves export compliance, submits TestFlight beta review when external testing requires it, exits successfully as pending review for first-build/new-version review waits, or assigns externally-ready builds to the public TestFlight group. | Same tag as server release. |
-| Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
+| Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds and notarizes the macOS DMG, creates a draft release when absent, or refreshes assets on an existing release without changing its publish state. | Same tag as iOS release. |
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
-  SemVer (`0.1.0-beta.1`), and `TRON_APPLE_BUILD` is the numeric Apple
-  build. Human-facing surfaces format that first beta as `v0.1 (Beta 1)`.
+  SemVer, `TRON_APPLE_BUILD` is the numeric Apple build, and
+  `TRON_DISPLAY_VERSION` is the human-facing label.
 - **Generated mirrors** — `packages/agent/Cargo.toml`, `packages/agent/Cargo.lock`,
   Mac/iOS `project.yml`, and custom `TRONCanonicalVersion` bundle keys.
   Run `scripts/tron version sync` after editing `VERSION.env`; CI runs
@@ -230,18 +235,18 @@ Versioning sources:
 git checkout main && git pull && git log -1 --oneline
 
 # 2. Set VERSION.env, then sync generated mirrors.
-# For the first beta this is already 0.1.0-beta.1; subsequent betas can use
-# `scripts/tron version bump beta`.
+# Use `scripts/tron version bump beta` first when advancing to the next beta.
 scripts/tron version sync
 
 # 3. Commit the bump and tag.
-git commit -am "chore(release): Tron v0.1 (Beta 1)"
+git commit -am "chore(release): bump Tron version"
 git tag "$(scripts/tron version print | awk -F= '$1 == "TRON_RELEASE_TAG" { print $2 }')"
 git push && git push --tags
 
 # 4. Tag push starts both release workflows:
 #    - release-mac.yml: build → codesign → app notarize/staple → DMG
-#      build/sign/notarize/staple → GitHub Release draft.
+#      build/sign/notarize/staple → create a draft or refresh existing assets
+#      without changing the release's publish state.
 #    - release-ios.yml: archive Prod iOS app → export/sign App Store IPA →
 #      upload to App Store Connect → wait for processing → resolve export
 #      compliance / beta review → either stop as pending Apple review or assign
@@ -251,8 +256,9 @@ git push && git push --tags
 
 # 5. To test the pipeline without cutting a real release, use
 #    Actions → Release (Mac DMG) and Actions → Release (iOS TestFlight)
-#    with `dry_run=true`. Missing release secrets auto-force dry-run, so
-#    forks can exercise the build without the Apple credentials.
+#    with `dry_run=true`; this explicit manual mode can run without Apple
+#    credentials. Tag runs and manual `dry_run=false` runs fail before the
+#    build when any required release secret is missing.
 ```
 
 **Required GitHub Actions secrets** for notarized releases:
@@ -272,12 +278,12 @@ git push && git push --tags
 | `IOS_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile` |
 | `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile.ShareExtension` |
 
-**Required GitHub Actions variables** for iOS TestFlight distribution:
+**Optional GitHub Actions variables** for iOS TestFlight group assignment:
 
 | Variable | What |
 |---|---|
-| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id |
-| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link |
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id; omitted when CI should skip that explicit assignment |
+| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link; CI can auto-discover a single public-link group |
 
 Rotate by regenerating the relevant `.p12` or profile, re-encoding
 (`base64 -i Tron.p12 | pbcopy`), or by creating a new App Store Connect API key
@@ -289,9 +295,9 @@ matching manually managed profiles or matching Xcode-managed App Store profiles.
 The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`;
 revisit that release assertion before adding non-exempt cryptography.
 
-**Rollback a bad server release**: `gh release delete server-v0.1.0-beta.1` pulls the DMG.
-Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed
-release at the next beta or patch version.
+**Rollback a bad server release**: `gh release delete <release-tag>` removes
+the release assets. Existing installs are unaffected because they do not
+auto-pull deletions. Cut a fixed release at the next beta or patch version.
 
 Hotfix path: cherry-pick the fix to `main`, tag a new patch release.
 

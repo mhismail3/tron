@@ -12,17 +12,14 @@ pub(super) async fn git_status(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let binding_deps = crate::domains::capability_binding::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     if let Some(route) = crate::domains::capability_binding::route::active_route_for_git_status(
-        &binding_deps,
+        &deps.engine_host,
         invocation,
     )
     .await?
     {
         return crate::domains::capability_binding::route::execute_routed_git_status(
-            &binding_deps,
+            &deps.engine_host,
             invocation,
             &route,
         )

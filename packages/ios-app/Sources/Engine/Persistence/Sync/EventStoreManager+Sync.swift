@@ -8,19 +8,24 @@ extension EventStoreManager {
     /// Does NOT sync events — just updates the session metadata so all devices see the same list.
     /// Reconciles local state: adds new sessions, updates existing, removes stale ones.
     func refreshSessionList() async {
-        let serverOrigin = engineClient.serverOrigin
+        let operationClient = engineClient
+        let processingRevision = processingStateRevision
+        let serverOrigin = operationClient.serverOrigin
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
         do {
-            let snapshot = try await sessionSynchronizer.fetchServerSessions()
+            let snapshot = try await sessionSynchronizer.fetchServerSessions(using: operationClient)
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             let serverSessions = snapshot.sessions
             let serverSessionIds = Set(serverSessions.map(\.sessionId))
             logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
 
             let localSessions = try await eventDB.sessions.getAll()
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             let localSessionsById = Dictionary(uniqueKeysWithValues: localSessions.map { ($0.id, $0) })
             var sessionsToUpsert: [CachedSession] = []
             sessionsToUpsert.reserveCapacity(serverSessions.count)
+            var authoritativeProcessingSessionIds = Set<String>()
 
             for serverSession in serverSessions {
                 let sessionId = serverSession.sessionId
@@ -28,6 +33,9 @@ extension EventStoreManager {
                 if let existingOrigin = existing?.serverOrigin,
                    existingOrigin != serverOrigin {
                     continue
+                }
+                if serverSession.isRunning != nil {
+                    authoritativeProcessingSessionIds.insert(sessionId)
                 }
 
                 if let existing {
@@ -51,6 +59,7 @@ extension EventStoreManager {
                 authoritativeSessionIds: snapshot.isComplete ? serverSessionIds : nil,
                 snapshotAsOf: snapshot.isComplete ? snapshot.snapshotAsOf : nil
             )
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             if removedCount > 0 {
                 logger.info("Removed \(removedCount) stale local sessions", category: .session)
             }
@@ -61,17 +70,23 @@ extension EventStoreManager {
                 )
             }
 
-            loadSessions()
-            seedProcessingStateFromSessions()
+            guard await loadSessionsAfterRefresh(
+                using: operationClient,
+                acceptingServerProcessingStateAt: processingRevision,
+                authoritativeProcessingSessionIds: authoritativeProcessingSessionIds
+            ) else {
+                return
+            }
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
         } catch {
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             if ConnectionErrorClassifier.isTransientTransport(error) {
                 // Transport-level foreground churn is owned by the connection state machine.
                 // Session refresh is opportunistic, so do not show a red error toast for a
                 // socket that is already reconnecting or about to reconnect.
                 let shouldRetryOnReconnect =
                     ConnectionErrorClassifier.requiresConnectionRecovery(error) ||
-                    !engineClient.connectionState.isConnected
+                    !operationClient.connectionState.isConnected
                 if shouldRetryOnReconnect {
                     logger.info("Session refresh deferred until reconnect: \(error.localizedDescription)", category: .session)
                     refreshService.deferUntilReconnect()
@@ -85,15 +100,26 @@ extension EventStoreManager {
         }
     }
 
-    /// Sync events for a specific session.
-    /// Delegates to SessionSynchronizer and handles pagination.
-    func syncSessionEvents(sessionId: String) async throws {
-        var result = try await sessionSynchronizer.syncEvents(sessionId: sessionId)
+    /// A retired or cancelled refresh cannot affect the current projection, retry lane, or UI.
+    private func acceptsRefreshCompletion(from operationClient: EngineClient) -> Bool {
+        !Task.isCancelled && engineClient === operationClient
+    }
 
-        // Continue fetching if more events available
+    /// Sync events for a specific session.
+    /// Keeps pagination on one captured client and updates metadata after every committed page.
+    func syncSessionEvents(sessionId: String) async throws {
+        let operationClient = engineClient
+        var result = try await sessionSynchronizer.syncEvents(
+            sessionId: sessionId,
+            using: operationClient
+        )
+
         while result.hasMore {
             try await updateSessionMetadata(sessionId: sessionId)
-            result = try await sessionSynchronizer.syncEvents(sessionId: sessionId)
+            result = try await sessionSynchronizer.syncEvents(
+                sessionId: sessionId,
+                using: operationClient
+            )
         }
 
         if result.eventCount > 0 {
@@ -104,7 +130,11 @@ extension EventStoreManager {
     /// Full sync for a single session (fetch all events from scratch).
     /// Delegates to SessionSynchronizer.
     func fullSyncSession(_ sessionId: String) async throws {
-        _ = try await sessionSynchronizer.fullSync(sessionId: sessionId)
+        let operationClient = engineClient
+        _ = try await sessionSynchronizer.fullSync(
+            sessionId: sessionId,
+            using: operationClient
+        )
         try await updateSessionMetadata(sessionId: sessionId)
     }
 

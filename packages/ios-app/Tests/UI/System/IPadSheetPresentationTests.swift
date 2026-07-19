@@ -95,7 +95,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     func testRepresentativeAppSheetsUseCanonicalIPadSizing() throws {
         let expected: [(path: [String], fragment: String)] = [
             (
-                ["Sources", "App", "Lifecycle", "TronMobileApp.swift"],
+                ["Sources", "App", "Lifecycle", "ProductionAppRoot.swift"],
                 ".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"
             ),
             (
@@ -116,6 +116,10 @@ final class IPadSheetPresentationTests: XCTestCase {
             ),
             (
                 ["Sources", "UI", "System", "ProviderErrorDetailSheet.swift"],
+                ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
+            ),
+            (
+                ["Sources", "UI", "Chat", "Sheets", "LocalErrorDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             )
         ]

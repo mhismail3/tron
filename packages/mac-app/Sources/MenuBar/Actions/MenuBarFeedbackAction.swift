@@ -5,9 +5,9 @@ import Foundation
 /// Log capture is best-effort and never routes through Mail.
 @MainActor
 enum MenuBarFeedbackAction {
-    static func present(snapshot: ServerStatusSnapshot) async {
+    static func present(snapshot: ServerStatusSnapshot, token: String?) async {
         let logs: String
-        switch await MenuBarLogReader.fetchRecentLogs() {
+        switch await MenuBarLogReader.fetchRecentLogs(token: token) {
         case .success(let value):
             logs = value
         case .failure(let error):

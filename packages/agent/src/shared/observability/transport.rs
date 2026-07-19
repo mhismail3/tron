@@ -32,13 +32,13 @@ use super::types::LogLevel;
 
 /// Configuration for the `SQLite` transport.
 #[derive(Clone, Debug)]
-pub struct TransportConfig {
+pub(super) struct TransportConfig {
     /// Minimum level to persist (numeric). Default: 30 (info).
-    pub min_level: i32,
+    pub(super) min_level: i32,
     /// Number of entries before batch flush. Default: 100.
-    pub batch_size: usize,
+    pub(super) batch_size: usize,
     /// Flush interval in milliseconds. Default: 1000.
-    pub flush_interval_ms: u64,
+    pub(super) flush_interval_ms: u64,
 }
 
 impl Default for TransportConfig {
@@ -82,7 +82,7 @@ struct TransportInner {
 /// Captures log events, batches them, and writes to the `logs` table in
 /// transactions. Use [`SqliteTransport::new`] to create, then register as a
 /// `tracing_subscriber::Layer`.
-pub struct SqliteTransport {
+pub(super) struct SqliteTransport {
     inner: Arc<Mutex<TransportInner>>,
     config: TransportConfig,
 }
@@ -92,7 +92,7 @@ impl SqliteTransport {
     ///
     /// The connection must have the `logs` table already created
     /// (via events migrations).
-    pub fn new(conn: Connection, config: TransportConfig) -> Self {
+    pub(super) fn new(conn: Connection, config: TransportConfig) -> Self {
         Self {
             inner: Arc::new(Mutex::new(TransportInner {
                 batch: Vec::with_capacity(config.batch_size),
@@ -103,7 +103,7 @@ impl SqliteTransport {
     }
 
     /// Get a handle for manual flushing and shutdown.
-    pub fn handle(&self) -> TransportHandle {
+    pub(super) fn handle(&self) -> TransportHandle {
         TransportHandle {
             inner: Arc::clone(&self.inner),
         }
@@ -132,13 +132,13 @@ impl SqliteTransport {
 
 /// Handle for flushing/shutdown from outside the layer.
 #[derive(Clone)]
-pub struct TransportHandle {
+pub(crate) struct TransportHandle {
     inner: Arc<Mutex<TransportInner>>,
 }
 
 impl TransportHandle {
     /// Flush any pending log entries to `SQLite`.
-    pub fn flush(&self) {
+    pub(crate) fn flush(&self) {
         SqliteTransport::flush_batch(&self.inner);
     }
 }
@@ -444,7 +444,9 @@ fn compact_log_data(conn: &Connection, entry: &PendingEntry) -> Option<String> {
         };
     let expires_at = (retention_class == "diagnostic_verbose").then(|| {
         (chrono::Utc::now()
-            + chrono::Duration::days(crate::shared::storage::DEFAULT_VERBOSE_RETENTION_DAYS))
+            + chrono::Duration::days(
+                i64::try_from(crate::shared::storage::DIAGNOSTIC_RETENTION_DAYS).unwrap(),
+            ))
         .to_rfc3339()
     });
     crate::shared::storage::store_json_bytes(

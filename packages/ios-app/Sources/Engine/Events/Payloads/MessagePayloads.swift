@@ -120,6 +120,23 @@ struct AssistantMessagePayload {
     let hasThinking: Bool?
     let interrupted: Bool?
 
+    /// Whether the provider response contains capability invocations. Their
+    /// presence makes the response ineligible for a final textual-response
+    /// footer whether capability execution continues or explicitly stops.
+    var hasCapabilityInvocations: Bool {
+        contentBlocks.contains {
+            $0["type"] as? String == ContentBlockType.capabilityInvocation.rawValue
+        }
+    }
+
+    /// Conservative, server-contract-backed presentation eligibility. A
+    /// completed text response with zero capability drafts is guaranteed to end
+    /// the agent loop; interrupted or capability-bearing responses get no
+    /// footer. Rendered position and provider stop-reason spelling are ignored.
+    var isFinalAssistantResponse: Bool {
+        textContent != nil && !hasCapabilityInvocations && interrupted != true
+    }
+
     /// Extracts ONLY the text content, ignoring capability_invocation blocks.
     /// Capability invocations are rendered via separate capability.invocation.started events.
     ///

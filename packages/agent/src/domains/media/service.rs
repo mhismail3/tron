@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    UpdateResource, WorkerId,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    PublishStreamEvent, UpdateResource, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -16,19 +16,19 @@ use super::contract::{
 };
 use super::projection::{inspected_media, media_summary};
 use super::validation::*;
-use super::{Deps, MEDIA_ARTIFACT_KIND, MEDIA_ARTIFACT_SCHEMA_ID};
+use super::{MEDIA_ARTIFACT_KIND, MEDIA_ARTIFACT_SCHEMA_ID};
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.media.idempotency.v1";
 const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.media.idempotency.v1\0";
 
 pub(crate) async fn create_media_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_raw_media_fields(payload)?;
-    ensure_write_authority(deps, invocation, "media_create").await?;
+    ensure_write_authority(engine_host, invocation, "media_create").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let media_id = optional_string(payload, "mediaId")?
@@ -64,8 +64,7 @@ pub(crate) async fn create_media_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = media_resource_id(&scope, &media_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -109,8 +108,7 @@ pub(crate) async fn create_media_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MEDIA_ARTIFACT_KIND.to_owned(),
@@ -137,7 +135,7 @@ pub(crate) async fn create_media_value_at(
         .clone()
         .ok_or_else(|| invalid("media resource was created without a current version"))?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "media.created",
         &resource,
@@ -157,17 +155,17 @@ pub(crate) async fn create_media_value_at(
         "idempotentReplay": false,
         "mediaResourceId": resource.resource_id,
         "mediaVersionId": version_id,
-        "media": media_summary_for_resource(deps, &resource).await?,
+        "media": media_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "media")]
     }))
 }
 
 pub(crate) async fn list_media_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "media_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "media_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -177,8 +175,7 @@ pub(crate) async fn list_media_value(
     let media_kind = optional_string(payload, "mediaKind")?
         .map(|value| parse_media_kind(Some(value)))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(MEDIA_ARTIFACT_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -194,8 +191,7 @@ pub(crate) async fn list_media_value(
     let truncated = resources.len() > limit;
     let mut media = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -230,16 +226,15 @@ pub(crate) async fn list_media_value(
 }
 
 pub(crate) async fn inspect_media_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "media_inspect").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "media_inspect").await?;
     let resource_id = required_string(payload, "mediaResourceId")?;
     validate_media_resource_id(&resource_id)?;
     let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -256,12 +251,12 @@ pub(crate) async fn inspect_media_value(
 }
 
 pub(crate) async fn archive_media_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
-    ensure_write_authority(deps, invocation, "media_archive").await?;
+    ensure_write_authority(engine_host, invocation, "media_archive").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let resource_id = required_string(payload, "mediaResourceId")?;
     validate_media_resource_id(&resource_id)?;
@@ -270,8 +265,7 @@ pub(crate) async fn archive_media_value_at(
         .transpose()?
         .unwrap_or_else(|| "archive".to_owned());
     let scope = resource_scope(invocation)?;
-    let mut inspection = deps
-        .engine_host
+    let mut inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -305,8 +299,7 @@ pub(crate) async fn archive_media_value_at(
         "idempotency": idempotency_evidence(invocation, &idempotency_key)
     });
     record["revision"] = json!(record["revision"].as_u64().unwrap_or(1).saturating_add(1));
-    let version = deps
-        .engine_host
+    let version = engine_host
         .update_resource(UpdateResource {
             resource_id: resource_id.clone(),
             expected_current_version_id: Some(current_version.version_id.clone()),
@@ -322,7 +315,7 @@ pub(crate) async fn archive_media_value_at(
     inspection.resource.lifecycle = "archived".to_owned();
     inspection.resource.current_version_id = Some(version.version_id.clone());
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "media.archived",
         &inspection.resource,
@@ -448,11 +441,10 @@ fn transcription_record(payload: &Value) -> Result<Value, CapabilityError> {
 }
 
 async fn media_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?
@@ -516,13 +508,13 @@ fn validate_media_resource_id(value: &str) -> Result<(), CapabilityError> {
 }
 
 async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: MEDIA_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

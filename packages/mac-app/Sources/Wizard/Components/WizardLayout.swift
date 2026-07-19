@@ -9,9 +9,7 @@ import SwiftUI
 /// the same insets regardless of which step body is sliding.
 enum WizardLayout {
     static let width: CGFloat = 480
-    static var height: CGFloat {
-        WizardStep.allCases.map { $0.preferredHeight }.max() ?? 480
-    }
+    static let height: CGFloat = 440
     static let horizontalPadding: CGFloat = 32
     static let topPadding: CGFloat = 18
     static let bottomPadding: CGFloat = 24

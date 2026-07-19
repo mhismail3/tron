@@ -1,14 +1,9 @@
-# Dependabot config — keep dependencies fresh without manual diligence.
-#
-# Three ecosystems (today):
+# Dependabot keeps two active dependency ecosystems fresh:
 #   - cargo: the Rust agent. Weekly. Grouped: dev-deps and prod-deps split so a
 #     test-only bump can merge without re-reviewing the runtime surface.
 #   - github-actions: workflow action versions (actions/checkout, etc.). Weekly.
-#   - swift (Swift Package Manager): NOT YET — packages/ios-app has no
-#     Package.swift today. Re-enable this entry if the app adopts SPM deps.
 #
-# Reviewers: PR labels are auto-applied so we can filter the queue. Keep
-# `open-pull-requests-limit` low so dependabot doesn't drown the repo.
+# Labels keep the queue filterable; low open-PR limits prevent a noisy backlog.
 
 version: 2
 updates:
@@ -56,16 +51,3 @@ updates:
     commit-message:
       prefix: "chore(ci)"
       include: scope
-
-  # Re-enable if packages/ios-app adopts Swift Package Manager dependencies.
-  # - package-ecosystem: swift
-  #   directory: /packages/ios-app
-  #   schedule:
-  #     interval: monthly
-  #   open-pull-requests-limit: 3
-  #   labels:
-  #     - dependencies
-  #     - ios
-  #   commit-message:
-  #     prefix: "chore(deps-ios)"
-  #     include: scope

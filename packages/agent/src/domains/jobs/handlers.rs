@@ -10,7 +10,7 @@ operation_bindings! {
             service::start_job_value(
                 &deps.engine_host,
                 deps.shutdown_coordinator.clone(),
-                deps.runtime.clone(),
+                deps.state.runtime(),
                 invocation,
                 &invocation.payload,
             ).await
@@ -18,8 +18,8 @@ operation_bindings! {
         "status" => |invocation, deps| {
             service::status_job_value(
                 &deps.engine_host,
-                deps.runtime.clone(),
-                deps.reconcile.clone(),
+                deps.state.runtime(),
+                deps.state.reconcile(),
                 invocation,
                 &invocation.payload,
             ).await
@@ -27,8 +27,8 @@ operation_bindings! {
         "list" => |invocation, deps| {
             service::list_jobs_value(
                 &deps.engine_host,
-                deps.runtime.clone(),
-                deps.reconcile.clone(),
+                deps.state.runtime(),
+                deps.state.reconcile(),
                 invocation,
                 &invocation.payload,
             ).await
@@ -36,8 +36,8 @@ operation_bindings! {
         "log" => |invocation, deps| {
             service::log_job_value(
                 &deps.engine_host,
-                deps.runtime.clone(),
-                deps.reconcile.clone(),
+                deps.state.runtime(),
+                deps.state.reconcile(),
                 invocation,
                 &invocation.payload,
             ).await
@@ -45,8 +45,8 @@ operation_bindings! {
         "cancel" => |invocation, deps| {
             service::cancel_job_value(
                 &deps.engine_host,
-                deps.runtime.clone(),
-                deps.reconcile.clone(),
+                deps.state.runtime(),
+                deps.state.reconcile(),
                 invocation,
                 &invocation.payload,
             ).await
@@ -54,8 +54,8 @@ operation_bindings! {
         "cleanup" => |invocation, deps| {
             service::cleanup_jobs_value(
                 &deps.engine_host,
-                deps.runtime.clone(),
-                deps.reconcile.clone(),
+                deps.state.runtime(),
+                deps.state.reconcile(),
                 invocation,
                 &invocation.payload,
             ).await

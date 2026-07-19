@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, PublishStreamEvent, WorkerId,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -11,16 +11,16 @@ use super::projection::{request_summary, reviewed_summary, source_summary};
 use super::records::resource_ref;
 use super::validation::invalid;
 use super::{
-    Deps, WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
+    WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
     WEB_RESEARCH_REVIEW_SCHEMA_ID, WEB_RESEARCH_SOURCE_KIND, WEB_RESEARCH_SOURCE_SCHEMA_ID,
 };
 
 pub(super) async fn inspect_resource_required(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource_id: &str,
     label: &str,
 ) -> Result<EngineResourceInspection, CapabilityError> {
-    deps.engine_host
+    engine_host
         .inspect_resource(resource_id)
         .await
         .map_err(engine_error)?
@@ -28,31 +28,34 @@ pub(super) async fn inspect_resource_required(
 }
 
 pub(super) async fn request_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "web research request").await?;
+        inspect_resource_required(engine_host, &resource.resource_id, "web research request")
+            .await?;
     let (version, payload) = current_payload(&inspection, "web_research_request projection")?;
     Ok(request_summary(&inspection.resource, version, payload))
 }
 
 pub(super) async fn review_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "web research review").await?;
+        inspect_resource_required(engine_host, &resource.resource_id, "web research review")
+            .await?;
     let (version, payload) = current_payload(&inspection, "web_research_review projection")?;
     Ok(reviewed_summary(&inspection.resource, version, payload))
 }
 
 pub(super) async fn source_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
     let inspection =
-        inspect_resource_required(deps, &resource.resource_id, "web research source").await?;
+        inspect_resource_required(engine_host, &resource.resource_id, "web research source")
+            .await?;
     let (version, payload) = current_payload(&inspection, "web_research_source projection")?;
     Ok(source_summary(&inspection.resource, version, payload))
 }
@@ -144,13 +147,13 @@ pub(super) fn current_payload<'a>(
 }
 
 pub(super) async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: WEB_RESEARCH_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

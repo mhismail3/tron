@@ -192,6 +192,7 @@ extension SourceGuardTests {
         let checkedFiles = [
             iosRoot.appendingPathComponent("Sources/Engine/Persistence/SQLite/EventDatabase.swift"),
             iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
+            iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainerStorage.swift"),
             iosRoot.appendingPathComponent("Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift"),
         ]
 

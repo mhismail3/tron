@@ -1,20 +1,10 @@
 import Foundation
 import Observation
 
-/// Observable model behind `OnboardingFlowView`. Owns the step selection,
-/// pairing form, completion flag, and inline error surface for the
-/// first-run sheet.
-///
-/// **Persistence**: explicitly uses an injected `UserDefaults` (defaulted
-/// to `.standard`). We deliberately do NOT route through
-/// `NSUbiquitousKeyValueStore` — onboarding completion is per-device, not
-/// per-iCloud-account. Otherwise "I paired on iPad" would falsely mark
-/// the iPhone as paired too.
-///
-/// **Why `@Observable` + manual storage** (vs `@AppStorage`): SwiftUI's
-/// `@AppStorage` doesn't compose with `@Observable` cleanly and isn't
-/// injectable for tests. Hand-rolled UserDefaults reads/writes give us a
-/// testable surface.
+/// Observable transient flow state behind `OnboardingFlowView`. Owns step
+/// selection, pairing inputs, setup snapshots, and inline errors. App-wide
+/// completion persistence belongs to `ProductionAppRoot`, which gates sheet
+/// presentation and startup side effects.
 @Observable
 @MainActor
 final class OnboardingState {
@@ -56,13 +46,6 @@ final class OnboardingState {
             }
         }
     }
-
-    // MARK: - Storage keys
-
-    // `nonisolated` so tests and app bootstrap code can read this key
-    // without crossing actor boundaries. The string is an immutable value
-    // type — no isolation is needed for safety.
-    nonisolated static let completionStorageKey = "onboardingComplete"
 
     // MARK: - Pairing inputs
 
@@ -138,21 +121,6 @@ final class OnboardingState {
     /// after pairing. The setup pages read this so pairing a previously
     /// forgotten server shows its existing choices instead of blank defaults.
     var setupSnapshot = OnboardingSetupSnapshot()
-
-    // MARK: - Storage
-
-    @ObservationIgnored
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    /// Final commit — flips the AppStorage flag the first-run sheet observes
-    /// and dismisses the flow.
-    func complete() {
-        defaults.set(true, forKey: Self.completionStorageKey)
-    }
 
     /// Apply a parsed pairing payload to the form. Preserves the user's
     /// server name if they've typed something other than the default.
@@ -290,23 +258,6 @@ final class OnboardingState {
     private func beginPairingAttempt() {
         currentStep = .connect
         hasPairedMac = false
-        pairingError = nil
-        isConnecting = false
-        setupSnapshot.reset()
-    }
-
-    /// Reset the sheet to its initial state. Used by tests and any
-    /// explicit "run onboarding again" debug path.
-    func reset() {
-        defaults.set(false, forKey: Self.completionStorageKey)
-        currentStep = .welcome
-        hasPairedMac = false
-        pairingHost = ""
-        pairingPort = AppConstants.prodPort
-        pairingToken = ""
-        pairingLabel = "My Mac"
-        clearPairingPrefill()
-        completesAfterPairing = false
         pairingError = nil
         isConnecting = false
         setupSnapshot.reset()

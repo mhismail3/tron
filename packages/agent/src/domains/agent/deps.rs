@@ -2,17 +2,22 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    pub(super) agent_deps: Option<crate::shared::server::context::AgentDeps>,
+    pub(super) auth_path: PathBuf,
+    pub(super) responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) origin: String,
+    pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
@@ -21,11 +26,13 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
-            agent_deps: deps.agent_deps.clone(),
+            auth_path: deps.auth_path.clone(),
+            responder_factory: deps.responder_factory.clone(),
             engine_host: deps.engine_host.clone(),
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),
             origin: deps.origin.clone(),
+            profile_runtime: deps.profile_runtime.clone(),
             session_manager: deps.session_manager.clone(),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
         }
@@ -38,6 +45,7 @@ impl Deps {
             orchestrator: self.orchestrator.clone(),
             session_manager: self.session_manager.clone(),
             event_store: self.event_store.clone(),
+            settings: self.profile_runtime.current().settings.clone(),
             shutdown_coordinator: self.shutdown_coordinator.clone(),
             engine_host: self.engine_host.clone(),
             origin: self.origin.clone(),

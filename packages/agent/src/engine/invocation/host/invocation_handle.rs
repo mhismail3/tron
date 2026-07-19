@@ -19,16 +19,46 @@ impl EngineHostHandle {
             return self.inner.lock().await.invoke(invocation).await;
         }
 
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(invocation)
-        };
+        let prepared = self.prepare_regular_invocation(invocation).await;
         let prepared = match prepared {
             PreparedSyncInvocationDecision::Execute(prepared) => prepared,
             PreparedSyncInvocationDecision::Finished(result) => return *result,
         };
 
-        self.execute_prepared_regular(*prepared).await
+        self.execute_prepared_regular(*prepared, None).await
+    }
+
+    /// Invoke a regular in-process function with cooperative handler cancellation.
+    ///
+    /// This path deliberately excludes the privileged `engine::invoke` meta
+    /// route, engine-owned/host-dispatched primitives, queued work, and trigger
+    /// dispatch. Those targets retain their ordinary routing without this
+    /// cancellation contract. Cancellation is observed after any resource
+    /// lease is acquired so the normal release, durable outcome, idempotency,
+    /// and compensation lifecycle still completes.
+    pub(crate) async fn invoke_regular_cancellable(
+        &self,
+        invocation: Invocation,
+        cancellation: &CancellationToken,
+    ) -> Result<InvocationResult> {
+        if invocation.function_id.as_str() == INVOKE_FUNCTION
+            || invocation.function_id.namespace() == ENGINE_WORKER_ID
+            || is_host_dispatched_primitive_function(&invocation.function_id)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "cooperative cancellation requires a regular in-process function, not {}",
+                invocation.function_id
+            )));
+        }
+        let prepared = self.prepare_regular_invocation(invocation).await;
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => return Ok(*result),
+        };
+
+        Ok(self
+            .execute_prepared_regular(*prepared, Some(cancellation))
+            .await)
     }
 
     /// Invoke a target claimed by the engine queue runtime.
@@ -53,10 +83,7 @@ impl EngineHostHandle {
             };
         }
 
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(invocation)
-        };
+        let prepared = self.prepare_regular_invocation(invocation).await;
         let prepared = match prepared {
             PreparedSyncInvocationDecision::Execute(prepared) => prepared,
             PreparedSyncInvocationDecision::Finished(result) => {
@@ -73,6 +100,7 @@ impl EngineHostHandle {
         self.execute_prepared_regular_with_recording_policy(
             *prepared,
             InvocationRecordingPolicy::SkipRetryableQueueDeliveryFailure,
+            None,
         )
         .await
     }
@@ -94,13 +122,29 @@ impl EngineHostHandle {
             PreparedSyncInvocationDecision::Execute(prepared) => prepared,
             PreparedSyncInvocationDecision::Finished(result) => return *result,
         };
-        self.execute_prepared_regular(*prepared).await
+        self.execute_prepared_regular(*prepared, None).await
     }
 
-    async fn execute_prepared_regular(&self, prepared: PreparedSyncInvocation) -> InvocationResult {
+    async fn prepare_regular_invocation(
+        &self,
+        invocation: Invocation,
+    ) -> PreparedSyncInvocationDecision {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .prepare_sync_invocation(invocation)
+    }
+
+    async fn execute_prepared_regular(
+        &self,
+        prepared: PreparedSyncInvocation,
+        cancellation: Option<&CancellationToken>,
+    ) -> InvocationResult {
         self.execute_prepared_regular_with_recording_policy(
             prepared,
             InvocationRecordingPolicy::RecordAll,
+            cancellation,
         )
         .await
         .result
@@ -110,6 +154,7 @@ impl EngineHostHandle {
         &self,
         prepared: PreparedSyncInvocation,
         recording_policy: InvocationRecordingPolicy,
+        cancellation: Option<&CancellationToken>,
     ) -> QueueTargetInvocation {
         let compensation_contract = prepared.function.compensation.clone();
         let compensation_invocation = prepared.invocation.clone();
@@ -118,10 +163,10 @@ impl EngineHostHandle {
         let handler_result = match lease_result {
             Ok(Some(lease)) => {
                 lease_ids.push(lease.lease_id.clone());
-                let result = self.invoke_prepared_handler(&prepared).await;
+                let result = self.invoke_prepared_handler(&prepared, cancellation).await;
                 release_after_primary(self.release_resource_lease(&lease.lease_id).await, result)
             }
-            Ok(None) => self.invoke_prepared_handler(&prepared).await,
+            Ok(None) => self.invoke_prepared_handler(&prepared, cancellation).await,
             Err(error) => Err(error),
         };
         if recording_policy == InvocationRecordingPolicy::SkipRetryableQueueDeliveryFailure
@@ -182,8 +227,26 @@ impl EngineHostHandle {
         }
     }
 
-    async fn invoke_prepared_handler(&self, prepared: &PreparedSyncInvocation) -> Result<Value> {
-        AssertUnwindSafe(prepared.handler.invoke(prepared.invocation.clone()))
+    async fn invoke_prepared_handler(
+        &self,
+        prepared: &PreparedSyncInvocation,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<Value> {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(EngineError::InvocationCancelled);
+        }
+        let handler = async {
+            match cancellation {
+                Some(cancellation) => {
+                    prepared
+                        .handler
+                        .invoke_cancellable(prepared.invocation.clone(), cancellation)
+                        .await
+                }
+                None => prepared.handler.invoke(prepared.invocation.clone()).await,
+            }
+        };
+        AssertUnwindSafe(handler)
             .catch_unwind()
             .await
             .unwrap_or_else(|payload| {
@@ -292,7 +355,7 @@ impl EngineHostHandle {
 
         let child_result = match prepared.child {
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Execute(child)) => {
-                self.execute_prepared_regular(*child).await
+                self.execute_prepared_regular(*child, None).await
             }
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(result)) => {
                 *result

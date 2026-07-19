@@ -37,7 +37,7 @@ enum ConnectionErrorClassifier {
                 return .requiresConnectionRecovery
             case .timeout:
                 return .transient
-            case .unauthorized, .invalidResponse, .encodingError, .decodingError:
+            case .unauthorized, .invalidResponse, .encodingError, .decodingError, .messageTooLarge:
                 return .none
             }
         }

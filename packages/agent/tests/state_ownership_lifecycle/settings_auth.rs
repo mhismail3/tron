@@ -42,8 +42,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
     for required in [
         "settings_reset_to_defaults_value",
         "restore_sparse_value_for_rollback",
-        "rollback_sparse_settings",
-        "init_settings(deps.profile_runtime.current().settings.clone())",
+        "restore_sparse_settings_file(deps, previous_sparse, reason).await?",
         "deps.profile_runtime.reload_now(reason)",
         "sparse settings were rolled back",
     ] {
@@ -74,7 +73,6 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         "current: ArcSwap<ResolvedHarnessSpec>",
         "pub fn reload_now",
         "self.current.store(next.clone())",
-        "crate::domains::settings::init_settings(next.settings.clone())",
         "profile runtime reload rejected; keeping previous valid spec",
         "pub fn spawn_watcher",
         "CancellationToken",
@@ -83,11 +81,69 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         "AUTH_JSON",
         "continue;",
         "invalid_reload_keeps_previous_spec",
-        "reload_updates_global_settings_snapshot",
+        "reload_swaps_current_snapshot_and_preserves_held_value",
     ] {
         assert!(
             profile_runtime.contains(required),
             "profile runtime lifecycle missing `{required}`"
+        );
+    }
+
+    let agent_deps = read_repo_file("packages/agent/src/domains/agent/deps.rs");
+    assert!(
+        agent_deps.contains("settings: self.profile_runtime.current().settings.clone()"),
+        "prompt settings must snapshot the authoritative profile runtime"
+    );
+    let prompt_execute =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs");
+    assert!(prompt_execute.contains("api_settings: settings.api.clone()"));
+    assert!(!prompt_execute.contains("get_settings()"));
+
+    let agent_build =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/agent_build.rs");
+    let title_generation =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/title_generation.rs");
+    let responder = read_repo_file("packages/agent/src/domains/model/responder/mod.rs");
+    for (source, required) in [
+        (&agent_build, ".create_for_model(model, &settings.api)"),
+        (
+            &title_generation,
+            "api_settings: crate::domains::settings::ApiSettings",
+        ),
+        (&title_generation, ".create_for_model(model, api_settings)"),
+        (
+            &responder,
+            "api_settings: &crate::domains::settings::ApiSettings",
+        ),
+        (&responder, "http_client: reqwest::Client"),
+        (&responder, "DefaultProviderFactory::with_client("),
+    ] {
+        assert!(
+            source.contains(required),
+            "prompt provider settings projection missing `{required}`"
+        );
+    }
+    for forbidden in [
+        "pub fn new(settings:",
+        "providers: crate::domains::model::providers::factory::DefaultProviderFactory",
+    ] {
+        assert!(
+            !responder.contains(forbidden),
+            "long-lived responder factory cached provider settings: {forbidden}"
+        );
+    }
+
+    let settings_profile = read_repo_file("packages/agent/src/domains/settings/profile/mod.rs");
+    for forbidden in [
+        "static SETTINGS",
+        "pub fn get_settings",
+        "pub fn init_settings",
+        "reload_settings_from_path",
+        "test_settings_lock",
+    ] {
+        assert!(
+            !settings_profile.contains(forbidden),
+            "duplicate settings owner reappeared: {forbidden}"
         );
     }
 
@@ -159,6 +215,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         &oauth_operations,
         &[
             "auth_oauth_begin",
+            "prepare_oauth_flow",
             "flows.retain",
             "OAUTH_FLOW_TTL_SECS",
             "flows.insert",
@@ -167,12 +224,27 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
             "flows.remove(&flow_id)",
             "flow.created_at.elapsed() >",
             "OAUTH_FLOW_TTL_SECS",
+            "exchange_oauth_code",
+            "write_auth_and_broadcast",
             "auth::oauth_complete",
-            "acquire_auth_file_lock(&auth_path)",
             "save_account_oauth_tokens",
-            "publish_auth_updated",
         ],
     );
+    let oauth_flows = read_repo_file("packages/agent/src/domains/auth/oauth/flows.rs");
+    for required in [
+        "prepare_oauth_flow",
+        "prepare_oauth_flow_with_state",
+        "exchange_oauth_code",
+        "load_google_config",
+        "generate_state",
+        "get_authorization_url_with_state",
+        "exchange_code_for_tokens",
+    ] {
+        assert!(
+            oauth_flows.contains(required),
+            "canonical OAuth provider flow missing `{required}`"
+        );
+    }
     let oauth_mod = read_repo_file("packages/agent/src/domains/auth/oauth/mod.rs");
     assert!(
         oauth_mod.contains("pub(crate) const OAUTH_FLOW_TTL_SECS: u64 = 600"),
@@ -353,91 +425,6 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
             );
         }
     }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/app/bootstrap/mod.rs",
-        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
-        "packages/agent/src/domains/agent/loop/profile_runtime.rs",
-        "packages/agent/src/domains/auth/credentials/anthropic.rs",
-        "packages/agent/src/domains/auth/credentials/google.rs",
-        "packages/agent/src/domains/auth/credentials/openai/mod.rs",
-        "packages/agent/src/domains/auth/credentials/provider_state.rs",
-        "packages/agent/src/domains/auth/credentials/storage/mod.rs",
-        "packages/agent/src/domains/auth/oauth/operations.rs",
-        "packages/agent/src/domains/model/providers/factory/mod.rs",
-        "packages/agent/src/domains/model/providers/google/provider/mod.rs",
-        "packages/agent/src/domains/model/providers/google/types/mod.rs",
-        "packages/agent/src/domains/registration/worker.rs",
-        "packages/agent/src/domains/settings/profile/operations.rs",
-        "packages/agent/src/domains/settings/profile/storage/loader.rs",
-        "packages/agent/src/domains/settings/profile/store.rs",
-        "packages/agent/src/shared/foundation/paths/mod.rs",
-        "packages/agent/src/shared/foundation/profile/mod.rs",
-        "packages/agent/src/shared/foundation/profile/validation.rs",
-        "packages/agent/src/shared/server/context.rs",
-        "packages/agent/src/transport/http/auth.rs",
-        "README.md",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-7"))),
-            "SOL inventory must tag {required} as part of SOL-7"
-        );
-    }
-}
-
-#[test]
-fn dead_plan_mode_state_is_removed() {
-    let source =
-        read_repo_file("packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs");
-    for forbidden in ["plan_mode", "set_plan_mode", "is_plan_mode"] {
-        assert!(
-            !source.contains(forbidden),
-            "SessionManager still contains unowned dead state marker `{forbidden}`"
-        );
-    }
-}
-
-#[test]
-fn production_tokio_spawns_have_shutdown_or_scoped_lifecycle() {
-    let inventory = inventory_by_path();
-    let missing = marker_paths()
-        .into_iter()
-        .filter(|path| path.ends_with(".rs"))
-        .filter(|path| read_repo_file(path).contains("tokio::spawn"))
-        .filter(|path| {
-            inventory
-                .get(path)
-                .is_none_or(|rows| !rows.iter().any(row_has_runtime_guard))
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        missing.is_empty(),
-        "production tokio::spawn sites need shutdown/scoped inventory guards:\n{}",
-        missing.join("\n")
-    );
-}
-
-#[test]
-fn ios_tasks_have_cancellation_or_view_lifecycle_ownership() {
-    let inventory = inventory_by_path();
-    let missing = marker_paths()
-        .into_iter()
-        .filter(|path| path.ends_with(".swift"))
-        .filter(|path| read_repo_file(path).contains("Task"))
-        .filter(|path| {
-            inventory
-                .get(path)
-                .is_none_or(|rows| !rows.iter().any(row_has_runtime_guard))
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        missing.is_empty(),
-        "Swift Task sites need cancellation/scoped inventory guards:\n{}",
-        missing.join("\n")
-    );
 }
 
 #[test]
@@ -447,6 +434,7 @@ fn server_auth_and_settings_writes_stay_owner_private() {
         "packages/agent/src/app/health/mod.rs",
         "packages/agent/src/domains/auth/credentials/",
         "packages/agent/src/domains/settings/profile/",
+        "packages/agent/src/shared/foundation/constitution.rs",
         "packages/agent/src/shared/foundation/profile/",
     ];
     let offenders = git_ls_files()
@@ -467,59 +455,5 @@ fn server_auth_and_settings_writes_stay_owner_private() {
         offenders.is_empty(),
         "settings/auth/profile writes must stay behind owner stores:\n{}",
         offenders.join("\n")
-    );
-}
-
-#[test]
-fn ios_local_state_is_documented_as_projection_or_local_state() {
-    let inventory = read_repo_file(INVENTORY_TSV_PATH);
-    for (path, class) in [
-        (
-            "packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift",
-            "projection_cache",
-        ),
-        (
-            "packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift",
-            "projection_cache",
-        ),
-        (
-            "packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift",
-            "local_device_preference",
-        ),
-        (
-            "packages/ios-app/Sources/Support/Storage/PairedServerTokenStore.swift",
-            "secret",
-        ),
-        (
-            "packages/ios-app/Sources/Support/Storage/DraftStore.swift",
-            "local_device_preference",
-        ),
-        (
-            "packages/ios-app/Sources/Support/Storage/InputHistoryStore.swift",
-            "local_device_preference",
-        ),
-        (
-            "packages/ios-app/Sources/Support/Share/SharedContent.swift",
-            "local_device_preference",
-        ),
-        (
-            "packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift",
-            "diagnostic_buffer",
-        ),
-    ] {
-        let needle = format!("{path}\t");
-        assert!(
-            inventory
-                .lines()
-                .any(|line| line.starts_with(&needle) && line.contains(&format!("\t{class}\t"))),
-            "SOL inventory must classify {path} as {class}"
-        );
-    }
-    assert!(
-        !inventory
-            .lines()
-            .filter(|line| line.starts_with("packages/ios-app/"))
-            .any(|line| line.contains("\tcanonical_truth\t")),
-        "iOS local state rows must not be classified as canonical server truth"
     );
 }

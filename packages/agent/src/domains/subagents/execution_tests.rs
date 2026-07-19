@@ -3,13 +3,16 @@ use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::execution::{
-    cancel_subagent_value, launch_subagent_value, result_subagent_value, status_subagent_value,
+    PreparedSubagentFollowup, cancel_subagent_value, launch_subagent_value,
+    prepare_delegated_module_followup, result_subagent_from_module_value,
+    status_subagent_from_module_value,
 };
-use super::{Deps, READ_SCOPE, WRITE_SCOPE};
+use super::{READ_SCOPE, WRITE_SCOPE};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, SUBAGENT_TASK_KIND, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, RiskLevel, SUBAGENT_TASK_KIND, TraceId,
 };
+use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::test_support::make_test_context;
 
 #[tokio::test]
@@ -48,10 +51,9 @@ async fn launch_records_delegated_module_worker_lifecycle_without_parent_merge()
     assert_eq!(task["activation"]["resultMerged"], json!(false));
     assert_eq!(task["delegation"]["jobRef"]["kind"], json!("job_process"));
 
-    let result = fixture.result("launch-result", resource_id).await;
-    assert_eq!(result["status"], json!("running"));
-    assert_eq!(result["result"]["status"], json!("running"));
-    assert_eq!(result["projection"]["resultMergePerformed"], json!(false));
+    assert_eq!(status["status"], json!("running"));
+    assert_eq!(task["result"]["status"], json!("running"));
+    assert_eq!(status["execution"]["resultMerged"], json!(false));
 }
 
 #[tokio::test]
@@ -134,9 +136,36 @@ async fn cancel_uses_freshness_and_is_idempotent_after_terminal_state() {
     assert_eq!(replay["status"], json!("cancelled"));
     assert_eq!(replay["idempotent"], json!(true));
 
-    let result = fixture.result("cancel-result", resource_id).await;
-    assert_eq!(result["result"]["status"], json!("cancelled"));
-    assert_eq!(result["execution"]["resultMerged"], json!(false));
+    let status = fixture.status("cancel-status", resource_id).await;
+    assert_eq!(
+        status["task"]["payload"]["result"]["status"],
+        json!("cancelled")
+    );
+    assert_eq!(status["execution"]["resultMerged"], json!(false));
+}
+
+#[tokio::test]
+async fn read_only_followup_projects_one_validated_task_snapshot() {
+    let fixture = Fixture::new("snapshot").await;
+    let launched = fixture.launch("snapshot-launch", launch_payload()).await;
+    let resource_id = launched["subagentTaskResourceId"].as_str().unwrap();
+    let version_id = launched["subagentTaskVersionId"].clone();
+    let followup = fixture
+        .prepare_followup("snapshot-read", resource_id, "subagent_result")
+        .await
+        .expect("prepare follow-up snapshot");
+    fixture
+        .cancel(
+            "snapshot-cancel",
+            json!({"subagentTaskResourceId": resource_id}),
+        )
+        .await;
+
+    let details = module_details("completed");
+    let status = status_subagent_from_module_value(&followup, &details);
+    assert_eq!(status["task"]["payload"]["state"], json!("running"));
+    let result = result_subagent_from_module_value(&followup, &details).unwrap();
+    assert_eq!(result["subagentTaskVersionId"], version_id);
 }
 
 #[tokio::test]
@@ -173,7 +202,7 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         Some(&first.session_id),
     );
     let error = cancel_subagent_value(
-        &first.deps,
+        &first.host,
         &read_only_invocation,
         &read_only_invocation.payload,
     )
@@ -200,7 +229,7 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         Some(&first.session_id),
     );
     let error = launch_subagent_value(
-        &first.deps,
+        &first.host,
         &wildcard_invocation,
         &wildcard_invocation.payload,
         &delegated_start_value(),
@@ -214,10 +243,35 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
 #[tokio::test]
 async fn execution_validation_rejects_unbounded_or_execution_shaped_evidence() {
     let fixture = Fixture::new("validation").await;
+    let mut long_objective = launch_payload();
+    long_objective["objectiveSummary"] = json!("x".repeat(2_049));
+    let objective_error = fixture.launch_error("long-objective", long_objective).await;
+    assert!(
+        objective_error.contains("objectiveSummary exceeds"),
+        "{objective_error}"
+    );
+
     let mut too_large = launch_payload();
     too_large["evidenceRefs"] = json!([{"kind": "fixture", "id": "x".repeat(9_000)}]);
     let large = fixture.launch_error("too-large", too_large).await;
     assert!(large.contains("exceeds"), "{large}");
+
+    let mut secret = launch_payload();
+    secret["evidenceRefs"] =
+        json!([{"kind": "fixture", "id": "evidence-secret", "token": "Bearer denied"}]);
+    let secret_error = fixture.launch_error("secret", secret).await;
+    assert!(secret_error.contains("secret"), "{secret_error}");
+
+    let mut evidence_command = launch_payload();
+    evidence_command["evidenceRefs"] =
+        json!([{"kind": "fixture", "id": "evidence-command", "command": "run helper"}]);
+    let evidence_command_error = fixture
+        .launch_error("evidence-command", evidence_command)
+        .await;
+    assert!(
+        evidence_command_error.contains("execution field"),
+        "{evidence_command_error}"
+    );
 
     let mut command = launch_payload();
     command["handoffRefs"] = json!([{"command": "run hidden helper"}]);
@@ -267,23 +321,21 @@ fn static_non_goal_guards_keep_subagent_execution_foundation_narrow() {
 
 #[derive(Clone)]
 struct Fixture {
-    deps: Deps,
+    host: EngineHostHandle,
     session_id: String,
 }
 
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
-        Self { deps, session_id }
+        Self { host, session_id }
     }
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
         Self {
-            deps: self.deps.clone(),
+            host: self.host.clone(),
             session_id: session_id.to_owned(),
         }
     }
@@ -297,7 +349,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             scopes,
             resource_kinds,
@@ -313,7 +365,7 @@ impl Fixture {
             .write_invocation(key, payload, Some(&resource_id))
             .await;
         launch_subagent_value(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             &delegated_start_value(),
@@ -328,7 +380,7 @@ impl Fixture {
             .write_invocation(key, payload, Some(&resource_id))
             .await;
         launch_subagent_value(
-            &self.deps,
+            &self.host,
             &invocation,
             &invocation.payload,
             &delegated_start_value(),
@@ -339,33 +391,29 @@ impl Fixture {
     }
 
     async fn status(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self
-            .read_invocation(
-                key,
-                json!({"subagentTaskResourceId": resource_id}),
-                Some(resource_id),
-            )
+        let followup = self
+            .prepare_followup(key, resource_id, "subagent_status")
             .await;
-        status_subagent_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("status")
+        let followup = followup.expect("prepare status follow-up");
+        status_subagent_from_module_value(&followup, &module_details("running"))
     }
 
     async fn status_error(&self, key: &str, resource_id: &str) -> String {
-        let invocation = self
-            .read_invocation(
-                key,
-                json!({"subagentTaskResourceId": resource_id}),
-                Some(resource_id),
-            )
+        let result = self
+            .prepare_followup(key, resource_id, "subagent_status")
             .await;
-        status_subagent_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("status should fail")
-            .to_string()
+        match result {
+            Ok(_) => panic!("status preparation should fail"),
+            Err(error) => error.to_string(),
+        }
     }
 
-    async fn result(&self, key: &str, resource_id: &str) -> Value {
+    async fn prepare_followup(
+        &self,
+        key: &str,
+        resource_id: &str,
+        operation: &str,
+    ) -> Result<PreparedSubagentFollowup, CapabilityError> {
         let invocation = self
             .read_invocation(
                 key,
@@ -373,9 +421,8 @@ impl Fixture {
                 Some(resource_id),
             )
             .await;
-        result_subagent_value(&self.deps, &invocation, &invocation.payload)
+        prepare_delegated_module_followup(&self.host, &invocation, &invocation.payload, operation)
             .await
-            .expect("result")
     }
 
     async fn cancel(&self, key: &str, payload: Value) -> Value {
@@ -386,7 +433,7 @@ impl Fixture {
         let invocation = self
             .write_invocation(key, payload, resource_id.as_deref())
             .await;
-        cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
+        cancel_subagent_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("cancel")
     }
@@ -399,7 +446,7 @@ impl Fixture {
         let invocation = self
             .write_invocation(key, payload, resource_id.as_deref())
             .await;
-        cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
+        cancel_subagent_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect_err("cancel should fail")
             .to_string()
@@ -484,7 +531,7 @@ impl Fixture {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
@@ -493,7 +540,7 @@ async fn derive_grant(
 ) -> AuthorityGrantId {
     static GRANT_COUNTER: AtomicUsize = AtomicUsize::new(0);
     let counter = GRANT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    deps.engine_host
+    engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(
                 AuthorityGrantId::new(format!("subagent-exec-{suffix}-{counter}")).unwrap(),
@@ -595,7 +642,11 @@ fn delegated_start_value() -> Value {
         "status": "running",
         "moduleRuntime": {
             "moduleRuntimeResourceId": "module_runtime_state:delegated-runtime",
-            "moduleRuntimeVersionId": "runtime-version-1"
+            "moduleRuntimeVersionId": "runtime-version-1",
+            "moduleRuntime": {
+                "resourceId": "module_runtime_state:delegated-runtime",
+                "versionId": "runtime-version-2"
+            }
         },
         "programExecution": {
             "programExecutionResourceId": "program_execution_record:delegated-program",
@@ -609,4 +660,10 @@ fn delegated_start_value() -> Value {
             }
         }
     })
+}
+
+fn module_details(status: &str) -> Value {
+    let mut details = delegated_start_value();
+    details["status"] = json!(status);
+    details
 }

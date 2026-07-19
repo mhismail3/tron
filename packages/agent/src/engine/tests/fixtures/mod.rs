@@ -21,7 +21,7 @@ pub(in crate::engine::tests) use crate::engine::durability::ledger::{
 };
 pub(in crate::engine::tests) use crate::engine::durability::queue;
 pub(in crate::engine::tests) use crate::engine::durability::streams::SqliteEngineStreamStore;
-pub(in crate::engine::tests) use crate::engine::invocation::host;
+pub(in crate::engine::tests) use crate::engine::invocation::host::{self, EngineHost};
 pub(in crate::engine::tests) use crate::engine::invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation,
 };
@@ -41,11 +41,11 @@ pub(in crate::engine::tests) use crate::engine::kernel::types::{
 };
 pub(in crate::engine::tests) use crate::engine::runtime::external_workers as external;
 pub(in crate::engine::tests) use crate::engine::{
-    CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHost, EngineHostHandle,
-    EngineQueueDrainer, EngineResourceLeaseStatus, EngineTriggerRuntime, PublishStreamEvent,
-    RegisterFunction, RegisterTrigger, StreamActorScope, StreamCursor, TriggerDispatchRequest,
-    WorkerDisconnect, WorkerHello, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleState,
-    WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish,
+    CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHostHandle, EngineQueueDrainer,
+    EngineResourceLeaseStatus, EngineTriggerRuntime, PublishStreamEvent, RegisterFunction,
+    RegisterTrigger, StreamActorScope, StreamCursor, TriggerDispatchRequest, WorkerDisconnect,
+    WorkerHello, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleState, WorkerProtocolMessage,
+    WorkerRegistrationMode, WorkerStreamPublish,
 };
 
 pub(in crate::engine::tests) fn wid(value: &str) -> WorkerId {

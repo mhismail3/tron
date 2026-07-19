@@ -106,14 +106,21 @@ pub(super) fn required_str<'a>(
     optional_str(payload, field)?.ok_or_else(|| invalid_params(format!("{field} is required")))
 }
 
-pub(super) fn required_idempotency_key(payload: &Value) -> Result<&str, CapabilityError> {
-    let key = required_str(payload, "idempotencyKey")?.trim();
+pub(super) fn required_idempotency_key(invocation: &Invocation) -> Result<&str, CapabilityError> {
+    let key = invocation
+        .causal_context
+        .idempotency_key
+        .as_deref()
+        .ok_or_else(|| invalid_params("invocation idempotency key is required"))?
+        .trim();
     if key.is_empty() {
-        return Err(invalid_params("idempotencyKey must not be empty"));
+        return Err(invalid_params(
+            "invocation idempotency key must not be empty",
+        ));
     }
     if key.len() > IDEMPOTENCY_KEY_MAX_BYTES {
         return Err(invalid_params(format!(
-            "idempotencyKey must be at most {IDEMPOTENCY_KEY_MAX_BYTES} bytes"
+            "invocation idempotency key must be at most {IDEMPOTENCY_KEY_MAX_BYTES} bytes"
         )));
     }
     Ok(key)
@@ -160,15 +167,6 @@ pub(super) fn effect_key(value: EffectClass) -> &'static str {
         EffectClass::ReversibleSideEffect => "reversible_side_effect",
         EffectClass::ExternalSideEffect => "external_side_effect",
         EffectClass::IrreversibleSideEffect => "irreversible_side_effect",
-    }
-}
-
-pub(super) fn risk_key(value: RiskLevel) -> &'static str {
-    match value {
-        RiskLevel::Low => "low",
-        RiskLevel::Medium => "medium",
-        RiskLevel::High => "high",
-        RiskLevel::Critical => "critical",
     }
 }
 

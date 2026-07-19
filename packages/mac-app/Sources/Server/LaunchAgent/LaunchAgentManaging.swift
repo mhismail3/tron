@@ -17,7 +17,6 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var uptime: String?
     var parentBundleIdentifier: String?
     var parentBundleVersion: String?
-    var programIdentifier: String?
     var executablePath: String?
     var needsLaunchConstraintRefresh: Bool
 
@@ -26,7 +25,6 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         uptime: String? = nil,
         parentBundleIdentifier: String? = nil,
         parentBundleVersion: String? = nil,
-        programIdentifier: String? = nil,
         executablePath: String? = nil,
         needsLaunchConstraintRefresh: Bool = false
     ) {
@@ -34,14 +32,13 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         self.uptime = uptime
         self.parentBundleIdentifier = parentBundleIdentifier
         self.parentBundleVersion = parentBundleVersion
-        self.programIdentifier = programIdentifier
         self.executablePath = executablePath
         self.needsLaunchConstraintRefresh = needsLaunchConstraintRefresh
     }
 }
 
-/// Indirection over `SMAppService` and launchd diagnostics so the
-/// wizard's install step is testable without mutating Login Items.
+/// Indirection over `SMAppService` and launchd diagnostics so service-control
+/// callers are testable without mutating Login Items.
 /// Mocks live in `Tests/Infrastructure/Fakes/MockLaunchAgentManager.swift`.
 protocol LaunchAgentManaging: Sendable {
     /// `SMAppService.agent(plistName:).register()` — registers the
@@ -63,4 +60,21 @@ protocol LaunchAgentManaging: Sendable {
     /// Best-effort process metadata from launchd/ps for diagnostics UI.
     /// Returns nil when launchd has no loaded service or does not expose a pid.
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo?
+}
+
+/// Applies the shared service-start policy. An already-enabled label may
+/// still be running an older helper image after app replacement, so
+/// `.alreadyLoaded` is followed by `kickstart -k` through the manager.
+enum LaunchAgentLoader {
+    static func ensureLoaded(
+        manager: LaunchAgentManaging,
+        plistPath: URL,
+        label: String
+    ) async -> LaunchAgentOutcome {
+        let loadOutcome = await manager.load(plistPath: plistPath, label: label)
+        guard case .alreadyLoaded = loadOutcome else {
+            return loadOutcome
+        }
+        return await manager.restart(label: label)
+    }
 }

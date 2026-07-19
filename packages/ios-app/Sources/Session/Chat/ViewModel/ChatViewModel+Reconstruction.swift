@@ -20,9 +20,11 @@ extension ChatViewModel {
             previousEvents: previousEvents,
             previousHadOlderServerPages: previousHadOlderServerPages
         )
-        let mergedEvents = mergeReconstructionEvents(previousEvents, eventWindow.events)
+        let mergedEvents = eventWindow.mergesPreviousEvents
+            ? mergeReconstructionEvents(previousEvents, eventWindow.events)
+            : eventWindow.events
 
-        // 1. Reconstruct full session state (messages + config)
+        // 1. Reconstruct the transient chat projection (messages + config + tokens)
         //    Uses reconstructSessionState() as single source of truth.
         let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)
         applyReconstructedConfig(state)
@@ -44,7 +46,7 @@ extension ChatViewModel {
         }
 
         // 3. Track oldest sequence for load-more pagination
-        reconstructionOldestEventId = mergedEvents.first?.id ?? eventWindow.oldestEventId
+        reconstructionOldestEventId = eventWindow.oldestEventId ?? mergedEvents.first?.id
         hasOlderServerReconstructionPages = eventWindow.hasMoreEvents
         recomputeHasMoreMessages()
         loadedReconstructionEvents = mergedEvents
@@ -55,8 +57,11 @@ extension ChatViewModel {
             currentTurn = turnCount
         }
 
-        // 4a. Set agent phase from server-authoritative value
+        // 4a. Set agent phase from server-authoritative value. A local Stop
+        // request is a stricter active substate and remains until the server's
+        // terminal lifecycle arrives.
         switch result.agentPhase {
+        case "processing" where agentPhase == .stopping: break
         case "processing": agentPhase = .processing
         default: agentPhase = .idle
         }
@@ -64,6 +69,17 @@ extension ChatViewModel {
         // 4b. Process in-flight state (if agent is running)
         if let inFlight = result.inFlight {
             await processInFlightState(inFlight)
+        }
+
+        // 4c. Rebuild reconnect-significant compaction UI from the same server
+        // cut as the event watermark. The live start frame is filtered at or
+        // below that cut, so the snapshot owns the spinner and send gate.
+        isCompacting = result.isCompacting ?? false
+        compactionInProgressMessageId = nil
+        if isCompacting {
+            let message = ChatMessage.compactionInProgress(reason: result.compactionReason ?? "auto")
+            appendToMessages(message)
+            compactionInProgressMessageId = message.id
         }
 
         // 5. Restore token state for context progress pill
@@ -80,9 +96,6 @@ extension ChatViewModel {
         if let cost = result.metadata.totalCost {
             contextState.accumulatedCost = cost
         }
-
-        // 6. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
-        await refreshContextFromServer()
 
         if !result.isRunning {
             reconcileCompletedReconstructionState()
@@ -131,6 +144,7 @@ extension ChatViewModel {
         let events: [RawEvent]
         let oldestEventId: String?
         let hasMoreEvents: Bool
+        let mergesPreviousEvents: Bool
     }
 
     private func reconstructionEventWindow(
@@ -142,9 +156,13 @@ extension ChatViewModel {
         var oldestEventId = result.oldestEventId
         var hasMoreEvents = result.hasMoreEvents && result.oldestEventId != nil
 
+        var hasUnresolvedGap = false
         if hasInitiallyLoaded,
-           let previousHighestSequence = previousEvents.map(\.sequence).max(),
-           let firstIncomingSequence = events.first?.sequence,
+           let previousHighestSequence = previousEvents
+               .filter({ $0.sessionId == sessionId })
+               .map(\.sequence)
+               .max(),
+           let firstIncomingSequence = events.first(where: { $0.sessionId == sessionId })?.sequence,
            firstIncomingSequence > previousHighestSequence + 1 {
             logger.info(
                 "[RECONSTRUCT] gap detected between previous seq \(previousHighestSequence) and incoming seq \(firstIncomingSequence); backfilling",
@@ -153,7 +171,7 @@ extension ChatViewModel {
 
             var pageCount = 0
             while hasMoreEvents,
-                  let firstSequence = events.first?.sequence,
+                  let firstSequence = events.first(where: { $0.sessionId == sessionId })?.sequence,
                   firstSequence > previousHighestSequence + 1,
                   pageCount < Self.maxReconstructionGapBackfillPages {
                 guard let cursor = oldestEventId else { break }
@@ -181,37 +199,92 @@ extension ChatViewModel {
                 }
             }
 
-            if pageCount >= Self.maxReconstructionGapBackfillPages {
-                logger.warning("[RECONSTRUCT] gap backfill reached page cap", category: .session)
+            hasUnresolvedGap = events
+                .first(where: { $0.sessionId == sessionId })
+                .map { $0.sequence > previousHighestSequence + 1 }
+                ?? false
+            if hasUnresolvedGap {
+                if pageCount >= Self.maxReconstructionGapBackfillPages {
+                    logger.warning("[RECONSTRUCT] gap backfill reached page cap", category: .session)
+                }
+                logger.warning(
+                    "[RECONSTRUCT] gap remains after backfill; replacing the cached window so pagination retains the recovery cursor",
+                    category: .session
+                )
             }
         }
 
+        if hasUnresolvedGap {
+            return ReconstructionEventWindow(
+                events: events,
+                oldestEventId: oldestEventId,
+                hasMoreEvents: hasMoreEvents,
+                mergesPreviousEvents: false
+            )
+        }
+
         if let previousFirst = previousEvents.first,
-           let currentFirst = events.first,
-           previousFirst.sequence < currentFirst.sequence {
+           !events.contains(where: { $0.id == previousFirst.id }) {
             return ReconstructionEventWindow(
                 events: events,
                 oldestEventId: previousFirst.id,
-                hasMoreEvents: previousHadOlderServerPages
+                hasMoreEvents: previousHadOlderServerPages,
+                mergesPreviousEvents: true
             )
         }
 
         return ReconstructionEventWindow(
             events: events,
             oldestEventId: oldestEventId,
-            hasMoreEvents: hasMoreEvents
+            hasMoreEvents: hasMoreEvents,
+            mergesPreviousEvents: true
         )
     }
 
     private func mergeReconstructionEvents(_ previous: [RawEvent], _ incoming: [RawEvent]) -> [RawEvent] {
-        var byId: [String: RawEvent] = [:]
-        for event in previous {
-            byId[event.id] = event
+        let previous = deduplicatedEvents(previous)
+        let incoming = deduplicatedEvents(incoming)
+        guard !previous.isEmpty else { return incoming }
+        guard !incoming.isEmpty else { return previous }
+
+        let previousIndexes = Dictionary(
+            uniqueKeysWithValues: previous.enumerated().map { ($1.id, $0) }
+        )
+        let sharedPreviousIndexes = incoming.compactMap { previousIndexes[$0.id] }
+
+        guard let firstSharedIndex = sharedPreviousIndexes.first,
+              let lastSharedIndex = sharedPreviousIndexes.last else {
+            return previous + incoming
         }
-        for event in incoming {
-            byId[event.id] = event
+
+        guard zip(sharedPreviousIndexes, sharedPreviousIndexes.dropFirst()).allSatisfy({ pair in
+            pair.0 < pair.1
+        }) else {
+            logger.warning(
+                "[RECONSTRUCT] overlapping event order changed; trusting the server reconstruction window",
+                category: .session
+            )
+            return incoming
         }
-        return EventSorter.sortBySequence(Array(byId.values))
+
+        return Array(previous[..<firstSharedIndex])
+            + incoming
+            + Array(previous[(lastSharedIndex + 1)...])
+    }
+
+    private func deduplicatedEvents(_ events: [RawEvent]) -> [RawEvent] {
+        var indexesById: [String: Int] = [:]
+        var unique: [RawEvent] = []
+        unique.reserveCapacity(events.count)
+        for event in events {
+            if let existingIndex = indexesById[event.id] {
+                unique[existingIndex] = event
+            } else {
+                indexesById[event.id] = unique.count
+                unique.append(event)
+            }
+        }
+        return unique
     }
 
     private func visibleMessageCountAfterReconstruction(
@@ -239,8 +312,7 @@ extension ChatViewModel {
     func reconcileCompletedReconstructionState() {
         agentPhase = .idle
         runningCapabilityInvocationCount = 0
-        currentCapabilityInvocationMessages.removeAll()
-        currentTurnCapabilityInvocations.removeAll()
+        currentTurnCapabilityMessageIds.removeAll()
         streamingManager.reset()
         thinkingState.markStreamingComplete()
         markThinkingMessageCompleteIfNeeded()
@@ -399,16 +471,6 @@ extension ChatViewModel {
             }
         }
 
-        // Add to current turn capability invocations for tracking
-        var record = CapabilityInvocationRecord(
-            invocationId: capabilityInvocation.invocationId,
-            modelPrimitiveName: modelPrimitiveName,
-            arguments: argsString
-        )
-        record.result = capabilityInvocation.result
-        record.isError = capabilityInvocation.isError ?? false
-        currentTurnCapabilityInvocations.append(record)
-
         let identity = CapabilityIdentity(
             modelPrimitiveName: modelPrimitiveName,
             operationName: capabilityInvocation.operationName ?? capabilityInvocation.operation,
@@ -421,7 +483,7 @@ extension ChatViewModel {
         // Create UI message for the capability invocation
         let messageId = UUID(uuidString: capabilityInvocation.invocationId) ?? UUID()
 
-            let status: CapabilityInvocationStatus = switch capabilityInvocation.status {
+        let status: CapabilityInvocationStatus = switch capabilityInvocation.status {
             case CapabilityInvocationStatusDTO.generating.rawValue:
                 .generating
             case CapabilityInvocationStatusDTO.running.rawValue:
@@ -450,26 +512,41 @@ extension ChatViewModel {
             status: status,
             arguments: argsString,
             result: capabilityInvocation.result,
+            details: capabilityInvocation.details,
+            progressMessage: capabilityInvocation.progressMessage,
+            progressPercent: capabilityInvocation.progressPercent,
             durationMs: durationMs,
             identity: identity,
             logs: (status == .running && capabilityInvocation.streamingOutput != nil) ? [capabilityInvocation.streamingOutput!] : []
         )
 
         // Dedup: if a capability message with this invocationId already exists (from persisted
-        // message.assistant), update it with in-flight details rather than creating a duplicate.
+        // message.assistant), update only nonterminal state. Persisted completion is the
+        // authoritative result and must not regress to a lower-fidelity in-flight projection.
         if let existingIdx = messages.firstIndex(where: { msg in
             switch msg.content {
             case .capabilityInvocation(let data): return data.id == capabilityInvocation.invocationId
             default: return false
             }
         }) {
-            // Only update capability invocation with richer in-flight data (streaming output, startedAt).
-            updateMessage(at: existingIdx) { message in
-                message.content = .capabilityInvocation(invocationData)
+            let persistedIsTerminal: Bool
+            if case .capabilityInvocation(let existingData) = messages[existingIdx].content {
+                persistedIsTerminal = existingData.status == .success || existingData.status == .error
+            } else {
+                persistedIsTerminal = false
             }
-            currentCapabilityInvocationMessages[messages[existingIdx].id] = messages[existingIdx]
+
+            if !persistedIsTerminal {
+                updateMessage(at: existingIdx) { message in
+                    message.content = .capabilityInvocation(invocationData)
+                }
+            }
+            currentTurnCapabilityMessageIds.insert(messages[existingIdx].id)
             animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
-            logger.info("[RECONSTRUCT] Deduplicated capability message for \(modelPrimitiveName) id=\(capabilityInvocation.invocationId)", category: .session)
+            logger.info(
+                "[RECONSTRUCT] Deduplicated capability message for \(modelPrimitiveName) id=\(capabilityInvocation.invocationId), preservedTerminal=\(persistedIsTerminal)",
+                category: .session
+            )
             return
         }
 
@@ -480,8 +557,7 @@ extension ChatViewModel {
             timestamp: Date()
         )
 
-        // Track in currentCapabilityInvocationMessages AFTER content is finalized
-        currentCapabilityInvocationMessages[messageId] = capabilityMessage
+        currentTurnCapabilityMessageIds.insert(messageId)
         appendToMessages(capabilityMessage)
         animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
     }

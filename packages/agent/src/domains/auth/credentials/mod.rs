@@ -5,10 +5,13 @@
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
 //! Auth state is persisted to `~/.tron/profiles/auth.json` with secure file
-//! permissions. Fresh Mac installs seed this file as `{}`; storage loading
-//! treats only that exact empty object as pristine empty auth state, and the
-//! first secure write materializes the full schema. Non-empty malformed auth
-//! files remain hard errors so real credentials are never silently overwritten.
+//! permissions. Constitution creates an exact empty compatibility sentinel at
+//! mode `0o600` for profile validation; the first auth-domain write materializes
+//! the full schema. Storage loading retains that sentinel interpretation for
+//! interrupted or older installs. Non-empty malformed auth files remain hard
+//! errors so real credentials are never silently overwritten.
+//! `OAuthTokens::expires_at` stores the provider's actual expiry; provider
+//! refresh paths apply their safety buffer once when deciding to renew.
 //!
 //! # Provider modules
 //!
@@ -61,10 +64,11 @@ pub(crate) use storage::{
     load_or_init_for_write, save_named_api_key,
 };
 pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
+pub(crate) use types::calculate_expires_at;
 pub use types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleProviderAuth,
     OAuthConfig, OAuthTokenRefreshResponse, OAuthTokens, OpenAIAuthPath, ProviderAuth, ServerAuth,
-    ServiceAuth, calculate_expires_at, now_ms, should_refresh,
+    ServiceAuth, now_ms, should_refresh,
 };
 
 pub(crate) const DEFAULT_API_KEY_LABEL: &str = "Default";

@@ -2,7 +2,7 @@
 Thanks for the PR! A few things below help reviewers move fast.
 
 Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pairing step`,
-`fix(rpc): handle missing token gracefully`, `docs: update protocol reference`.
+`fix(events): reject a mismatched session`, `docs: update protocol reference`.
 -->
 
 ## Summary
@@ -23,11 +23,11 @@ Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pa
 
 <!-- Code, tests, and docs ship together (project AGENTS.md rule #1). -->
 
-- [ ] Tests added or updated (TDD: tests before implementation where practical).
-- [ ] `cd packages/agent && cargo check && cargo test -- --quiet` is green locally.
-- [ ] Workflow/docs/static-gate changes: `scripts/tron ci fmt check clippy test`, `git diff --check`, and `git ls-files -ci --exclude-standard` are green locally.
-- [ ] Scorecard/evidence/inventory changes: companion artifacts include concrete command results, closed 100/100 rows, and predecessor inventory rows where static gates require them.
-- [ ] iOS changes: `xcodegen generate && xcodebuild test -scheme Tron …` is green locally.
+- [ ] Existing tests cover the change, or tests were added/updated for changed behavior or a genuine gap.
+- [ ] Validation is proportionate to the changed owners; exact commands and results are listed above.
+- [ ] Rust or CI changes: `scripts/tron ci fmt check clippy test` and `git diff --check` are green locally.
+- [ ] iOS changes: `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` is green locally.
+- [ ] Mac changes: `cd packages/mac-app && ./scripts/bundle-agent.sh --profile debug && xcodegen generate && xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug` is green locally.
 - [ ] `scripts/personal-info-guard.sh` is green (no leaked usernames, paths, or domains).
 - [ ] Documentation updated at the narrowest owner per the [documentation maintenance map](../AGENTS.md#documentation-maintenance); the root README changed only when product-level setup or workflow changed.
 - [ ] Progressive disclosure docs updated (`mod.rs` submodule tables and package docs) for any module that gained or lost responsibilities.
@@ -41,4 +41,4 @@ Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pa
 
 ## Related
 
-<!-- Issues, prior PRs, or plan-file sections. -->
+<!-- Issues or prior PRs. -->

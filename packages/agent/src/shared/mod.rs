@@ -22,8 +22,8 @@
 //!   bundle passed into retained domains and runtime services.
 //! - [`storage::StorageRuntime`] owns database startup maintenance,
 //!   checkpoint/export/stats/retention helpers, and payload blob helpers.
-//! - [`observability::init_subscriber`] and
-//!   [`observability::init_subscriber_with_sqlite`] own tracing setup.
+//! - [`observability`] owns managed terminal and database tracing setup; only
+//!   its flush handle crosses into bootstrap shutdown coordination.
 //!
 //! ## Invariants
 //!

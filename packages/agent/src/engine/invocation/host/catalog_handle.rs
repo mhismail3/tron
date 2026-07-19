@@ -207,13 +207,6 @@ impl EngineHostHandle {
         self.inner.lock().await.catalog.worker_is_volatile(id)
     }
 
-    /// Return a snapshot of invocation records.
-    pub async fn invocation_records(
-        &self,
-    ) -> Vec<crate::engine::invocation::model::InvocationRecord> {
-        self.inner.lock().await.catalog.invocations().to_vec()
-    }
-
     /// Inspect a trigger through the host boundary.
     pub async fn inspect_trigger(&self, id: &TriggerId) -> Result<TriggerDefinition> {
         self.inner.lock().await.catalog.inspect_trigger(id)

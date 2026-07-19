@@ -155,7 +155,8 @@ async fn trigger_runtime_manual_dispatch_records_trigger_metadata() {
     assert_eq!(result.value.unwrap()["echo"], json!({"value": 1}));
 
     let host = handle.lock().await;
-    let record = host.catalog().invocations().last().unwrap();
+    let records = host.catalog().ledger_invocations().unwrap();
+    let record = records.last().unwrap();
     assert_eq!(record.trigger_id, Some(trigger_id));
     assert_eq!(record.authority_grant_id, grant("manual-grant"));
     assert_eq!(record.trace_id, trace("trigger-trace"));
@@ -262,9 +263,8 @@ async fn trigger_runtime_void_dispatch_records_causal_metadata_once() {
         Some("1")
     );
 
-    let record = handle
-        .invocation_records()
-        .await
+    let records = handle.lock().await.catalog().ledger_invocations().unwrap();
+    let record = records
         .into_iter()
         .find(|record| record.function_id == fid("alpha::telemetry"))
         .expect("void trigger target should be recorded");
@@ -402,7 +402,7 @@ async fn trigger_runtime_stops_cascades_at_depth_budget_before_handler() {
         "policy_violation"
     );
 
-    let records = handle.invocation_records().await;
+    let records = handle.lock().await.catalog().ledger_invocations().unwrap();
     let cascade_records: Vec<_> = records
         .iter()
         .filter(|record| record.function_id == fid("alpha::cascade"))
@@ -443,7 +443,8 @@ async fn trigger_runtime_fails_closed_for_missing_trigger() {
     assert!(matches!(result.error, Some(EngineError::NotFound { .. })));
 
     let host = handle.lock().await;
-    let record = host.catalog().invocations().last().unwrap();
+    let records = host.catalog().ledger_invocations().unwrap();
+    let record = records.last().unwrap();
     assert_eq!(record.function_id, fid("engine::trigger_dispatch"));
     assert_eq!(record.worker_id, wid("engine"));
     assert_eq!(record.trigger_id, Some(trigger_id));
@@ -506,7 +507,8 @@ async fn trigger_runtime_records_delivery_mismatch_prepare_failure() {
     ));
 
     let host = handle.lock().await;
-    let record = host.catalog().invocations().last().unwrap();
+    let records = host.catalog().ledger_invocations().unwrap();
+    let record = records.last().unwrap();
     assert_eq!(record.function_id, fid("alpha::echo"));
     assert_eq!(record.worker_id, wid("alpha"));
     assert_eq!(record.trigger_id, Some(trigger_id));
@@ -577,7 +579,8 @@ async fn trigger_runtime_target_failures_keep_trigger_metadata_in_ledger() {
     ));
 
     let host = handle.lock().await;
-    let record = host.catalog().invocations().last().unwrap();
+    let records = host.catalog().ledger_invocations().unwrap();
+    let record = records.last().unwrap();
     assert_eq!(record.function_id, fid("alpha::schema"));
     assert_eq!(record.worker_id, wid("alpha"));
     assert_eq!(record.trigger_id, Some(trigger_id));
@@ -639,7 +642,8 @@ async fn trigger_runtime_records_current_target_revision_after_promotion() {
     assert_eq!(result.error, None);
 
     let host = handle.lock().await;
-    let record = host.catalog().invocations().last().unwrap();
+    let records = host.catalog().ledger_invocations().unwrap();
+    let record = records.last().unwrap();
     assert_eq!(record.function_id, fid("alpha::echo"));
     assert_eq!(record.trigger_id, Some(trigger_id));
     assert!(

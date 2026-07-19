@@ -20,7 +20,7 @@ struct SettingsView: View {
     @State var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case engine, providers, server, app
+        case engine, providers, app
         var id: String { rawValue }
     }
 
@@ -72,7 +72,9 @@ struct SettingsView: View {
     }
 
     private var selectedModelDisplayName: String {
-        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.defaultModel }) {
+        if let model = dependencies.modelRepository.cachedModels.first(where: {
+            $0.id == settingsState.defaultModel
+        }) {
             return model.formattedModelName
         }
         return settingsState.defaultModel.shortModelName
@@ -89,22 +91,22 @@ struct SettingsView: View {
     }
 
     private var settingsBaseView: some View {
-        SettingsPageContainer(
-            title: "Settings",
-            leadingToolbar: {
-                Button { showLogViewer = true } label: {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronEmerald)
+        VStack(spacing: 0) {
+            SettingsPageContainer(
+                title: "Settings",
+                leadingToolbar: {
+                    Button { showLogViewer = true } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
-            }
-        ) {
-            VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
+            ) {
                 mainSettingsSection
                     .cardEntrance(visible: cardsVisible, index: 0)
-
-                settingsFooterDockView
             }
+
+            settingsFooterDockView
         }
     }
 
@@ -184,11 +186,7 @@ struct SettingsView: View {
             EngineSettingsPage(
                 settingsState: settingsState,
                 selectedModelDisplayName: selectedModelDisplayName,
-                updateServerSetting: updateServerSetting
-            )
-        case .server:
-            ConnectionSettingsPage(
-                settingsState: settingsState,
+                updateServerSetting: updateServerSetting,
                 startServerOnboarding: { startOnboarding(prefill: $0) }
             )
         case .providers:
@@ -218,7 +216,7 @@ struct SettingsView: View {
             settingsState.clearServerSnapshot()
             return
         }
-        let isAlive = await connection.verifyConnection()
+        let isAlive = await dependencies.verifyConnection()
         guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
               dependencies.activeServerSelectionVersion == selectionVersion else {
             return
@@ -228,13 +226,16 @@ struct SettingsView: View {
             await dependencies.manualRetry()
             return
         }
-        await settingsState.reload(
-            settingsRepository: dependencies.settingsRepository,
-            modelRepository: dependencies.modelRepository
-        ) {
+        settingsState.clearServerSnapshot()
+        await settingsState.load(using: dependencies.settingsRepository) {
             dependencies.pairedServerStore.activeServer?.id == activeServer.id
                 && dependencies.activeServerSelectionVersion == selectionVersion
         }
+        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+              dependencies.activeServerSelectionVersion == selectionVersion else {
+            return
+        }
+        _ = try? await dependencies.modelRepository.list(forceRefresh: false)
     }
 
     func startOnboarding(prefill server: PairedServer? = nil) {

@@ -2,66 +2,59 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// Tests for the engine protocol response decoder behind `ServerPing`. The
+/// Tests for the engine protocol frame decoder behind `ServerPing`. The
 /// network ping itself is not unit-tested (URLSession mocking is
 /// expensive); we cover the decode path which is where every
 /// JSON-shape edge lives.
-@Suite("ServerPing.decode")
+@Suite("ServerPing.decodeFrame")
 struct ServerPingDecodeTests {
-    @Test("happy path: full result object")
-    func happyDecode() throws {
+    @Test("matching canonical response projects the server version")
+    func matchingCanonicalResponseProjectsServerVersion() {
         let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"pong":true,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}}}
         """
-        let info = try #require(ServerPing.decode(data: Data(body.utf8)))
-        #expect(info.version == "0.5.0")
-        #expect(info.port == 9847)
-        #expect(info.tailscaleIp == "100.64.0.1")
-        #expect(info.paired == true)
+        let expected = ServerPingInfo(version: "0.5.0")
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
     }
 
-    @Test("missing optional fields use defaults")
-    func missingOptionalFields() throws {
+    @Test("missing canonical ping fields is malformed")
+    func missingCanonicalFieldsIsMalformed() {
         let body = """
         {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{}}}}
         """
-        let info = try #require(ServerPing.decode(data: Data(body.utf8)))
-        #expect(info.version == "")
-        #expect(info.port == TronPaths.defaultServerPort)
-        #expect(info.tailscaleIp == nil)
-        #expect(info.paired == false)
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .malformed)
     }
 
-    @Test("error response (no result) returns nil")
-    func errorResponseReturnsNil() throws {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":false,"error":{"code":"CAPABILITY_NOT_FOUND","message":"capability not found"}}
+    @Test("false pong or compatibility is malformed")
+    func falsePongOrCompatibilityIsMalformed() {
+        let falsePong = """
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"pong":false,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}}}
         """
-        #expect(ServerPing.decode(data: Data(body.utf8)) == nil)
+        let incompatible = falsePong
+            .replacingOccurrences(of: "\"pong\":false", with: "\"pong\":true")
+            .replacingOccurrences(of: "\"compatible\":true", with: "\"compatible\":false")
+
+        #expect(ServerPing.decodeFrame(data: Data(falsePong.utf8)) == .malformed)
+        #expect(ServerPing.decodeFrame(data: Data(incompatible.utf8)) == .malformed)
     }
 
-    @Test("malformed JSON returns nil")
-    func malformedJSONReturnsNil() throws {
-        #expect(ServerPing.decode(data: Data("garbage".utf8)) == nil)
-        #expect(ServerPing.decode(data: Data()) == nil)
-    }
-
-    @Test("paired defaults to false when field is missing")
-    func pairedDefaults() throws {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":1234}}}}
+    @Test("numeric booleans and boolean protocol versions are malformed")
+    func bridgedJSONScalarTypesAreMalformed() {
+        let numericBooleans = """
+        {"type":"response","id":"mac-system-ping","ok":1,"result":{"child":{"value":{"pong":1,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":1}}}}
         """
-        let info = try #require(ServerPing.decode(data: Data(body.utf8)))
-        #expect(info.paired == false)
+        let booleanProtocols = """
+        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"pong":true,"timestamp":"2026-07-16T00:00:00.000Z","serverVersion":"0.5.0","serverProtocolVersion":true,"minClientProtocolVersion":false,"compatible":true}}}}
+        """
+
+        #expect(ServerPing.decodeFrame(data: Data(numericBooleans.utf8)) == .malformed)
+        #expect(ServerPing.decodeFrame(data: Data(booleanProtocols.utf8)) == .malformed)
     }
 
-    @Test("response frame decodes string-id server response")
-    func responseFrameDecodesStringID() {
-        let body = """
-        {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}}}
-        """
-        let expected = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
-        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
+    @Test("malformed JSON is classified")
+    func malformedJSONIsClassified() {
+        #expect(ServerPing.decodeFrame(data: Data("garbage".utf8)) == .malformed)
+        #expect(ServerPing.decodeFrame(data: Data()) == .malformed)
     }
 
     @Test("connection.established event is ignored while waiting for ping response")
@@ -83,22 +76,6 @@ struct ServerPingDecodeTests {
 
 @Suite("ServerPingResult")
 struct ServerPingResultTests {
-    @Test("info accessor returns nil for non-success cases")
-    func infoAccessorNilForFailures() {
-        #expect(ServerPingResult.unauthorized.info == nil)
-        #expect(ServerPingResult.unreachable.info == nil)
-        #expect(ServerPingResult.timeout.info == nil)
-        #expect(ServerPingResult.malformedResponse.info == nil)
-    }
-
-    @Test("info accessor returns the wrapped ServerInfo on success")
-    func infoAccessorSuccess() throws {
-        let info = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
-        let result = ServerPingResult.success(info)
-        #expect(result.info?.version == "0.5.0")
-        #expect(result.info?.port == 9847)
-    }
-
     @Test("equality holds for matching cases")
     func equality() {
         #expect(ServerPingResult.unauthorized == ServerPingResult.unauthorized)

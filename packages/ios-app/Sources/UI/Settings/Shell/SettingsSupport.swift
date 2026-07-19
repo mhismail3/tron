@@ -27,20 +27,11 @@ enum SettingsAdaptiveLayout {
 enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     case engine
     case providers
-    case server
-
-    static let serverBackedOrder: [Self] = [
-        .engine,
-        .providers,
-        .server,
-    ]
 
     var icon: String {
         switch self {
         case .engine:
             return "cpu"
-        case .server:
-            return "network"
         case .providers:
             return "circle.hexagongrid"
         }
@@ -50,21 +41,17 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
         switch self {
         case .engine:
             return "Engine"
-        case .server:
-            return "Servers"
         case .providers:
-            return "Accounts"
+            return "Providers"
         }
     }
 
     var subtitle: String {
         switch self {
         case .engine:
-            return "Server-owned defaults, context, and evidence policy"
-        case .server:
-            return "Pairing and connection"
+            return "Servers, session defaults, context"
         case .providers:
-            return "Login with OAuth and configure API keys"
+            return "OAuth and API keys"
         }
     }
 }
@@ -75,8 +62,8 @@ enum MainSettingsLocalCategoryStyle {
 }
 
 enum MainSettingsListLayout {
-    static let columnSpacing: CGFloat = 8
     static let rowSpacing: CGFloat = 8
+    static let sectionSpacing: CGFloat = 18
     static let dividerHeight: CGFloat = 1
     static let dividerHorizontalPadding: CGFloat = 2
     static let dividerVerticalPadding: CGFloat = 6
@@ -88,30 +75,17 @@ enum MainSettingsGridDestination: Hashable, Sendable {
     case engine
     case providers
     case app
-    case server
 
-    static let serverOwned: [Self] = [
+    static let order: [Self] = [
         .engine,
         .providers,
-    ]
-
-    static let deviceOwned: [Self] = [
-        .server,
         .app,
     ]
-
-    static let unavailableRow: [Self] = deviceOwned
-
-    static func visibleDestinations(serverSettingsUnavailable: Bool) -> [Self] {
-        serverSettingsUnavailable ? unavailableRow : serverOwned + deviceOwned
-    }
 
     var icon: String {
         switch self {
         case .engine:
             return ServerSettingsCategory.engine.icon
-        case .server:
-            return ServerSettingsCategory.server.icon
         case .app:
             return MainSettingsLocalCategoryStyle.appIcon
         case .providers:
@@ -123,8 +97,6 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         switch self {
         case .engine:
             return ServerSettingsCategory.engine.title
-        case .server:
-            return ServerSettingsCategory.server.title
         case .app:
             return "App"
         case .providers:
@@ -136,21 +108,19 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         switch self {
         case .engine:
             return ServerSettingsCategory.engine.subtitle
-        case .server:
-            return ServerSettingsCategory.server.subtitle
         case .app:
-            return "Appearance, notifications, local behavior"
+            return "Appearance, notifications, behavior"
         case .providers:
-            return "OAuth login and API keys"
+            return ServerSettingsCategory.providers.subtitle
         }
     }
 
     var accessibilityHint: String {
         switch self {
         case .engine:
-            return "Configure server-owned engine settings."
-        case .server, .app:
-            return "Configure local app and pairing settings."
+            return "Manage server pairing and server-owned engine settings."
+        case .app:
+            return "Configure local app settings."
         case .providers:
             return "Configure server-held provider accounts."
         }
@@ -159,10 +129,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
 
 enum MainSettingsFooterLayout {
     static let horizontalPadding: CGFloat = 20
-    static let textLeadingPadding: CGFloat = 8
-    static let topPadding: CGFloat = 10
-    static let bottomPadding: CGFloat = 10
-    static let dockHeight: CGFloat = 58
+    static let taglineLeadingPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 10
     static let feedbackButtonCornerRadius: CGFloat = 13
     static let feedbackButtonGlassTintOpacity = 0.14
 }
@@ -170,7 +138,7 @@ enum MainSettingsFooterLayout {
 enum EngineSettingsSection: String, CaseIterable, Sendable {
     case defaults = "Session Defaults"
     case context = "Context"
-    case evidence = "Evidence Policy"
+    case transcription = "Transcription"
 }
 
 enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
@@ -238,89 +206,6 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
     }
 }
 
-enum EngineSettingsSummary {
-    struct Context: Equatable, Sendable {
-        let isLoaded: Bool
-        let triggerTokenThreshold: Double
-        let preserveRecentCount: Int
-    }
-
-    static func title(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Load engine settings"
-        }
-
-        return "Server-owned engine policy"
-    }
-
-    static func description(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Loading model defaults, context, and evidence policy from the active server."
-        }
-
-        let threshold = Int((context.triggerTokenThreshold * 100).rounded())
-        return "Defaults, compaction at \(threshold)%, and evidence retention are mirrored from the server."
-    }
-}
-
-enum ProvidersSettingsSummary {
-    struct Context: Equatable, Sendable {
-        let isLoaded: Bool
-        let configuredModelProviderCount: Int
-        let totalModelProviderCount: Int
-        let configuredServiceCount: Int
-        let totalServiceCount: Int
-    }
-
-    static func title(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Load credential status"
-        }
-
-        return "Provider connections"
-    }
-
-    static func description(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Loading provider and service credential status from the active server."
-        }
-
-        let totalConfigured = context.configuredModelProviderCount + context.configuredServiceCount
-        guard totalConfigured > 0 else {
-            return "No model providers or services are configured. Add OAuth accounts or API keys; secrets stay on the Mac server."
-        }
-
-        let modelSummary = countSummary(
-            configured: context.configuredModelProviderCount,
-            total: context.totalModelProviderCount,
-            singular: "model provider",
-            plural: "model providers"
-        )
-        let serviceSummary = countSummary(
-            configured: context.configuredServiceCount,
-            total: context.totalServiceCount,
-            singular: "service",
-            plural: "services"
-        )
-        return sentenceCase("\(modelSummary) and \(serviceSummary) are configured. Secrets stay on the Mac server.")
-    }
-
-    private static func countSummary(configured: Int, total: Int, singular: String, plural: String) -> String {
-        let noun = configured == 1 ? singular : plural
-        if configured == 0 {
-            return "0 \(plural)"
-        }
-        if configured == total {
-            return "all \(total) \(plural)"
-        }
-        return "\(configured) \(noun)"
-    }
-
-    private static func sentenceCase(_ value: String) -> String {
-        guard let first = value.first else { return value }
-        return first.uppercased() + value.dropFirst()
-    }
-}
 
 enum ServerOnboardingLauncher {
     static let serverIdUserInfoKey = "serverId"
@@ -343,62 +228,6 @@ enum ServerOnboardingLauncher {
             object: nil,
             userInfo: userInfo(prefill: server)
         )
-    }
-}
-
-enum ConnectionSettingsDiagnosticsCopy {
-    static let sectionTitle = "Diagnostics"
-    static let logsLabel = "Logs"
-    static let logsAction = "View"
-    static let caption = "Shows redacted local iOS logs. Engine visibility now lives in the dashboard cockpit."
-}
-
-enum ServerSettingsSummary {
-    struct Context: Equatable, Sendable {
-        let activeServerLabel: String?
-        let pairedServerCount: Int
-        let activeServerUnavailable: Bool
-        let isLoaded: Bool
-        let loadError: String?
-    }
-
-    static func title(for context: Context) -> String {
-        if let label = cleaned(context.activeServerLabel), !label.isEmpty {
-            if context.activeServerUnavailable {
-                return "\(label) not available"
-            }
-            return "Manage \(label)"
-        }
-        return context.pairedServerCount == 0 ? "Connect a Mac" : "Choose a server"
-    }
-
-    static func description(for context: Context) -> String {
-        guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to connect this iPhone to the engine."
-        }
-
-        guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
-            let count = context.pairedServerCount
-            let mac = count == 1 ? "Mac" : "Macs"
-            return "Choose one of your \(count) paired \(mac) to load its server-backed settings."
-        }
-
-        if context.activeServerUnavailable {
-            return SettingsLabels.connectedServerUnavailableDescription
-        }
-
-        guard context.isLoaded else {
-            if let error = cleaned(context.loadError), !error.isEmpty {
-                return "\(label) is paired, but settings are unavailable: \(error)"
-            }
-            return "\(label) is connected. Loading server settings."
-        }
-
-        return "\(label) is connected. Pairing and diagnostics are available."
-    }
-
-    private static func cleaned(_ value: String?) -> String? {
-        value?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

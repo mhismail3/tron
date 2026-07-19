@@ -42,6 +42,9 @@ pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value>
     models.extend(all_kimi_models_api_json());
     models.extend(all_ollama_models_api_json_with_availability(None).await);
     models
+        .into_iter()
+        .map(super::attachments::decorate_model)
+        .collect()
 }
 
 pub(crate) fn is_model_supported(model_id: &str) -> bool {
@@ -137,7 +140,7 @@ pub(crate) async fn switch_model(
 
     deps.session_manager.invalidate_session(&session_id);
 
-    let is_active = deps.session_manager.is_active(&session_id);
+    let is_cached = deps.session_manager.is_cached(&session_id);
     let _ = deps.orchestrator.broadcast().emit(
         crate::shared::protocol::events::TronEvent::SessionUpdated {
             base: crate::shared::protocol::events::BaseEvent::now(&session_id),
@@ -153,7 +156,8 @@ pub(crate) async fn switch_model(
             cache_creation_tokens: Some(session.total_cache_creation_tokens),
             cost: Some(session.total_cost),
             last_activity: session.last_activity_at.clone(),
-            is_active,
+            // Wire compatibility: the event field retains its historical name.
+            is_active: is_cached,
             last_user_prompt: None,
             last_assistant_response: None,
             parent_session_id: session.parent_session_id.clone(),

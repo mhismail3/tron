@@ -28,29 +28,6 @@ extension Color {
         })
     }
 
-    /// Static hex initializer — use for tokens that should not adapt
-    /// across light/dark modes (rare; prefer the adaptive form).
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r, g, b: UInt64
-        switch hex.count {
-        case 6:
-            (r, g, b) = (int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8:
-            (r, g, b) = (int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (r, g, b) = (0, 0, 0)
-        }
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255
-        )
-    }
-
     // MARK: - Accent Greens (mirrors iOS)
 
     /// Primary brand emerald — logo, headings, primary CTA fill.
@@ -86,26 +63,4 @@ extension NSColor {
         }
         self.init(srgbRed: r, green: g, blue: b, alpha: 1)
     }
-}
-
-// MARK: - Gradients
-
-extension LinearGradient {
-    /// Top-to-bottom mint→emerald gradient. Use for the primary CTA
-    /// background so the button has visible depth without losing its
-    /// emerald identity at a glance.
-    static let tronEmeraldGradient = LinearGradient(
-        colors: [Color(hex: "#34D399"), Color(hex: "#10B981")],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-}
-
-// MARK: - ShapeStyle Aliases
-
-extension ShapeStyle where Self == Color {
-    static var tronEmerald: Color { .tronEmerald }
-    static var tronEmeraldDeep: Color { .tronEmeraldDeep }
-    static var tronMint: Color { .tronMint }
-    static var tronSuccess: Color { .tronSuccess }
 }

@@ -265,7 +265,8 @@ struct ModelInfoComputedTests {
 //
 // Server contract: every provider registry (Anthropic, OpenAI, Google,
 // MiniMax, Kimi, Ollama) populates `supportsThinking`, `supportsImages`,
-// `supportsDocuments`, `tier`, and `isRetiredGeneration` unconditionally. A payload
+// `supportsDocuments`, `attachmentPolicy`, `tier`, and `isRetiredGeneration`
+// unconditionally. A payload
 // missing any of these is a server bug, not a client default case.
 
 @Suite("ModelInfo Strict Decode — I8")
@@ -282,6 +283,14 @@ struct ModelInfoStrictDecodeTests {
             "supportsThinking": true,
             "supportsImages": true,
             "supportsDocuments": true,
+            "attachmentPolicy": [
+                "supportsPdfContent": true,
+                "supportsTextFiles": true,
+                "maxImageDimension": 1_568,
+                "maxImageBytes": 1_400_000,
+                "maxDocumentBytes": 20_971_520,
+                "supportedImageMimeTypes": ["image/jpeg", "image/png"]
+            ],
             "tier": "sonnet",
             "isLegacy": false
         ]
@@ -299,8 +308,30 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.supportsThinking == true)
         #expect(m.supportsImages == true)
         #expect(m.supportsDocuments == true)
+        #expect(m.attachmentPolicy.maxImageBytes == 1_400_000)
         #expect(m.tier == "sonnet")
         #expect(m.isRetiredGeneration == false)
+    }
+
+    @Test("attachment capability derives from server policy")
+    func attachmentCapabilityUsesServerPolicy() throws {
+        var payload = Self.validPayload()
+        payload["supportsImages"] = false
+        payload["attachmentPolicy"] = [
+            "supportsPdfContent": false,
+            "supportsTextFiles": true,
+            "maxImageDimension": 0,
+            "maxImageBytes": 0,
+            "maxDocumentBytes": 4_096,
+            "supportedImageMimeTypes": []
+        ]
+
+        let model = try decode(payload)
+        let capability = AttachmentCapability.from(model: model)
+        #expect(capability.supportsImages == false)
+        #expect(capability.supportsPdfContent == false)
+        #expect(capability.maxImageBytes == 0)
+        #expect(capability.maxDocumentBytes == 4_096)
     }
 
     @Test("OpenAI endpoint-aware optional fields decode")
@@ -359,6 +390,13 @@ struct ModelInfoStrictDecodeTests {
     func missingSupportsDocuments() {
         var payload = Self.validPayload()
         payload.removeValue(forKey: "supportsDocuments")
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("missing attachmentPolicy fails decode")
+    func missingAttachmentPolicy() {
+        var payload = Self.validPayload()
+        payload.removeValue(forKey: "attachmentPolicy")
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 

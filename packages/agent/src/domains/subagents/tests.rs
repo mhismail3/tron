@@ -1,164 +1,29 @@
 use serde_json::{Value, json};
 
 use super::projection::PROJECTION_STRING_BYTES;
-use super::service::{
-    create_task_value, inspect_subagent_task_value, list_subagent_tasks_value, update_task_value,
-};
+use super::service::{inspect_subagent_task_value, list_subagent_tasks_value};
 use super::validation::{MAX_REF_ITEMS, MAX_SUMMARY_BYTES};
-use super::{CREATE_TASK_FUNCTION, Deps, READ_SCOPE, UPDATE_TASK_FUNCTION, WRITE_SCOPE};
+use super::{READ_SCOPE, SCHEMA_VERSION};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel, SUBAGENT_TASK_KIND,
-    SUBAGENT_TASK_SCHEMA_ID, TraceId, WorkerId, builtin_resource_type_definitions,
+    EngineHostHandle, EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel,
+    SUBAGENT_TASK_KIND, SUBAGENT_TASK_SCHEMA_ID, TraceId, WorkerId,
+    builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
-
-#[tokio::test]
-async fn internal_creation_records_bounded_inert_subagent_task_resource() {
-    let fixture = Fixture::new("create").await;
-    let created = fixture.create_task("create-key", task_payload()).await;
-    let resource_id = created["subagentTaskResourceId"].as_str().unwrap();
-    assert_eq!(created["activation"]["subagentStarted"], json!(false));
-    assert_eq!(created["network"]["requiredPolicy"], json!("none"));
-
-    let inspection = fixture
-        .deps
-        .engine_host
-        .inspect_resource(resource_id)
-        .await
-        .expect("inspect")
-        .expect("subagent task");
-    assert_eq!(inspection.resource.kind, SUBAGENT_TASK_KIND);
-    assert_eq!(inspection.resource.schema_id, SUBAGENT_TASK_SCHEMA_ID);
-    assert_eq!(inspection.resource.scope.kind(), "session");
-    let payload = current_payload(&inspection);
-    assert_eq!(payload["taskId"], json!("task-alpha"));
-    assert_eq!(
-        payload["objectiveSummary"],
-        json!("Review a failing unit test")
-    );
-    assert_eq!(
-        payload["promptSummary"],
-        json!("Summarize likely root cause")
-    );
-    assert_eq!(payload["result"], Value::Null);
-    assert_eq!(payload["error"], Value::Null);
-    assert_eq!(payload["activation"]["toolExecution"], json!(false));
-}
-
-#[tokio::test]
-async fn lifecycle_update_appends_placeholder_result_without_side_effects() {
-    let fixture = Fixture::new("update").await;
-    let created = fixture.create_task("update-create", task_payload()).await;
-    let resource_id = created["subagentTaskResourceId"].as_str().unwrap();
-    let before_catalog = fixture.deps.engine_host.catalog_revision().await.0;
-    let updated = fixture
-        .update_task(
-            "update-key",
-            json!({
-                "subagentTaskResourceId": resource_id,
-                "state": "succeeded",
-                "result": {"summary": "Recorded placeholder only"}
-            }),
-        )
-        .await;
-    let after_catalog = fixture.deps.engine_host.catalog_revision().await.0;
-
-    assert_eq!(before_catalog, after_catalog);
-    assert_eq!(updated["status"], json!("succeeded"));
-    let inspected = fixture.inspect("update-inspect", resource_id).await;
-    assert_eq!(inspected["task"]["payload"]["state"], json!("succeeded"));
-    assert_eq!(
-        inspected["task"]["payload"]["result"]["summary"],
-        json!("Recorded placeholder only")
-    );
-    assert_eq!(inspected["activation"]["jobStarted"], json!(false));
-}
-
-#[tokio::test]
-async fn creation_requires_internal_non_wildcard_authority() {
-    let fixture = Fixture::new("authority").await;
-    let agent_error = fixture
-        .create_task_error_with_actor("agent-denied", ActorKind::Agent, task_payload())
-        .await;
-    assert!(agent_error.contains("trusted internal"), "{agent_error}");
-
-    let bootstrap_invocation = invocation(
-        CREATE_TASK_FUNCTION,
-        "bootstrap-denied",
-        task_payload(),
-        AuthorityGrantId::new("engine-system").unwrap(),
-        ActorKind::System,
-        &[WRITE_SCOPE, "resource.write"],
-        Some("authority-session"),
-    );
-    let bootstrap = create_task_value(
-        &fixture.deps,
-        &bootstrap_invocation,
-        &bootstrap_invocation.payload,
-    )
-    .await
-    .expect_err("bootstrap grant denied")
-    .to_string();
-    assert!(bootstrap.contains("non-bootstrap"), "{bootstrap}");
-
-    let wildcard_grant = fixture
-        .derive_grant(
-            "wildcard-write",
-            &[WRITE_SCOPE, "resource.write"],
-            &["*"],
-            &["kind:subagent_task"],
-            "none",
-        )
-        .await;
-    let wildcard_invocation = invocation(
-        CREATE_TASK_FUNCTION,
-        "wildcard-denied",
-        task_payload(),
-        wildcard_grant,
-        ActorKind::System,
-        &[WRITE_SCOPE, "resource.write"],
-        Some(&fixture.session_id),
-    );
-    let wildcard = create_task_value(
-        &fixture.deps,
-        &wildcard_invocation,
-        &wildcard_invocation.payload,
-    )
-    .await
-    .expect_err("wildcard grant denied")
-    .to_string();
-    assert!(wildcard.contains("wildcard"), "{wildcard}");
-}
-
-#[tokio::test]
-async fn creation_is_idempotent_per_scope_and_key() {
-    let fixture = Fixture::new("idempotent").await;
-    let first = fixture.create_task("same-key", task_payload()).await;
-    let second = fixture.create_task("same-key", task_payload()).await;
-    assert_eq!(
-        first["subagentTaskResourceId"],
-        second["subagentTaskResourceId"]
-    );
-    assert_eq!(second["idempotentReplay"], json!(true));
-
-    let listed = fixture.list("list-once").await;
-    assert_eq!(listed["tasks"].as_array().unwrap().len(), 1);
-}
 
 #[tokio::test]
 async fn read_operations_are_scoped_and_require_explicit_selector() {
     let first = Fixture::new("scope-one").await;
     let second = first.clone_for_session("scope-two-session").await;
-    let created = first.create_task("scope-key", task_payload()).await;
-    let resource_id = created["subagentTaskResourceId"].as_str().unwrap();
+    let resource_id = first.seed_readable_task("scope-task").await;
 
-    let inspected = first.inspect("scope-inspect", resource_id).await;
+    let inspected = first.inspect("scope-inspect", &resource_id).await;
     assert_eq!(
         inspected["task"]["payload"]["scope"]["kind"],
         json!("session")
     );
-    let cross_scope = second.inspect_error("scope-denied", resource_id).await;
+    let cross_scope = second.inspect_error("scope-denied", &resource_id).await;
     assert!(
         cross_scope.contains("outside the current scope"),
         "{cross_scope}"
@@ -182,7 +47,7 @@ async fn read_operations_are_scoped_and_require_explicit_selector() {
         &[READ_SCOPE, "resource.read"],
         Some(&first.session_id),
     );
-    let error = list_subagent_tasks_value(&first.deps, &no_selector, &no_selector.payload)
+    let error = list_subagent_tasks_value(&first.host, &no_selector, &no_selector.payload)
         .await
         .expect_err("selector is required")
         .to_string();
@@ -194,8 +59,7 @@ async fn inspect_revalidates_stored_kind_and_schema_not_id_prefix() {
     let fixture = Fixture::new("schema-mismatch").await;
     let resource_id = "subagent_task:not-actually-a-subagent";
     fixture
-        .deps
-        .engine_host
+        .host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.to_owned()),
             kind: "artifact".to_owned(),
@@ -237,8 +101,7 @@ async fn read_projections_omit_redact_and_bound_untrusted_stored_payloads() {
         .collect::<Vec<_>>();
 
     fixture
-        .deps
-        .engine_host
+        .host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.to_owned()),
             kind: SUBAGENT_TASK_KIND.to_owned(),
@@ -411,37 +274,6 @@ async fn read_projections_omit_redact_and_bound_untrusted_stored_payloads() {
     }
 }
 
-#[tokio::test]
-async fn validation_rejects_unbounded_secret_and_execution_material() {
-    let fixture = Fixture::new("validation").await;
-    let mut large = task_payload();
-    large["objectiveSummary"] = json!("x".repeat(2_049));
-    assert!(
-        fixture
-            .create_task_error("large-objective", large)
-            .await
-            .contains("exceeds")
-    );
-
-    let mut secret = task_payload();
-    secret["evidenceRefs"] = json!([{"token": "Bearer not-allowed"}]);
-    assert!(
-        fixture
-            .create_task_error("secret", secret)
-            .await
-            .contains("secret")
-    );
-
-    let mut command = task_payload();
-    command["evidenceRefs"] = json!([{"command": "run helper"}]);
-    assert!(
-        fixture
-            .create_task_error("command", command)
-            .await
-            .contains("execution field")
-    );
-}
-
 #[test]
 fn resource_definitions_include_subagent_task_required_fields() {
     let definitions = builtin_resource_type_definitions();
@@ -510,30 +342,18 @@ fn static_non_goal_guards_keep_subagent_tasks_inert() {
 }
 
 struct Fixture {
-    deps: Deps,
+    host: EngineHostHandle,
     session_id: String,
-    grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
 }
 
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
-        let grant_id = derive_grant(
-            &deps,
-            &format!("{label}-write"),
-            &[WRITE_SCOPE, READ_SCOPE, "resource.write", "resource.read"],
-            &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
-            "none",
-        )
-        .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &host,
             &format!("{label}-read"),
             &[READ_SCOPE, "resource.read"],
             &[SUBAGENT_TASK_KIND],
@@ -542,23 +362,13 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            host,
             session_id,
-            grant_id,
             read_grant_id,
         }
     }
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
-        let grant_id = self
-            .derive_grant(
-                &format!("{session_id}-write"),
-                &[WRITE_SCOPE, READ_SCOPE, "resource.write", "resource.read"],
-                &[SUBAGENT_TASK_KIND],
-                &["kind:subagent_task"],
-                "none",
-            )
-            .await;
         let read_grant_id = self
             .derive_grant(
                 &format!("{session_id}-read"),
@@ -569,9 +379,8 @@ impl Fixture {
             )
             .await;
         Self {
-            deps: self.deps.clone(),
+            host: self.host.clone(),
             session_id: session_id.to_owned(),
-            grant_id,
             read_grant_id,
         }
     }
@@ -585,7 +394,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.host,
             suffix,
             scopes,
             resource_kinds,
@@ -595,78 +404,83 @@ impl Fixture {
         .await
     }
 
-    async fn create_task(&self, key: &str, payload: Value) -> Value {
-        let invocation =
-            self.write_invocation(CREATE_TASK_FUNCTION, key, payload, ActorKind::System);
-        create_task_value(&self.deps, &invocation, &invocation.payload)
+    async fn seed_readable_task(&self, task_id: &str) -> String {
+        let resource_id = format!("{SUBAGENT_TASK_KIND}:{task_id}");
+        self.host
+            .create_resource(CreateResource {
+                resource_id: Some(resource_id.clone()),
+                kind: SUBAGENT_TASK_KIND.to_owned(),
+                schema_id: Some(SUBAGENT_TASK_SCHEMA_ID.to_owned()),
+                scope: EngineResourceScope::Session(self.session_id.clone()),
+                owner_worker_id: WorkerId::new("subagents").unwrap(),
+                owner_actor_id: ActorId::new("system:subagents-test").unwrap(),
+                lifecycle: Some("requested".to_owned()),
+                policy: json!({"read": ["subagents.read", "resource.read"]}),
+                initial_payload: Some(json!({
+                    "schemaVersion": SCHEMA_VERSION,
+                    "state": "requested",
+                    "taskId": task_id,
+                    "parent": {
+                        "sessionId": self.session_id.clone(),
+                        "workspaceId": "workspace-subagents",
+                        "traceId": format!("trace-{task_id}"),
+                        "parentInvocationId": Value::Null,
+                        "actorId": "system:subagents-test",
+                        "actorKind": "System"
+                    },
+                    "scope": {"kind": "session", "value": self.session_id.clone()},
+                    "objectiveSummary": "Stored read projection fixture",
+                    "promptSummary": "Inspect this stored task",
+                    "createdAt": "2026-06-24T00:00:00Z",
+                    "updatedAt": "2026-06-24T00:00:00Z",
+                    "refs": {
+                        "trace": [],
+                        "replay": [],
+                        "evidence": [],
+                        "outputs": [],
+                        "handoff": []
+                    },
+                    "activation": {
+                        "performed": false,
+                        "subagentStarted": false,
+                        "workerStarted": false,
+                        "jobStarted": false,
+                        "catalogRegistration": false,
+                        "toolExecution": false,
+                        "resultMerged": false
+                    },
+                    "network": {"performed": false, "requiredPolicy": "none"},
+                    "revision": 1
+                })),
+                locations: Vec::new(),
+                trace_id: TraceId::new(format!("trace-seed-{task_id}")).unwrap(),
+                invocation_id: None,
+            })
             .await
-            .expect("create task")
-    }
-
-    async fn create_task_error(&self, key: &str, payload: Value) -> String {
-        self.create_task_error_with_actor(key, ActorKind::System, payload)
-            .await
-    }
-
-    async fn create_task_error_with_actor(
-        &self,
-        key: &str,
-        actor_kind: ActorKind,
-        payload: Value,
-    ) -> String {
-        let invocation = self.write_invocation(CREATE_TASK_FUNCTION, key, payload, actor_kind);
-        create_task_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("create should fail")
-            .to_string()
-    }
-
-    async fn update_task(&self, key: &str, payload: Value) -> Value {
-        let invocation =
-            self.write_invocation(UPDATE_TASK_FUNCTION, key, payload, ActorKind::System);
-        update_task_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("update task")
+            .expect("seed readable subagent task");
+        resource_id
     }
 
     async fn list(&self, key: &str) -> Value {
         let invocation = self.read_invocation(key, json!({"limit": 10}));
-        list_subagent_tasks_value(&self.deps, &invocation, &invocation.payload)
+        list_subagent_tasks_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("list tasks")
     }
 
     async fn inspect(&self, key: &str, resource_id: &str) -> Value {
         let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
-        inspect_subagent_task_value(&self.deps, &invocation, &invocation.payload)
+        inspect_subagent_task_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect("inspect task")
     }
 
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
         let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
-        inspect_subagent_task_value(&self.deps, &invocation, &invocation.payload)
+        inspect_subagent_task_value(&self.host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
-    }
-
-    fn write_invocation(
-        &self,
-        function_id: &str,
-        key: &str,
-        payload: Value,
-        actor_kind: ActorKind,
-    ) -> Invocation {
-        invocation(
-            function_id,
-            key,
-            payload,
-            self.grant_id.clone(),
-            actor_kind,
-            &[WRITE_SCOPE, "resource.write"],
-            Some(&self.session_id),
-        )
     }
 
     fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
@@ -683,15 +497,14 @@ impl Fixture {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("subagents-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
@@ -759,29 +572,4 @@ fn invocation(
         payload,
         causal_context: context,
     }
-}
-
-fn task_payload() -> Value {
-    json!({
-        "taskId": "task-alpha",
-        "objectiveSummary": "Review a failing unit test",
-        "promptSummary": "Summarize likely root cause",
-        "evidenceRefs": [{"kind": "fixture", "id": "evidence-1"}],
-        "outputRefs": []
-    })
-}
-
-fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Value {
-    let current = inspection
-        .resource
-        .current_version_id
-        .as_ref()
-        .expect("current version");
-    inspection
-        .versions
-        .iter()
-        .find(|version| &version.version_id == current)
-        .expect("current payload")
-        .payload
-        .clone()
 }
