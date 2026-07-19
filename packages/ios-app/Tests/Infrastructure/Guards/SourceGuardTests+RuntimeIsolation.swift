@@ -231,7 +231,9 @@ extension SourceGuardTests {
         )
         let directive = try #require(source.range(of: "sessionAttemptDirective(request)"))
         for liveMarker in [
-            "URLSessionConfiguration.default",
+            // The static configuration factory may be declared earlier; only
+            // invoking it belongs to the live connection attempt.
+            "let configuration = Self.makeSessionConfiguration()",
             "EngineConnectionSessionDelegate(owner: self)",
             "let session = URLSession(",
             "session.webSocketTask(with: request)",
