@@ -4,9 +4,24 @@
 
 ### Prerequisites
 
-- Xcode 26+ with iOS 26 SDK
+- Xcode 26 or newer
+- Validated toolchains: Xcode 26.6 with the iOS 26.5 SDK; Xcode 27 beta with the iOS 27 SDK
 - XcodeGen (`brew install xcodegen`)
 - Tron server running locally
+
+The project keeps `iOS: "26.0"` as its deployment target and
+`xcodeVersion: "2640"` as its generated-project compatibility baseline. The same source and
+production bundle therefore support iOS 26 and iOS 27; do not raise the
+deployment target or create an iOS 27-only project. Select a locally installed
+toolchain without changing the project:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -version
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -version
+```
+
+Physical-device builds honor the same selection when `DEVELOPER_DIR` is passed
+to `scripts/tron-ios-beta`.
 
 ### Project Generation
 

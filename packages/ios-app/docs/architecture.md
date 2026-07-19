@@ -1,10 +1,16 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-17 (prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
+> Last verified: 2026-07-18 (prompt admission and Stop are single-flight, Stop waits for server terminal lifecycle truth, and live/replayed cancellation share one interruption projection; typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
 
 ## Overview
 
 **Minimum iOS**: 26.0
+
+One source tree and binary contract supports iOS 26 and iOS 27. The generated
+project keeps an iOS 26.0 deployment target and an Xcode 26 project-format
+baseline, while compiling without source forks against either the iOS 26 or
+iOS 27 SDK. SDK selection is a build-toolchain choice; runtime behavior stays
+behind Apple's availability model rather than separate app variants.
 
 The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,

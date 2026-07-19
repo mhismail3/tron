@@ -2580,6 +2580,11 @@ The events table enforces correctness with `UNIQUE(session_id, sequence)` and a 
 
 **Minimum iOS:** 26.0 | **Swift:** 6.0 | **Build system:** XcodeGen
 
+The iOS 26 deployment baseline is shared by Xcode 26 and Xcode 27 builds. A
+single source tree and binary contract runs on iOS 26 and iOS 27; choosing the
+iOS 26 or iOS 27 SDK changes the build toolchain, not the product identity or
+deployment target.
+
 ### Architecture
 
 The app uses MVVM with coordinators, event plugins, and SwiftUI's `@Observable` macro. The authoritative architecture document is `packages/ios-app/docs/architecture.md`.
