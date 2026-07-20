@@ -160,12 +160,18 @@ struct SessionInfoTests {
 
 @Suite("SessionCreateParams encoding")
 struct SessionCreateParamsEncodingTests {
-    @Test("profile encodes when supplied")
-    func profileEncodes() {
-        let params = SessionCreateParams(workingDirectory: "/tmp", profile: "local")
+    @Test("create encodes exactly the strict server-owned fields")
+    func strictCreateSchemaEncodes() {
+        let params = SessionCreateParams(
+            workingDirectory: "/tmp",
+            model: "gpt-5.4",
+            title: "Worker proof"
+        )
         let data = try! JSONEncoder().encode(params)
         let json = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
-        #expect(json["profile"] as? String == "local")
         #expect(json["workingDirectory"] as? String == "/tmp")
+        #expect(json["model"] as? String == "gpt-5.4")
+        #expect(json["title"] as? String == "Worker proof")
+        #expect(Set(json.keys) == Set(["workingDirectory", "model", "title"]))
     }
 }

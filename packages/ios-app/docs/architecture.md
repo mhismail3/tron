@@ -48,6 +48,11 @@ Client state may cache server facts, but it must not infer health, versions,
 trigger status, authority, or lifecycle transitions. Mutations complete from
 server responses and then refresh canonical state.
 
+Protocol request DTOs mirror strict server contracts exactly. Session creation
+sends only `workingDirectory`, `model`, and `title`; obsolete automation-era
+`source`/`profile` metadata and the unsupported `contextFiles` field are not
+encoded or silently ignored.
+
 The local `EventDatabase` is a reconstructable projection under the app's
 Documents `.tron/database/prod.db` path. `EventStoreManager` serializes global
 stream replacement, reconstruction, and shutdown; server switching replaces

@@ -191,8 +191,6 @@ extension EventStoreManager {
         session.isFork = info.isFork
         session.archivedAt = info.isArchived == true ? (info.lastActivity ?? info.createdAt) : nil
         session.serverOrigin = serverOrigin
-        session.source = info.source
-        session.profile = info.profile
         session.isProcessing = info.isRunning ?? false
         session.lastUserPrompt = info.lastUserPrompt
         session.lastAssistantResponse = info.lastAssistantResponse
@@ -235,8 +233,6 @@ extension EventStoreManager {
             ? (existing.archivedAt ?? serverInfo.lastActivity ?? serverInfo.createdAt)
             : nil
         session.serverOrigin = serverOrigin
-        session.source = serverInfo.source ?? existing.source
-        session.profile = serverInfo.profile ?? existing.profile
         session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
         session.lastUserPrompt = serverInfo.lastUserPrompt ?? existing.lastUserPrompt
         session.lastAssistantResponse = serverInfo.lastAssistantResponse ?? existing.lastAssistantResponse

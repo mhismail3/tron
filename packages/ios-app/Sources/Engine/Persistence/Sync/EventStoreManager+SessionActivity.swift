@@ -232,7 +232,7 @@ extension EventStoreManager {
 
     private func handleSessionCreated(_ result: SessionCreatedPlugin.Result) async {
         guard !sessions.contains(where: { $0.id == result.sessionId }) else { return }
-        var session = CachedSession(
+        let session = CachedSession(
             id: result.sessionId,
             workspaceId: result.workingDirectory ?? "",
             rootEventId: nil,
@@ -255,8 +255,6 @@ extension EventStoreManager {
             isFork: result.parentSessionId != nil,
             serverOrigin: engineClient.serverOrigin
         )
-        session.source = result.source
-        session.profile = result.profile
         insertSessionLocally(session, at: 0)
         do {
             try await eventDB.sessions.insert(session)

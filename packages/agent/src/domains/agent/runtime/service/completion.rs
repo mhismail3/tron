@@ -9,19 +9,10 @@ use super::{
     PromptEngineCausality, PromptRunCleanup, load_session_update_event,
     publish_prompt_runtime_stream,
 };
-use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
-};
 use crate::shared::protocol::events::{BaseEvent, TronEvent, error_event};
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_RUN_ERROR,
 };
-
-#[derive(Debug, PartialEq)]
-struct AgentResultMessage {
-    text: String,
-    event_ref: Option<String>,
-}
 
 pub(super) struct PromptRunCompletion<'a> {
     pub(super) result: crate::domains::agent::r#loop::types::RunResult,
@@ -64,8 +55,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         has_error = result.error.is_some(),
         "agent prompt run finalizing"
     );
-    let agent_result_message =
-        resolve_agent_result_message(&event_store, &session_id, result.error.as_deref());
     // INVARIANT: the active-run slot owns every event that consumes its shared
     // sequence counter. Publish the final session metadata first. Terminal
     // error/idle/ready events and matching run release then share one registry
@@ -90,17 +79,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         );
     });
 
-    let agent_result_refs = create_agent_result_resource(
-        &engine_host,
-        engine_causality.as_ref(),
-        &session_id,
-        &run_id,
-        &result,
-        &agent_result_message,
-    )
-    .await;
-    let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
-
     info!(
         component = "agent.runtime",
         agent_event = "prompt_run_completed",
@@ -110,7 +88,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         turns = result.turns_executed,
         interrupted = result.interrupted,
         has_error = result.error.is_some(),
-        agent_result_ref_count,
         "prompt run completed"
     );
     publish_prompt_runtime_stream(
@@ -124,7 +101,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             "interrupted": result.interrupted,
             "stopReason": format!("{:?}", result.stop_reason),
             "error": result.error,
-            "resourceRefs": agent_result_refs.unwrap_or_default(),
         }),
     )
     .await;
@@ -170,145 +146,6 @@ fn emit_maybe_sequenced(
         let _ = broadcast.emit_sequenced(event, counter);
     } else {
         let _ = broadcast.emit(event);
-    }
-}
-
-async fn create_agent_result_resource(
-    engine_host: &crate::engine::EngineHostHandle,
-    causality: Option<&PromptEngineCausality>,
-    session_id: &str,
-    run_id: &str,
-    result: &crate::domains::agent::r#loop::types::RunResult,
-    message: &AgentResultMessage,
-) -> Option<Vec<serde_json::Value>> {
-    let mut context = causality
-        .map(|causality| causality.context.clone())
-        .unwrap_or_else(|| {
-            CausalContext::new(
-                ActorId::new("system:agent").expect("valid actor id"),
-                ActorKind::System,
-                AuthorityGrantId::new("engine-system").expect("valid grant"),
-                TraceId::generate(),
-            )
-        });
-    context.actor_id = ActorId::new("system:agent").expect("valid actor id");
-    context.actor_kind = ActorKind::System;
-    context.authority_grant_id = AuthorityGrantId::new("engine-system").expect("valid grant");
-    if context.session_id.is_none() {
-        context = context.with_session_id(session_id.to_owned());
-    }
-    if let Some(causality) = causality {
-        context = context.with_parent_invocation(causality.invocation_id.clone());
-    }
-    context = context
-        .with_scope("resource.write")
-        .with_idempotency_key(format!("agent-result:{run_id}"));
-    let payload = serde_json::json!({
-        "kind": "agent_result",
-        "scope": "session",
-        "sessionId": session_id,
-        "payload": {
-            "message": message.text,
-            "promotedRefs": [],
-            "decisionRefs": [],
-            "subgoalRefs": [],
-            "stopReason": format!("{:?}", result.stop_reason),
-            "tokenUsage": &result.total_token_usage,
-            "metadata": {
-                "runId": run_id,
-                "messageEventRef": message.event_ref,
-                "turnsExecuted": result.turns_executed,
-                "interrupted": result.interrupted,
-                "lastContextWindowTokens": result.last_context_window_tokens
-            }
-        }
-    });
-    let invocation = Invocation::new_sync(
-        FunctionId::new("resource::create").expect("valid function id"),
-        payload,
-        context,
-    );
-    let result = engine_host.invoke(invocation).await;
-    if let Some(error) = result.error {
-        warn!(?error, run_id, "failed to create agent_result resource");
-        return None;
-    }
-    let refs = result.value.and_then(|value| {
-        value
-            .get("resourceRefs")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-    });
-    info!(
-        component = "agent.runtime",
-        agent_event = "agent_result_resource_recorded",
-        session_id = %session_id,
-        run_id = %run_id,
-        resource_ref_count = refs.as_ref().map_or(0, Vec::len),
-        "agent result resource recorded"
-    );
-    refs
-}
-
-fn resolve_agent_result_message(
-    event_store: &crate::domains::session::event_store::EventStore,
-    session_id: &str,
-    run_error: Option<&str>,
-) -> AgentResultMessage {
-    match event_store.get_messages_at_head(session_id) {
-        Ok(reconstruction) => agent_result_message_from_reconstruction(&reconstruction, run_error),
-        Err(error) => {
-            warn!(
-                session_id,
-                ?error,
-                "failed to reconstruct final assistant message for agent_result"
-            );
-            AgentResultMessage {
-                text: run_error.unwrap_or_default().to_owned(),
-                event_ref: None,
-            }
-        }
-    }
-}
-
-fn agent_result_message_from_reconstruction(
-    reconstruction: &crate::domains::session::event_store::reconstruction::ReconstructionResult,
-    run_error: Option<&str>,
-) -> AgentResultMessage {
-    let assistant = reconstruction
-        .messages_with_event_ids
-        .iter()
-        .rev()
-        .find(|entry| entry.message.role == "assistant");
-    let text = assistant
-        .map(|entry| assistant_content_text(&entry.message.content))
-        .filter(|text| !text.is_empty());
-
-    AgentResultMessage {
-        text: text.unwrap_or_else(|| run_error.unwrap_or_default().to_owned()),
-        event_ref: assistant.and_then(|entry| {
-            entry
-                .event_ids
-                .iter()
-                .rev()
-                .find_map(|event_id| event_id.clone())
-        }),
-    }
-}
-
-fn assistant_content_text(content: &serde_json::Value) -> String {
-    match content {
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Array(blocks) => blocks
-            .iter()
-            .filter_map(|block| {
-                (block.get("type").and_then(serde_json::Value::as_str) == Some("text"))
-                    .then(|| block.get("text").and_then(serde_json::Value::as_str))
-                    .flatten()
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
     }
 }
 
@@ -361,81 +198,17 @@ async fn emit_session_update(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
-    use crate::domains::session::event_store::reconstruction::ReconstructionResult;
-    use crate::domains::session::event_store::types::payloads::TokenTotals;
-    use crate::domains::session::event_store::types::state::{Message, MessageWithEventId};
-
-    fn reconstruction(messages_with_event_ids: Vec<MessageWithEventId>) -> ReconstructionResult {
-        ReconstructionResult {
-            messages_with_event_ids,
-            token_usage: TokenTotals::default(),
-            turn_count: 1,
-            reasoning_level: None,
-            system_prompt: None,
-        }
-    }
 
     #[test]
-    fn agent_result_uses_latest_assistant_text_and_event_ref() {
-        let state = reconstruction(vec![
-            MessageWithEventId {
-                message: Message {
-                    role: "user".into(),
-                    content: json!("question"),
-                    invocation_id: None,
-                    is_error: None,
-                },
-                event_ids: vec![Some("evt-user".into())],
-            },
-            MessageWithEventId {
-                message: Message {
-                    role: "assistant".into(),
-                    content: json!([
-                        {"type": "thinking", "thinking": "private"},
-                        {"type": "text", "text": "first"},
-                        {"type": "text", "text": "second"}
-                    ]),
-                    invocation_id: None,
-                    is_error: None,
-                },
-                event_ids: vec![
-                    Some("evt-assistant-1".into()),
-                    Some("evt-assistant-2".into()),
-                ],
-            },
-        ]);
-
-        assert_eq!(
-            agent_result_message_from_reconstruction(&state, Some("run failed")),
-            AgentResultMessage {
-                text: "first\nsecond".into(),
-                event_ref: Some("evt-assistant-2".into()),
-            }
-        );
-    }
-
-    #[test]
-    fn agent_result_uses_run_error_when_no_assistant_text_exists() {
-        let state = reconstruction(vec![MessageWithEventId {
-            message: Message {
-                role: "assistant".into(),
-                content: json!([{"type": "capability_invocation", "id": "call"}]),
-                invocation_id: None,
-                is_error: None,
-            },
-            event_ids: vec![Some("evt-call".into())],
-        }]);
-
-        assert_eq!(
-            agent_result_message_from_reconstruction(&state, Some("run failed")),
-            AgentResultMessage {
-                text: "run failed".into(),
-                event_ref: Some("evt-call".into()),
-            }
-        );
+    fn completion_does_not_recreate_superseded_result_resources() {
+        let source = include_str!("completion.rs");
+        let create_operation = ["resource", "::", "create"].concat();
+        let obsolete_kind = ["agent", "_", "result"].concat();
+        let obsolete_refs = ["resource", "Refs"].concat();
+        assert!(!source.contains(&create_operation));
+        assert!(!source.contains(&obsolete_kind));
+        assert!(!source.contains(&obsolete_refs));
     }
 
     #[tokio::test]

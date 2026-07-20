@@ -63,6 +63,26 @@ fn execution_context<'a>(
     }
 }
 
+#[test]
+fn transient_capability_result_copy_is_redacted_without_mutating_provider_result() {
+    let token = "trwh_0123456789abcdef0123456789abcdef";
+    let result = CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![
+            CapabilityResultContent::text(format!("credential: {token}")),
+            CapabilityResultContent::image("image-data", "image/png"),
+        ]),
+        details: Some(json!({"token": token, "status": "active"})),
+        is_error: None,
+        stop_turn: None,
+    };
+
+    let redacted = redacted_capability_result(&result);
+
+    assert!(!serde_json::to_string(&redacted).unwrap().contains(token));
+    assert_eq!(redacted.details.as_ref().unwrap()["token"], "****");
+    assert!(serde_json::to_string(&result).unwrap().contains(token));
+}
+
 #[tokio::test]
 async fn unknown_direct_tool_fails_before_engine_execution() {
     let host = EngineHostHandle::new_in_memory().unwrap();

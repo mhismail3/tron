@@ -16,7 +16,9 @@
 //! start before the phase error propagates to the turn's canonical failure.
 //! Executed and skipped completion payloads are collected in provider-request
 //! order and commit as one terminal batch; no completion is broadcast when any
-//! row in that batch fails.
+//! row in that batch fails. A direct operation may return a one-time credential
+//! to the active model turn, but capability arguments, result content, and
+//! details are redacted before any durable row or lifecycle broadcast is built.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +34,7 @@ use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::session::event_store::EventType;
+use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
@@ -182,7 +185,7 @@ pub(super) async fn execute_capability_invocation_phase(
         ) {
             payload.extend(identity);
         }
-        started_payloads.push(payload);
+        started_payloads.push(redact_sensitive_json(&payload));
     }
 
     if let Some(persister) = params.persister {
@@ -485,6 +488,8 @@ fn executed_completion_payload(
     parent_invocation_id: Option<&crate::engine::InvocationId>,
 ) -> Value {
     let result_text = extract_result_text(result);
+    let durable_result_text = redact_sensitive_content(&result_text);
+    let durable_provider_text = redact_sensitive_content(provider_text);
     let is_error = result.result.is_error.unwrap_or(false);
     let base_identity = primitive_identity_json(
         &invocation.name,
@@ -495,20 +500,20 @@ fn executed_completion_payload(
     let mut payload = json!({
         "invocationId": invocation.id,
         "name": invocation.name,
-        "content": result_text,
+        "content": durable_result_text,
         "isError": is_error,
         "duration": result.duration_ms,
-        "details": result.result.details,
+        "details": result.result.details.as_ref().map(redact_sensitive_json),
         "runId": run_id,
         "traceId": trace_id.map(|id| id.as_str()),
         "parentInvocationId": parent_invocation_id.map(|id| id.as_str()),
     });
-    if provider_text != result_text
+    if durable_provider_text != durable_result_text
         && let Some(payload) = payload.as_object_mut()
     {
         payload.insert(
             "modelContextContent".to_owned(),
-            Value::String(provider_text.to_owned()),
+            Value::String(durable_provider_text),
         );
     }
     if let (Some(payload), Some(identity)) = (

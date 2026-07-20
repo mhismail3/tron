@@ -32,8 +32,9 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "wait_for_shutdown_signal",
             "graceful_shutdown",
             "flush_task.abort",
-            "log_handle.flush",
             "checkpoint()",
+            "tracing::info!(\"Shutdown complete\")",
+            "log_handle.flush_until_empty",
         ],
     );
     assert_contains_in_order(

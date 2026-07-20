@@ -8,7 +8,7 @@ enum DatabaseSchema {
     /// Current schema version. Stored as `PRAGMA user_version` after a
     /// successful migration so subsequent app launches can short-circuit
     /// the create-table / column-add IF-NOT-EXISTS dance.
-    static let version: Int32 = 14
+    static let version: Int32 = 15
 
     // MARK: - Public API
 
@@ -101,8 +101,7 @@ enum DatabaseSchema {
                 cache_read_tokens INTEGER DEFAULT 0,
                 cache_creation_tokens INTEGER DEFAULT 0,
                 cost REAL DEFAULT 0,
-                is_processing INTEGER DEFAULT 0,
-                profile TEXT
+                is_processing INTEGER DEFAULT 0
             )
         """)
 
@@ -159,11 +158,13 @@ enum DatabaseSchema {
         // Migration: Add activity_lines_json for server-computed session list activity lines
         try addColumnIfNotExists(db: db, table: "sessions", column: "activity_lines_json", definition: "TEXT")
 
-        // Migration: Add source column for session type (e.g. "chat", "cron")
-        try addColumnIfNotExists(db: db, table: "sessions", column: "source", definition: "TEXT")
-
-        // Migration: Add execution profile column for profile-backed sessions
-        try addColumnIfNotExists(db: db, table: "sessions", column: "profile", definition: "TEXT")
+        // Primitive sessions no longer project automation source or a
+        // per-session execution profile. The server owns neither field.
+        for obsoleteColumn in ["source", "profile"] {
+            if try columnExists(table: "sessions", column: obsoleteColumn, db: db) {
+                try execute(db: db, "ALTER TABLE sessions DROP COLUMN \(obsoleteColumn)")
+            }
+        }
     }
 
     /// Migrate old sessions table schema by rebuilding the table.

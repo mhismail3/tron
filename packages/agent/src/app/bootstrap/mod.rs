@@ -209,7 +209,8 @@ fn init_logging(
     crate::shared::storage::apply_runtime_pragmas(&log_conn)
         .context("Failed to set logging connection pragmas")?;
     let log_handle =
-        crate::shared::observability::init_subscriber_with_sqlite(log_conn, stderr_enabled);
+        crate::shared::observability::init_subscriber_with_sqlite(log_conn, stderr_enabled)
+            .context("Failed to initialize SQLite log transport")?;
     let flush_task = crate::shared::observability::spawn_flush_task(log_handle.clone());
     Ok((log_handle, flush_task))
 }
@@ -516,9 +517,11 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         .graceful_shutdown(shutdown_handles, None)
         .await;
 
-    // Flush remaining logs to SQLite and stop the periodic flush task
+    // Stop periodic writes before the final checkpoint. Record its outcome and
+    // the terminal lifecycle message, then drain that complete final log batch
+    // with a bounded retry so ordinary SQLite contention cannot drop shutdown
+    // evidence.
     flush_task.abort();
-    log_handle.flush();
     match crate::shared::storage::StorageRuntime::new(db_path.clone()).checkpoint() {
         Ok(report) => tracing::debug!(
             wal_bytes = report.wal_bytes,
@@ -529,6 +532,12 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     }
 
     tracing::info!("Shutdown complete");
+    if !log_handle.flush_until_empty(std::time::Duration::from_secs(2)) {
+        eprintln!(
+            "[tron-logging] final flush deadline expired ({} entries could not be persisted)",
+            log_handle.pending_count()
+        );
+    }
     Ok(())
 }
 

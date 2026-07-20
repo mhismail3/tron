@@ -6,6 +6,7 @@ use crate::domains::session::event_store::EventType;
 use crate::domains::session::event_store::types::payloads::capability_invocation::{
     CapabilityInvocationCompletedPayload, CapabilityInvocationStartedPayload,
 };
+use crate::shared::foundation::redaction::redact_sensitive_json;
 use crate::shared::protocol::events::{
     AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
 };
@@ -635,7 +636,12 @@ pub(super) fn emit_capability_invocation_batch(
         .map(|capability_invocation| CapabilityInvocationSummary {
             id: capability_invocation.id.clone(),
             name: capability_invocation.name.clone(),
-            arguments: capability_invocation.arguments.clone(),
+            arguments: redact_sensitive_json(&Value::Object(
+                capability_invocation.arguments.clone(),
+            ))
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
         })
         .collect();
 

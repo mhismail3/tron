@@ -284,8 +284,6 @@ final class SessionListPageLoaderTests: XCTestCase {
             title: "Session \(index)",
             lastUserPrompt: nil,
             lastAssistantResponse: nil,
-            source: nil,
-            profile: nil,
             isRunning: false,
             activityLines: nil
         )

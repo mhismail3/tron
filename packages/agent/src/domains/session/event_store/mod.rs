@@ -61,7 +61,9 @@
 //! - Log query filters are applied in the storage owner so diagnostics callers
 //!   cannot silently broaden session/workspace/trace scope.
 //! - Durable event payloads and client logs call the shared foundation
-//!   redaction policy directly; the session domain does not shadow that owner.
+//!   redaction policy directly. JSON redaction retains field context so opaque
+//!   values under exact credential keys are masked before storage; the session
+//!   domain does not shadow that owner.
 //! - Session roots, forks, and generic appends are created only through
 //!   `EventStore`; no parallel factory or manual chain-head owner exists.
 //! - Replay/import paths use explicit identities instead of ambient time or

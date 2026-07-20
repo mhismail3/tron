@@ -10,6 +10,7 @@ use crate::domains::session::event_store::sqlite::connection::{self, ConnectionC
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::{AppendOptions, EventStore};
 use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use crate::shared::protocol::messages::{Provider, TokenUsage};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -224,6 +225,48 @@ fn stream_result_stub() -> StreamResult {
         partial_content: None,
         ttft_ms: None,
     }
+}
+
+#[tokio::test]
+async fn capability_batch_redacts_arguments_before_live_broadcast() {
+    let mut h = harness();
+    let token = "trwh_0123456789abcdef0123456789abcdef";
+    let invocation = CapabilityInvocationDraft::new(
+        "call-secret",
+        "worker_webhook_rotate",
+        serde_json::Map::from_iter([
+            ("token".to_owned(), json!(token)),
+            ("workerId".to_owned(), json!("recent-research")),
+        ]),
+    );
+
+    emit_capability_invocation_batch(
+        &h.emitter,
+        &h.session_id,
+        &[invocation],
+        Some(&h.counter),
+        None,
+        None,
+    );
+
+    let event = h.rx.recv().await.expect("capability batch broadcast");
+    let TronEvent::CapabilityInvocationBatch {
+        capability_invocations,
+        ..
+    } = event
+    else {
+        panic!("expected capability invocation batch");
+    };
+    assert_eq!(capability_invocations[0].arguments["token"], "****");
+    assert_eq!(
+        capability_invocations[0].arguments["workerId"],
+        "recent-research"
+    );
+    assert!(
+        !serde_json::to_string(&capability_invocations)
+            .unwrap()
+            .contains(token)
+    );
 }
 
 #[tokio::test]

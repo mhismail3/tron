@@ -11,7 +11,9 @@
 //! session event persister is available, the executor only returns the
 //! primitive result; the turn runner persists and broadcasts row-backed
 //! `capability.invocation.started` / `completed` events so live clients and
-//! reconstruction share the same sequence source.
+//! reconstruction share the same sequence source. Transient lifecycle events
+//! use redacted argument and result copies; the raw operation result is kept
+//! only in memory for the active provider turn.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -31,9 +33,13 @@ use crate::engine::{
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
 };
+use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
+use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity, TronEvent};
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
-use crate::shared::protocol::model_capabilities::{CapabilityResult, failure_result};
+use crate::shared::protocol::model_capabilities::{
+    CapabilityResult, CapabilityResultBody, failure_result,
+};
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
     CAPABILITY_ENGINE_RESULT_MISSING, CAPABILITY_PRIMITIVE_NOT_FOUND, ENGINE_POLICY_VIOLATION,
@@ -136,6 +142,33 @@ fn capability_identity_from_result(
             .cloned()
             .or_else(|| base_identity.presentation_hints.clone()),
         ..base_identity.clone()
+    }
+}
+
+fn redacted_capability_result(result: &CapabilityResult) -> CapabilityResult {
+    let content = match &result.content {
+        CapabilityResultBody::Text(text) => {
+            CapabilityResultBody::Text(redact_sensitive_content(text))
+        }
+        CapabilityResultBody::Blocks(blocks) => CapabilityResultBody::Blocks(
+            blocks
+                .iter()
+                .map(|block| match block {
+                    CapabilityResultContent::Text { text } => {
+                        CapabilityResultContent::text(redact_sensitive_content(text))
+                    }
+                    CapabilityResultContent::Image { data, mime_type } => {
+                        CapabilityResultContent::image(data.clone(), mime_type.clone())
+                    }
+                })
+                .collect(),
+        ),
+    };
+    CapabilityResult {
+        content,
+        details: result.details.as_ref().map(redact_sensitive_json),
+        is_error: result.is_error,
+        stop_turn: result.stop_turn,
     }
 }
 
@@ -267,11 +300,12 @@ pub async fn execute_capability_invocation(
     );
 
     if ctx.emit_lifecycle_events {
+        let redacted_arguments = redact_sensitive_json(&effective_args).as_object().cloned();
         let started = TronEvent::CapabilityInvocationStarted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             invocation_id: invocation_id.clone(),
             model_primitive_name: model_primitive_name.clone(),
-            arguments: effective_args.as_object().cloned(),
+            arguments: redacted_arguments,
             capability_identity: primitive_identity.clone(),
         };
         emit(ctx, started);
@@ -339,13 +373,14 @@ pub async fn execute_capability_invocation(
         .record(start.elapsed().as_secs_f64());
 
     if ctx.emit_lifecycle_events {
+        let event_result = redacted_capability_result(&capability_result);
         let completed = TronEvent::CapabilityInvocationCompleted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             invocation_id: invocation_id.clone(),
             model_primitive_name: model_primitive_name.clone(),
             duration: duration_ms,
             is_error: capability_result.is_error,
-            result: Some(capability_result.clone()),
+            result: Some(event_result),
             capability_identity: resolved_identity,
         };
         emit(ctx, completed);

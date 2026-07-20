@@ -16,7 +16,12 @@
 //! pass through the shared sensitive-content redactor. Call sites should still
 //! log durable IDs, counts, statuses, and hashes instead of prompt/output/file
 //! content; transport redaction is the boundary backstop, not a reason to log
-//! raw content.
+//! raw content. The dedicated logging connection uses a short busy timeout;
+//! atomic batches remain queued in memory and retry after ordinary SQLite
+//! writer contention instead of blocking the engine or dropping evidence.
+//! Shutdown stops the periodic task only after runtime services drain, records
+//! checkpoint/terminal lifecycle evidence, and then gives the final batch a
+//! bounded two-second retry window.
 //! Persisted database diagnostics use a managed `info` level and managed
 //! dependency filters. Optional terminal output may honor `RUST_LOG`, but
 //! neither ambient environment nor settings updates can alter persisted
@@ -103,7 +108,7 @@ mod policy_tests {
 pub(crate) fn init_subscriber_with_sqlite(
     conn: rusqlite::Connection,
     enable_fmt: bool,
-) -> TransportHandle {
+) -> rusqlite::Result<TransportHandle> {
     use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -123,7 +128,7 @@ pub(crate) fn init_subscriber_with_sqlite(
         min_level: LogLevel::from_str_lossy(DEFAULT_DATABASE_LOG_LEVEL).as_num(),
         ..Default::default()
     };
-    let transport = SqliteTransport::new(conn, config);
+    let transport = SqliteTransport::new(conn, config)?;
     let handle = transport.handle();
 
     let _ = tracing_subscriber::registry()
@@ -131,7 +136,7 @@ pub(crate) fn init_subscriber_with_sqlite(
         .with(transport.with_filter(database_filter))
         .try_init();
 
-    handle
+    Ok(handle)
 }
 
 /// Spawn a periodic flush task for the log transport.
@@ -145,7 +150,7 @@ pub(crate) fn spawn_flush_task(handle: TransportHandle) -> tokio::task::JoinHand
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(interval_ms));
         loop {
             let _ = interval.tick().await;
-            handle.flush();
+            let _ = handle.flush();
         }
     })
 }

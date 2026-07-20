@@ -412,6 +412,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {
+        let record = record.redacted_for_storage();
         self.conn
             .execute(
                 "INSERT INTO engine_invocations
@@ -655,6 +656,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
         invocation_id: &InvocationId,
         outcome: StoredInvocationOutcome,
     ) -> Result<()> {
+        let outcome = outcome.redacted_for_storage();
         let updated = self
             .conn
             .execute(

@@ -24,15 +24,19 @@ final class DatabaseSchemaTests: XCTestCase {
 
     // MARK: - Session columns
 
-    /// Fresh install: sessions table must not contain the dead is_chat column.
-    /// The column was always written as 0 and never read — removed in schema v11.
-    func testSessionsSchemaHasNoIsChatColumn() async throws {
+    /// Fresh installs contain only server-owned session truth. Local remnants
+    /// from automation and execution-profile machinery stay removed.
+    func testSessionsSchemaHasNoObsoleteProductMetadataColumns() async throws {
         let actor = DatabaseActor(dbPath: dbPath)
         try await actor.open()
 
         let columns = try await sessionsColumns(actor: actor)
         XCTAssertFalse(columns.contains("is_chat"),
                        "is_chat column should be absent from fresh sessions table schema, got: \(columns)")
+        XCTAssertFalse(columns.contains("source"),
+                       "source column should be absent from fresh sessions table schema, got: \(columns)")
+        XCTAssertFalse(columns.contains("profile"),
+                       "profile column should be absent from fresh sessions table schema, got: \(columns)")
         await actor.close()
     }
 
@@ -90,9 +94,9 @@ final class DatabaseSchemaTests: XCTestCase {
         await actor.close()
     }
 
-    /// Existing install: schema v11 predates the session profile column, so
-    /// opening it must run the v12 migration before repositories read sessions.
-    func testExistingInstallAddsProfileColumnOnVersionBump() async throws {
+    /// Existing worker-POC installs may still contain metadata from removed
+    /// automation/profile planes. Schema v15 drops it instead of projecting it.
+    func testExistingInstallDropsObsoleteProductMetadataOnVersionBump() async throws {
         var db: OpaquePointer?
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
             XCTFail("sqlite3_open failed")
@@ -121,19 +125,22 @@ final class DatabaseSchemaTests: XCTestCase {
                 is_fork INTEGER DEFAULT 0,
                 server_origin TEXT,
                 activity_lines_json TEXT,
-                source TEXT
+                source TEXT,
+                profile TEXT
             )
         """
         XCTAssertEqual(sqlite3_exec(db, createSQL, nil, nil, nil), SQLITE_OK)
-        XCTAssertEqual(sqlite3_exec(db, "PRAGMA user_version = 11", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "PRAGMA user_version = 14", nil, nil, nil), SQLITE_OK)
         sqlite3_close(db)
 
         let actor = DatabaseActor(dbPath: dbPath)
         try await actor.open()
 
         let columns = try await sessionsColumns(actor: actor)
-        XCTAssertTrue(columns.contains("profile"),
-                      "profile should be added by v12 migration, got columns: \(columns)")
+        XCTAssertFalse(columns.contains("source"),
+                       "source should be dropped by v15 migration, got columns: \(columns)")
+        XCTAssertFalse(columns.contains("profile"),
+                       "profile should be dropped by v15 migration, got columns: \(columns)")
         await actor.close()
     }
 
@@ -278,8 +285,8 @@ final class DatabaseSchemaTests: XCTestCase {
         XCTAssertTrue(columns.contains("cache_read_tokens"), "cache_read_tokens should be present, got: \(columns)")
         XCTAssertTrue(columns.contains("cache_creation_tokens"), "cache_creation_tokens should be present, got: \(columns)")
         XCTAssertTrue(columns.contains("activity_lines_json"), "activity_lines_json should be present, got: \(columns)")
-        XCTAssertTrue(columns.contains("source"), "source should be present, got: \(columns)")
-        XCTAssertTrue(columns.contains("profile"), "profile should be present, got: \(columns)")
+        XCTAssertFalse(columns.contains("source"), "source should be removed, got: \(columns)")
+        XCTAssertFalse(columns.contains("profile"), "profile should be removed, got: \(columns)")
         await actor.close()
     }
 

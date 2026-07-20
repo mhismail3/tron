@@ -3,6 +3,12 @@
 //! This domain is the executable self-extension path. A complete bundle is
 //! staged, dependency-locked, smoke-tested, atomically versioned, activated,
 //! and projected as a direct typed model tool by one `worker_upsert` call.
+//! Callers may omit a dependency's expected checksum; acquisition computes and
+//! seals it into the staged manifest and lock before the version is hashed.
+//! A model may pass a bounded staged `sourceDirectory`; the handler imports its
+//! UTF-8 tree directly into the candidate so source does not need to make a
+//! wasteful model-output round trip. Inline bundle files override imported
+//! paths, and symlinks or special files fail before candidate preparation.
 //! Filesystem bundles are canonical; the dedicated SQLite database is a
 //! rebuildable route/trigger indexes plus durable attempt, causal-trace,
 //! invocation, inbox, health, and audit ledgers.
@@ -49,6 +55,29 @@
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
 //! remain eligible for one-time attachment to the next relevant session.
+//! The unrestricted trusted-local text search still has reliability ceilings:
+//! it runs off the async executor, defaults to five seconds and 20,000 walked
+//! entries, skips hidden/heavy child trees unless requested, and reports every
+//! truncation cause. An agent abort or server shutdown therefore cannot be held
+//! indefinitely by a home-directory search.
+//! A command that intentionally ignores typed stdin may close its pipe before
+//! the parent finishes writing; that broken pipe is tolerated only after a
+//! successful child exit, while other input errors and failed exits remain
+//! worker failures.
+//! Command, smoke-test, and health-check working directories are always the
+//! bundle's `files/` directory. A dependency named `N` is acquired beneath
+//! `../dependencies/N`; its optional install command runs within that directory
+//! before validation commands, making the authoring layout deterministic.
+//! Direct-operation lifecycle events retain shape and reliability evidence but
+//! redact credential fields and recognizable secret values before persistence
+//! or broadcast. One-time webhook credentials exist raw only in the active
+//! provider turn that requested them.
+//! A webhook request body is the worker's ordinary typed input. Object-valued
+//! trigger configuration supplies defaults, request keys override defaults,
+//! and no engine-specific wrapper field is injected.
+//! Unseen inbox attachment is invoked by the engine's internal runtime identity
+//! with session/trace provenance. It therefore crosses internal visibility as
+//! an engine projection and never requires or fabricates an agent grant.
 
 use std::sync::Arc;
 

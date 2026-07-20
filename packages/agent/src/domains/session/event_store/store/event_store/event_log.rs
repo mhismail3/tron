@@ -15,7 +15,7 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::TokenTotals;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::domains::session::event_store::{EventRow, SessionRow};
-use crate::shared::foundation::redaction::redact_sensitive_content;
+use crate::shared::foundation::redaction::redact_sensitive_json;
 
 use super::{AppendBatchItem, AppendOptions, EventStore};
 
@@ -86,7 +86,7 @@ pub(super) fn append_event_in_tx_with_identity(
         }
     };
 
-    let payload = redact_json_strings(&opts.payload);
+    let payload = redact_sensitive_json(&opts.payload);
 
     let event = SessionEvent {
         id: identity.id,
@@ -142,20 +142,6 @@ pub(super) fn append_event_in_tx_with_identity(
 
     let _ = SessionRepo::increment_counters(tx, opts.session_id, &counters)?;
     Ok(event)
-}
-
-/// Recursively redact sensitive strings in a JSON value.
-fn redact_json_strings(value: &Value) -> Value {
-    match value {
-        Value::String(s) => Value::String(redact_sensitive_content(s)),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(k, v)| (k.clone(), redact_json_strings(v)))
-                .collect(),
-        ),
-        Value::Array(arr) => Value::Array(arr.iter().map(redact_json_strings).collect()),
-        other => other.clone(),
-    }
 }
 
 impl EventStore {

@@ -91,7 +91,7 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {
-        self.invocations.push(record.clone());
+        self.invocations.push(record.redacted_for_storage());
         Ok(())
     }
 
@@ -166,7 +166,7 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             .ok_or_else(|| ledger_failure("complete_idempotency", "reservation not found"))?;
         entry.status = IdempotencyStatus::Completed;
         entry.latest_invocation_id = invocation_id.clone();
-        entry.outcome = Some(outcome);
+        entry.outcome = Some(outcome.redacted_for_storage());
         entry.updated_at = Utc::now();
         Ok(())
     }

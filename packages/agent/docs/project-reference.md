@@ -119,24 +119,32 @@ rotation.
 
 ## Atomic `worker_upsert`
 
-One request carries the complete candidate bundle and an optional predecessor.
-The runtime:
+One request carries the complete candidate bundle, an optional predecessor, and
+an optional local `sourceDirectory`. A staged source directory is recursively
+imported as UTF-8 bundle files under reliability ceilings of 1,024 files and 16
+MiB; explicit inline files win. Symlinks and special files are rejected. This
+keeps activation atomic without requiring the model to read source back and
+reproduce it as JSON. The runtime:
 
-1. validates identity, schemas, runner configuration, relative paths, trigger
+1. normalizes a plain direct tool name into the `worker_` namespace, then
+   validates identity, schemas, runner configuration, relative paths, trigger
    definitions and deterministic schedule inputs, secret names, provenance,
-   and dependency locks;
+   and any caller-supplied dependency checksums;
 2. chooses the explicit predecessor or detects the closest semantic overlap by
    name/description terms, preferring an update over a duplicate;
 3. stages outside the active worker directory;
-4. fetches dependencies into worker-owned directories and verifies exact tree
-   checksums;
-5. runs dependency installation, smoke tests, and health checks with the worker
-   dependency environment, never the Tron installation environment;
+4. fetches each exact dependency version to `dependencies/<name>`, verifies a
+   supplied checksum or calculates an omitted one, and rewrites the staged
+   manifest and dependency lock with the actual digest;
+5. runs each optional install command inside that dependency's directory, then
+   runs smoke tests and health checks from `files/` with the worker dependency
+   environment, never the Tron installation environment;
 6. writes redacted verification evidence and seals the staged tree with its
    content hash;
 7. publishes the immutable version, updates `worker.json` and indexes,
    registers triggers, and installs the direct typed tool;
-8. emits lifecycle evidence and returns one-time webhook credentials.
+8. emits redacted lifecycle evidence and returns one-time webhook credentials
+   only through the active operation result.
 
 Any failure before publication abandons staging and leaves the prior active
 version untouched. Existing invocations retain their pinned version while new
@@ -161,7 +169,11 @@ A command worker starts an executable with the version's `files/` directory as
 its working directory. JSON input is written to stdin. JSON stdout becomes the
 typed result; non-JSON stdout is wrapped as bounded text. Commands inherit the
 Tron user's normal host permissions. There is no application filesystem or
-process sandbox.
+process sandbox. A successful command may intentionally ignore its input; Tron
+does not turn the resulting closed stdin pipe into a false worker failure, but
+all other write errors and non-success child exits remain failures. From this
+working directory, a declared dependency named `N` is available at
+`../dependencies/N`.
 
 ### Resident-service runner
 
@@ -177,9 +189,11 @@ off, or Tron shuts down.
 ## Dependency and Secret Isolation
 
 Dependencies support `file://`, `git+https://`, and bounded HTTP(S) sources.
-Every dependency requires an exact revision string and `sha256:<hex>` tree
-checksum. Optional install commands run with worker-local Python, npm, Cargo,
-Ruby, and PATH roots under `dependency-runtime/`.
+Every dependency requires an exact revision string. A caller may supply an
+expected `sha256:<hex>` tree checksum or omit it so acquisition computes and
+seals the actual digest. Optional install commands run from the acquired
+dependency directory with worker-local Python, npm, Cargo, Ruby, and PATH roots
+under `dependency-runtime/`.
 
 Secret bindings resolve logical names from:
 
@@ -206,6 +220,10 @@ All invocation sources enter the same durable queue:
 - `POST /engine/workers/webhooks/<worker-id>/<trigger-id>` from loopback with
   `X-Tron-Worker-Token` or `Authorization: Bearer` and optional
   `X-Tron-Idempotency-Key`.
+
+For a webhook, a JSON object body is the worker's direct typed input.
+Object-valued trigger input supplies defaults and body fields override them;
+Tron does not inject a framework-specific wrapper key.
 
 Delivery is at least once. Tron persists `queued` before execution and records a
 numbered attempt whenever a dispatcher claims it. On restart, the unfinished
@@ -271,8 +289,13 @@ Operator controls are:
 When autonomy is enabled, fixed kernel operations are direct typed tools. There
 is no wrapper operation field. `worker_upsert` publishes the complete bundle
 schema—including every runner, trigger, dependency lock, named-secret binding,
-test, health check, provenance record, and routing field—to the model; authoring
-does not depend on hidden documentation.
+test, health check, provenance record, and routing field—to the model. Its tool
+description includes command-runner I/O and automatic checksum locking, and
+states the deterministic `files/` and `../dependencies/<name>` layout. The
+optional `sourceDirectory` transport imports an already-authored local tree;
+provider guidance tells the model not to read those files back just to echo them
+through tool JSON and explicitly forbids searching the source tree or user home
+for private authoring examples.
 
 ### Host primitives
 
@@ -280,7 +303,7 @@ does not depend on hidden documentation.
 |---|---|---|
 | `filesystem_read` | `worker_kernel::filesystem_read` | Bounded UTF-8 read |
 | `filesystem_list` | `worker_kernel::filesystem_list` | Directory listing |
-| `filesystem_search_text` | `worker_kernel::filesystem_search_text` | Recursive literal search |
+| `filesystem_search_text` | `worker_kernel::filesystem_search_text` | Recursive literal search with time, walk, result, hidden-tree, and heavy-directory controls |
 | `filesystem_write` | `worker_kernel::filesystem_write` | Complete local text write |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
 | `web_fetch` | `worker_kernel::web_fetch` | Explicit bounded HTTP(S) fetch with provenance |
@@ -327,6 +350,11 @@ grants, or agent-kind rejections. Executable workers can change local files and
 make consequential external requests without fresh confirmation. This is the
 intentional POC threat model.
 
+Attaching unseen worker inbox results is an engine-owned session projection,
+not an agent action. It runs under the internal runtime identity while retaining
+the session and parent trace as provenance, so background-result delivery cannot
+silently depend on an agent grant or fail internal visibility checks.
+
 The remaining boundaries are practical:
 
 - bearer authentication protects remote `/engine` clients;
@@ -350,7 +378,15 @@ Provider credentials live in `~/.tron/profiles/auth.json`. Worker secrets live
 under `~/.tron/workspace/vault/` and enter a worker only through declared
 logical bindings. Bundle validation rejects likely secret material; runtime
 injection uses environment variables, and redaction covers persisted inputs,
-outputs, events, logs, and diagnostics.
+outputs, events, logs, and diagnostics. Redaction is field-aware for JSON and
+also recognizes worker webhook credential shapes. Capability start, batch, and
+completion broadcasts use the same redacted copies as durable rows. A one-time
+credential remains raw only in the current caller/provider result needed to
+hand it off; reconstruction receives the redacted result. The generic engine
+invocation ledger independently reapplies the same boundary before writing
+results or errors to either its in-memory idempotency cache or SQLite. A live
+caller can therefore receive a one-time credential, while replay and audit
+records cannot recover it.
 
 ## Core Source Proposals
 
@@ -471,6 +507,14 @@ invoke contract admits client identity and idempotency metadata but rejects
 injected internal authority/runtime fields. Bearer rotation continues to force
 client re-pairing.
 
+Session events are the only durable owner of assistant output. Prompt completion
+emits lifecycle and runtime-stream status without recreating a parallel
+`agent_result` resource. Structured diagnostic logs use short SQLite write
+waits; an atomically failed batch remains queued for the periodic retry rather
+than blocking an agent turn or being dropped during ordinary writer contention.
+Shutdown records checkpoint and terminal lifecycle evidence before a bounded
+final drain of that retained batch.
+
 Worker live topics are:
 
 - `worker.lifecycle` — activation, enablement, disablement, rollback,
@@ -568,9 +612,10 @@ TRON_WORKER_LIVE_NETWORK=1 \
   last30days_upstream_live_network_dependency_is_locked_and_activates -- --ignored
 ```
 
-It resolves the upstream HEAD revision, independently calculates the exact
-tree checksum, lets `worker_upsert` clone and verify it again, smoke-tests the
-locked dependency, activates the worker, and invokes it.
+It resolves the upstream HEAD revision, omits the checksum from the candidate,
+proves that `worker_upsert` cloned the exact revision and sealed its actual tree
+digest into canonical state, smoke-tests the locked dependency, activates the
+worker, and invokes it.
 
 ## Empirical POC Gate
 

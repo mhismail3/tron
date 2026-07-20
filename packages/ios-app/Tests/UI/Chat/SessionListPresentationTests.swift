@@ -335,8 +335,7 @@ final class SessionListPresentationTests: XCTestCase {
             cost: 0,
             lastUserPrompt: lastUserPrompt,
             isProcessing: isProcessing,
-            isFork: isFork,
-            source: title == "Chat" ? "chat" : nil
+            isFork: isFork
         )
     }
 

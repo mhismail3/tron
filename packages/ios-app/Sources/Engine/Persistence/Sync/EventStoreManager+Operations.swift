@@ -9,9 +9,7 @@ extension EventStoreManager {
         sessionId: String,
         workspaceId: String,
         model: String,
-        workingDirectory: String,
-        source: String? = nil,
-        profile: String? = nil
+        workingDirectory: String
     ) async throws {
         let now = DateParser.now
 
@@ -23,8 +21,6 @@ extension EventStoreManager {
             workspaceId: workspaceId,
             model: model,
             workingDirectory: workingDirectory,
-            source: source,
-            profile: profile,
             now: now,
             serverOrigin: serverOrigin
         )
@@ -315,17 +311,15 @@ extension EventStoreManager {
         workspaceId: String,
         model: String,
         workingDirectory: String,
-        source: String?,
-        profile: String?,
         now: String,
         serverOrigin: String
     ) -> CachedSession {
-        var session = CachedSession(
+        let session = CachedSession(
             id: sessionId,
             workspaceId: workspaceId,
             rootEventId: nil,
             headEventId: nil,
-            title: source == "chat" ? "Chat" : nil,
+            title: nil,
             latestModel: model,
             workingDirectory: workingDirectory,
             createdAt: now,
@@ -341,8 +335,6 @@ extension EventStoreManager {
             cost: 0,
             serverOrigin: serverOrigin
         )
-        session.source = source
-        session.profile = profile
         return session
     }
 
@@ -356,7 +348,7 @@ extension EventStoreManager {
         serverOrigin: String
     ) -> CachedSession {
         let workingDir = sourceSession?.workingDirectory ?? ""
-        var session = CachedSession(
+        return CachedSession(
             id: result.newSessionId,
             workspaceId: sourceSession?.workspaceId ?? workingDir,
             rootEventId: result.rootEventId,
@@ -381,8 +373,5 @@ extension EventStoreManager {
             isFork: true,
             serverOrigin: serverOrigin
         )
-        session.source = sourceSession?.source
-        session.profile = sourceSession?.profile
-        return session
     }
 }

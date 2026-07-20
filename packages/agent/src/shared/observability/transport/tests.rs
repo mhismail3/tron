@@ -2,6 +2,11 @@ use super::*;
 
 fn create_test_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
+    initialize_test_schema(&conn);
+    conn
+}
+
+fn initialize_test_schema(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +39,6 @@ fn create_test_db() -> Connection {
         );",
     )
     .unwrap();
-    conn
 }
 
 fn make_entry(level: &str, level_num: i32, component: &str, msg: &str) -> PendingEntry {
@@ -261,6 +265,7 @@ fn config_defaults() {
     assert_eq!(cfg.min_level, 30);
     assert_eq!(cfg.batch_size, 100);
     assert_eq!(cfg.flush_interval_ms, 1000);
+    assert_eq!(cfg.busy_timeout_ms, 50);
 }
 
 // ── TransportHandle ──────────────────────────────────────────────
@@ -268,15 +273,15 @@ fn config_defaults() {
 #[test]
 fn handle_flush_empty() {
     let conn = create_test_db();
-    let transport = SqliteTransport::new(conn, TransportConfig::default());
+    let transport = SqliteTransport::new(conn, TransportConfig::default()).unwrap();
     let handle = transport.handle();
-    handle.flush(); // Should not panic
+    assert!(handle.flush());
 }
 
 #[test]
 fn handle_flush_pending_entries() {
     let conn = create_test_db();
-    let transport = SqliteTransport::new(conn, TransportConfig::default());
+    let transport = SqliteTransport::new(conn, TransportConfig::default()).unwrap();
     let handle = transport.handle();
 
     // Manually push entries into the batch
@@ -290,7 +295,7 @@ fn handle_flush_pending_entries() {
             .push(make_entry("info", 30, "Test", "pending 2"));
     }
 
-    handle.flush();
+    assert!(handle.flush());
 
     // Verify entries were flushed
     let guard = transport.inner.lock().unwrap();
@@ -301,6 +306,48 @@ fn handle_flush_pending_entries() {
         .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
         .unwrap();
     assert_eq!(count, 2);
+}
+
+#[test]
+fn busy_flush_retains_the_atomic_batch_and_retries_without_duplicates() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = temp.path().join("logs.sqlite");
+    let setup = Connection::open(&database).unwrap();
+    initialize_test_schema(&setup);
+    setup.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+    drop(setup);
+
+    let blocking = Connection::open(&database).unwrap();
+    blocking
+        .execute_batch("PRAGMA journal_mode = WAL;")
+        .unwrap();
+    blocking.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+    let writer = Connection::open(&database).unwrap();
+    writer.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+    let config = TransportConfig {
+        busy_timeout_ms: 0,
+        ..TransportConfig::default()
+    };
+    let transport = SqliteTransport::new(writer, config).unwrap();
+    let handle = transport.handle();
+    {
+        let mut guard = transport.inner.lock().unwrap();
+        guard.batch.push(make_entry("info", 30, "Test", "retry me"));
+    }
+
+    assert!(!handle.flush());
+    assert_eq!(transport.inner.lock().unwrap().batch.len(), 1);
+
+    blocking.execute_batch("ROLLBACK;").unwrap();
+    assert!(handle.flush());
+    let guard = transport.inner.lock().unwrap();
+    assert!(guard.batch.is_empty());
+    let count: i64 = guard
+        .conn
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
 }
 
 // ── EventFieldVisitor ────────────────────────────────────────────
@@ -367,7 +414,7 @@ fn batch_threshold_accumulates() {
         batch_size: 5, // Small batch for testing
         ..Default::default()
     };
-    let transport = SqliteTransport::new(conn, config);
+    let transport = SqliteTransport::new(conn, config).unwrap();
 
     // Push 3 info entries (below threshold of 5)
     {

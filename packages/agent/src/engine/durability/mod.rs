@@ -26,6 +26,8 @@
 //! ## Invariants
 //!
 //! - Durable records are source of truth, not projections over stream logs.
+//! - Invocation and idempotency result records are credential-redacted copies;
+//!   the live caller result is not the durable audit representation.
 //! - Queue attempts and resource versions retain causality and trace identity.
 //! - SQLite codecs stay inside the store owner that persists the row shape.
 //! - SQLite-backed durability constructors apply shared storage pragmas and

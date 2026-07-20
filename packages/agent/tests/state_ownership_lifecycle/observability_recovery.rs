@@ -90,13 +90,17 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "conn: Connection",
             "pub(super) fn handle(&self) -> TransportHandle",
             "fn flush_batch",
-            "write_batch(&guard.conn, &entries)",
+            "flush_locked(&mut guard)",
+            "write_batch(&inner.conn, &inner.batch)",
+            "inner.batch.clear()",
         ],
     );
     for required in [
-        "Immediate flush",
-        "Threshold flush",
-        "Periodic flush",
+        "Immediate flush attempt",
+        "Threshold flush attempt",
+        "Periodic retry",
+        "entries retained for retry",
+        "flush_until_empty",
         "INSERT INTO logs",
         "session_id",
         "workspace_id",
@@ -108,6 +112,18 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "SQLite log transport evidence missing `{required}`"
         );
     }
+
+    let bootstrap = read_repo_file("packages/agent/src/app/bootstrap/mod.rs");
+    assert_contains_in_order(
+        "shutdown log drain",
+        &bootstrap,
+        &[
+            "flush_task.abort()",
+            "checkpoint()",
+            "tracing::info!(\"Shutdown complete\")",
+            "log_handle.flush_until_empty",
+        ],
+    );
 
     let logs_domain = read_repo_file("packages/agent/src/domains/logs/mod.rs");
     for required in [

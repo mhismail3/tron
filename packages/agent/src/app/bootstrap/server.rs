@@ -627,7 +627,7 @@ mod tests {
                         "name":"HTTP Webhook Fixture",
                         "description":"Exercises the authenticated loopback HTTP trigger",
                         "toolName":"worker_http_webhook_fixture",
-                        "inputSchema":{"type":"object"},
+                        "inputSchema":{"type":"object","additionalProperties":false,"properties":{"configured":{"type":"boolean"},"requestValue":{"type":"integer"}}},
                         "outputSchema":{"type":"object"},
                         "runner":{"kind":"command","command":["sh","-c","cat"]},
                         "triggers":[{
@@ -719,7 +719,8 @@ mod tests {
         .expect("webhook invocation should be dispatched from its durable queue");
         assert_eq!(completed["attemptCount"], 1);
         assert_eq!(completed["output"]["configured"], true);
-        assert_eq!(completed["output"]["webhook"]["requestValue"], 7);
+        assert_eq!(completed["output"]["requestValue"], 7);
+        assert!(completed["output"].get("webhook").is_none());
 
         let mut wrong = Request::builder()
             .method("POST")

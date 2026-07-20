@@ -11,6 +11,11 @@
 //! The SQLite implementation keeps schema and query operations in
 //! `sqlite_store`, with row decoding helpers split into `sqlite_store::rows` so
 //! persistence behavior remains owned by this module without oversized files.
+//! Live invocation results are returned unchanged to the current caller. Audit
+//! rows and idempotency outcomes use a field-aware redacted copy, so one-time
+//! credentials cannot enter SQLite, payload blobs, replay exports, or later
+//! idempotent replays. Both ledger implementations apply that policy at their
+//! storage boundary even when a caller manually constructs a record.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

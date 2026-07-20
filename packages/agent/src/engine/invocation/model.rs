@@ -438,10 +438,33 @@ impl InvocationRecord {
             produced_resource_refs: produced_resource_refs_from_result(&result.value),
             replayed_from: result.replayed_from.clone(),
             succeeded: result.error.is_none(),
-            result_value: result.value.clone(),
+            result_value: result
+                .value
+                .as_ref()
+                .map(crate::shared::foundation::redaction::redact_sensitive_json),
             error: result.error.clone(),
             timestamp,
         }
+    }
+
+    /// Return the audit-safe projection accepted by any ledger implementation.
+    ///
+    /// Callers normally construct records through [`Self::from_result_at`],
+    /// which already applies this policy. Stores call it again as a boundary
+    /// backstop for manually constructed records.
+    #[must_use]
+    pub(crate) fn redacted_for_storage(&self) -> Self {
+        let mut record = self.clone();
+        record.result_value = record
+            .result_value
+            .as_ref()
+            .map(crate::shared::foundation::redaction::redact_sensitive_json);
+        record.produced_resource_refs = record
+            .produced_resource_refs
+            .iter()
+            .map(crate::shared::foundation::redaction::redact_sensitive_json)
+            .collect();
+        record
     }
 
     /// Attach host-enforced contract bookkeeping.
@@ -503,6 +526,34 @@ mod tests {
         assert_eq!(record.session_id.as_deref(), Some("sess-fixed"));
         assert_eq!(record.workspace_id.as_deref(), Some("ws-fixed"));
         assert_eq!(record.timestamp, timestamp);
+    }
+
+    #[test]
+    fn invocation_record_redacts_credentials_without_mutating_live_result() {
+        let invocation = Invocation::new_sync(
+            FunctionId::new("worker_kernel::webhook_rotate").unwrap(),
+            serde_json::json!({}),
+            CausalContext::new(
+                ActorId::new("agent-secret").unwrap(),
+                ActorKind::Agent,
+                AuthorityGrantId::new("grant-secret").unwrap(),
+                TraceId::new("trace-secret").unwrap(),
+            ),
+        );
+        let token = "trwh_0123456789abcdef0123456789abcdef";
+        let result = InvocationResult::success(
+            &invocation,
+            WorkerId::new("worker-kernel").unwrap(),
+            FunctionRevision(1),
+            CatalogRevision(1),
+            serde_json::json!({"token":token,"path":"/hooks/research"}),
+        );
+
+        let record = InvocationRecord::from_result(&invocation, &result, None);
+
+        assert_eq!(record.result_value.as_ref().unwrap()["token"], "****");
+        assert!(!record.result_value.unwrap().to_string().contains(token));
+        assert_eq!(result.value.as_ref().unwrap()["token"], token);
     }
 }
 

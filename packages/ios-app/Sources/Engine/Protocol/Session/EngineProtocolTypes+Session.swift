@@ -5,25 +5,16 @@ import Foundation
 struct SessionCreateParams: Encodable {
     let workingDirectory: String
     let model: String?
-    let contextFiles: [String]?
     let title: String?
-    let source: String?
-    let profile: String?
 
     init(
         workingDirectory: String,
         model: String? = nil,
-        contextFiles: [String]? = nil,
-        title: String? = nil,
-        source: String? = nil,
-        profile: String? = nil
+        title: String? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.model = model
-        self.contextFiles = contextFiles
         self.title = title
-        self.source = source
-        self.profile = profile
     }
 }
 
@@ -66,10 +57,6 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let lastUserPrompt: String?
     /// Last assistant response text (for preview display)
     let lastAssistantResponse: String?
-    /// Session source (e.g. "cron" for automation sessions)
-    let source: String?
-    /// Execution profile selected for the session.
-    let profile: String?
     /// Whether the agent is currently running in this session (server-authoritative)
     let isRunning: Bool?
     /// Server-computed activity summary lines for session list rows

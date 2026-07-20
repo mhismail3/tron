@@ -8,7 +8,7 @@
 //! | [`ids`] | Branded IDs used across domains and protocol payloads |
 //! | [`paths`] | Canonical filesystem paths |
 //! | [`profile`] | Profile runtime constants and validation |
-//! | [`redaction`] | Authoritative cross-domain sensitive-data redaction policy |
+//! | [`redaction`] | Authoritative text- and field-aware JSON sensitive-data redaction policy |
 //! | [`retry`] | Retry/backoff policy helpers |
 //! | [`text`] | Text helpers used by multiple owners |
 

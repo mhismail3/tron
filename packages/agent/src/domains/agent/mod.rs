@@ -3,16 +3,18 @@
 //! This module owns the server-side prompt harness. Public agent functions are
 //! limited to accepting prompts, reporting runtime status, and aborting active
 //! work. Hidden functions serialize those prompts into the provider loop; the
-//! model-facing capability surface after that loop starts is the single
-//! direct typed kernel and worker tools.
+//! model-facing capability surface after that loop starts is the direct typed
+//! kernel tools plus the relevant profile-global worker tools.
 //! Worker composition carries the optional model responder factory directly;
 //! prompt validation reports `NotAvailable` when that runtime owner is absent.
 //!
 //! ## Prompt Execution Flow
 //!
 //! 1. `/engine` builds an `EngineTransportRequest` for `agent::prompt`.
-//! 2. The engine validates schema, authority, idempotency, leases, and
-//!    catalog revision before this domain handler runs.
+//! 2. The authenticated transport validates schema, idempotency, leases, and
+//!    catalog revision before this domain handler runs. Transport authority
+//!    authenticates the remote caller; it is not re-derived for trusted-local
+//!    model tool calls.
 //! 3. `agent::prompt` derives the run id, records the accepted prompt, invokes
 //!    hidden `agent::prompt_apply` synchronously through an engine-owned
 //!    internal causal context, and returns an affirmative acknowledgement plus
@@ -20,8 +22,9 @@
 //!    The prompt path does not race the background queue drainer for its own receipt.
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
-//! 5. The turn runner builds provider input from session state and supplies one
-//!    model-facing tool named `execute`.
+//! 5. The turn runner builds provider input from session state and supplies
+//!    direct typed kernel tools plus a compact relevant-worker projection. It
+//!    never supplies the removed `capability::execute` wrapper.
 //! 6. Provider tool calls are written as session truth and invoked as child
 //!    trusted-local typed engine invocations.
 //! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;

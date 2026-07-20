@@ -11,8 +11,8 @@ final class SessionRepository: @unchecked Sendable {
          working_directory, created_at, last_activity_at, archived_at, event_count,
          turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
          cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-         activity_lines_json, source, profile)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         activity_lines_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             workspace_id = excluded.workspace_id,
             root_event_id = excluded.root_event_id,
@@ -35,9 +35,7 @@ final class SessionRepository: @unchecked Sendable {
             is_fork = excluded.is_fork,
             is_processing = excluded.is_processing,
             server_origin = excluded.server_origin,
-            activity_lines_json = excluded.activity_lines_json,
-            source = excluded.source,
-            profile = excluded.profile
+            activity_lines_json = excluded.activity_lines_json
     """
 
     private weak var transport: (any DatabaseTransport)?
@@ -244,7 +242,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                       activity_lines_json, source, profile
+                       activity_lines_json
                 FROM sessions WHERE id = ?
             """
 
@@ -276,7 +274,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                       activity_lines_json, source, profile
+                       activity_lines_json
                 FROM sessions ORDER BY last_activity_at DESC, id DESC
             """
 
@@ -313,7 +311,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                           activity_lines_json, source, profile
+                           activity_lines_json
                     FROM sessions
                     WHERE server_origin = ?
                     ORDER BY last_activity_at DESC, id DESC
@@ -324,7 +322,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                           activity_lines_json, source, profile
+                           activity_lines_json
                     FROM sessions ORDER BY last_activity_at DESC, id DESC
                 """
             }
@@ -508,8 +506,6 @@ final class SessionRepository: @unchecked Sendable {
         } else {
             sqlite3_bind_null(stmt, 23)
         }
-        sqliteBindOptionalText(stmt, 24, session.source)
-        sqliteBindOptionalText(stmt, 25, session.profile)
     }
 
     private static func parseSessionRow(_ stmt: OpaquePointer?) -> CachedSession? {
@@ -543,9 +539,6 @@ final class SessionRepository: @unchecked Sendable {
             activityLines = try? JSONDecoder().decode([ActivityLine].self, from: data)
         }
 
-        let source = sqliteGetOptionalText(stmt, 23)
-        let profile = sqliteGetOptionalText(stmt, 24)
-
         var session = CachedSession(
             id: id,
             workspaceId: workspaceId,
@@ -571,8 +564,6 @@ final class SessionRepository: @unchecked Sendable {
         )
         session.lastActivityLines = activityLines
         session.isProcessing = isProcessing
-        session.source = source
-        session.profile = profile
         return session
     }
 

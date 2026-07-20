@@ -236,9 +236,7 @@ struct ContentView: View {
                             sessionId: created.sessionId,
                             workspaceId: created.workspaceId,
                             model: created.model,
-                            workingDirectory: created.workingDirectory,
-                            source: created.source,
-                            profile: created.profile
+                            workingDirectory: created.workingDirectory
                         )
                     } catch {
                         logger.error("cacheNewSession failed: \(error)", category: .session)

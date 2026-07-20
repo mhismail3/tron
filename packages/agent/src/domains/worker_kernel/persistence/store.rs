@@ -375,6 +375,32 @@ impl WorkerStore {
         let _ = fs::remove_dir_all(&prepared.staging_dir);
     }
 
+    /// Rewrite the staged canonical metadata after dependency acquisition has
+    /// filled every optional input checksum. Publication must never preserve an
+    /// unresolved dependency even though callers may omit expected digests.
+    pub fn seal_resolved_dependencies(&self, prepared: &PreparedWorker) -> Result<(), String> {
+        for dependency in &prepared.bundle.dependencies {
+            if dependency.checksum.is_none() {
+                return Err(format!(
+                    "dependency '{}' was not resolved to a checksum",
+                    dependency.name
+                ));
+            }
+        }
+        fs::write(
+            prepared.staging_dir.join("manifest.json"),
+            serde_json::to_vec_pretty(&prepared.bundle)
+                .map_err(|error| format!("encode resolved worker manifest: {error}"))?,
+        )
+        .map_err(|error| format!("write resolved worker manifest: {error}"))?;
+        fs::write(
+            prepared.staging_dir.join("dependencies.lock.json"),
+            serde_json::to_vec_pretty(&prepared.bundle.dependencies)
+                .map_err(|error| format!("encode resolved dependency lock: {error}"))?,
+        )
+        .map_err(|error| format!("write resolved dependency lock: {error}"))
+    }
+
     /// Seal the exact staged tree after dependency acquisition and smoke tests.
     /// The resulting full SHA-256 is the immutable content-version directory.
     pub fn finalize(&self, prepared: &mut PreparedWorker) -> Result<(), String> {
@@ -1994,21 +2020,23 @@ pub(super) fn validate_bundle(bundle: &WorkerBundle) -> Result<(), String> {
                 dependency.name
             ));
         }
-        let checksum = dependency.checksum.strip_prefix("sha256:").ok_or_else(|| {
-            format!(
-                "dependency '{}' requires a sha256 checksum",
-                dependency.name
-            )
-        })?;
-        if checksum.len() != 64
-            || !checksum
-                .chars()
-                .all(|character| character.is_ascii_hexdigit())
-        {
-            return Err(format!(
-                "dependency '{}' checksum must be sha256 followed by 64 hex characters",
-                dependency.name
-            ));
+        if let Some(expected) = dependency.checksum.as_deref() {
+            let checksum = expected.strip_prefix("sha256:").ok_or_else(|| {
+                format!(
+                    "dependency '{}' checksum must start with sha256:",
+                    dependency.name
+                )
+            })?;
+            if checksum.len() != 64
+                || !checksum
+                    .chars()
+                    .all(|character| character.is_ascii_hexdigit())
+            {
+                return Err(format!(
+                    "dependency '{}' checksum must be sha256 followed by 64 hex characters",
+                    dependency.name
+                ));
+            }
         }
         if let Some(install) = &dependency.install {
             validate_worker_command(install, "dependency install")?;
@@ -2100,11 +2128,11 @@ fn validate_runtime_identifier(value: &str, field: &str, max: usize) -> Result<(
 }
 
 fn normalize_tool_name(value: &str) -> Result<String, String> {
-    let value = value.replace('-', "_");
-    validate_identifier(&value, "toolName")?;
+    let mut value = value.replace('-', "_");
     if !value.starts_with("worker_") {
-        return Err("toolName must begin with 'worker_'".to_owned());
+        value = format!("worker_{value}");
     }
+    validate_identifier(&value, "toolName")?;
     Ok(value)
 }
 
@@ -2489,6 +2517,21 @@ mod tests {
         assert_eq!(inspection["route"]["workerVersion"], version);
         assert_eq!(inspection["route"]["enabled"], true);
         assert_eq!(inspection["healthHistory"][0]["status"], "healthy");
+    }
+
+    #[test]
+    fn prepare_normalizes_a_plain_tool_name_without_an_authoring_retry() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut candidate = bundle();
+        candidate.tool_name = Some("last30days-research".to_owned());
+
+        let prepared = store.prepare(candidate, None).unwrap();
+
+        assert_eq!(
+            prepared.bundle.tool_name.as_deref(),
+            Some("worker_last30days_research")
+        );
     }
 
     #[test]

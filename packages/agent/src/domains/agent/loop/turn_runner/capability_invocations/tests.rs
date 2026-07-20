@@ -103,6 +103,33 @@ fn extract_result_text_drops_images() {
     assert!(!text.contains("base64"));
 }
 
+#[test]
+fn durable_completion_redacts_one_time_credentials_but_leaves_live_result_intact() {
+    let token = "trwh_0123456789abcdef0123456789abcdef";
+    let invocation = CapabilityInvocationDraft::new("call-secret", "worker_upsert", Map::new());
+    let result = make_exec_result_with_details(
+        CapabilityResultBody::Text(format!(r#"{{"token":"{token}"}}"#)),
+        Some(json!({
+            "webhooks": [{"token": token, "path": "/hooks/research"}],
+            "status": "active"
+        })),
+    );
+
+    let payload = executed_completion_payload(
+        &invocation,
+        &result,
+        &provider_result_text(&result.result),
+        Some("run-secret"),
+        None,
+        None,
+    );
+
+    assert!(!payload.to_string().contains(token));
+    assert_eq!(payload["details"]["webhooks"][0]["token"], "****");
+    assert!(payload["content"].as_str().unwrap().contains("****"));
+    assert!(provider_result_text(&result.result).contains(token));
+}
+
 struct PhasePersistenceHarness {
     emitter: Arc<EventEmitter>,
     persister: EventPersister,

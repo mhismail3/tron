@@ -9,9 +9,9 @@ use std::sync::{OnceLock, RwLock};
 use serde_json::Value;
 
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle,
-    FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery, Invocation, InvocationId,
-    TraceId,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext,
+    ENGINE_INTERNAL_INVOKE_SCOPE, EngineHostHandle, FunctionDefinition, FunctionHealth, FunctionId,
+    FunctionQuery, Invocation, InvocationId, TraceId,
 };
 use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
@@ -45,12 +45,17 @@ pub(crate) async fn take_worker_inbox_context(
     if !target.trusted_local {
         return None;
     }
+    // INVARIANT: inbox attachment is an engine-owned projection step, not a
+    // model tool call. Attribute the observation to the session while using an
+    // internal runtime actor so the hidden operation never depends on an agent
+    // grant or fails its own visibility boundary.
     let mut context = CausalContext::trusted_local(
-        ActorId::new(format!("agent:{session_id}")).ok()?,
-        ActorKind::Agent,
+        ActorId::new("system:agent-runtime").ok()?,
+        ActorKind::System,
         trace_id.cloned().unwrap_or_else(TraceId::generate),
     )
     .with_session_id(session_id.to_owned())
+    .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
     .with_idempotency_key(format!("worker-inbox-attach:{session_id}:{turn}"));
     if let Some(parent) = parent_invocation_id {
         context = context.with_parent_invocation(parent.clone());
@@ -383,11 +388,27 @@ fn parameter_schema_from_value(value: Value) -> CapabilityParameterSchema {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::engine::{
         ActorId, AuthorityGrantId, EffectClass, FunctionDefinition, WorkerDefinition, WorkerId,
         WorkerKind,
     };
+
+    struct InboxAttachHandler;
+
+    #[async_trait::async_trait]
+    impl crate::engine::InProcessFunctionHandler for InboxAttachHandler {
+        async fn invoke(
+            &self,
+            _invocation: crate::engine::Invocation,
+        ) -> crate::engine::Result<Value> {
+            Ok(serde_json::json!({
+                "items": [{"workerId":"background-worker","result":{"summary":"ready"}}]
+            }))
+        }
+    }
 
     fn worker(id: &str, namespace: &str) -> WorkerDefinition {
         WorkerDefinition::new(
@@ -457,6 +478,53 @@ mod tests {
             .await
             .expect("surface");
         assert!(surface.capabilities.is_empty());
+    }
+
+    #[tokio::test]
+    async fn engine_owned_inbox_attachment_crosses_internal_visibility_without_an_agent_grant() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
+            .expect("worker kernel");
+        register_worker_primitive(
+            &host,
+            "inbox",
+            "worker_inbox",
+            "Read durable worker results",
+            false,
+            "kernel",
+            serde_json::json!({}),
+        );
+        let mut attach = FunctionDefinition::new(
+            FunctionId::new("worker_kernel::inbox_attach").expect("function id"),
+            WorkerId::new("worker_kernel").expect("worker id"),
+            "Attach unseen inbox results",
+            crate::engine::VisibilityScope::Internal,
+            EffectClass::IdempotentWrite,
+        )
+        .with_idempotency(crate::engine::IdempotencyContract::caller_system_engine_ledger())
+        .with_request_schema(serde_json::json!({"type":"object"}))
+        .with_response_schema(serde_json::json!({"type":"object"}));
+        attach.metadata = serde_json::json!({"trustedLocalKernel":true});
+        host.register_function_for_setup(attach, Some(Arc::new(InboxAttachHandler)), false)
+            .expect("internal inbox attachment");
+
+        let surface = resolve_provider_primitive_surface(&host, "session-a", None)
+            .await
+            .expect("surface");
+        let primer = take_worker_inbox_context(
+            &host,
+            &surface,
+            "session-a",
+            1,
+            Some("background"),
+            None,
+            None,
+        )
+        .await
+        .expect("inbox primer");
+
+        assert!(primer.contains("background-worker"));
+        assert!(primer.contains("ready"));
     }
 
     #[tokio::test]

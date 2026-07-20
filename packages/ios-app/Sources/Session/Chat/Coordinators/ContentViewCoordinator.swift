@@ -83,9 +83,7 @@ final class ContentViewCoordinator {
                     sessionId: result.sessionId,
                     workspaceId: workspace,
                     model: result.model,
-                    workingDirectory: workspace,
-                    source: nil,
-                    profile: nil
+                    workingDirectory: workspace
                 )
 
                 await MainActor.run {

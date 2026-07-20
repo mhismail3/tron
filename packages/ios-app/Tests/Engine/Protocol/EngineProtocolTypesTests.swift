@@ -117,7 +117,7 @@ final class SessionTypesTests: XCTestCase {
         let params = SessionCreateParams(
             workingDirectory: "/path/to/dir",
             model: "claude-opus-4-5-20251101",
-            contextFiles: ["file1.md", "file2.md"]
+            title: "Protocol parity"
         )
 
         let data = try JSONEncoder().encode(params)
@@ -125,7 +125,11 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(decoded["workingDirectory"] as? String, "/path/to/dir")
         XCTAssertEqual(decoded["model"] as? String, "claude-opus-4-5-20251101")
-        XCTAssertEqual(decoded["contextFiles"] as? [String], ["file1.md", "file2.md"])
+        XCTAssertEqual(decoded["title"] as? String, "Protocol parity")
+        XCTAssertEqual(
+            Set(decoded.keys),
+            Set(["workingDirectory", "model", "title"])
+        )
     }
 
     // MARK: - SessionForkResult Tests

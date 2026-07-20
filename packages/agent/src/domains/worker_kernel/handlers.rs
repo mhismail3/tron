@@ -1,15 +1,45 @@
 use std::sync::Arc;
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::{Duration, Instant},
+};
 
 use serde_json::{Value, json};
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::Invocation;
 use crate::engine::RUNTIME_METADATA_WORKING_DIRECTORY;
+use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
+use super::contract::{
+    DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS, DEFAULT_TEXT_SEARCH_WALK_ENTRIES,
+    MAX_TEXT_SEARCH_TIMEOUT_SECONDS, MAX_TEXT_SEARCH_WALK_ENTRIES,
+};
 use super::runtime::WorkerRuntime;
 use super::types::{InvokeRequest, WorkerBundle};
+
+const DEFAULT_TEXT_SEARCH_RESULTS: usize = 200;
+const MAX_TEXT_SEARCH_RESULTS: usize = 1_000;
+const MAX_TEXT_SEARCH_FILE_BYTES: u64 = 1_048_576;
+const MAX_WORKER_SOURCE_FILES: usize = 1_024;
+const MAX_WORKER_SOURCE_BYTES: u64 = 16 * 1_048_576;
+const DEFAULT_IGNORED_SEARCH_DIRECTORIES: &[&str] = &[
+    ".git",
+    ".cache",
+    ".build",
+    ".venv",
+    "Library",
+    "DerivedData",
+    "Pods",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+    "venv",
+];
 
 #[derive(Clone)]
 pub(super) struct Deps {
@@ -166,33 +196,136 @@ async fn filesystem_search_text(invocation: &Invocation, deps: &Deps) -> Result<
         .payload
         .get("maxResults")
         .and_then(Value::as_u64)
-        .unwrap_or(200)
-        .min(1_000) as usize;
+        .unwrap_or(DEFAULT_TEXT_SEARCH_RESULTS as u64)
+        .clamp(1, MAX_TEXT_SEARCH_RESULTS as u64) as usize;
+    let max_walk_entries = invocation
+        .payload
+        .get("maxWalkEntries")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_TEXT_SEARCH_WALK_ENTRIES as u64)
+        .clamp(1, MAX_TEXT_SEARCH_WALK_ENTRIES as u64) as usize;
+    let timeout = Duration::from_secs(
+        invocation
+            .payload
+            .get("timeoutSeconds")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS)
+            .clamp(1, MAX_TEXT_SEARCH_TIMEOUT_SECONDS),
+    );
+    let include_hidden = invocation
+        .payload
+        .get("includeHidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let include_ignored_directories = invocation
+        .payload
+        .get("includeIgnoredDirectories")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    run_blocking_task("worker_kernel::filesystem_search_text", move || {
+        bounded_text_search(
+            &path,
+            &query,
+            max,
+            max_walk_entries,
+            timeout,
+            include_hidden,
+            include_ignored_directories,
+        )
+        .map_err(|message| CapabilityError::Internal { message })
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bounded_text_search(
+    path: &Path,
+    query: &str,
+    max_results: usize,
+    max_walk_entries: usize,
+    timeout: Duration,
+    include_hidden: bool,
+    include_ignored_directories: bool,
+) -> Result<Value, String> {
+    let started = Instant::now();
     let mut matches = Vec::new();
-    for entry in walkdir::WalkDir::new(&path).follow_links(false) {
+    let mut visited_entries = 0usize;
+    let mut skipped_directories = 0usize;
+    let mut result_limit_reached = false;
+    let mut walk_limit_reached = false;
+    let mut time_limit_reached = false;
+    let root = path.to_path_buf();
+    let mut walker = walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            if entry.path() == root {
+                return true;
+            }
+            let name = entry.file_name().to_string_lossy();
+            let hidden = name.starts_with('.');
+            let ignored = entry.file_type().is_dir()
+                && DEFAULT_IGNORED_SEARCH_DIRECTORIES.contains(&name.as_ref());
+            let include = (include_hidden || !hidden) && (include_ignored_directories || !ignored);
+            if !include && entry.file_type().is_dir() {
+                skipped_directories += 1;
+            }
+            include
+        });
+
+    'walk: loop {
+        if started.elapsed() >= timeout {
+            time_limit_reached = true;
+            break;
+        }
+        let Some(entry) = walker.next() else {
+            break;
+        };
         let Ok(entry) = entry else { continue };
+        if visited_entries >= max_walk_entries {
+            walk_limit_reached = true;
+            break;
+        }
+        visited_entries += 1;
         if !entry.file_type().is_file() {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
-        if metadata.len() > 1_048_576 {
+        if metadata.len() > MAX_TEXT_SEARCH_FILE_BYTES {
             continue;
         }
         let Ok(content) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
         for (index, line) in content.lines().enumerate() {
-            if line.contains(&query) {
+            if started.elapsed() >= timeout {
+                time_limit_reached = true;
+                break 'walk;
+            }
+            if line.contains(query) {
                 matches.push(json!({"path":entry.path(),"line":index + 1,"text":line}));
-                if matches.len() >= max {
-                    return Ok(json!({"query":query,"matches":matches,"truncated":true}));
+                if matches.len() >= max_results {
+                    result_limit_reached = true;
+                    break 'walk;
                 }
             }
         }
     }
-    Ok(json!({"query":query,"matches":matches,"truncated":false}))
+    drop(walker);
+    Ok(json!({
+        "query":query,
+        "path":path,
+        "matches":matches,
+        "visitedEntries":visited_entries,
+        "skippedDirectories":skipped_directories,
+        "resultLimitReached":result_limit_reached,
+        "walkLimitReached":walk_limit_reached,
+        "timeLimitReached":time_limit_reached,
+        "truncated":result_limit_reached || walk_limit_reached || time_limit_reached,
+    }))
 }
 
 async fn filesystem_write(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -347,7 +480,7 @@ fn require_autonomous(deps: &Deps) -> Result<(), String> {
 
 async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     require_autonomous(deps)?;
-    let bundle: WorkerBundle = serde_json::from_value(
+    let mut bundle: WorkerBundle = serde_json::from_value(
         invocation
             .payload
             .get("bundle")
@@ -355,6 +488,24 @@ async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
             .ok_or_else(|| "worker_upsert requires bundle".to_owned())?,
     )
     .map_err(|error| format!("decode worker bundle: {error}"))?;
+    let source_import = if invocation.payload.get("sourceDirectory").is_some() {
+        let source_directory = resolve_path(
+            invocation,
+            &required_string(&invocation.payload, "sourceDirectory")?,
+        )?;
+        let (imported_bundle, summary) =
+            run_blocking_task("worker_kernel::import_source_directory", move || {
+                let summary = import_source_directory(&source_directory, &mut bundle)
+                    .map_err(|message| CapabilityError::Internal { message })?;
+                Ok((bundle, summary))
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        bundle = imported_bundle;
+        Some(summary)
+    } else {
+        None
+    };
     let predecessor = invocation
         .payload
         .get("predecessorWorkerId")
@@ -366,7 +517,114 @@ async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
             &outcome.worker.worker_id,
         );
     }
-    serde_json::to_value(outcome).map_err(|error| error.to_string())
+    let mut response = serde_json::to_value(outcome).map_err(|error| error.to_string())?;
+    if let (Some(response), Some((file_count, bytes))) = (response.as_object_mut(), source_import) {
+        response.insert(
+            "sourceImport".to_owned(),
+            json!({"fileCount":file_count,"bytes":bytes}),
+        );
+    }
+    Ok(response)
+}
+
+/// Import a staged UTF-8 source tree into a candidate without making the model
+/// echo every file through JSON. Explicit inline bundle files win on duplicate
+/// relative paths. Symlinks and special files are rejected so the immutable
+/// version always contains exactly the tree the caller selected.
+fn import_source_directory(
+    source_directory: &Path,
+    bundle: &mut WorkerBundle,
+) -> Result<(usize, u64), String> {
+    let root_metadata = std::fs::symlink_metadata(source_directory).map_err(|error| {
+        format!(
+            "inspect worker source directory {}: {error}",
+            source_directory.display()
+        )
+    })?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(format!(
+            "worker source directory must be a real directory, not a symlink or file: {}",
+            source_directory.display()
+        ));
+    }
+
+    let mut file_count = 0usize;
+    let mut total_bytes = 0u64;
+    for entry in walkdir::WalkDir::new(source_directory)
+        .follow_links(false)
+        .sort_by_file_name()
+    {
+        let entry = entry.map_err(|error| format!("walk worker source directory: {error}"))?;
+        if entry.depth() == 0 {
+            continue;
+        }
+        if entry.file_type().is_symlink() {
+            return Err(format!(
+                "worker source directory cannot contain symlinks: {}",
+                entry.path().display()
+            ));
+        }
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        if !entry.file_type().is_file() {
+            return Err(format!(
+                "worker source directory contains a non-file entry: {}",
+                entry.path().display()
+            ));
+        }
+        file_count = file_count
+            .checked_add(1)
+            .ok_or_else(|| "worker source file count overflow".to_owned())?;
+        if file_count > MAX_WORKER_SOURCE_FILES {
+            return Err(format!(
+                "worker source directory exceeds the {MAX_WORKER_SOURCE_FILES}-file reliability ceiling"
+            ));
+        }
+        let bytes = std::fs::read(entry.path())
+            .map_err(|error| format!("read worker source {}: {error}", entry.path().display()))?;
+        total_bytes = total_bytes
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| "worker source byte count overflow".to_owned())?;
+        if total_bytes > MAX_WORKER_SOURCE_BYTES {
+            return Err(format!(
+                "worker source directory exceeds the {MAX_WORKER_SOURCE_BYTES}-byte reliability ceiling"
+            ));
+        }
+        let content = String::from_utf8(bytes).map_err(|_| {
+            format!(
+                "worker source files must be UTF-8 text: {}",
+                entry.path().display()
+            )
+        })?;
+        let relative = entry
+            .path()
+            .strip_prefix(source_directory)
+            .map_err(|error| {
+                format!(
+                    "derive relative worker source path for {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+        let relative = relative
+            .components()
+            .map(|component| {
+                component
+                    .as_os_str()
+                    .to_str()
+                    .ok_or_else(|| {
+                        format!(
+                            "worker source path is not UTF-8: {}",
+                            entry.path().display()
+                        )
+                    })
+                    .map(ToOwned::to_owned)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .join("/");
+        bundle.files.entry(relative).or_insert(content);
+    }
+    Ok((file_count, total_bytes))
 }
 
 async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -598,17 +856,12 @@ async fn webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, String> 
         .runtime
         .store()
         .verify_webhook(&worker_id, &trigger_id, &token)?;
-    let mut input = configured;
     let body = invocation
         .payload
         .get("input")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    if let Some(object) = input.as_object_mut() {
-        let _ = object.insert("webhook".to_owned(), body);
-    } else {
-        input = body;
-    }
+    let input = materialize_webhook_input(configured, body);
     serde_json::to_value(deps.runtime.enqueue(InvokeRequest {
         worker_id,
         input,
@@ -621,6 +874,20 @@ async fn webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, String> 
         trigger_kind: "webhook".to_owned(),
     })?)
     .map_err(|error| error.to_string())
+}
+
+/// Treat a webhook body as the worker's typed input. Object-valued trigger
+/// configuration provides defaults and request fields override them. This
+/// keeps HTTP invocation identical to manual/direct invocation instead of
+/// forcing every worker schema to declare an engine-specific `webhook` wrapper.
+fn materialize_webhook_input(configured: Value, body: Value) -> Value {
+    match (configured, body) {
+        (Value::Object(mut defaults), Value::Object(request)) => {
+            defaults.extend(request);
+            Value::Object(defaults)
+        }
+        (_, body) => body,
+    }
 }
 
 fn response(
@@ -647,4 +914,128 @@ fn terms(value: &str) -> Vec<String> {
         .filter(|term| term.len() > 2)
         .map(str::to_owned)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_text_search_skips_hidden_and_heavy_directories_by_default() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("visible.txt"), "needle\n").unwrap();
+        std::fs::create_dir_all(root.path().join(".hidden")).unwrap();
+        std::fs::write(root.path().join(".hidden/secret.txt"), "needle\n").unwrap();
+        std::fs::create_dir_all(root.path().join("target")).unwrap();
+        std::fs::write(root.path().join("target/generated.txt"), "needle\n").unwrap();
+
+        let result = bounded_text_search(
+            root.path(),
+            "needle",
+            20,
+            100,
+            Duration::from_secs(1),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(result["skippedDirectories"], 2);
+        assert_eq!(result["truncated"], false);
+    }
+
+    #[test]
+    fn bounded_text_search_reports_walk_and_time_ceilings() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("one.txt"), "needle\n").unwrap();
+        std::fs::write(root.path().join("two.txt"), "needle\n").unwrap();
+
+        let walked = bounded_text_search(
+            root.path(),
+            "needle",
+            20,
+            1,
+            Duration::from_secs(1),
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(walked["walkLimitReached"], true);
+        assert_eq!(walked["truncated"], true);
+
+        let timed = bounded_text_search(root.path(), "needle", 20, 100, Duration::ZERO, true, true)
+            .unwrap();
+        assert_eq!(timed["timeLimitReached"], true);
+        assert_eq!(timed["visitedEntries"], 0);
+    }
+
+    #[test]
+    fn source_directory_imports_nested_utf8_files_and_inline_content_wins() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("lib")).unwrap();
+        std::fs::write(root.path().join("main.py"), "print('staged')\n").unwrap();
+        std::fs::write(root.path().join("lib/helper.py"), "VALUE = 1\n").unwrap();
+        let mut bundle = test_worker_bundle();
+        bundle
+            .files
+            .insert("main.py".to_owned(), "print('inline')\n".to_owned());
+
+        let summary = import_source_directory(root.path(), &mut bundle).unwrap();
+
+        assert_eq!(summary.0, 2);
+        assert_eq!(bundle.files["main.py"], "print('inline')\n");
+        assert_eq!(bundle.files["lib/helper.py"], "VALUE = 1\n");
+    }
+
+    #[test]
+    fn source_directory_rejects_binary_files_and_symlinks() {
+        let binary_root = tempfile::tempdir().unwrap();
+        std::fs::write(binary_root.path().join("binary"), [0xff, 0xfe]).unwrap();
+        assert!(
+            import_source_directory(binary_root.path(), &mut test_worker_bundle())
+                .unwrap_err()
+                .contains("UTF-8")
+        );
+
+        let linked_root = tempfile::tempdir().unwrap();
+        std::fs::write(linked_root.path().join("target.txt"), "target").unwrap();
+        std::os::unix::fs::symlink(
+            linked_root.path().join("target.txt"),
+            linked_root.path().join("link.txt"),
+        )
+        .unwrap();
+        assert!(
+            import_source_directory(linked_root.path(), &mut test_worker_bundle())
+                .unwrap_err()
+                .contains("symlinks")
+        );
+    }
+
+    #[test]
+    fn webhook_body_is_direct_typed_input_with_configured_defaults() {
+        let input = materialize_webhook_input(
+            json!({"mode":"research","days":30}),
+            json!({"topic":"persistent agents","days":7}),
+        );
+
+        assert_eq!(
+            input,
+            json!({"mode":"research","days":7,"topic":"persistent agents"})
+        );
+        assert!(input.get("webhook").is_none());
+    }
+
+    fn test_worker_bundle() -> WorkerBundle {
+        serde_json::from_value(json!({
+            "schemaVersion":"tron.worker_bundle.v1",
+            "name":"Source Import",
+            "description":"Test source directory import",
+            "inputSchema":{"type":"object"},
+            "outputSchema":{"type":"object"},
+            "runner":{"kind":"command","command":["python3","main.py"]},
+            "provenance":[{"source":"test:source-directory"}]
+        }))
+        .unwrap()
+    }
 }

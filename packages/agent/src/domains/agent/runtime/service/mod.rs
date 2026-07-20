@@ -7,10 +7,11 @@
 //! runs so logs, session events, trace records, and agent-result resources share
 //! common run/session/trace identifiers. `PromptRequest` is the single
 //! plan-level owner of accepted invocation causality; execution moves that value
-//! into its turn and completion path. Completion derives `agent_result` text and
-//! its event reference after the turn's synchronous persistence calls have
-//! committed, then emits the runtime-owned durable session-update projection;
-//! it does not rebuild that wire event or retain session-cache ownership.
+//! into its turn and completion path. Completion emits the runtime-owned
+//! durable session-update projection after the turn's synchronous persistence
+//! calls have committed; it does not rebuild that wire event, retain
+//! session-cache ownership, or duplicate final assistant state into an
+//! `agent_result` resource.
 //! Before durable history is reconstructed, prompt admission atomically closes
 //! any terminal prior turn's unmatched capability starts and broadcasts those
 //! row-backed repairs to live clients. A repair failure rejects the prompt

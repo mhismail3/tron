@@ -109,7 +109,6 @@ struct DiagnosticsSessionSummary: Encodable, Sendable {
     let cacheCreationTokens: Int
     let cost: Double
     let isFork: Bool?
-    let source: String?
     let serverOriginHash: String?
 
     init(session: CachedSession) {
@@ -129,7 +128,6 @@ struct DiagnosticsSessionSummary: Encodable, Sendable {
         cacheCreationTokens = session.cacheCreationTokens
         cost = session.cost
         isFork = session.isFork
-        source = session.source
         serverOriginHash = DiagnosticsHash.hash(session.serverOrigin)
     }
 }

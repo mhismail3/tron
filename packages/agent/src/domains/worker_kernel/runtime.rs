@@ -196,7 +196,7 @@ impl WorkerRuntime {
     ) -> Result<UpsertOutcome, String> {
         self.reject_secret_material_in_bundle(&bundle)?;
         let mut prepared = self.store.prepare(bundle, predecessor)?;
-        if let Err(error) = self.prepare_dependencies_and_test(&prepared).await {
+        if let Err(error) = self.prepare_dependencies_and_test(&mut prepared).await {
             self.store.abandon(&prepared);
             return Err(error);
         }
@@ -295,7 +295,10 @@ impl WorkerRuntime {
         }
     }
 
-    async fn prepare_dependencies_and_test(&self, prepared: &PreparedWorker) -> Result<(), String> {
+    async fn prepare_dependencies_and_test(
+        &self,
+        prepared: &mut PreparedWorker,
+    ) -> Result<(), String> {
         let workdir = prepared.staging_dir.join("files");
         let dependencies = prepared.staging_dir.join("dependencies");
         let runtime = prepared.staging_dir.join("dependency-runtime");
@@ -306,11 +309,14 @@ impl WorkerRuntime {
         let mut health_evidence = Vec::new();
         std::fs::create_dir_all(&dependencies).map_err(|error| error.to_string())?;
         std::fs::create_dir_all(&runtime).map_err(|error| error.to_string())?;
-        for dependency in &prepared.bundle.dependencies {
+        for index in 0..prepared.bundle.dependencies.len() {
+            let dependency = prepared.bundle.dependencies[index].clone();
             let dependency_dir = dependencies.join(&dependency.name);
-            self.fetch_dependency(dependency, &dependency_dir)
+            let actual_checksum = self
+                .fetch_dependency(&dependency, &dependency_dir)
                 .await
                 .map_err(|error| redact_known_secrets(&error, &redactions))?;
+            prepared.bundle.dependencies[index].checksum = Some(actual_checksum);
             if let Some(install) = &dependency.install {
                 let output = run_worker_command(install, &dependency_dir, None, &secrets, None)
                     .await
@@ -322,6 +328,7 @@ impl WorkerRuntime {
                 }));
             }
         }
+        self.store.seal_resolved_dependencies(prepared)?;
         for test in &prepared.bundle.smoke_tests {
             let output = run_worker_command(test, &workdir, None, &secrets, None)
                 .await
@@ -361,7 +368,7 @@ impl WorkerRuntime {
         &self,
         dependency: &WorkerDependency,
         destination: &Path,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         if destination.exists() {
             std::fs::remove_dir_all(destination).map_err(|error| error.to_string())?;
         }
@@ -433,13 +440,15 @@ impl WorkerRuntime {
                 .map_err(|error| format!("store dependency '{}': {error}", dependency.name))?;
         }
         let actual = format!("sha256:{}", digest_tree(destination)?);
-        if !actual.eq_ignore_ascii_case(&dependency.checksum) {
+        if let Some(expected) = dependency.checksum.as_deref()
+            && !actual.eq_ignore_ascii_case(expected)
+        {
             return Err(format!(
-                "dependency '{}' checksum mismatch: expected {}, got {actual}",
-                dependency.name, dependency.checksum
+                "dependency '{}' checksum mismatch: expected {expected}, got {actual}",
+                dependency.name
             ));
         }
-        Ok(())
+        Ok(actual)
     }
 
     pub async fn invoke(
@@ -1839,14 +1848,17 @@ async fn run_worker_command(
     invocation: Option<&InvocationRecord>,
 ) -> Result<Value, String> {
     let mut child = spawn_process(&spec.command, workdir, secrets, Stdio::piped(), invocation)?;
+    let mut input_write_error = None;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
-        stdin
+        if let Err(error) = stdin
             .write_all(
                 &serde_json::to_vec(input)
                     .map_err(|error| format!("encode worker input: {error}"))?,
             )
             .await
-            .map_err(|error| format!("write worker input: {error}"))?;
+        {
+            input_write_error = Some(error);
+        }
     }
     let output = tokio::time::timeout(
         Duration::from_secs(spec.timeout_seconds),
@@ -1869,6 +1881,11 @@ async fn run_worker_command(
             ),
             secrets,
         ));
+    }
+    if let Some(error) = input_write_error
+        && error.kind() != std::io::ErrorKind::BrokenPipe
+    {
+        return Err(format!("write worker input: {error}"));
     }
     if output.stdout.is_empty() {
         return Ok(json!({}));
@@ -2421,26 +2438,6 @@ print(json.dumps({
             .next()
             .unwrap()
             .to_owned();
-        let checkout = tempfile::tempdir().unwrap();
-        assert!(
-            std::process::Command::new("git")
-                .args(["clone", "--quiet", "--no-checkout", source_url, "."])
-                .current_dir(checkout.path())
-                .status()
-                .unwrap()
-                .success()
-        );
-        assert!(
-            std::process::Command::new("git")
-                .args(["checkout", "--quiet", "--detach", &revision])
-                .current_dir(checkout.path())
-                .status()
-                .unwrap()
-                .success()
-        );
-        std::fs::remove_dir_all(checkout.path().join(".git")).unwrap();
-        let checksum = format!("sha256:{}", digest_tree(checkout.path()).unwrap());
-
         let mut bundle = last30days_bundle(source_url);
         bundle
             .description
@@ -2449,7 +2446,7 @@ print(json.dumps({
             name: "upstream".to_owned(),
             source: format!("git+{source_url}"),
             version: revision.clone(),
-            checksum: checksum.clone(),
+            checksum: None,
             install: None,
         });
         bundle.smoke_tests.push(WorkerCommand {
@@ -2461,10 +2458,24 @@ print(json.dumps({
             timeout_seconds: 10,
         });
         bundle.provenance[0].revision = Some(revision);
-        bundle.provenance[0].checksum = Some(checksum);
 
         let (runtime, _home) = test_runtime(None);
         let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let active = runtime
+            .store()
+            .load_active(&outcome.worker.worker_id)
+            .unwrap();
+        let locked = active.bundle.dependencies[0]
+            .checksum
+            .as_deref()
+            .expect("upsert seals fetched dependency checksum");
+        assert_eq!(
+            locked,
+            format!(
+                "sha256:{}",
+                digest_tree(&active.version_dir.join("dependencies/upstream")).unwrap()
+            )
+        );
         let result = runtime
             .invoke(request(
                 &outcome.worker.worker_id,
@@ -2475,6 +2486,51 @@ print(json.dumps({
             .unwrap();
         assert_eq!(result.status, "completed");
         assert_eq!(result.output.unwrap()["upstreamAvailable"], true);
+    }
+
+    #[tokio::test]
+    async fn upsert_fetches_and_seals_an_omitted_dependency_checksum() {
+        let (runtime, home) = test_runtime(None);
+        let source = home.path().join("dependency-source");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("source.txt"), "locked content").unwrap();
+        let expected = format!("sha256:{}", digest_tree(&source).unwrap());
+        let mut bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+        bundle.dependencies.push(WorkerDependency {
+            name: "upstream".to_owned(),
+            source: format!("file://{}", source.display()),
+            version: "fixture-1".to_owned(),
+            checksum: None,
+            install: None,
+        });
+        bundle.smoke_tests.push(WorkerCommand {
+            command: vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "test -f ../dependencies/upstream/source.txt".to_owned(),
+            ],
+            timeout_seconds: 5,
+        });
+
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let active = runtime
+            .store()
+            .load_active(&outcome.worker.worker_id)
+            .unwrap();
+        assert_eq!(
+            active.bundle.dependencies[0].checksum.as_deref(),
+            Some(expected.as_str())
+        );
+        let manifest: Value = serde_json::from_slice(
+            &std::fs::read(active.version_dir.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        let lock: Value = serde_json::from_slice(
+            &std::fs::read(active.version_dir.join("dependencies.lock.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["dependencies"][0]["checksum"], expected);
+        assert_eq!(lock[0]["checksum"], expected);
     }
 
     #[tokio::test]
@@ -3030,7 +3086,7 @@ print(json.dumps({
         webhook_input
             .as_object_mut()
             .unwrap()
-            .insert("webhook".to_owned(), json!({"payload":1}));
+            .insert("payload".to_owned(), json!(1));
         let webhook = runtime
             .invoke(InvokeRequest {
                 worker_id: outcome.worker.worker_id.clone(),
@@ -3106,7 +3162,7 @@ print(json.dumps({
             name: "upstream".to_owned(),
             source: format!("file://{}", dependency.display()),
             version: "1".to_owned(),
-            checksum: format!("sha256:{}", "0".repeat(64)),
+            checksum: Some(format!("sha256:{}", "0".repeat(64))),
             install: None,
         });
         assert!(
@@ -3333,7 +3389,11 @@ print(json.dumps({
             .invoke(request(&outcome.worker.worker_id, json!({}), "secret"))
             .await
             .unwrap();
-        assert_eq!(result.output, Some(json!({"value":"[REDACTED]"})));
+        assert_eq!(
+            result.output,
+            Some(json!({"value":"[REDACTED]"})),
+            "secret worker result: {result:?}"
+        );
         let diagnostics = format!(
             "{}{}",
             serde_json::to_string(&runtime.store().runs(None, 10).unwrap()).unwrap(),
@@ -3470,6 +3530,29 @@ print(json.dumps({
         .unwrap_err();
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn successful_command_may_ignore_typed_input_without_a_broken_pipe_failure() {
+        let temporary = tempfile::tempdir().unwrap();
+        let output = run_worker_command(
+            &WorkerCommand {
+                command: vec![
+                    "sh".to_owned(),
+                    "-c".to_owned(),
+                    "printf '{\"accepted\":true}'".to_owned(),
+                ],
+                timeout_seconds: 5,
+            },
+            temporary.path(),
+            Some(&json!({"payload":"x".repeat(2_000_000)})),
+            &HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(output, json!({"accepted":true}));
     }
 
     struct JsonResponder;

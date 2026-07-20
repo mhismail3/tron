@@ -52,6 +52,95 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
 }
 
 #[test]
+fn ledger_boundaries_redact_manually_constructed_results_and_idempotency_outcomes() {
+    let token = "trwh_0123456789abcdef0123456789abcdef";
+    let invocation = Invocation::new_sync(
+        fid("worker_kernel::webhook_rotate"),
+        json!({}),
+        causal().with_session_id("session-secret"),
+    );
+    let result = crate::engine::invocation::model::InvocationResult::success(
+        &invocation,
+        wid("worker-kernel"),
+        FunctionRevision(1),
+        CatalogRevision(1),
+        json!({"status":"active"}),
+    );
+    let mut raw_record =
+        crate::engine::invocation::model::InvocationRecord::from_result(&invocation, &result, None);
+    raw_record.result_value = Some(json!({"token":token,"status":"active"}));
+
+    let key = IdempotencyKey {
+        function_id: fid("worker_kernel::webhook_rotate"),
+        scope: IdempotencyScope::new("session", "session-secret"),
+        key: "rotate-secret".to_owned(),
+    };
+    let reservation = IdempotencyReservation {
+        key: key.clone(),
+        payload_fingerprint: "secret-fingerprint".to_owned(),
+        function_revision: FunctionRevision(1),
+        replay_behavior: ReplayBehavior::ReturnPrevious,
+        invocation_id: invocation.id.clone(),
+    };
+
+    let mut memory = InMemoryEngineLedgerStore::new();
+    memory.append_invocation(&raw_record).unwrap();
+    let _ = memory.reserve_idempotency(reservation.clone()).unwrap();
+    memory
+        .complete_idempotency(
+            &key,
+            &invocation.id,
+            StoredInvocationOutcome {
+                value: Some(json!({"token":token})),
+                error: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        memory.list_invocations().unwrap()[0]
+            .result_value
+            .as_ref()
+            .unwrap()["token"],
+        "****"
+    );
+    let IdempotencyReservationOutcome::Existing(entry) =
+        memory.reserve_idempotency(reservation.clone()).unwrap()
+    else {
+        panic!("completed reservation");
+    };
+    assert_eq!(entry.outcome.unwrap().value.unwrap()["token"], "****");
+
+    let mut sqlite = SqliteEngineLedgerStore::open_in_memory().unwrap();
+    sqlite.append_invocation(&raw_record).unwrap();
+    let _ = sqlite.reserve_idempotency(reservation.clone()).unwrap();
+    sqlite
+        .complete_idempotency(
+            &key,
+            &invocation.id,
+            StoredInvocationOutcome {
+                value: Some(json!({"token":token})),
+                error: None,
+            },
+        )
+        .unwrap();
+    let (result_json, outcome_json): (String, String) = sqlite
+        .connection()
+        .query_row(
+            "SELECT i.result_json, d.outcome_value_json
+             FROM engine_invocations i
+             JOIN engine_idempotency_entries d ON d.idempotency_key = 'rotate-secret'
+             WHERE i.invocation_id = ?1",
+            [invocation.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(!result_json.contains(token));
+    assert!(!outcome_json.contains(token));
+    assert!(result_json.contains("****"));
+    assert!(outcome_json.contains("****"));
+}
+
+#[test]
 fn sqlite_engine_ledger_blobs_large_results_but_replays_public_value() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tron.sqlite");

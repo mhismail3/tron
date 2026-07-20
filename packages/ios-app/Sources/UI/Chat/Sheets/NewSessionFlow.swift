@@ -321,9 +321,7 @@ struct NewSessionFlow: View {
                         sessionId: result.sessionId,
                         workspaceId: intent.workingDirectory,
                         model: result.model,
-                        workingDirectory: intent.workingDirectory,
-                        source: nil,
-                        profile: nil
+                        workingDirectory: intent.workingDirectory
                     ))
                     isCreatingSession = false
                 }

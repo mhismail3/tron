@@ -23,7 +23,7 @@ impl StoredEngineError {
     /// Project an [`EngineError`] into a stable stored representation.
     #[must_use]
     pub fn from_engine_error(error: &EngineError) -> Self {
-        match error {
+        let stored = match error {
             EngineError::InvalidId { kind, value } => Self {
                 kind: "invalid_id".to_owned(),
                 message: error.to_string(),
@@ -185,6 +185,16 @@ impl StoredEngineError {
                 message: error.to_string(),
                 details: serde_json::json!({ "message": message }),
             },
+        };
+        stored.redacted_for_storage()
+    }
+
+    #[must_use]
+    fn redacted_for_storage(&self) -> Self {
+        Self {
+            kind: self.kind.clone(),
+            message: crate::shared::foundation::redaction::redact_sensitive_content(&self.message),
+            details: crate::shared::foundation::redaction::redact_sensitive_json(&self.details),
         }
     }
 
@@ -297,11 +307,30 @@ impl StoredInvocationOutcome {
     #[must_use]
     pub fn from_result(result: &InvocationResult) -> Self {
         Self {
-            value: result.value.clone(),
+            value: result
+                .value
+                .as_ref()
+                .map(crate::shared::foundation::redaction::redact_sensitive_json),
             error: result
                 .error
                 .as_ref()
                 .map(StoredEngineError::from_engine_error),
+        }
+    }
+
+    /// Return the audit-safe projection accepted by durable and in-memory
+    /// idempotency ledgers.
+    #[must_use]
+    pub(crate) fn redacted_for_storage(&self) -> Self {
+        Self {
+            value: self
+                .value
+                .as_ref()
+                .map(crate::shared::foundation::redaction::redact_sensitive_json),
+            error: self
+                .error
+                .as_ref()
+                .map(StoredEngineError::redacted_for_storage),
         }
     }
 
@@ -330,5 +359,39 @@ impl StoredInvocationOutcome {
             error: self.error.as_ref().map(StoredEngineError::to_replay_error),
             replayed_from: Some(replayed_from),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::invocation::model::CausalContext;
+    use crate::engine::{ActorId, ActorKind, AuthorityGrantId, FunctionId, TraceId};
+
+    #[test]
+    fn stored_outcome_redacts_one_time_credential_but_live_result_stays_raw() {
+        let invocation = Invocation::new_sync(
+            FunctionId::new("worker_kernel::webhook_rotate").unwrap(),
+            serde_json::json!({}),
+            CausalContext::new(
+                ActorId::new("agent-secret").unwrap(),
+                ActorKind::Agent,
+                AuthorityGrantId::new("grant-secret").unwrap(),
+                TraceId::new("trace-secret").unwrap(),
+            ),
+        );
+        let token = "trwh_0123456789abcdef0123456789abcdef";
+        let result = InvocationResult::success(
+            &invocation,
+            WorkerId::new("worker-kernel").unwrap(),
+            FunctionRevision(1),
+            CatalogRevision(1),
+            serde_json::json!({"token":token}),
+        );
+
+        let stored = StoredInvocationOutcome::from_result(&result);
+
+        assert_eq!(stored.value.as_ref().unwrap()["token"], "****");
+        assert_eq!(result.value.as_ref().unwrap()["token"], token);
     }
 }

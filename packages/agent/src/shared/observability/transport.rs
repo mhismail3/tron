@@ -6,10 +6,11 @@
 //! # Batching Strategy
 //!
 //! - Events are accumulated in an internal buffer.
-//! - **Immediate flush** when level is warn, error, or fatal (`level_num` >= 40).
-//! - **Threshold flush** when the batch reaches `batch_size` (default 100).
-//! - **Periodic flush** via a Tokio interval task (default 1 second).
-//! - All flushes write the entire batch in a single `SQLite` transaction.
+//! - **Immediate flush attempt** for warn, error, or fatal (`level_num` >= 40).
+//! - **Threshold flush attempt** at `batch_size` (default 100).
+//! - **Periodic retry** via a Tokio interval task (default 1 second).
+//! - All flushes write the entire batch in one `SQLite` transaction; a failed
+//!   transaction retains every entry for a later attempt.
 //!
 //! # Span Context
 //!
@@ -39,6 +40,9 @@ pub(super) struct TransportConfig {
     pub(super) batch_size: usize,
     /// Flush interval in milliseconds. Default: 1000.
     pub(super) flush_interval_ms: u64,
+    /// Maximum time a diagnostic write waits on another SQLite writer.
+    /// Pending entries remain queued for a later flush after this timeout.
+    pub(super) busy_timeout_ms: u64,
 }
 
 impl Default for TransportConfig {
@@ -47,6 +51,7 @@ impl Default for TransportConfig {
             min_level: LogLevel::Info.as_num(),
             batch_size: 100,
             flush_interval_ms: 1000,
+            busy_timeout_ms: 50,
         }
     }
 }
@@ -92,14 +97,15 @@ impl SqliteTransport {
     ///
     /// The connection must have the `logs` table already created
     /// (via events migrations).
-    pub(super) fn new(conn: Connection, config: TransportConfig) -> Self {
-        Self {
+    pub(super) fn new(conn: Connection, config: TransportConfig) -> rusqlite::Result<Self> {
+        conn.busy_timeout(std::time::Duration::from_millis(config.busy_timeout_ms))?;
+        Ok(Self {
             inner: Arc::new(Mutex::new(TransportInner {
                 batch: Vec::with_capacity(config.batch_size),
                 conn,
             })),
             config,
-        }
+        })
     }
 
     /// Get a handle for manual flushing and shutdown.
@@ -110,23 +116,17 @@ impl SqliteTransport {
     }
 
     /// Flush the current batch to `SQLite`.
-    fn flush_batch(inner: &Mutex<TransportInner>) {
+    fn flush_batch(inner: &Mutex<TransportInner>) -> bool {
         let mut guard = match inner.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
 
         if guard.batch.is_empty() {
-            return;
+            return true;
         }
 
-        let entries: Vec<PendingEntry> = guard.batch.drain(..).collect();
-        if let Err(e) = write_batch(&guard.conn, &entries) {
-            eprintln!(
-                "[tron-logging] write_batch failed ({} entries dropped): {e}",
-                entries.len()
-            );
-        }
+        flush_locked(&mut guard)
     }
 }
 
@@ -138,8 +138,35 @@ pub(crate) struct TransportHandle {
 
 impl TransportHandle {
     /// Flush any pending log entries to `SQLite`.
-    pub(crate) fn flush(&self) {
-        SqliteTransport::flush_batch(&self.inner);
+    pub(crate) fn flush(&self) -> bool {
+        SqliteTransport::flush_batch(&self.inner)
+    }
+
+    /// Retry the complete pending batch until it commits or the shutdown
+    /// deadline expires. Runtime flushing stays non-blocking beyond the short
+    /// connection timeout; only final shutdown uses this bounded drain.
+    pub(crate) fn flush_until_empty(&self, deadline: std::time::Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            if self.flush() {
+                return true;
+            }
+            let elapsed = started.elapsed();
+            if elapsed >= deadline {
+                return false;
+            }
+            std::thread::sleep(
+                std::time::Duration::from_millis(25).min(deadline.saturating_sub(elapsed)),
+            );
+        }
+    }
+
+    /// Number of entries still awaiting a durable commit.
+    pub(crate) fn pending_count(&self) -> usize {
+        match self.inner.lock() {
+            Ok(guard) => guard.batch.len(),
+            Err(poisoned) => poisoned.into_inner().batch.len(),
+        }
     }
 }
 
@@ -343,13 +370,7 @@ where
             guard.batch.push(entry);
 
             if should_flush || guard.batch.len() >= self.config.batch_size {
-                let entries: Vec<PendingEntry> = guard.batch.drain(..).collect();
-                if let Err(e) = write_batch(&guard.conn, &entries) {
-                    eprintln!(
-                        "[tron-logging] write_batch failed ({} entries dropped): {e}",
-                        entries.len()
-                    );
-                }
+                flush_locked(&mut guard);
             }
         }
     }
@@ -364,6 +385,29 @@ where
         let mut span_ctx = SpanContext::default();
         attrs.record(&mut SpanFieldVisitor { ctx: &mut span_ctx });
         span.extensions_mut().insert(span_ctx);
+    }
+}
+
+/// Attempt one atomic diagnostic flush. A failed transaction leaves the batch
+/// in memory so the periodic task or next threshold flush can retry it. Because
+/// `write_batch` commits all entries in one transaction, clearing only after a
+/// successful commit cannot duplicate a partially written batch.
+fn flush_locked(inner: &mut TransportInner) -> bool {
+    let entry_count = inner.batch.len();
+    if entry_count == 0 {
+        return true;
+    }
+    match write_batch(&inner.conn, &inner.batch) {
+        Ok(()) => {
+            inner.batch.clear();
+            true
+        }
+        Err(error) => {
+            eprintln!(
+                "[tron-logging] write_batch failed ({entry_count} entries retained for retry): {error}"
+            );
+            false
+        }
     }
 }
 

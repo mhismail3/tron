@@ -89,8 +89,10 @@ pub struct WorkerDependency {
     pub name: String,
     pub source: String,
     pub version: String,
-    /// Required `sha256:<hex>` digest of the fetched file or source tree.
-    pub checksum: String,
+    /// Optional expected `sha256:<hex>` digest. `worker_upsert` always replaces
+    /// an omitted value with the fetched file/tree digest before publication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
     #[serde(default)]
     pub install: Option<WorkerCommand>,
 }

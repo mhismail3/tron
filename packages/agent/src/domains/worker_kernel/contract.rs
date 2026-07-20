@@ -5,6 +5,10 @@ use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{EffectClass, IdempotencyContract, RiskLevel, VisibilityScope};
 
 const WORKER: &str = "worker_kernel";
+pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
+pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
+pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
+pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
 
 pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
     let mut specs = Vec::new();
@@ -26,8 +30,21 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         "worker_kernel::filesystem_search_text",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"required":["query"],"properties":{"path":{"type":"string"},"query":{"type":"string"},"maxResults":{"type":"integer","minimum":1,"maximum":1000}}}),
-        "Search local UTF-8 files recursively for literal text.",
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["query"],
+            "properties":{
+                "path":{"type":"string","description":"Smallest directory or file that can answer the question; defaults to the session working directory."},
+                "query":{"type":"string"},
+                "maxResults":{"type":"integer","minimum":1,"maximum":1000},
+                "maxWalkEntries":{"type":"integer","minimum":1,"maximum":MAX_TEXT_SEARCH_WALK_ENTRIES},
+                "timeoutSeconds":{"type":"integer","minimum":1,"maximum":MAX_TEXT_SEARCH_TIMEOUT_SECONDS},
+                "includeHidden":{"type":"boolean","description":"Traverse hidden children. An explicitly selected hidden root is always searched."},
+                "includeIgnoredDirectories":{"type":"boolean","description":"Traverse common dependency, build, cache, and macOS Library directories."}
+            }
+        }),
+        "Bounded literal search of local UTF-8 files. Choose the smallest path; the default five-second and 20,000-entry ceilings keep agent cancellation and server shutdown responsive.",
     )?);
     specs.push(spec(
         "worker_kernel::filesystem_write",
@@ -86,10 +103,11 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "type":"object","additionalProperties":false,"required":["bundle"],
             "properties":{
                 "bundle":worker_bundle_schema(),
+                "sourceDirectory":{"type":"string","description":"Optional local directory containing staged UTF-8 worker source. Files are imported recursively into bundle.files; explicit inline files win. Use this after authoring and testing locally so the model does not read and echo file contents back through JSON."},
                 "predecessorWorkerId":{"type":"string"}
             }
         }),
-        "Create or improve a persistent worker in one atomic validate, test, activate operation.",
+        "Create or improve a persistent worker in one atomic validate, test, activate operation. This schema is the complete authoring contract: do not search Tron's files for private examples. Author source in a temporary directory and pass sourceDirectory instead of reading and echoing files into the call. Command runners and smoke/health commands start in files/, read typed JSON from stdin, and emit JSON on stdout; fetched dependency <name> is available at ../dependencies/<name>, and its optional install command runs inside that dependency directory first. A dependency may omit checksum; this operation fetches it and seals the actual digest into the immutable bundle.",
     )?);
     specs.push(spec(
         "worker_kernel::discover",
@@ -269,6 +287,7 @@ fn worker_bundle_schema() -> Value {
     json!({
         "type":"object",
         "additionalProperties":false,
+        "description":"Complete self-contained persistent worker bundle. No external proposal, installer, binding, or private source documentation is required.",
         "required":[
             "schemaVersion","name","description","inputSchema","outputSchema",
             "runner","provenance"
@@ -291,7 +310,7 @@ fn worker_bundle_schema() -> Value {
             },
             "toolName":{
                 "type":"string",
-                "description":"Optional stable direct tool name. Omit to retain the predecessor name or derive worker_<name>."
+                "description":"Optional stable direct tool name. Plain names are normalized to the worker_<name> namespace automatically; omit to retain the predecessor name or derive it from the worker name."
             },
             "inputSchema":{
                 "type":"object",
@@ -318,7 +337,7 @@ fn worker_bundle_schema() -> Value {
                         "required":["kind","command"],
                         "properties":{
                             "kind":{"type":"string","enum":["command"]},
-                            "command":{"type":"array","minItems":1,"items":{"type":"string"}}
+                            "command":{"type":"array","minItems":1,"items":{"type":"string"},"description":"Program and arguments executed with files/ as the working directory. Refer to a fetched dependency named N through ../dependencies/N."}
                         }
                     },
                     {
@@ -335,20 +354,29 @@ fn worker_bundle_schema() -> Value {
             },
             "files":{
                 "type":"object",
-                "description":"Relative source-file paths mapped to complete UTF-8 string contents.",
+                "description":"Relative source-file paths mapped to complete UTF-8 string contents. They are materialized beneath files/, the working directory for runner, smoke-test, and health-check commands.",
                 "additionalProperties":{"type":"string"}
             },
             "dependencies":{
                 "type":"array",
                 "items":{
                     "type":"object","additionalProperties":false,
-                    "required":["name","source","version","checksum"],
+                    "required":["name","source","version"],
                     "properties":{
                         "name":{"type":"string"},
-                        "source":{"type":"string"},
+                        "source":{"type":"string","description":"Use file:// for a local source, git+https:// for a repository, or http(s):// for one downloaded file. The acquired source is materialized at ../dependencies/<name> relative to files/."},
                         "version":{"type":"string","description":"Exact version or source revision; never latest or a range."},
-                        "checksum":{"type":"string","description":"Expected sha256:<64 lowercase or uppercase hex> source-tree digest."},
-                        "install":command
+                        "checksum":{"type":"string","description":"Optional expected sha256:<64 hex> source-tree digest. Omit it to let worker_upsert fetch the exact version and persist the actual digest automatically."},
+                        "install":{
+                            "type":"object",
+                            "additionalProperties":false,
+                            "required":["command"],
+                            "description":"Optional isolated setup command executed with this dependency's ../dependencies/<name> directory as its working directory before smoke tests.",
+                            "properties":{
+                                "command":{"type":"array","minItems":1,"items":{"type":"string"}},
+                                "timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}
+                            }
+                        }
                     }
                 }
             },
@@ -414,8 +442,8 @@ fn worker_bundle_schema() -> Value {
                     ]
                 }
             },
-            "smokeTests":{"type":"array","items":command},
-            "healthChecks":{"type":"array","items":command},
+            "smokeTests":{"type":"array","description":"Pre-activation commands executed from files/ after dependencies and their install commands are ready.","items":command},
+            "healthChecks":{"type":"array","description":"Pre-activation commands executed from files/ after dependencies and their install commands are ready.","items":command},
             "provenance":{
                 "type":"array","minItems":1,
                 "items":{
@@ -454,6 +482,12 @@ mod tests {
         let bundle = &schema["properties"]["bundle"];
         assert_eq!(bundle["additionalProperties"], false);
         assert!(
+            bundle["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("self-contained")
+        );
+        assert!(
             bundle["required"]
                 .as_array()
                 .unwrap()
@@ -481,6 +515,67 @@ mod tests {
         assert_eq!(
             bundle["properties"]["files"]["additionalProperties"]["type"],
             "string"
+        );
+        let dependency = &bundle["properties"]["dependencies"]["items"];
+        assert!(
+            !dependency["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field == "checksum")
+        );
+        assert!(
+            upsert
+                .description
+                .as_deref()
+                .unwrap_or_default()
+                .contains("complete authoring contract")
+        );
+        assert!(
+            upsert
+                .description
+                .as_deref()
+                .unwrap_or_default()
+                .contains("../dependencies/<name>")
+        );
+        assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
+        assert!(
+            upsert
+                .description
+                .as_deref()
+                .unwrap_or_default()
+                .contains("instead of reading and echoing files")
+        );
+        assert!(
+            bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("../dependencies/<name>")
+        );
+    }
+
+    #[test]
+    fn direct_text_search_contract_exposes_shutdown_safe_ceilings() {
+        let search = capabilities()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "worker_kernel::filesystem_search_text")
+            .expect("direct text search contract");
+        let schema = search.request_schema.expect("text search request schema");
+        assert_eq!(
+            schema["properties"]["timeoutSeconds"]["maximum"],
+            MAX_TEXT_SEARCH_TIMEOUT_SECONDS
+        );
+        assert_eq!(
+            schema["properties"]["maxWalkEntries"]["maximum"],
+            MAX_TEXT_SEARCH_WALK_ENTRIES
+        );
+        assert!(
+            search
+                .description
+                .as_deref()
+                .unwrap_or_default()
+                .contains("shutdown responsive")
         );
     }
 }
