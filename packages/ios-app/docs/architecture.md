@@ -180,8 +180,11 @@ state.
 `refresh` first loads the profile list, then refreshes the selected worker if it
 still exists. A disconnected refresh clears server-owned rows. `monitor` polls
 both worker stream topics with independent cursors and refreshes only after new
-events. Mutations serialize through the view model's mutation state, call one
-repository operation, and reload canonical server truth.
+events. Topic polling is historical replay, so the repository contract requires
+an explicit non-optional cursor and each monitoring pass begins at cursor `0`;
+only live subscription may omit its starting cursor. Mutations serialize
+through the view model's mutation state, call one repository operation, and
+reload canonical server truth.
 
 Invocation text is parsed with `JSONSerialization`; malformed JSON remains a
 visible error and is not sent. The server remains responsible for validating
@@ -189,25 +192,35 @@ the worker's actual input schema.
 
 ### Views
 
-The session sidebar contains a compact Worker band showing healthy and total
-persistent workers. It opens `WorkerConsoleSheet`, which provides:
+The session sidebar contains a compact Worker band showing healthy, enabled,
+and total persistent workers. It opens `WorkerConsoleSheet`. The console uses
+the same selected typography, semantic color tokens, liquid-glass section
+fills, compact inline sheet chrome, status hierarchy, and progressive evidence
+disclosure as the rest of Tron; raw schemas and durable payloads are supporting
+detail rather than the page's primary visual hierarchy. It provides:
 
 - profile stop-all/resume with an explanation that queued work remains durable;
 - worker list with runner, health, active hash prefix, and trigger count;
 - detail overview with tool identity and provenance;
-- input schema plus typed JSON invocation;
+- readable schema fields, progressively disclosed raw schema, generated valid
+  JSON input, inline syntax admission, and typed invocation results;
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
-- recent runs with delivery-attempt counts, inbox, and audit history;
+- recent runs with delivery-attempt counts and disclosed input/output, durable
+  inbox results, and progressively disclosed audit history;
 - stop current work without disabling the worker, enable/disable, retirement,
   and confirmation-backed permanent purge.
 
-An empty console explicitly directs the user to create workers
-conversationally. A retired worker does not show the invalid ordinary Enable
-action; its version rows become Restore actions that reactivate canonical
-server state. Destructive purge requires confirmation. Webhook credentials are
-shown only from the mutation response that created or rotated them.
+Loading, disconnected, empty, partial-error, and section-empty states all use
+the same compact semantic cards instead of raw list placeholders. An empty
+console explicitly directs the user to create workers conversationally. A
+retired worker does not show the invalid ordinary Enable action; its version
+rows become Restore actions that reactivate canonical server state. Stop-all,
+retirement, and permanent purge use explicit destructive affordances and
+confirmation; ordinary stop/disable controls explain their durable-state
+semantics. Webhook credentials are shown only from the mutation response that
+created or rotated them.
 
 ## Chat Flow
 
@@ -357,7 +370,9 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/WorkerKernelDTOTests \
   -only-testing:TronMobileTests/WorkerKernelClientTests \
+  -only-testing:TronMobileTests/WorkerConsolePresentationTests \
   -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
+  -only-testing:TronMobileTests/WorkerConsoleVisualContractTests \
   -only-testing:TronMobileTests/SettingsParityTests
 ```
 

@@ -361,7 +361,9 @@ xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/WorkerKernelDTOTests \
   -only-testing:TronMobileTests/WorkerKernelClientTests \
+  -only-testing:TronMobileTests/WorkerConsolePresentationTests \
   -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
+  -only-testing:TronMobileTests/WorkerConsoleVisualContractTests \
   -only-testing:TronMobileTests/SettingsParityTests
 ```
 

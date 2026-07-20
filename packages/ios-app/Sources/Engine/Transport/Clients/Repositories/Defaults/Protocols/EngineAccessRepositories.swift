@@ -351,7 +351,9 @@ protocol WorkerKernelRepository: AnyObject {
         triggerId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerWebhookCredentialDTO
-    func pollWorkerEvents(topic: String, cursor: EngineStreamCursor?) async throws -> EngineStreamPage
+    /// Polls historical worker topic events after an explicit cursor. Topic polling is
+    /// replay, not live subscription, so the transport must never omit the cursor.
+    func pollWorkerEvents(topic: String, cursor: EngineStreamCursor) async throws -> EngineStreamPage
 }
 
 // MARK: - Chat Session Services

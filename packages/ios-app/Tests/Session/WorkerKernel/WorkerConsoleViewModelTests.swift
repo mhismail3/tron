@@ -60,6 +60,27 @@ struct WorkerConsoleViewModelTests {
         let restoredWorker = try #require(viewModel.selectedWorker)
         #expect(WorkerVersionAction.resolve(worker: restoredWorker, version: version) == nil)
     }
+
+    @Test("Worker monitoring replays every topic from an explicit origin cursor")
+    func monitoringUsesExplicitOriginCursors() async {
+        let repository = MockWorkerKernelRepository()
+        let viewModel = WorkerConsoleViewModel()
+
+        let monitor = Task {
+            await viewModel.monitor(repository: repository, connectionState: .connected)
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        monitor.cancel()
+        await monitor.value
+
+        #expect(repository.polledCursors.count >= 2)
+        #expect(Set(repository.polledCursors.prefix(2).map(\.topic)) == [
+            "worker.lifecycle",
+            "worker.invocations",
+        ])
+        #expect(repository.polledCursors.prefix(2).allSatisfy { $0.cursor == 0 })
+        #expect(viewModel.monitoringError == nil)
+    }
 }
 
 @MainActor
@@ -71,6 +92,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var enabledMutations: [Bool] = []
     var rollbackVersions: [String] = []
     var lastInput: [String: Any]?
+    var polledCursors: [(topic: String, cursor: UInt64)] = []
 
     private var worker: WorkerSummaryDTO {
         WorkerSummaryDTO(
@@ -200,9 +222,10 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
 
     func pollWorkerEvents(
         topic: String,
-        cursor: EngineStreamCursor?
+        cursor: EngineStreamCursor
     ) async throws -> EngineStreamPage {
-        EngineStreamPage(events: [], hasMore: false, nextCursor: cursor?.rawValue)
+        polledCursors.append((topic, cursor.rawValue))
+        return EngineStreamPage(events: [], hasMore: false, nextCursor: cursor.rawValue)
     }
 
     private func invocation(id: String, output: [String: Any]) -> WorkerInvocationDTO {

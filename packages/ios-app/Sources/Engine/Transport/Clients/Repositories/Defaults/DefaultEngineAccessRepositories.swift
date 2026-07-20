@@ -360,7 +360,7 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
 
     func pollWorkerEvents(
         topic: String,
-        cursor: EngineStreamCursor?
+        cursor: EngineStreamCursor
     ) async throws -> EngineStreamPage {
         try await client.pollWorkerEvents(topic: topic, cursor: cursor)
     }

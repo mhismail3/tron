@@ -12,9 +12,12 @@ final class WorkerConsoleViewModel {
     var invocationResult: String?
     var webhookCredential: WorkerWebhookCredentialDTO?
     var isRefreshing = false
+    var isLoadingSelection = false
     var isMutating = false
+    var hasLoaded = false
     var stopAll = false
     var lastError: String?
+    var monitoringError: String?
 
     var selectedWorker: WorkerSummaryDTO? {
         workers.first { $0.workerId == selectedWorkerId }
@@ -22,6 +25,28 @@ final class WorkerConsoleViewModel {
 
     var healthyCount: Int {
         workers.filter { $0.enabled && $0.health == "healthy" }.count
+    }
+
+    var enabledCount: Int {
+        workers.filter { $0.enabled && !$0.retired }.count
+    }
+
+    var attentionCount: Int {
+        workers.filter {
+            WorkerConsolePresentation.status(for: $0).kind == .needsAttention
+        }.count
+    }
+
+    var invocationJSONIsValid: Bool {
+        (try? Self.decodeJSON(invocationInput)) != nil
+    }
+
+    var canInvokeSelectedWorker: Bool {
+        guard let selectedWorker else { return false }
+        return selectedWorker.enabled
+            && !selectedWorker.retired
+            && !isMutating
+            && invocationJSONIsValid
     }
 
     func refresh(
@@ -33,10 +58,14 @@ final class WorkerConsoleViewModel {
             inspection = nil
             runs = []
             inbox = []
+            hasLoaded = true
             return
         }
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            hasLoaded = true
+        }
         do {
             let result = try await repository.workers(includeRetired: true)
             workers = result.workers
@@ -58,8 +87,18 @@ final class WorkerConsoleViewModel {
 
     func select(_ workerId: String, repository: any WorkerKernelRepository) async {
         selectedWorkerId = workerId
+        inspection = nil
+        runs = []
+        inbox = []
+        invocationResult = nil
+        webhookCredential = nil
+        isLoadingSelection = true
+        defer { isLoadingSelection = false }
         do {
             try await loadWorker(workerId, repository: repository)
+            invocationInput = WorkerConsolePresentation.invocationTemplate(
+                from: inspection?.bundle["inputSchema"]
+            )
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -70,24 +109,30 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState
     ) async {
-        var cursors: [String: EngineStreamCursor] = [:]
         let topics = ["worker.lifecycle", "worker.invocations"]
+        // Topic polling is historical replay. Unlike live subscribe, the engine
+        // requires an explicit cursor, so every topic starts at the durable origin.
+        var cursors = Dictionary(
+            uniqueKeysWithValues: topics.map { ($0, EngineStreamCursor(rawValue: 0)) }
+        )
         while !Task.isCancelled && connectionState.isConnected {
             var changed = false
+            var pollingError: String?
             for topic in topics {
                 do {
                     let page = try await repository.pollWorkerEvents(
                         topic: topic,
-                        cursor: cursors[topic]
+                        cursor: cursors[topic] ?? EngineStreamCursor(rawValue: 0)
                     )
                     if let next = page.nextCursor {
                         cursors[topic] = EngineStreamCursor(rawValue: next)
                     }
                     changed = changed || !page.events.isEmpty
                 } catch {
-                    lastError = error.localizedDescription
+                    pollingError = error.localizedDescription
                 }
             }
+            monitoringError = pollingError
             if changed {
                 await refresh(repository: repository, connectionState: connectionState)
             }
