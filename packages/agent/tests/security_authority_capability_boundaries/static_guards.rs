@@ -292,7 +292,8 @@ fn sacb_trusted_local_workers_bypass_call_grants_while_remote_auth_stays_explici
     for required in [
         "CausalContext::trusted_local(",
         "ActorKind::Worker",
-        "self.store.mark_failed(&queued.worker_id, &redacted)",
+        ".mark_failed(&queued.worker_id, \"execution\", &redacted)",
+        "self.store.mark_failed(worker_id, phase, &reason)",
         "self.unregister_dynamic_tool(&queued.worker_id).await",
     ] {
         assert!(

@@ -54,6 +54,18 @@ they do not imply the removed authorization or operation-catalog system.
 - With the setting enabled, accepted user sessions and workers are trusted
   local operators. Direct host and worker calls do not derive, mint, inspect,
   or consume per-call capability grants.
+- Changes apply to the running profile without a server restart. Disabling
+  hides the fixed worker primitives, unregisters direct worker tools, cancels
+  active execution, and stops resident services while preserving canonical
+  bundles and queued work. Re-enabling restores the primitives, rebuilds the
+  enabled direct-tool surface from canonical state, and resumes dispatch unless
+  profile stop-all is still engaged.
+- The authenticated Worker Console remains operational while autonomy is off:
+  it may inspect state and history or use enable/disable, rollback,
+  retire/purge, webhook rotation, and stop controls. Those operations do not
+  expose tools or start dispatch until autonomy is enabled. Worker authoring,
+  invocation, webhooks, process/network primitives, and core mutation stay
+  blocked while the mode is off.
 - Remote clients still require bearer-authenticated transport. Worker webhooks
   are loopback-only and require their own rotatable trigger token.
 
@@ -111,7 +123,8 @@ One request carries the complete candidate bundle and an optional predecessor.
 The runtime:
 
 1. validates identity, schemas, runner configuration, relative paths, trigger
-   definitions, secret names, provenance, and dependency locks;
+   definitions and deterministic schedule inputs, secret names, provenance,
+   and dependency locks;
 2. chooses the explicit predecessor or detects the closest semantic overlap by
    name/description terms, preferring an update over a duplicate;
 3. stages outside the active worker directory;
@@ -154,8 +167,12 @@ process sandbox.
 
 A service worker starts lazily on first invocation, may use an HTTP health
 endpoint, and receives calls through its configured loopback invoke URL. The
-runtime reuses a healthy process for later calls and terminates it when the
-worker is disabled, retired, replaced, stop-all is engaged, or Tron shuts down.
+runtime reuses a healthy process for later calls and supervises it between
+invocations. An unexpected process exit disables the worker immediately; three
+consecutive failed health probes do the same without treating a single
+transient probe as terminal. The runtime also terminates a service when the
+worker is disabled, retired, replaced, stop-all is engaged, autonomy is turned
+off, or Tron shuts down.
 
 ## Dependency and Secret Isolation
 
@@ -214,14 +231,22 @@ Profile ceilings are fixed reliability limits:
 | Non-resident invocation timeout | 2 hours |
 | Causal trigger depth | 16 |
 
-Work beyond concurrency limits waits in the durable queue. Causal work beyond
-depth 16 is rejected before persistence. Event cursors advance only after
-matching invocations are durably queued.
+Work beyond concurrency limits waits in the durable queue. Direct causal work
+beyond depth 16 is rejected before persistence. A matching engine event beyond
+that ceiling records a durable terminal-suppression trace and audit entry, then
+advances its cursor so an impossible event cannot jam the trigger. Event cursors
+otherwise advance only after matching invocations are durably queued; a failure
+to persist either an invocation or suppression retains the cursor for retry. If
+the configured engine-event materialization itself violates the worker input
+schema or secret-isolation contract, Tron disables the worker, its route, and
+its triggers, records the inbox failure, and advances past that terminal event.
 
 Successful and failed results enter the durable inbox and emit
 `worker.invocations`. Notable unseen background results are atomically attached
-to the next relevant model turn once; manual results remain explicitly
-inspectable.
+to the next relevant model turn once. High-visibility system failures such as
+tool activation, trigger materialization, and resident supervision participate
+in the same one-time attachment path even though they have no invocation row;
+manual results remain explicitly inspectable.
 
 ## Failure and Recovery
 
@@ -232,7 +257,8 @@ does not silently repair or roll it back.
 
 Operator controls are:
 
-- disable/enable — immediate route removal/restoration and active-work stop;
+- disable/enable — immediate route and trigger removal/restoration plus
+  active-work stop (webhooks restore only when a token hash exists);
 - rollback — activate a retained version and rotate any restored webhook token;
 - retire — disable routes and triggers while preserving bundles and history;
 - purge — permanently remove a retired worker's bundle and operational rows,
@@ -511,8 +537,13 @@ Deterministic tests cover:
 - command, agent, and resident-service runners;
 - manual, schedule, engine-event, and authenticated webhook dispatch;
 - restart recovery with explicit attempts, idempotency propagation, loop
-  suppression, causal depth, concurrency queueing, timeout, stop/disable,
-  failure disablement, inbox, and all-vault secret rejection/redaction;
+  suppression, terminal-event cursor advancement, causal depth, concurrency
+  queueing, timeout, stop/disable, failure disablement, system-inbox attachment,
+  and all-vault secret rejection/redaction;
+- live autonomy enable/disable/re-enable without restart, including dynamic-tool
+  race closure and authenticated console management while execution is off;
+- lazy resident reuse plus shutdown, stop-all, disable, process-exit, and
+  repeated-health-failure supervision;
 - a natural-language model loop that proactively upserts a complete worker,
   sees its direct typed tool immediately, invokes it, and reports the persistent
   adaptation; plus relevance selection, discovery promotion, complete tool

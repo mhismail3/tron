@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock as StdRwLock, Weak};
 use std::time::Duration;
 
 use dashmap::{DashMap, DashSet};
@@ -35,7 +35,11 @@ use super::types::{
 
 struct ResidentProcess {
     child: Option<Child>,
+    consecutive_health_failures: u8,
 }
+
+const RESIDENT_HEALTH_FAILURE_LIMIT: u8 = 3;
+const RESIDENT_HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct RemoveDirectoryOnDrop(PathBuf);
 
@@ -43,6 +47,12 @@ impl Drop for RemoveDirectoryOnDrop {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+#[derive(Clone)]
+struct KernelPrimitiveRegistration {
+    definition: FunctionDefinition,
+    handler: Weak<dyn InProcessFunctionHandler>,
 }
 
 pub struct WorkerRuntime {
@@ -59,7 +69,10 @@ pub struct WorkerRuntime {
     execution_stop: Mutex<CancellationToken>,
     residents: DashMap<String, Arc<Mutex<ResidentProcess>>>,
     resident_users: DashMap<String, Arc<AtomicUsize>>,
+    resident_supervisions: DashSet<String>,
     stopped: AtomicBool,
+    kernel_primitives: StdRwLock<Vec<KernelPrimitiveRegistration>>,
+    kernel_visibility: AtomicBool,
     http: reqwest::Client,
     core_proposals: CoreProposalService,
 }
@@ -74,6 +87,7 @@ impl WorkerRuntime {
         profile_runtime: Arc<ProfileRuntime>,
     ) -> Result<Arc<Self>, String> {
         let stopped = store.stop_all()?;
+        let kernel_visibility = profile_runtime.current().settings.autonomous_workers;
         let core_proposals = CoreProposalService::new(store.home(), Arc::clone(&event_store))?;
         Ok(Arc::new(Self {
             store,
@@ -89,7 +103,10 @@ impl WorkerRuntime {
             execution_stop: Mutex::new(CancellationToken::new()),
             residents: DashMap::new(),
             resident_users: DashMap::new(),
+            resident_supervisions: DashSet::new(),
             stopped: AtomicBool::new(stopped),
+            kernel_primitives: StdRwLock::new(Vec::new()),
+            kernel_visibility: AtomicBool::new(kernel_visibility),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(MAX_INVOCATION_SECONDS))
                 .build()
@@ -104,6 +121,24 @@ impl WorkerRuntime {
 
     pub fn autonomous_enabled(&self) -> bool {
         self.profile_runtime.current().settings.autonomous_workers
+    }
+
+    pub(crate) fn configure_kernel_primitives(
+        &self,
+        primitives: Vec<(FunctionDefinition, Weak<dyn InProcessFunctionHandler>)>,
+    ) -> Result<(), String> {
+        let mut registrations = self
+            .kernel_primitives
+            .write()
+            .map_err(|_| "worker kernel primitive registry is poisoned".to_owned())?;
+        *registrations = primitives
+            .into_iter()
+            .map(|(definition, handler)| KernelPrimitiveRegistration {
+                definition,
+                handler,
+            })
+            .collect();
+        Ok(())
     }
 
     pub async fn create_core_proposal(
@@ -139,10 +174,15 @@ impl WorkerRuntime {
     }
 
     pub async fn activate(self: &Arc<Self>, cancellation: CancellationToken) {
-        if let Err(error) = self.register_active_tools().await {
-            tracing::error!(%error, "failed to register persistent worker tools");
-        }
-        self.run_dispatcher(cancellation).await;
+        let autonomous = self.autonomous_enabled();
+        let applied = match self.apply_autonomy_state(autonomous).await {
+            Ok(()) => Some(autonomous),
+            Err(error) => {
+                tracing::error!(%error, autonomous, "failed to apply initial worker autonomy state");
+                None
+            }
+        };
+        self.run_dispatcher(cancellation, applied).await;
     }
 
     pub async fn shutdown(&self) {
@@ -196,11 +236,26 @@ impl WorkerRuntime {
         phase: &str,
         error: &str,
     ) -> String {
+        self.handle_worker_runtime_failure(
+            worker_id,
+            version,
+            phase,
+            &format!("dynamic tool {phase} failed: {error}"),
+        )
+        .await
+    }
+
+    async fn handle_worker_runtime_failure(
+        &self,
+        worker_id: &str,
+        version: &str,
+        phase: &str,
+        error: &str,
+    ) -> String {
         let secrets = self.load_all_vault_secrets().unwrap_or_default();
-        let reason =
-            redact_known_secrets(&format!("dynamic tool {phase} failed: {error}"), &secrets);
+        let reason = redact_known_secrets(error, &secrets);
         let mut recording_failures = Vec::new();
-        if let Err(recording_error) = self.store.mark_failed(worker_id, &reason) {
+        if let Err(recording_error) = self.store.mark_failed(worker_id, phase, &reason) {
             recording_failures.push(format!("disable failed worker: {recording_error}"));
         }
         if let Err(recording_error) = self.store.record_system_inbox(
@@ -403,6 +458,12 @@ impl WorkerRuntime {
     }
 
     fn enqueue_request(&self, request: InvokeRequest) -> Result<(InvocationRecord, bool), String> {
+        if !self.autonomous_enabled() {
+            return Err(
+                "autonomous workers are disabled for this profile; set autonomousWorkers=true"
+                    .to_owned(),
+            );
+        }
         if self.stopped.load(Ordering::SeqCst) || self.store.stop_all()? {
             return Err("worker dispatch is stopped for this profile".to_owned());
         }
@@ -459,6 +520,9 @@ impl WorkerRuntime {
         self: &Arc<Self>,
         queued: InvocationRecord,
     ) -> Result<InvocationRecord, String> {
+        if !self.autonomous_enabled() {
+            return Err("worker autonomy was disabled while the invocation was queued".to_owned());
+        }
         let worker = self
             .store
             .load_version(&queued.worker_id, &queued.worker_version)?;
@@ -545,7 +609,8 @@ impl WorkerRuntime {
                 let secrets = self.load_all_vault_secrets().unwrap_or_default();
                 let redacted = redact_known_secrets(&error, &secrets);
                 if !was_stopped {
-                    self.store.mark_failed(&queued.worker_id, &redacted)?;
+                    self.store
+                        .mark_failed(&queued.worker_id, "execution", &redacted)?;
                     self.unregister_dynamic_tool(&queued.worker_id).await;
                     self.stop_residents(Some(&queued.worker_id)).await;
                     self.publish_event(
@@ -796,7 +861,12 @@ impl WorkerRuntime {
         let process = self
             .residents
             .entry(resident_key(worker))
-            .or_insert_with(|| Arc::new(Mutex::new(ResidentProcess { child: None })))
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(ResidentProcess {
+                    child: None,
+                    consecutive_health_failures: 0,
+                }))
+            })
             .clone();
         let mut process = process.lock().await;
         let still_running = match process.child.as_mut() {
@@ -817,6 +887,7 @@ impl WorkerRuntime {
                 Stdio::null(),
                 None,
             )?);
+            process.consecutive_health_failures = 0;
             if let Some(url) = health_url {
                 let mut healthy = false;
                 for _ in 0..50 {
@@ -861,7 +932,9 @@ impl WorkerRuntime {
         let worker = self.store.set_enabled(worker_id, enabled)?;
         if enabled {
             self.reset_worker_stop(worker_id);
-            if let Err(error) = self.register_dynamic_tool(worker_id).await {
+            if self.autonomous_enabled()
+                && let Err(error) = self.register_dynamic_tool(worker_id).await
+            {
                 return Err(self
                     .handle_tool_activation_failure(
                         worker_id,
@@ -887,7 +960,9 @@ impl WorkerRuntime {
         let (worker, webhooks) = self.store.rollback(worker_id, version)?;
         self.stop_obsolete_residents(worker_id, version).await;
         self.reset_worker_stop(worker_id);
-        if let Err(error) = self.register_dynamic_tool(worker_id).await {
+        if self.autonomous_enabled()
+            && let Err(error) = self.register_dynamic_tool(worker_id).await
+        {
             return Err(self
                 .handle_tool_activation_failure(worker_id, version, "rollback", &error)
                 .await);
@@ -916,7 +991,7 @@ impl WorkerRuntime {
         if stopped {
             self.execution_stop.lock().await.cancel();
             self.stop_residents(None).await;
-        } else {
+        } else if self.autonomous_enabled() {
             *self.execution_stop.lock().await = CancellationToken::new();
         }
         Ok(())
@@ -937,6 +1012,117 @@ impl WorkerRuntime {
         let _ = self
             .worker_stops
             .insert(worker_id.to_owned(), CancellationToken::new());
+    }
+
+    async fn apply_autonomy_state(self: &Arc<Self>, enabled: bool) -> Result<(), String> {
+        let visibility = self.sync_kernel_primitive_visibility(enabled).await;
+        if enabled {
+            visibility?;
+            if !self.stopped.load(Ordering::SeqCst) {
+                *self.execution_stop.lock().await = CancellationToken::new();
+            }
+            self.register_active_tools().await?;
+        } else {
+            self.execution_stop.lock().await.cancel();
+            self.stop_residents(None).await;
+            let unregistration = self.unregister_all_dynamic_tools().await;
+            visibility?;
+            unregistration?;
+        }
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action": if enabled { "autonomy_enabled" } else { "autonomy_disabled" },
+                "autonomousWorkers": enabled,
+            }),
+            None,
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn sync_kernel_primitive_visibility(&self, enabled: bool) -> Result<(), String> {
+        let previous = self.kernel_visibility.load(Ordering::SeqCst);
+        if previous == enabled {
+            return Ok(());
+        }
+        let registrations = self
+            .kernel_primitives
+            .read()
+            .map_err(|_| "worker kernel primitive registry is poisoned".to_owned())?
+            .clone();
+        let mut prepared = Vec::with_capacity(registrations.len());
+        for registration in registrations {
+            let handler = registration.handler.upgrade().ok_or_else(|| {
+                format!(
+                    "worker kernel handler for {} is no longer registered",
+                    registration.definition.id.as_str()
+                )
+            })?;
+            let mut next = registration.definition.clone();
+            let metadata = next.metadata.as_object_mut().ok_or_else(|| {
+                format!(
+                    "worker kernel metadata for {} is not an object",
+                    next.id.as_str()
+                )
+            })?;
+            let _ = metadata.insert("modelPrimitive".to_owned(), Value::Bool(enabled));
+            let mut rollback = registration.definition;
+            let rollback_metadata = rollback.metadata.as_object_mut().ok_or_else(|| {
+                format!(
+                    "worker kernel metadata for {} is not an object",
+                    rollback.id.as_str()
+                )
+            })?;
+            let _ = rollback_metadata.insert("modelPrimitive".to_owned(), Value::Bool(previous));
+            prepared.push((next, rollback, handler));
+        }
+
+        let mut updated = 0;
+        for (next, _, handler) in &prepared {
+            if let Err(error) = self
+                .host
+                .register_function(next.clone(), Some(Arc::clone(handler)), false)
+                .await
+            {
+                let mut rollback_failures = Vec::new();
+                for (_, rollback, rollback_handler) in prepared.iter().take(updated).rev() {
+                    if let Err(rollback_error) = self
+                        .host
+                        .register_function(
+                            rollback.clone(),
+                            Some(Arc::clone(rollback_handler)),
+                            false,
+                        )
+                        .await
+                    {
+                        rollback_failures.push(rollback_error.to_string());
+                    }
+                }
+                let rollback_evidence = if rollback_failures.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "; visibility rollback failures: {}",
+                        rollback_failures.join(" | ")
+                    )
+                };
+                return Err(format!(
+                    "update worker kernel tool visibility for {}: {error}{rollback_evidence}",
+                    next.id.as_str()
+                ));
+            }
+            updated += 1;
+        }
+        self.kernel_visibility.store(enabled, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn unregister_all_dynamic_tools(&self) -> Result<(), String> {
+        for worker in self.store.list(true)? {
+            self.unregister_dynamic_tool(&worker.worker_id).await;
+        }
+        Ok(())
     }
 
     async fn register_active_tools(self: &Arc<Self>) -> Result<(), String> {
@@ -965,6 +1151,10 @@ impl WorkerRuntime {
     }
 
     async fn register_dynamic_tool(self: &Arc<Self>, worker_id: &str) -> Result<(), String> {
+        if !self.autonomous_enabled() {
+            self.unregister_dynamic_tool(worker_id).await;
+            return Ok(());
+        }
         let active = self.store.load_active(worker_id)?;
         let success_evidence = self.store.success_evidence(worker_id)?;
         let provenance = active
@@ -1029,6 +1219,9 @@ impl WorkerRuntime {
             )
             .await
             .map_err(|error| format!("register dynamic worker tool: {error}"))?;
+        if !self.autonomous_enabled() {
+            self.unregister_dynamic_tool(worker_id).await;
+        }
         Ok(())
     }
 
@@ -1042,7 +1235,11 @@ impl WorkerRuntime {
         let _ = self.host.unregister_function(&function_id, &owner).await;
     }
 
-    async fn run_dispatcher(self: &Arc<Self>, cancellation: CancellationToken) {
+    async fn run_dispatcher(
+        self: &Arc<Self>,
+        cancellation: CancellationToken,
+        mut applied_autonomy: Option<bool>,
+    ) {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut runs = JoinSet::new();
@@ -1050,13 +1247,22 @@ impl WorkerRuntime {
             tokio::select! {
                 () = cancellation.cancelled() => break,
                 _ = ticker.tick() => {
-                    if !self.autonomous_enabled() {
-                        self.execution_stop.lock().await.cancel();
-                        self.stop_residents(None).await;
-                    } else if !self.stopped.load(Ordering::SeqCst) {
+                    let autonomous = self.autonomous_enabled();
+                    if applied_autonomy != Some(autonomous) {
+                        match self.apply_autonomy_state(autonomous).await {
+                            Ok(()) => applied_autonomy = Some(autonomous),
+                            Err(error) => {
+                                tracing::error!(%error, autonomous, "failed to apply live worker autonomy state");
+                                applied_autonomy = None;
+                                continue;
+                            }
+                        }
+                    }
+                    if autonomous && !self.stopped.load(Ordering::SeqCst) {
                         if self.execution_stop.lock().await.is_cancelled() {
                             *self.execution_stop.lock().await = CancellationToken::new();
                         }
+                        self.dispatch_resident_supervision(&mut runs);
                         self.dispatch_queued(&mut runs).await;
                         self.dispatch_schedules(&mut runs).await;
                         self.dispatch_events(&mut runs).await;
@@ -1148,6 +1354,15 @@ impl WorkerRuntime {
             let Ok(page) = page else {
                 continue;
             };
+            let active = match self.store.load_active(&worker_id) {
+                Ok(active) => active,
+                Err(_) => continue,
+            };
+            let worker_function =
+                match FunctionId::new(format!("worker_kernel::dynamic_{worker_id}")) {
+                    Ok(function) => function,
+                    Err(_) => continue,
+                };
             let next_cursor = page.next_cursor.0;
             let mut durable = Vec::new();
             let mut persistence_failed = false;
@@ -1172,14 +1387,66 @@ impl WorkerRuntime {
                     .and_then(|value| u32::try_from(value).ok())
                     .unwrap_or(0)
                     .saturating_add(1);
+                let idempotency_key = format!("event:{event_trigger}:{event_cursor}");
+                let trace_id = event.trace_id.as_ref().map_or_else(
+                    || format!("worker-event-{}", uuid::Uuid::now_v7()),
+                    |id| id.as_str().to_owned(),
+                );
+                if causal_depth > MAX_CAUSAL_DEPTH {
+                    if self
+                        .store
+                        .record_trigger_suppression(
+                            &trace_id,
+                            &event_worker,
+                            "engine_event",
+                            &idempotency_key,
+                            causal_depth,
+                            "causal_depth_limit",
+                        )
+                        .is_err()
+                    {
+                        persistence_failed = true;
+                        break;
+                    }
+                    continue;
+                }
+                let input_validation = crate::engine::validate_engine_schema_payload(
+                    &worker_function,
+                    "request",
+                    &active.bundle.input_schema,
+                    &merged,
+                )
+                .map_err(|error| format!(
+                    "engine-event trigger '{event_trigger}' produced input outside inputSchema: {error}"
+                ))
+                .and_then(|()| {
+                    self.reject_secret_material_in_value(&merged, "engine-event worker input")
+                });
+                if let Err(error) = input_validation {
+                    let _ = self
+                        .handle_worker_runtime_failure(
+                            &worker_id,
+                            &active.summary.active_version,
+                            "trigger_dispatch",
+                            &error,
+                        )
+                        .await;
+                    if self
+                        .store
+                        .summary(&worker_id)
+                        .ok()
+                        .flatten()
+                        .is_none_or(|summary| summary.enabled)
+                    {
+                        persistence_failed = true;
+                    }
+                    break;
+                }
                 match self.enqueue_request(InvokeRequest {
                     worker_id: event_worker,
                     input: merged,
-                    idempotency_key: format!("event:{event_trigger}:{event_cursor}"),
-                    trace_id: event.trace_id.map_or_else(
-                        || format!("worker-event-{}", uuid::Uuid::now_v7()),
-                        |id| id.as_str().to_owned(),
-                    ),
+                    idempotency_key,
+                    trace_id,
                     causal_depth,
                     trigger_kind: "engine_event".to_owned(),
                 }) {
@@ -1204,6 +1471,164 @@ impl WorkerRuntime {
                 });
             }
         }
+    }
+
+    fn dispatch_resident_supervision(self: &Arc<Self>, runs: &mut JoinSet<()>) {
+        let residents = self
+            .residents
+            .iter()
+            .map(|entry| (entry.key().clone(), Arc::clone(entry.value())))
+            .collect::<Vec<_>>();
+        for (key, process) in residents {
+            if !self.resident_supervisions.insert(key.clone()) {
+                continue;
+            }
+            let runtime = Arc::clone(self);
+            runs.spawn(async move {
+                runtime.supervise_resident(&key, process).await;
+                let _ = runtime.resident_supervisions.remove(&key);
+            });
+        }
+    }
+
+    #[cfg(test)]
+    async fn supervise_residents(self: &Arc<Self>) {
+        let mut runs = JoinSet::new();
+        self.dispatch_resident_supervision(&mut runs);
+        while runs.join_next().await.is_some() {}
+    }
+
+    async fn supervise_resident(&self, key: &str, process: Arc<Mutex<ResidentProcess>>) {
+        let Some((worker_id, version)) = key.rsplit_once('@') else {
+            return;
+        };
+        if !self.resident_is_current(worker_id, version)
+            || !self.resident_process_is_registered(key, &process)
+        {
+            return;
+        }
+
+        let exited = {
+            let mut process = process.lock().await;
+            match process.child.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        process.child = None;
+                        Some(format!("resident service exited with {status}"))
+                    }
+                    Ok(None) => None,
+                    Err(error) => Some(format!(
+                        "resident service process supervision failed: {error}"
+                    )),
+                },
+                None => Some("resident service process disappeared".to_owned()),
+            }
+        };
+        if let Some(error) = exited {
+            if self.resident_is_current(worker_id, version)
+                && self.resident_process_is_registered(key, &process)
+            {
+                let _ = self
+                    .handle_worker_runtime_failure(
+                        worker_id,
+                        version,
+                        "resident_supervision",
+                        &error,
+                    )
+                    .await;
+            }
+            return;
+        }
+
+        let worker = match self.store.load_version(worker_id, version) {
+            Ok(worker) => worker,
+            Err(error) => {
+                if self.resident_is_current(worker_id, version)
+                    && self.resident_process_is_registered(key, &process)
+                {
+                    let _ = self
+                        .handle_worker_runtime_failure(
+                            worker_id,
+                            version,
+                            "resident_supervision",
+                            &format!("load resident worker version for supervision: {error}"),
+                        )
+                        .await;
+                }
+                return;
+            }
+        };
+        let WorkerRunner::Service { health_url, .. } = worker.bundle.runner else {
+            return;
+        };
+        let Some(health_url) = health_url else {
+            return;
+        };
+        let health = self
+            .http
+            .get(&health_url)
+            .timeout(RESIDENT_HEALTH_TIMEOUT)
+            .send()
+            .await;
+        if !self.resident_is_current(worker_id, version)
+            || !self.resident_process_is_registered(key, &process)
+        {
+            return;
+        }
+        let healthy = health
+            .as_ref()
+            .is_ok_and(|response| response.status().is_success());
+        let failure = {
+            let mut process = process.lock().await;
+            if healthy {
+                process.consecutive_health_failures = 0;
+                None
+            } else {
+                process.consecutive_health_failures =
+                    process.consecutive_health_failures.saturating_add(1);
+                (process.consecutive_health_failures >= RESIDENT_HEALTH_FAILURE_LIMIT).then(
+                    || match health {
+                        Ok(response) => format!(
+                            "resident health endpoint {health_url} returned {} {} consecutive times",
+                            response.status(),
+                            process.consecutive_health_failures
+                        ),
+                        Err(error) => format!(
+                            "resident health endpoint {health_url} failed {} consecutive times: {error}",
+                            process.consecutive_health_failures
+                        ),
+                    },
+                )
+            }
+        };
+        if let Some(error) = failure
+            && self.resident_is_current(worker_id, version)
+            && self.resident_process_is_registered(key, &process)
+        {
+            let _ = self
+                .handle_worker_runtime_failure(worker_id, version, "resident_supervision", &error)
+                .await;
+        }
+    }
+
+    fn resident_is_current(&self, worker_id: &str, version: &str) -> bool {
+        self.store
+            .summary(worker_id)
+            .ok()
+            .flatten()
+            .is_some_and(|summary| {
+                summary.enabled && !summary.retired && summary.active_version == version
+            })
+    }
+
+    fn resident_process_is_registered(
+        &self,
+        key: &str,
+        process: &Arc<Mutex<ResidentProcess>>,
+    ) -> bool {
+        self.residents
+            .get(key)
+            .is_some_and(|registered| Arc::ptr_eq(registered.value(), process))
     }
 
     async fn stop_residents(&self, worker_id: Option<&str>) {
@@ -2252,6 +2677,124 @@ print(json.dumps({
     }
 
     #[tokio::test]
+    async fn over_depth_engine_event_is_durably_suppressed_and_cursor_advances() {
+        let (runtime, _home) = test_runtime(None);
+        let mut bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+        bundle.worker_id = Some("depth-suppression".to_owned());
+        bundle.name = "Depth Suppression".to_owned();
+        bundle.description =
+            "Engine-event fixture proving terminal causal suppression does not jam delivery"
+                .to_owned();
+        bundle.tool_name = Some("worker_depth_suppression".to_owned());
+        bundle.triggers = vec![WorkerTrigger::EngineEvent {
+            id: "depth-event".to_owned(),
+            topic: "worker.depth-fixture".to_owned(),
+            filter: json!({"ready":true}),
+            input: json!({"kind":"event"}),
+        }];
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let trace_id = TraceId::new("depth-suppression-trace").unwrap();
+        runtime
+            .publish_event(
+                "worker.depth-fixture",
+                json!({"ready":true,"causalDepth":MAX_CAUSAL_DEPTH}),
+                Some(trace_id.clone()),
+            )
+            .await;
+
+        let mut runs = JoinSet::new();
+        runtime.dispatch_events(&mut runs).await;
+
+        assert!(runs.is_empty());
+        assert!(runtime.store().runs(None, 10).unwrap().is_empty());
+        let trace = runtime
+            .store()
+            .trace(trace_id.as_str())
+            .unwrap()
+            .expect("suppressed trace");
+        assert_eq!(trace["suppressedCount"], 1);
+        assert_eq!(trace["maxCausalDepth"], MAX_CAUSAL_DEPTH + 1);
+        let cursor_after_suppression = runtime
+            .store()
+            .event_triggers()
+            .unwrap()
+            .into_iter()
+            .find(|(worker_id, _, _)| worker_id == &outcome.worker.worker_id)
+            .expect("event trigger")
+            .2;
+        assert!(cursor_after_suppression > 0);
+
+        runtime.dispatch_events(&mut runs).await;
+        let trace_after_repoll = runtime
+            .store()
+            .trace(trace_id.as_str())
+            .unwrap()
+            .expect("suppressed trace after repoll");
+        assert_eq!(trace_after_repoll["suppressedCount"], 1);
+        let inspection = runtime.store().inspect(&outcome.worker.worker_id).unwrap();
+        assert!(inspection["audit"].as_array().unwrap().iter().any(|entry| {
+            entry["action"] == "delivery_suppressed"
+                && entry["details"]["reason"] == "causal_depth_limit"
+        }));
+    }
+
+    #[tokio::test]
+    async fn invalid_engine_event_materialization_disables_worker_instead_of_jamming_cursor() {
+        let (runtime, _home) = test_runtime(None);
+        let mut bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+        bundle.worker_id = Some("invalid-event-materialization".to_owned());
+        bundle.name = "Invalid Event Materialization".to_owned();
+        bundle.description =
+            "Engine-event fixture whose schema intentionally rejects the injected event envelope"
+                .to_owned();
+        bundle.tool_name = Some("worker_invalid_event_materialization".to_owned());
+        bundle.input_schema = json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["kind"],
+            "properties":{"kind":{"type":"string"}}
+        });
+        bundle.triggers = vec![WorkerTrigger::EngineEvent {
+            id: "invalid-event".to_owned(),
+            topic: "worker.invalid-event-fixture".to_owned(),
+            filter: json!({"ready":true}),
+            input: json!({"kind":"event"}),
+        }];
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        runtime
+            .publish_event(
+                "worker.invalid-event-fixture",
+                json!({"ready":true}),
+                Some(TraceId::new("invalid-event-materialization-trace").unwrap()),
+            )
+            .await;
+
+        let mut runs = JoinSet::new();
+        runtime.dispatch_events(&mut runs).await;
+
+        assert!(runs.is_empty());
+        assert!(runtime.store().runs(None, 10).unwrap().is_empty());
+        let summary = runtime
+            .store()
+            .summary(&outcome.worker.worker_id)
+            .unwrap()
+            .unwrap();
+        assert!(!summary.enabled);
+        assert_eq!(summary.health, "failed");
+        let inspection = runtime.store().inspect(&outcome.worker.worker_id).unwrap();
+        assert!(inspection["triggers"][0]["streamCursor"].as_i64().unwrap() > 0);
+        assert_eq!(inspection["triggers"][0]["enabled"], false);
+        assert_eq!(inspection["healthHistory"][0]["source"], "trigger_dispatch");
+        let inbox = runtime
+            .store()
+            .inbox(Some(&outcome.worker.worker_id), 10)
+            .unwrap();
+        assert!(inbox.iter().any(|item| {
+            item["result"]["phase"] == "trigger_dispatch" && item["result"]["disabled"] == true
+        }));
+    }
+
+    #[tokio::test]
     async fn profile_and_worker_concurrency_overflow_stays_durably_queued() {
         let (runtime, _home) = test_runtime(None);
         let mut worker_ids = Vec::new();
@@ -2381,17 +2924,15 @@ print(json.dumps({
     #[tokio::test]
     async fn disabling_a_worker_stops_its_active_invocation() {
         let (runtime, _home) = test_runtime(None);
-        let outcome = runtime
-            .upsert(
-                command_bundle(vec![
-                    "sh".to_owned(),
-                    "-c".to_owned(),
-                    "sleep 30; cat".to_owned(),
-                ]),
-                None,
-            )
-            .await
-            .unwrap();
+        let mut bundle = command_bundle(vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "sleep 30; cat".to_owned(),
+        ]);
+        bundle.triggers = vec![WorkerTrigger::Manual {
+            id: "manual".to_owned(),
+        }];
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
         let worker_id = outcome.worker.worker_id;
         let invoking = {
             let runtime = Arc::clone(&runtime);
@@ -2428,6 +2969,14 @@ print(json.dumps({
                 .unwrap()
                 .enabled
         );
+        let disabled = runtime.store().inspect(&worker_id).unwrap();
+        assert_eq!(disabled["route"]["enabled"], false);
+        assert_eq!(disabled["triggers"][0]["enabled"], false);
+
+        runtime.set_enabled(&worker_id, true).await.unwrap();
+        let enabled = runtime.store().inspect(&worker_id).unwrap();
+        assert_eq!(enabled["route"]["enabled"], true);
+        assert_eq!(enabled["triggers"][0]["enabled"], true);
     }
 
     #[tokio::test]
@@ -2694,6 +3243,70 @@ print(json.dumps({
                 )
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_tool_registration_cannot_escape_disabled_autonomy() {
+        let (runtime, _home) = test_runtime(None);
+        let outcome = runtime
+            .upsert(
+                command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+                None,
+            )
+            .await
+            .unwrap();
+        let before =
+            crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
+                &runtime.host,
+                "dynamic-registration-race",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            before
+                .targets_by_name
+                .contains_key(&outcome.worker.tool_name)
+        );
+
+        let settings_path = crate::shared::server::test_support::test_user_profile_path(
+            runtime.profile_runtime.home(),
+        );
+        crate::domains::settings::profile::SettingsStore::new(settings_path)
+            .update(json!({"autonomousWorkers":false}))
+            .unwrap();
+        runtime
+            .profile_runtime
+            .reload_now("dynamic registration autonomy race test")
+            .unwrap();
+
+        runtime
+            .register_dynamic_tool(&outcome.worker.worker_id)
+            .await
+            .unwrap();
+
+        let after =
+            crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
+                &runtime.host,
+                "dynamic-registration-race",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            !after
+                .targets_by_name
+                .contains_key(&outcome.worker.tool_name)
+        );
+        assert!(
+            runtime
+                .store()
+                .summary(&outcome.worker.worker_id)
+                .unwrap()
+                .unwrap()
+                .enabled,
+            "profile mode changes must preserve canonical worker enablement"
         );
     }
 
@@ -2993,8 +3606,191 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
             );
         }
         assert_eq!(runtime.residents.len(), 1);
+
+        runtime.set_stop_all(true).await.unwrap();
+        assert!(runtime.residents.is_empty());
+        runtime.set_stop_all(false).await.unwrap();
+        let resumed = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({"index":2}),
+                "service-after-stop-all",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resumed.output.as_ref().unwrap()["index"], 2);
+        assert_eq!(runtime.residents.len(), 1);
+
+        runtime
+            .set_enabled(&outcome.worker.worker_id, false)
+            .await
+            .unwrap();
+        assert!(runtime.residents.is_empty());
+        runtime
+            .set_enabled(&outcome.worker.worker_id, true)
+            .await
+            .unwrap();
+        let enabled = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({"index":3}),
+                "service-after-enable",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(enabled.output.as_ref().unwrap()["index"], 3);
+        assert_eq!(runtime.residents.len(), 1);
+
         runtime.shutdown().await;
         assert!(runtime.residents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resident_supervisor_disables_an_exited_service_without_another_invocation() {
+        let (runtime, _home) = test_runtime(None);
+        let mut bundle = command_bundle(Vec::new());
+        bundle.worker_id = Some("resident-supervision".to_owned());
+        bundle.name = "Resident Supervision".to_owned();
+        bundle.description =
+            "Long-lived resident fixture whose unexpected exit must be detected proactively"
+                .to_owned();
+        bundle.tool_name = Some("worker_resident_supervision".to_owned());
+        bundle.runner = WorkerRunner::Service {
+            command: vec!["sh".to_owned(), "-c".to_owned(), "sleep 30".to_owned()],
+            invoke_url: "http://127.0.0.1:1/invoke".to_owned(),
+            health_url: None,
+        };
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let active = runtime
+            .store()
+            .load_active(&outcome.worker.worker_id)
+            .unwrap();
+        let WorkerRunner::Service {
+            command,
+            health_url,
+            ..
+        } = &active.bundle.runner
+        else {
+            panic!("fixture must be a resident service");
+        };
+        runtime
+            .ensure_resident(&active, command, health_url.as_deref(), &HashMap::new())
+            .await
+            .unwrap();
+        let key = resident_key(&active);
+        let process = runtime
+            .residents
+            .get(&key)
+            .expect("resident process")
+            .clone();
+        process
+            .lock()
+            .await
+            .child
+            .as_mut()
+            .expect("resident child")
+            .kill()
+            .await
+            .unwrap();
+
+        runtime.supervise_residents().await;
+
+        let summary = runtime
+            .store()
+            .summary(&outcome.worker.worker_id)
+            .unwrap()
+            .unwrap();
+        assert!(!summary.enabled);
+        assert_eq!(summary.health, "failed");
+        assert!(runtime.residents.is_empty());
+        assert!(
+            runtime
+                .host
+                .inspect_function(
+                    &FunctionId::new("worker_kernel::dynamic_resident-supervision").unwrap(),
+                    None,
+                )
+                .await
+                .is_err(),
+            "failed resident must be removed from direct routing"
+        );
+        let inbox = runtime
+            .store()
+            .inbox(Some(&outcome.worker.worker_id), 10)
+            .unwrap();
+        assert!(inbox.iter().any(|item| {
+            item["result"]["phase"] == "resident_supervision" && item["result"]["disabled"] == true
+        }));
+        let inspection = runtime.store().inspect(&outcome.worker.worker_id).unwrap();
+        assert_eq!(
+            inspection["healthHistory"][0]["source"],
+            "resident_supervision"
+        );
+    }
+
+    #[tokio::test]
+    async fn resident_supervisor_requires_repeated_health_failures_before_disabling() {
+        let (runtime, _home) = test_runtime(None);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let script = r#"import http.server,sys
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self): self.send_response(503); self.end_headers()
+ def log_message(self,*args): pass
+http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()"#;
+        let mut bundle = command_bundle(Vec::new());
+        bundle.worker_id = Some("resident-health-supervision".to_owned());
+        bundle.name = "Resident Health Supervision".to_owned();
+        bundle.description =
+            "Resident fixture requiring repeated health failures before disablement".to_owned();
+        bundle.tool_name = Some("worker_resident_health_supervision".to_owned());
+        bundle.runner = WorkerRunner::Service {
+            command: vec![
+                "python3".to_owned(),
+                "-u".to_owned(),
+                "-c".to_owned(),
+                script.to_owned(),
+                port.to_string(),
+            ],
+            invoke_url: format!("http://127.0.0.1:{port}/invoke"),
+            health_url: Some(format!("http://127.0.0.1:{port}/health")),
+        };
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let active = runtime
+            .store()
+            .load_active(&outcome.worker.worker_id)
+            .unwrap();
+        let WorkerRunner::Service { command, .. } = &active.bundle.runner else {
+            panic!("fixture must be a resident service");
+        };
+        runtime
+            .ensure_resident(&active, command, None, &HashMap::new())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        for attempt in 1..RESIDENT_HEALTH_FAILURE_LIMIT {
+            runtime.supervise_residents().await;
+            assert!(
+                runtime
+                    .store()
+                    .summary(&outcome.worker.worker_id)
+                    .unwrap()
+                    .unwrap()
+                    .enabled,
+                "transient resident health failure {attempt} disabled the worker"
+            );
+        }
+        runtime.supervise_residents().await;
+
+        let summary = runtime
+            .store()
+            .summary(&outcome.worker.worker_id)
+            .unwrap()
+            .unwrap();
+        assert!(!summary.enabled);
+        assert_eq!(summary.health, "failed");
     }
 
     #[test]

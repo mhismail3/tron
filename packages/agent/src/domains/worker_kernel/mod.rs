@@ -34,7 +34,21 @@
 //! errors so they never enter manifests, operational records, events, or logs.
 //! Every claimed delivery creates a numbered attempt. Interrupted attempts are
 //! terminalized before their invocation is requeued, making at-least-once
-//! redelivery and causal-loop suppression directly inspectable.
+//! redelivery and causal-loop suppression directly inspectable. An engine event
+//! beyond the causal ceiling is durably recorded as terminal suppression before
+//! its cursor advances. A matched event that cannot satisfy the worker input
+//! schema is a terminal worker failure, not an endlessly retried delivery. A
+//! persistence failure retains the cursor for retry.
+//! The worker lifecycle observer always runs: edits to the
+//! `autonomousWorkers` profile setting hide or restore the fixed and dynamic
+//! model-tool surface, cancel or resume dispatch, and stop resident services
+//! without a server restart or a change to canonical worker state.
+//! Authenticated clients retain read access and lifecycle/stop controls while
+//! autonomy is off, but authoring and invocation remain blocked. Lazy resident
+//! processes remain supervised between invocations: an exit or three
+//! consecutive health-check failures disables routing and creates a durable
+//! high-visibility inbox result. System inbox failures without invocation rows
+//! remain eligible for one-time attachment to the next relevant session.
 
 use std::sync::Arc;
 
@@ -68,7 +82,6 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["worker.lifecycle", "worker.invocati
 pub(crate) struct Registration {
     pub(crate) module: DomainWorkerModule,
     pub(crate) runtime: Arc<WorkerRuntime>,
-    pub(crate) autonomous: bool,
 }
 
 pub(crate) fn registration(
@@ -149,16 +162,32 @@ pub(crate) fn registration(
         }
         registration.definition.metadata = Value::Object(metadata);
     }
+    runtime
+        .configure_kernel_primitives(
+            functions
+                .iter()
+                .filter(|registration| {
+                    registration
+                        .definition
+                        .metadata
+                        .get("modelPrimitiveName")
+                        .is_some()
+                })
+                .map(|registration| {
+                    (
+                        registration.definition.clone(),
+                        Arc::downgrade(&registration.handler),
+                    )
+                })
+                .collect(),
+        )
+        .map_err(crate::engine::EngineError::HandlerFailed)?;
     let module = crate::domains::registration::worker::domain_worker_module(
         "worker_kernel",
         STREAM_TOPICS,
         functions,
     )?;
-    Ok(Registration {
-        module,
-        runtime,
-        autonomous,
-    })
+    Ok(Registration { module, runtime })
 }
 
 #[cfg(test)]

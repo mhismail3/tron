@@ -279,8 +279,13 @@ the explicit product projection in `ServerSettings`.
 
 Existing profiles default off. The UI explains that enabling it lets local
 agents create and run persistent workers with the Mac user's normal
-permissions. The setting is server-owned; changing paired servers reloads the
-new server's value.
+permissions. The setting is server-owned and applies live: disabling it hides
+the model-facing kernel and worker tools, cancels worker execution, and stops
+resident services without deleting worker state. The authenticated Worker
+Console can still inspect that state and use lifecycle or stop controls, but it
+cannot invoke workers while the mode is off. Re-enabling restores the persistent
+tools and dispatcher without restarting the server. Changing paired servers
+reloads the new server's value.
 
 No server-only provider retry, runtime, tmux, or TUI field may drift into only
 one Swift layer. `SettingsParityTests` guard the admitted projection.

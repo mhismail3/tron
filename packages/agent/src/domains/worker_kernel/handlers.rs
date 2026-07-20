@@ -79,12 +79,10 @@ async fn core_proposal_create(invocation: &Invocation, deps: &Deps) -> Result<Va
 }
 
 async fn core_proposal_list(_invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     Ok(json!({"proposals":deps.runtime.list_core_proposals()?}))
 }
 
 async fn core_proposal_inspect(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     serde_json::to_value(
         deps.runtime
             .inspect_core_proposal(&required_string(&invocation.payload, "proposalId")?)?,
@@ -372,7 +370,6 @@ async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
 }
 
 async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let query = required_string(&invocation.payload, "query")?.to_ascii_lowercase();
     let limit = invocation
         .payload
@@ -445,7 +442,6 @@ async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String>
 }
 
 async fn list(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let include_retired = invocation
         .payload
         .get("includeRetired")
@@ -458,7 +454,6 @@ async fn list(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
 }
 
 async fn inspect(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     deps.runtime
         .store()
         .inspect(&required_string(&invocation.payload, "workerId")?)
@@ -500,14 +495,12 @@ async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, St
 }
 
 async fn set_enabled(invocation: &Invocation, deps: &Deps, enabled: bool) -> Result<Value, String> {
-    require_autonomous(deps)?;
     deps.runtime
         .set_enabled(&required_string(&invocation.payload, "workerId")?, enabled)
         .await
 }
 
 async fn rollback(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     deps.runtime
         .rollback(
             &required_string(&invocation.payload, "workerId")?,
@@ -517,20 +510,17 @@ async fn rollback(invocation: &Invocation, deps: &Deps) -> Result<Value, String>
 }
 
 async fn retire(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     deps.runtime
         .retire(&required_string(&invocation.payload, "workerId")?)
         .await
 }
 
 async fn purge(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let worker_id = required_string(&invocation.payload, "workerId")?;
     Ok(json!({"workerId":worker_id,"purged":deps.runtime.purge(&worker_id).await?}))
 }
 
 async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let limit = invocation
         .payload
         .get("limit")
@@ -542,7 +532,6 @@ async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
 }
 
 async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let limit = invocation
         .payload
         .get("limit")
@@ -558,7 +547,6 @@ async fn inbox_attach(invocation: &Invocation, deps: &Deps) -> Result<Value, Str
 }
 
 async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
     let limit = invocation
         .payload
@@ -584,7 +572,6 @@ async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
 }
 
 async fn rotate_webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     serde_json::to_value(deps.runtime.store().rotate_webhook(
         &required_string(&invocation.payload, "workerId")?,
         &required_string(&invocation.payload, "triggerId")?,
@@ -593,7 +580,6 @@ async fn rotate_webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, S
 }
 
 async fn stop_all(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let stopped = invocation
         .payload
         .get("stopped")

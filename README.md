@@ -102,7 +102,8 @@ scripts/tron ci fmt check clippy test
 ```
 
 The dedicated `worker-poc` profile enables `autonomousWorkers` by default.
-Existing profiles remain opt-in through Settings.
+Existing profiles remain opt-in through Settings, and the toggle applies to the
+running server without a restart while preserving persistent worker state.
 
 Build the iOS app:
 

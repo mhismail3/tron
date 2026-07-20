@@ -805,6 +805,17 @@ impl WorkerStore {
                     params![worker_id, i64::from(enabled), state.updated_at],
                 )
                 .map_err(|error| format!("update worker route enablement: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE worker_triggers
+                     SET enabled=CASE
+                        WHEN ?2=1 AND (kind!='webhook' OR token_hash IS NOT NULL) THEN 1
+                        ELSE 0
+                     END
+                     WHERE worker_id=?1",
+                    params![worker_id, i64::from(enabled)],
+                )
+                .map_err(|error| format!("update worker trigger enablement: {error}"))?;
             insert_health(
                 &transaction,
                 worker_id,
@@ -823,7 +834,8 @@ impl WorkerStore {
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))
     }
 
-    pub fn mark_failed(&self, worker_id: &str, error: &str) -> Result<(), String> {
+    pub fn mark_failed(&self, worker_id: &str, source: &str, error: &str) -> Result<(), String> {
+        validate_runtime_identifier(source, "worker failure source", 64)?;
         let prior = self
             .read_state(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
@@ -852,7 +864,7 @@ impl WorkerStore {
                 &transaction,
                 worker_id,
                 "failed",
-                &json!({"error":error,"activeVersion":state.active_version}),
+                &json!({"error":error,"source":source,"activeVersion":state.active_version}),
             )?;
             transaction
                 .execute(
@@ -860,12 +872,18 @@ impl WorkerStore {
                     params![worker_id, state.updated_at],
                 )
                 .map_err(|db_error| format!("disable failed worker route: {db_error}"))?;
+            transaction
+                .execute(
+                    "UPDATE worker_triggers SET enabled=0 WHERE worker_id=?1",
+                    [worker_id],
+                )
+                .map_err(|db_error| format!("disable failed worker triggers: {db_error}"))?;
             insert_health(
                 &transaction,
                 worker_id,
                 &state.active_version,
                 "failed",
-                "execution",
+                source,
                 &json!({"error":error}),
             )?;
             transaction
@@ -1415,6 +1433,29 @@ impl WorkerStore {
         idempotency_key: &str,
         causal_depth: u32,
     ) -> Result<(), String> {
+        self.record_trigger_suppression(
+            trace_id,
+            worker_id,
+            trigger_kind,
+            idempotency_key,
+            causal_depth,
+            "duplicate_delivery",
+        )
+    }
+
+    pub fn record_trigger_suppression(
+        &self,
+        trace_id: &str,
+        worker_id: &str,
+        trigger_kind: &str,
+        idempotency_key: &str,
+        causal_depth: u32,
+        reason: &str,
+    ) -> Result<(), String> {
+        validate_runtime_identifier(trace_id, "trace id", 256)?;
+        validate_runtime_identifier(trigger_kind, "trigger kind", 64)?;
+        validate_runtime_identifier(idempotency_key, "idempotency key", 256)?;
+        validate_runtime_identifier(reason, "suppression reason", 64)?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction()
@@ -1428,6 +1469,8 @@ impl WorkerStore {
                 "traceId":trace_id,
                 "triggerKind":trigger_kind,
                 "idempotencyKey":idempotency_key,
+                "reason":reason,
+                "causalDepth":causal_depth,
             }),
         )?;
         transaction
@@ -1549,11 +1592,12 @@ impl WorkerStore {
             let mut statement = transaction
                 .prepare(
                     "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
-                            i.created_at,r.trigger_kind,w.name,w.description
+                            i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
                      FROM worker_inbox i
-                     JOIN worker_invocations r ON r.invocation_id=i.invocation_id
+                     LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                      JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.seen=0 AND (i.severity!='info' OR r.trigger_kind!='manual')
+                     WHERE i.seen=0
+                        AND (i.severity!='info' OR COALESCE(r.trigger_kind,'system')!='manual')
                      ORDER BY i.created_at DESC LIMIT 200",
                 )
                 .map_err(|error| error.to_string())?;
@@ -1875,6 +1919,20 @@ pub(super) fn validate_bundle(bundle: &WorkerBundle) -> Result<(), String> {
             }
             WorkerTrigger::EngineEvent { filter, .. } if !filter.is_object() => {
                 return Err("engine event filter must be a JSON object".to_owned());
+            }
+            WorkerTrigger::Schedule { id, input, .. } => {
+                let function_id =
+                    crate::engine::FunctionId::new(format!("worker_kernel::schedule_{id}"))
+                        .map_err(|error| error.to_string())?;
+                crate::engine::validate_engine_schema_payload(
+                    &function_id,
+                    "request",
+                    &bundle.input_schema,
+                    input,
+                )
+                .map_err(|error| {
+                    format!("schedule trigger '{id}' input does not match inputSchema: {error}")
+                })?;
             }
             _ => {}
         }
@@ -2687,6 +2745,25 @@ mod tests {
                 .unwrap_err()
                 .contains("timeoutSeconds")
         );
+
+        let mut invalid_schedule = bundle();
+        invalid_schedule.input_schema = json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["topic"],
+            "properties":{"topic":{"type":"string"}}
+        });
+        invalid_schedule.triggers = vec![WorkerTrigger::Schedule {
+            id: "invalid-input".to_owned(),
+            every_seconds: 60,
+            input: json!({}),
+        }];
+        assert!(
+            store
+                .prepare(invalid_schedule, None)
+                .unwrap_err()
+                .contains("does not match inputSchema")
+        );
         assert!(!temp.path().join("workspace/workers/.staging").exists());
     }
 
@@ -2780,6 +2857,17 @@ mod tests {
 
         let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
         assert!(reopened.load_active("recent-research").is_ok());
+        let rebuilt = reopened.inspect("recent-research").unwrap();
+        assert_eq!(rebuilt["triggers"][0]["kind"], "webhook");
+        assert_eq!(rebuilt["triggers"][0]["tokenConfigured"], false);
+        assert_eq!(rebuilt["triggers"][0]["enabled"], false);
+        reopened.set_enabled("recent-research", false).unwrap();
+        reopened.set_enabled("recent-research", true).unwrap();
+        assert_eq!(
+            reopened.inspect("recent-research").unwrap()["triggers"][0]["enabled"],
+            false,
+            "profile enablement must not revive a rebuilt webhook without a token"
+        );
         assert_eq!(
             reopened
                 .invocation(&queued.invocation_id)
@@ -2842,11 +2930,21 @@ mod tests {
                 )
                 .unwrap();
         }
+        store
+            .record_system_inbox(
+                &outcome.worker.worker_id,
+                "resident_supervision",
+                &json!({"status":"failed","phase":"resident_supervision"}),
+            )
+            .unwrap();
         let first = store
             .take_notable_unseen(Some("recent research"), 10)
             .unwrap();
-        assert_eq!(first.len(), 1);
-        assert_eq!(first[0]["triggerKind"], "schedule");
+        assert_eq!(first.len(), 2);
+        assert!(first.iter().any(|item| item["triggerKind"] == "schedule"));
+        assert!(first.iter().any(|item| {
+            item["triggerKind"] == "system" && item["result"]["phase"] == "resident_supervision"
+        }));
         assert!(
             store
                 .take_notable_unseen(Some("recent research"), 10)
