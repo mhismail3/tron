@@ -3149,7 +3149,6 @@ print(json.dumps({
         let inspection_actor = crate::engine::ActorContext::new(
             ActorId::new("system:worker-tool-evidence-test").unwrap(),
             ActorKind::System,
-            crate::engine::AuthorityGrantId::new("worker-tool-evidence-test").unwrap(),
         );
         let definition = runtime
             .host

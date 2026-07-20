@@ -39,7 +39,10 @@ pub(super) fn item_params(
         SqlValue::Text(payload),
         SqlValue::Text(item.actor_id.to_string()),
         SqlValue::Text(format!("{:?}", item.actor_kind)),
-        SqlValue::Text(item.authority_grant_id.to_string()),
+        item.authority_grant_id
+            .as_ref()
+            .map(|id| SqlValue::Text(id.to_string()))
+            .unwrap_or(SqlValue::Null),
         SqlValue::Text(scopes),
         SqlValue::Text(item.trace_id.to_string()),
         item.parent_invocation_id
@@ -106,8 +109,9 @@ pub(super) fn row_to_queue_item(
         actor_id: ActorId::new(row.get::<_, String>(4)?)
             .expect("stored queue actor id should be valid"),
         actor_kind: actor_kind_from_str(&row.get::<_, String>(5)?),
-        authority_grant_id: AuthorityGrantId::new(row.get::<_, String>(6)?)
-            .expect("stored queue authority id should be valid"),
+        authority_grant_id: row
+            .get::<_, Option<String>>(6)?
+            .and_then(|id| AuthorityGrantId::new(id).ok()),
         authority_scopes: serde_json::from_str(&scopes_json).unwrap_or_default(),
         runtime_metadata: serde_json::from_str(&runtime_metadata_json).unwrap_or_default(),
         trace_id: TraceId::new(row.get::<_, String>(8)?)

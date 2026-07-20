@@ -7,6 +7,10 @@
 //! derives the cursor from persisted changes, and session replay/catalog watch
 //! read durable records. The live registry does not retain duplicate history
 //! projections.
+//!
+//! Discovery actor context is provenance plus visibility scope, not an
+//! authorization token. It deliberately contains no authority-grant id;
+//! grant-backed invocation authorization remains an execution-boundary concern.
 
 pub mod discovery;
 pub mod registry;

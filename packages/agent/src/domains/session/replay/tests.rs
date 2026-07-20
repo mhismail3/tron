@@ -321,7 +321,7 @@ async fn enqueue_for_session(
             }),
             actor_id: actor_id("actor-queue"),
             actor_kind: ActorKind::System,
-            authority_grant_id: grant_id("grant-queue"),
+            authority_grant_id: Some(grant_id("grant-queue")),
             authority_scopes: vec!["state.read".to_owned()],
             runtime_metadata: BTreeMap::new(),
             trace_id: trace_id(&format!("{queue}-trace")),

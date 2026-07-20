@@ -324,10 +324,9 @@ impl EngineExternalWorkerRuntime {
             trace_id: trace_id.clone(),
             timestamp: Utc::now().to_rfc3339(),
         };
-        let mut context = CausalContext::new(
+        let mut context = CausalContext::trusted_local(
             ActorId::new("worker-runtime")?,
             ActorKind::System,
-            AuthorityGrantId::new("worker-runtime")?,
             trace_id,
         )
         .with_scope("stream.write")
@@ -373,7 +372,6 @@ impl EngineExternalWorkerRuntime {
             ActorId::new(format!("worker:{}", connection.worker_id))
                 .expect("valid worker actor id"),
             ActorKind::Worker,
-            connection.worker_token.authority_grant_id.clone(),
         );
         let functions = self
             .host
@@ -468,11 +466,7 @@ impl EngineExternalWorkerRuntime {
         &self,
         connection: &ExternalWorkerConnection,
     ) -> Result<()> {
-        let admin_actor = ActorContext::new(
-            ActorId::new("worker-runtime")?,
-            ActorKind::System,
-            AuthorityGrantId::new("worker-runtime")?,
-        );
+        let admin_actor = ActorContext::new(ActorId::new("worker-runtime")?, ActorKind::System);
         for function_id in &connection.functions {
             let id = FunctionId::new(function_id.clone())?;
             let mut definition = self.host.inspect_function(&id, Some(&admin_actor)).await?;

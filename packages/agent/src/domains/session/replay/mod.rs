@@ -370,7 +370,7 @@ struct ReplayInvocationRecord {
     catalog_revision: u64,
     actor_id: String,
     actor_kind: Value,
-    authority_grant_id: String,
+    authority_grant_id: Option<String>,
     authority_scopes: Vec<String>,
     trace_id: String,
     parent_invocation_id: Option<String>,
@@ -403,7 +403,7 @@ impl ReplayInvocationRecord {
             catalog_revision: record.catalog_revision.0,
             actor_id: record.actor_id.to_string(),
             actor_kind: serde_json::to_value(&record.actor_kind).unwrap_or(Value::Null),
-            authority_grant_id: record.authority_grant_id.to_string(),
+            authority_grant_id: record.authority_grant_id.as_ref().map(ToString::to_string),
             authority_scopes: record.authority_scopes.clone(),
             trace_id: record.trace_id.to_string(),
             parent_invocation_id: record

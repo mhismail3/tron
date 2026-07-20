@@ -4,7 +4,8 @@ use crate::engine::durability::streams::PublishStreamEvent;
 use crate::engine::invocation::host::QueueTargetInvocation;
 use crate::engine::kernel::types::VisibilityScope;
 use crate::engine::{
-    CausalContext, DeliveryMode, EngineHostHandle, Invocation, InvocationResult, Result,
+    CausalContext, DeliveryMode, EngineError, EngineHostHandle, Invocation, InvocationResult,
+    RUNTIME_METADATA_TRUSTED_LOCAL, Result,
 };
 
 use super::{EngineQueueAttemptRecord, EngineQueueItem, QueueAttemptOutcome, QueueItemStatus};
@@ -49,12 +50,30 @@ impl EngineQueueDrainer {
         handle: &EngineHostHandle,
         item: EngineQueueItem,
     ) -> Result<InvocationResult> {
-        let mut context = CausalContext::new(
-            item.actor_id.clone(),
-            item.actor_kind.clone(),
-            item.authority_grant_id.clone(),
-            item.trace_id.clone(),
-        );
+        let mut context = match item.authority_grant_id.clone() {
+            Some(grant_id) => CausalContext::new(
+                item.actor_id.clone(),
+                item.actor_kind.clone(),
+                grant_id,
+                item.trace_id.clone(),
+            ),
+            None if item
+                .runtime_metadata
+                .get(RUNTIME_METADATA_TRUSTED_LOCAL)
+                .is_some_and(|value| value == "true") =>
+            {
+                CausalContext::trusted_local(
+                    item.actor_id.clone(),
+                    item.actor_kind.clone(),
+                    item.trace_id.clone(),
+                )
+            }
+            None => {
+                return Err(EngineError::PolicyViolation(
+                    "queued invocation without a grant must be marked trusted-local".to_owned(),
+                ));
+            }
+        };
         for scope in &item.authority_scopes {
             context = context.with_scope(scope.clone());
         }

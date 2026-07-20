@@ -287,7 +287,10 @@ impl LiveCatalog {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
             .consume_invocation_budget(ConsumeGrantInvocationBudget {
-                grant_id: invocation.causal_context.authority_grant_id.clone(),
+                grant_id: invocation
+                    .causal_context
+                    .require_authority_grant_id("consume invocation budget")?
+                    .clone(),
                 invocation_id: invocation.id.clone(),
                 function_id: function.id.clone(),
                 trace_id: invocation.causal_context.trace_id.clone(),

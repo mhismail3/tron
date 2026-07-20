@@ -51,8 +51,10 @@ pub struct CausalContext {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant id for grant-backed boundaries. Trusted-local
+    /// invocations deliberately carry no grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Granted authority scopes.
     pub authority_scopes: Vec<String>,
     /// Trace id.
@@ -86,6 +88,15 @@ impl CausalContext {
         authority_grant_id: AuthorityGrantId,
         trace_id: TraceId,
     ) -> Self {
+        Self::new_with_authority(actor_id, actor_kind, Some(authority_grant_id), trace_id)
+    }
+
+    fn new_with_authority(
+        actor_id: ActorId,
+        actor_kind: ActorKind,
+        authority_grant_id: Option<AuthorityGrantId>,
+        trace_id: TraceId,
+    ) -> Self {
         Self {
             actor_id,
             actor_kind,
@@ -103,19 +114,20 @@ impl CausalContext {
         }
     }
 
+    /// Create an observational context with no authority grant and no trusted
+    /// execution marker. Rejected work can therefore retain honest causal
+    /// evidence without gaining a local-authority bypass.
+    #[must_use]
+    pub fn observed(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
+        Self::new_with_authority(actor_id, actor_kind, None, trace_id)
+    }
+
     /// Create a trusted-local causal context that is not backed by an authority
-    /// grant. The placeholder id remains only because legacy durable invocation
-    /// rows still carry that column; it is never resolved or consumed.
+    /// grant.
     #[must_use]
     pub fn trusted_local(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
-        Self::new(
-            actor_id,
-            actor_kind,
-            AuthorityGrantId::new("trusted-local-observation")
-                .expect("trusted-local observation id is valid"),
-            trace_id,
-        )
-        .with_runtime_metadata(RUNTIME_METADATA_TRUSTED_LOCAL, "true")
+        Self::observed(actor_id, actor_kind, trace_id)
+            .with_runtime_metadata(RUNTIME_METADATA_TRUSTED_LOCAL, "true")
     }
 
     /// Whether the engine admitted this invocation through the trusted-local
@@ -125,6 +137,19 @@ impl CausalContext {
         self.runtime_metadata
             .get(RUNTIME_METADATA_TRUSTED_LOCAL)
             .is_some_and(|value| value == "true")
+    }
+
+    /// Return the grant required by a grant-backed boundary.
+    ///
+    /// Trusted-local calls must never be converted into a synthetic grant just
+    /// to satisfy a legacy field. Callers that truly require a grant fail
+    /// closed through this accessor instead.
+    pub fn require_authority_grant_id(&self, operation: &str) -> Result<&AuthorityGrantId> {
+        self.authority_grant_id.as_ref().ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "{operation} requires a grant-backed causal context"
+            ))
+        })
     }
 
     /// Add an authority scope.
@@ -358,8 +383,9 @@ pub struct InvocationRecord {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant id when a grant-backed boundary authorized the call.
+    /// Trusted-local invocations persist `None`/SQL `NULL`.
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Granted authority scopes.
     pub authority_scopes: Vec<String>,
     /// Trace id.
@@ -492,6 +518,23 @@ fn produced_resource_refs_from_result(value: &Option<Value>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_local_context_has_no_synthetic_authority_id() {
+        let context = CausalContext::trusted_local(
+            ActorId::new("agent:trusted-local-test").unwrap(),
+            ActorKind::Agent,
+            TraceId::new("trusted-local-test").unwrap(),
+        );
+
+        assert!(context.is_trusted_local());
+        assert_eq!(context.authority_grant_id, None);
+        let encoded = serde_json::to_value(&context).unwrap();
+        assert!(encoded.get("authority_grant_id").is_none());
+        let decoded: CausalContext = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.authority_grant_id, None);
+        assert!(decoded.is_trusted_local());
+    }
 
     #[test]
     fn invocation_record_from_result_at_pins_timestamp() {

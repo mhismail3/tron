@@ -15,9 +15,7 @@ use crate::engine::invocation::model::{
     RUNTIME_METADATA_TRIGGER_PATH,
 };
 use crate::engine::kernel::errors::EngineError;
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
-};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use crate::engine::kernel::types::{DeliveryMode, FunctionRevision, TriggerDefinition};
 
 const DEFAULT_TRIGGER_MAX_DEPTH: u32 = 8;
@@ -147,15 +145,21 @@ impl EngineTriggerRuntime {
                     || FunctionId::new("engine::trigger_dispatch").unwrap(),
                     |trigger| trigger.target_function.clone(),
                 );
-                let mut context = CausalContext::new(
-                    request.actor_id,
-                    request.actor_kind,
-                    trigger.as_ref().map_or_else(
-                        || AuthorityGrantId::new("missing").unwrap(),
-                        |trigger| trigger.authority_grant.clone(),
-                    ),
-                    request.trace_id.unwrap_or_else(TraceId::generate),
-                )
+                let trace_id = request.trace_id.unwrap_or_else(TraceId::generate);
+                let mut context = if let Some(trigger) = trigger.as_ref() {
+                    CausalContext::new(
+                        request.actor_id.clone(),
+                        request.actor_kind.clone(),
+                        trigger.authority_grant.clone(),
+                        trace_id.clone(),
+                    )
+                } else {
+                    CausalContext::observed(
+                        request.actor_id.clone(),
+                        request.actor_kind.clone(),
+                        trace_id.clone(),
+                    )
+                }
                 .with_trigger_id(request.trigger_id);
                 for scope in request.authority_scopes {
                     context = context.with_scope(scope);

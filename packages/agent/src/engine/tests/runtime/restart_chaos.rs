@@ -35,7 +35,7 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
     drop(handle);
 
     let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
-    let admin = ActorContext::new(actor("admin"), ActorKind::System, grant("admin-grant"));
+    let admin = ActorContext::new(actor("admin"), ActorKind::System);
     let function = reopened
         .inspect_function(&fid("restart_chaos::echo"), Some(&admin))
         .await

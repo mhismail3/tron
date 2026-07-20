@@ -20,6 +20,49 @@ use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId};
 use crate::engine::kernel::types::{CompensationContract, FunctionRevision};
 
+const COMPENSATION_TABLE_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS engine_compensation_records (
+  compensation_id       TEXT PRIMARY KEY,
+  invocation_id         TEXT NOT NULL UNIQUE,
+  function_id           TEXT NOT NULL,
+  function_revision     INTEGER NOT NULL,
+  actor_id              TEXT NOT NULL,
+  authority_grant_id    TEXT,
+  trace_id              TEXT NOT NULL,
+  parent_invocation_id  TEXT,
+  resource_lease_ids    TEXT NOT NULL,
+  contract_json         TEXT NOT NULL,
+  status                TEXT NOT NULL,
+  succeeded             INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
+  result_json           TEXT,
+  error_json            TEXT,
+  created_at            TEXT NOT NULL
+);
+"#;
+
+const COMPENSATION_INDEX_SCHEMA: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
+  ON engine_compensation_records(invocation_id);
+"#;
+
+const COMPENSATION_COLUMNS: &[&str] = &[
+    "compensation_id",
+    "invocation_id",
+    "function_id",
+    "function_revision",
+    "actor_id",
+    "authority_grant_id",
+    "trace_id",
+    "parent_invocation_id",
+    "resource_lease_ids",
+    "contract_json",
+    "status",
+    "succeeded",
+    "result_json",
+    "error_json",
+    "created_at",
+];
+
 /// Current durable state of a compensation record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,8 +105,9 @@ pub struct EngineCompensationRecord {
     pub function_revision: FunctionRevision,
     /// Actor that caused the invocation.
     pub actor_id: ActorId,
-    /// Authority grant used for the invocation.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant used for the invocation, when it crossed a grant-backed
+    /// boundary.
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Trace propagated through the invocation.
     pub trace_id: TraceId,
     /// Parent invocation if present.
@@ -149,30 +193,22 @@ impl SqliteEngineCompensationStore {
         crate::shared::storage::ensure_storage_schema(&self.conn)
             .map_err(|err| sqlite_err_message("compensation.storage_schema", err.to_string()))?;
         self.conn
-            .execute_batch(
-                r#"
-CREATE TABLE IF NOT EXISTS engine_compensation_records (
-  compensation_id       TEXT PRIMARY KEY,
-  invocation_id         TEXT NOT NULL UNIQUE,
-  function_id           TEXT NOT NULL,
-  function_revision     INTEGER NOT NULL,
-  actor_id              TEXT NOT NULL,
-  authority_grant_id    TEXT NOT NULL,
-  trace_id              TEXT NOT NULL,
-  parent_invocation_id  TEXT,
-  resource_lease_ids    TEXT NOT NULL,
-  contract_json         TEXT NOT NULL,
-  status                TEXT NOT NULL,
-  succeeded             INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
-  result_json           TEXT,
-  error_json            TEXT,
-  created_at            TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
-  ON engine_compensation_records(invocation_id);
-"#,
-            )
-            .map_err(|err| sqlite_err("compensation.init", err))
+            .execute_batch(COMPENSATION_TABLE_SCHEMA)
+            .map_err(|err| sqlite_err("compensation.init_table", err))?;
+        self.conn
+            .execute_batch(COMPENSATION_INDEX_SCHEMA)
+            .map_err(|err| sqlite_err("compensation.init_indexes", err))?;
+        crate::shared::storage::ensure_nullable_text_observation(
+            &self.conn,
+            "engine_compensation_records",
+            "authority_grant_id",
+            COMPENSATION_TABLE_SCHEMA,
+            COMPENSATION_INDEX_SCHEMA,
+            COMPENSATION_COLUMNS,
+        )
+        .map_err(|err| {
+            sqlite_err_message("compensation.migrate_nullable_authority", err.to_string())
+        })
     }
 
     /// Append or return the compensation record for an invocation.
@@ -198,7 +234,10 @@ CREATE INDEX IF NOT EXISTS idx_engine_compensation_invocation
                     record.function_id.as_str(),
                     record.function_revision.0,
                     record.actor_id.as_str(),
-                    record.authority_grant_id.as_str(),
+                    record
+                        .authority_grant_id
+                        .as_ref()
+                        .map(AuthorityGrantId::as_str),
                     record.trace_id.as_str(),
                     record
                         .parent_invocation_id
@@ -325,7 +364,10 @@ fn row_to_record(
         function_id: FunctionId::new(row.get::<_, String>("function_id")?).map_err(to_sql_err)?,
         function_revision: FunctionRevision(row.get::<_, u64>("function_revision")?),
         actor_id: ActorId::new(row.get::<_, String>("actor_id")?).map_err(to_sql_err)?,
-        authority_grant_id: AuthorityGrantId::new(row.get::<_, String>("authority_grant_id")?)
+        authority_grant_id: row
+            .get::<_, Option<String>>("authority_grant_id")?
+            .map(AuthorityGrantId::new)
+            .transpose()
             .map_err(to_sql_err)?,
         trace_id: TraceId::new(row.get::<_, String>("trace_id")?).map_err(to_sql_err)?,
         parent_invocation_id: parent
@@ -429,4 +471,84 @@ fn to_sql_err(error: EngineError) -> rusqlite::Error {
 
 fn storage_to_sql_err(error: anyhow::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error.to_string())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::catalog::discovery::ActorKind;
+    use crate::engine::invocation::model::CausalContext;
+    use crate::engine::kernel::ids::WorkerId;
+    use crate::engine::kernel::types::{CatalogRevision, CompensationKind};
+    use serde_json::json;
+
+    #[test]
+    fn old_compensation_schema_migrates_and_records_local_evidence_without_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tron.sqlite");
+        let legacy_schema = COMPENSATION_TABLE_SCHEMA.replace(
+            "authority_grant_id    TEXT,",
+            "authority_grant_id    TEXT NOT NULL,",
+        );
+        assert_ne!(legacy_schema, COMPENSATION_TABLE_SCHEMA);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&legacy_schema)
+            .unwrap();
+
+        let invocation = Invocation::new_sync(
+            FunctionId::new("filesystem::patch_apply").unwrap(),
+            json!({}),
+            CausalContext::trusted_local(
+                ActorId::new("agent:compensation-null-test").unwrap(),
+                ActorKind::Agent,
+                TraceId::new("compensation-null-test").unwrap(),
+            ),
+        );
+        let result = InvocationResult::success(
+            &invocation,
+            WorkerId::new("filesystem").unwrap(),
+            FunctionRevision(1),
+            CatalogRevision(1),
+            json!({"ok": true}),
+        );
+        let record = compensation_record(
+            &invocation,
+            &result,
+            CompensationContract::new(CompensationKind::ManualOnly, "restore prior content"),
+            Vec::new(),
+        );
+        let mut store = SqliteEngineCompensationStore::open(&path).unwrap();
+        let stored = store.record(record).unwrap();
+        assert_eq!(stored.authority_grant_id, None);
+        assert_eq!(
+            store
+                .get(&stored.compensation_id)
+                .unwrap()
+                .unwrap()
+                .authority_grant_id,
+            None
+        );
+        drop(store);
+
+        let conn = Connection::open(&path).unwrap();
+        let stored_grant: Option<String> = conn
+            .query_row(
+                "SELECT authority_grant_id FROM engine_compensation_records \
+                 WHERE compensation_id = ?1",
+                [stored.compensation_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_grant, None);
+        let not_null: i64 = conn
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('engine_compensation_records') \
+                 WHERE name = 'authority_grant_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(not_null, 0);
+    }
 }

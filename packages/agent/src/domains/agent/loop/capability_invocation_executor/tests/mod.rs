@@ -196,12 +196,7 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
             .as_deref()
             .is_some_and(|key| key.starts_with("model-tool:"))
     );
-    assert!(
-        host.inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(invocation.causal_context.authority_grant_id.is_none());
 }
 
 #[tokio::test]

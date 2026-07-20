@@ -139,6 +139,9 @@ pub(super) async fn ensure_internal_write_authority(
             "{operation} is available only through {expected_function}"
         )));
     }
+    if invocation.causal_context.is_trusted_local() {
+        return Ok(());
+    }
     if !invocation.causal_context.has_scope(WRITE_SCOPE) {
         return Err(policy(format!("{operation} requires {WRITE_SCOPE}")));
     }
@@ -244,7 +247,11 @@ pub(super) fn resource_policy() -> Value {
 
 fn authority_record(invocation: &Invocation) -> Value {
     json!({
-        "grantId": invocation.causal_context.authority_grant_id.as_str(),
+        "grantId": invocation
+            .causal_context
+            .authority_grant_id
+            .as_ref()
+            .map(|grant_id| grant_id.as_str()),
         "requiredScopes": [WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
         "resourceKind": DEVICE_REGISTRATION_KIND,
         "wildcardGrantsAllowed": false

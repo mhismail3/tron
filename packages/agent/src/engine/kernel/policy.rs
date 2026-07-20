@@ -313,7 +313,6 @@ fn actor_from_causal_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
         actor_kind: context.actor_kind.clone(),
-        authority_grant_id: context.authority_grant_id.clone(),
         authority_scopes: context.authority_scopes.clone(),
         session_id: context.session_id.clone(),
         workspace_id: context.workspace_id.clone(),
@@ -324,9 +323,8 @@ fn actor_from_causal_context(context: &CausalContext) -> ActorContext {
 mod tests {
     use super::*;
     use crate::engine::{
-        ActorId, AuthorityGrantId, AuthorityRequirement, CompensationContract, CompensationKind,
-        EffectClass, FunctionId, IdempotencyContract, Provenance, ResourceLeaseRequirement,
-        WorkerId,
+        ActorId, AuthorityRequirement, CompensationContract, CompensationKind, EffectClass,
+        FunctionId, IdempotencyContract, Provenance, ResourceLeaseRequirement, WorkerId,
     };
 
     fn high_risk_external_function() -> FunctionDefinition {
@@ -392,12 +390,8 @@ mod tests {
             EffectClass::PureRead,
         );
         let scoped_actor = |kind| {
-            ActorContext::new(
-                ActorId::new("actor").expect("actor id"),
-                kind,
-                AuthorityGrantId::new("grant").expect("grant id"),
-            )
-            .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+            ActorContext::new(ActorId::new("actor").expect("actor id"), kind)
+                .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
         };
 
         assert!(!is_visible_to_actor(

@@ -452,19 +452,26 @@ mod tests {
             )
             .with_session_id("worker-first-test"),
         );
-        let observed_grant_id = invocation.causal_context.authority_grant_id.clone();
+        assert!(
+            invocation.causal_context.authority_grant_id.is_none(),
+            "trusted-local context must carry no grant observation"
+        );
 
         let result = ctx.engine_host.invoke(invocation).await;
 
         assert_eq!(result.error, None, "direct list failed: {:?}", result.error);
         assert!(result.value.expect("list value")["workers"].is_array());
+        let records = ctx
+            .engine_host
+            .replay_snapshot("worker-first-test")
+            .await
+            .expect("replay snapshot")
+            .invocations;
         assert!(
-            ctx.engine_host
-                .inspect_authority_grant(&observed_grant_id)
-                .await
-                .expect("inspect local observation")
-                .is_none(),
-            "trusted-local invocation must not synthesize a grant"
+            records.iter().any(|record| {
+                record.invocation_id == result.invocation_id && record.authority_grant_id.is_none()
+            }),
+            "trusted-local invocation must persist without a grant"
         );
     }
 
@@ -640,7 +647,6 @@ mod tests {
         ActorContext::new(
             ActorId::new("system:test").expect("actor id"),
             ActorKind::System,
-            AuthorityGrantId::new("engine-system").expect("grant id"),
         )
     }
 

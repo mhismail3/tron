@@ -54,7 +54,7 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
             .inspect_function(
                 &fid("local::echo"),
                 Some(
-                    &ActorContext::new(actor("agent"), ActorKind::Agent, grant("agent-grant"))
+                    &ActorContext::new(actor("agent"), ActorKind::Agent)
                         .with_session_id("session-a"),
                 ),
             )
@@ -354,10 +354,7 @@ async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_tok
     let stored = handle
         .inspect_function(
             &fid("policy_local::echo"),
-            Some(
-                &ActorContext::new(actor("agent"), ActorKind::Agent, grant("agent-grant"))
-                    .with_session_id("session-a"),
-            ),
+            Some(&ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-a")),
         )
         .await
         .unwrap();
@@ -402,10 +399,7 @@ async fn local_external_worker_engine_issued_token_is_binding_selectable() {
     let stored = handle
         .inspect_function(
             &fid("engine_issued::echo"),
-            Some(
-                &ActorContext::new(actor("agent"), ActorKind::Agent, grant("agent-grant"))
-                    .with_session_id("session-a"),
-            ),
+            Some(&ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-a")),
         )
         .await
         .unwrap();
@@ -750,7 +744,7 @@ async fn rejected_durable_reconnect_restores_prior_registration() {
     let restored = handle.inspect_worker(&worker_id).await.unwrap();
     assert_eq!(restored.lifecycle, WorkerLifecycleState::Stopped);
     assert_eq!(handle.worker_is_volatile(&worker_id).await, Some(false));
-    let admin = ActorContext::new(actor("admin"), ActorKind::System, grant("admin-grant"));
+    let admin = ActorContext::new(actor("admin"), ActorKind::System);
     let retained_function = handle
         .inspect_function(&function_id, Some(&admin))
         .await

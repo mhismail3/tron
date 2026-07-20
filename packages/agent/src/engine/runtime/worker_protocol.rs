@@ -370,8 +370,9 @@ pub struct WorkerInvoke {
     pub payload: Value,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant id when the caller crossed a grant-backed boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Authority scopes.
     pub authority_scopes: Vec<String>,
     /// Trace id.

@@ -110,10 +110,9 @@ pub(crate) async fn load_prompt_memory_context(
 ) -> Option<String> {
     let resolved_trace_id =
         trace_id.unwrap_or_else(|| TraceId::new("memory-context").expect("static trace id"));
-    let causal = CausalContext::new(
+    let causal = CausalContext::trusted_local(
         ActorId::new("system:memory-context").ok()?,
         ActorKind::System,
-        crate::engine::AuthorityGrantId::new("engine-system").ok()?,
         resolved_trace_id.clone(),
     )
     .with_scope(super::READ_SCOPE)

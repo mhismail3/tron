@@ -301,7 +301,7 @@ fn trusted_agent_internal_child_context(
     context.actor_kind = crate::engine::ActorKind::System;
     if !context.is_trusted_local() {
         context.authority_grant_id =
-            crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id");
+            Some(crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id"));
     }
     context.parent_invocation_id = Some(invocation.id.clone());
     if !context
@@ -377,7 +377,10 @@ mod tests {
 
         assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
         assert_eq!(child.actor_kind, ActorKind::System);
-        assert_eq!(child.authority_grant_id.as_str(), "engine-system");
+        assert_eq!(
+            child.authority_grant_id.as_ref().map(|id| id.as_str()),
+            Some("engine-system")
+        );
         assert_eq!(child.parent_invocation_id, Some(parent.id));
         assert_eq!(child.session_id.as_deref(), Some("session-a"));
         assert_eq!(child.workspace_id.as_deref(), Some("workspace-a"));

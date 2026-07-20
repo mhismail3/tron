@@ -632,7 +632,11 @@ async fn publish_lifecycle(
                 "afterHash": plan.after_hash,
                 "patchResourceId": patch_resource.resource_id,
                 "materialized": materialized,
-                "authorityGrantId": invocation.causal_context.authority_grant_id.as_str(),
+                "authorityGrantId": invocation
+                    .causal_context
+                    .authority_grant_id
+                    .as_ref()
+                    .map(|grant_id| grant_id.as_str()),
             }),
             visibility: VisibilityScope::System,
             session_id: invocation.causal_context.session_id.clone(),

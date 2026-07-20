@@ -377,6 +377,16 @@ The invocation executor records actor, session, workspace, model/provider call,
 trace, parent invocation, working directory, turn, and deterministic
 idempotency metadata. None of those observations is a permission grant.
 
+The causal model represents that distinction directly: local contexts and their
+invocation, queue, lease, and compensation records carry no grant id and persist
+SQL `NULL`. Catalog discovery actor context contains no grant field at all.
+Grant-backed authenticated boundaries retain `Some(real_id)` and fail closed if
+that id is absent; rejected work can carry an unbacked observation without
+receiving the trusted-local marker. Startup transactionally converts the prior
+`TEXT NOT NULL` observation columns while preserving rows, so there is no
+active `trusted-local` placeholder or compatibility grant. The same one-time
+conversion clears historical placeholder values to SQL `NULL`.
+
 There are no local operation claims, resource selectors, synthetic profile
 grants, or agent-kind rejections. Executable workers can change local files and
 make consequential external requests without fresh confirmation. This is the
@@ -490,14 +500,14 @@ kernel does not move these shared engine records into its disposable index.
 | `engine_catalog_changes` | catalog change stream |
 | `engine_catalog_functions` | durable external function definitions |
 | `engine_catalog_workers` | durable external worker definitions |
-| `engine_compensation_records` | engine compensation evidence |
+| `engine_compensation_records` | engine compensation evidence; nullable non-local grant observation |
 | `engine_grant_events` | retained non-local authority audit history |
 | `engine_grants` | retained non-local authority grants |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
-| `engine_invocations` | generic engine invocation history |
-| `engine_queue_items` | durable engine queue |
+| `engine_invocations` | generic engine invocation history; local rows carry SQL `NULL` grant observation |
+| `engine_queue_items` | durable engine queue; local rows retain the trusted-local marker without a grant id |
 | `engine_resource_events` | generic resource event history |
-| `engine_resource_leases` | generic resource leases |
+| `engine_resource_leases` | generic resource leases; grant id is optional provenance |
 | `engine_resource_links` | generic resource relationships |
 | `engine_resource_type_definitions` | registered generic resource schemas |
 | `engine_resource_versions` | immutable generic resource versions |

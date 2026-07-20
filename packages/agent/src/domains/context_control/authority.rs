@@ -23,17 +23,21 @@ pub(super) async fn ensure_authority(
     session_id: &str,
     exact_resource_id: Option<&str>,
 ) -> Result<(), CapabilityError> {
-    if is_first_party_system(invocation) {
+    if invocation.causal_context.is_trusted_local() || is_first_party_system(invocation) {
         return Ok(());
     }
-    if is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id) {
+    let grant_id = invocation
+        .causal_context
+        .require_authority_grant_id(operation)
+        .map_err(engine_error)?;
+    if is_bootstrap_authority_grant_id(grant_id) {
         return Err(invalid(format!(
             "{operation} requires a derived non-bootstrap grant"
         )));
     }
     let grant = deps
         .engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .inspect_authority_grant(grant_id)
         .await
         .map_err(engine_error)?
         .ok_or_else(|| invalid(format!("{operation} authority grant was not found")))?;

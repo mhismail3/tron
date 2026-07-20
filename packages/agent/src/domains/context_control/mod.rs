@@ -12,7 +12,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `authority` | Session-scoped read/write grant and selector checks |
+//! | `authority` | Trusted-local bypass plus non-local session-scoped grant and selector checks |
 //! | `contract` | Worker id, stream topic, scopes, schemas, and function contracts |
 //! | `projection` | Provider-safe response shaping and timeline refs |
 //! | `records` | Provider-safe record payloads, refs, ids, and proofs |
@@ -46,6 +46,9 @@
 //! Automatic compaction similarly prepares its action first; a later automatic
 //! compaction reconciles any requested runtime action whose boundary already
 //! committed before creating another boundary.
+//! Accepted trusted-local agent/system invocations use session provenance
+//! directly and do not derive or inspect grants. Authenticated non-local callers
+//! retain the existing exact-scope checks.
 //! The compaction adapter seam is the summarizer strategy only. Context-control
 //! snapshot/action/epoch and survivor/exclusion policy records, provider-safe
 //! projections, replay refs, and audit custody stay server-owned; a future

@@ -11,7 +11,8 @@
 //! ## Entry Points
 //!
 //! Production callers enter through `EngineHostHandle`; the engine-owned raw
-//! host resolves grants and leases before handlers run.
+//! host resolves grants only for grant-backed boundaries and acquires leases
+//! before handlers run when a function declares one.
 //!
 //! ## Dependency Direction
 //!
@@ -21,11 +22,14 @@
 //! ## Invariants
 //!
 //! - Caller-supplied authority scopes are audit context, not permission truth.
-//! - Grants are resolved from the engine-owned store before execution.
+//! - Grant-backed calls resolve a real grant from the engine-owned store before
+//!   execution. Trusted-local calls bypass that path and never synthesize one.
 //! - Grants with `remainingInvocations` consume one durable budget unit after
 //!   idempotency replay/schema checks and before handler dispatch; replayed
 //!   idempotency results do not consume again.
 //! - Lease state has active/released/expired transitions enforced by the store.
+//!   Lease and compensation records treat a grant id as optional provenance and
+//!   persist SQL `NULL` for trusted-local work.
 //! - Compensation is audit-only durable state in this branch: the only accepted
 //!   status is `recorded`, and future automated rollback must add a new owner,
 //!   status transitions, and tests instead of overloading the audit record.

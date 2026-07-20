@@ -30,9 +30,7 @@ use crate::engine::catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 use crate::engine::invocation::host::EngineHostHandle;
 use crate::engine::invocation::model::{CausalContext, InProcessFunctionHandler, Invocation};
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId,
-};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
 use crate::engine::kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::kernel::types::{
     DeliveryMode, FunctionDefinition, FunctionHealth, TriggerDefinition, VisibilityScope,

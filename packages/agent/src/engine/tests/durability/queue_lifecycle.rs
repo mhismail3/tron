@@ -11,7 +11,7 @@ fn bounded_queue_request(queue: &str, payload: Value) -> EnqueueInvocation {
         payload,
         actor_id: actor("queue-boundary-test"),
         actor_kind: ActorKind::Agent,
-        authority_grant_id: grant("queue-boundary-grant"),
+        authority_grant_id: Some(grant("queue-boundary-grant")),
         authority_scopes: vec!["queue.test".to_owned()],
         runtime_metadata: BTreeMap::new(),
         trace_id: trace("queue-boundary-trace"),
@@ -258,7 +258,10 @@ async fn trigger_dispatch_primitive_enqueues_and_drains_triggered_invocation() {
         enqueued_record.parent_invocation_id.as_ref(),
         Some(&dispatch_record.invocation_id)
     );
-    assert_eq!(enqueued_record.authority_grant_id, grant("manual-grant"));
+    assert_eq!(
+        enqueued_record.authority_grant_id,
+        Some(grant("manual-grant"))
+    );
     assert!(records.iter().any(|record| {
         record.result_value.as_ref().is_some_and(|value| {
             value.get("receiptId").and_then(Value::as_str) == Some(receipt.as_str())
@@ -311,7 +314,7 @@ async fn queue_failure_event_records_updated_retry_state() {
             payload: json!({"message": "fail once"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
-            authority_grant_id: grant("manual-grant"),
+            authority_grant_id: Some(grant("manual-grant")),
             authority_scopes: vec!["queue.test".to_owned()],
             runtime_metadata: Default::default(),
             trace_id: trace("rwo-n16-queue-failure"),
@@ -427,7 +430,7 @@ async fn queue_cancel_during_claim_preserves_terminal_cancelled_state() {
             payload: json!({"message": "block"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
-            authority_grant_id: grant("manual-grant"),
+            authority_grant_id: Some(grant("manual-grant")),
             authority_scopes: vec!["queue.test".to_owned()],
             runtime_metadata: Default::default(),
             trace_id: trace("rwo-n16b-cancel"),
@@ -547,7 +550,7 @@ async fn queue_terminal_failure_publishes_dead_letter_lifecycle_event() {
             payload: json!({"message": "fail"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
-            authority_grant_id: grant("manual-grant"),
+            authority_grant_id: Some(grant("manual-grant")),
             authority_scopes: vec!["queue.test".to_owned()],
             runtime_metadata: Default::default(),
             trace_id: trace("rwo-n16b-dead-letter"),

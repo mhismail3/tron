@@ -21,7 +21,7 @@
 //!
 //! - Trusted-local agent and worker invocations bypass authority checks without
 //!   synthesizing grants; identities, provenance, hashes, and traces remain
-//!   observable evidence.
+//!   observable evidence, and grant-id columns persist SQL `NULL`.
 //! - Remote clients and external transports remain authenticated.
 //! - Requests and responses are validated against the registered JSON schemas.
 //! - Durable mutation and queue delivery retain idempotency and causal truth.
@@ -95,7 +95,8 @@ pub use invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TRIGGER_DEPTH,
-    RUNTIME_METADATA_TRIGGER_PATH, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY,
+    RUNTIME_METADATA_TRIGGER_PATH, RUNTIME_METADATA_TRUSTED_LOCAL, RUNTIME_METADATA_TURN,
+    RUNTIME_METADATA_WORKING_DIRECTORY,
 };
 pub use kernel::errors::{EngineError, Result};
 pub use kernel::ids::{

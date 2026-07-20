@@ -74,11 +74,7 @@ async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload
 fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
     let host = EngineHost::new().unwrap();
     let functions = host.catalog().discover_functions(&FunctionQuery {
-        actor: Some(ActorContext::new(
-            actor("system"),
-            ActorKind::System,
-            grant("engine-system"),
-        )),
+        actor: Some(ActorContext::new(actor("system"), ActorKind::System)),
         include_internal: true,
         ..FunctionQuery::default()
     });

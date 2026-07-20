@@ -158,7 +158,7 @@ async fn trigger_runtime_manual_dispatch_records_trigger_metadata() {
     let records = host.catalog().ledger_invocations().unwrap();
     let record = records.last().unwrap();
     assert_eq!(record.trigger_id, Some(trigger_id));
-    assert_eq!(record.authority_grant_id, grant("manual-grant"));
+    assert_eq!(record.authority_grant_id, Some(grant("manual-grant")));
     assert_eq!(record.trace_id, trace("trigger-trace"));
     assert_eq!(record.delivery_mode, DeliveryMode::Sync);
 }
@@ -715,11 +715,7 @@ async fn trigger_runtime_does_not_block_discovery_while_target_runs() {
     let functions = tokio::time::timeout(
         std::time::Duration::from_millis(100),
         handle.discover(&FunctionQuery {
-            actor: Some(ActorContext::new(
-                actor("agent"),
-                ActorKind::Agent,
-                grant("grant"),
-            )),
+            actor: Some(ActorContext::new(actor("agent"), ActorKind::Agent)),
             ..FunctionQuery::default()
         }),
     )

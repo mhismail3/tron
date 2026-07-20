@@ -484,7 +484,6 @@ async fn engine_worker_shutdown_drains_a_pending_invocation() {
     let actor = ActorContext::new(
         ActorId::new("worker-shutdown-agent").unwrap(),
         ActorKind::Agent,
-        AuthorityGrantId::new("agent-runtime").unwrap(),
     )
     .with_session_id(session_id);
     let invocation = Invocation::new_sync(
@@ -493,7 +492,7 @@ async fn engine_worker_shutdown_drains_a_pending_invocation() {
         CausalContext::new(
             actor.actor_id.clone(),
             actor.actor_kind.clone(),
-            actor.authority_grant_id.clone(),
+            AuthorityGrantId::new("agent-runtime").unwrap(),
             TraceId::generate(),
         )
         .with_session_id(session_id),
@@ -578,7 +577,6 @@ async fn engine_worker_heartbeat_retirement_closes_socket_and_drains_pending_inv
     let actor = ActorContext::new(
         ActorId::new("worker-heartbeat-retirement-agent").unwrap(),
         ActorKind::Agent,
-        AuthorityGrantId::new("agent-runtime").unwrap(),
     )
     .with_session_id(session_id);
     let invocation = Invocation::new_sync(
@@ -587,7 +585,7 @@ async fn engine_worker_heartbeat_retirement_closes_socket_and_drains_pending_inv
         CausalContext::new(
             actor.actor_id.clone(),
             actor.actor_kind.clone(),
-            actor.authority_grant_id.clone(),
+            AuthorityGrantId::new("agent-runtime").unwrap(),
             TraceId::generate(),
         )
         .with_session_id(session_id),
@@ -965,7 +963,6 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
     let admin = ActorContext::new(
         ActorId::new("baseline-characterization").unwrap(),
         ActorKind::Admin,
-        AuthorityGrantId::new("transport-authenticated").unwrap(),
     );
     let functions = runtime
         .server

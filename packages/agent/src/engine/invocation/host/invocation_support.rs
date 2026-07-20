@@ -162,9 +162,11 @@ fn resource_template_context_value<'a>(
         "actorId" | "actor_id" => Some(ValueRef::OwnedString(
             invocation.causal_context.actor_id.to_string(),
         )),
-        "authorityGrantId" | "authority_grant_id" => Some(ValueRef::OwnedString(
-            invocation.causal_context.authority_grant_id.to_string(),
-        )),
+        "authorityGrantId" | "authority_grant_id" => invocation
+            .causal_context
+            .authority_grant_id
+            .as_ref()
+            .map(|id| ValueRef::OwnedString(id.to_string())),
         "traceId" | "trace_id" => Some(ValueRef::OwnedString(
             invocation.causal_context.trace_id.to_string(),
         )),

@@ -22,6 +22,10 @@
 //!
 //! - Invocation IDs and causal context are created before dispatch and copied
 //!   into the durable record.
+//! - Trusted-local contexts carry no authority-grant id. Grant-backed remote
+//!   boundaries carry `Some(id)`; rejected unbacked observations and accepted
+//!   trusted-local calls carry `None`, with only the latter receiving the
+//!   explicit trusted-local runtime marker.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
 //! - Production timestamps remain wall-clock values; deterministic tests and

@@ -472,7 +472,7 @@ mod tests {
             function_id: FunctionId::new("rwo_n16::queued_echo").unwrap(),
             payload: json!({"message": "pending"}),
             actor_kind: ActorKind::Agent,
-            authority_grant_id: AuthorityGrantId::new("worker-runtime").unwrap(),
+            authority_grant_id: Some(AuthorityGrantId::new("worker-runtime").unwrap()),
             authority_scopes: vec!["rwo_n16.invoke".to_owned()],
             trace_id: TraceId::new("rwo-n16-trace").unwrap(),
             parent_invocation_id: None,

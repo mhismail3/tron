@@ -96,7 +96,7 @@ async fn external_worker_soak_registers_invokes_disconnects_and_reopens() {
                 .inspect_function(
                     &fid(&function_id),
                     Some(
-                        &ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+                        &ActorContext::new(actor("agent"), ActorKind::Agent)
                             .with_session_id(&session_id)
                     ),
                 )
@@ -121,7 +121,7 @@ async fn external_worker_soak_registers_invokes_disconnects_and_reopens() {
                 .inspect_function(
                     &fid(&function_id),
                     Some(
-                        &ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+                        &ActorContext::new(actor("agent"), ActorKind::Agent)
                             .with_session_id(&session_id)
                     ),
                 )

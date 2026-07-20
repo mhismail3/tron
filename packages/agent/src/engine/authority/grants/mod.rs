@@ -161,7 +161,11 @@ impl InMemoryEngineGrantStore {
         function: &FunctionDefinition,
         invocation: &Invocation,
     ) -> Result<EngineGrant> {
-        let grant = self.require_grant(&invocation.causal_context.authority_grant_id)?;
+        let grant = self.require_grant(
+            invocation
+                .causal_context
+                .require_authority_grant_id("authorize invocation")?,
+        )?;
         authorize_with_grant(&grant, function, invocation)?;
         Ok(grant)
     }
@@ -392,7 +396,11 @@ impl SqliteEngineGrantStore {
         function: &FunctionDefinition,
         invocation: &Invocation,
     ) -> Result<EngineGrant> {
-        let grant = self.require_grant(&invocation.causal_context.authority_grant_id)?;
+        let grant = self.require_grant(
+            invocation
+                .causal_context
+                .require_authority_grant_id("authorize invocation")?,
+        )?;
         authorize_with_grant(&grant, function, invocation)?;
         Ok(grant)
     }

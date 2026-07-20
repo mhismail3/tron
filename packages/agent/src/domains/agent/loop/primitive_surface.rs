@@ -9,9 +9,9 @@ use std::sync::{OnceLock, RwLock};
 use serde_json::Value;
 
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext,
-    ENGINE_INTERNAL_INVOKE_SCOPE, EngineHostHandle, FunctionDefinition, FunctionHealth, FunctionId,
-    FunctionQuery, Invocation, InvocationId, TraceId,
+    ActorContext, ActorId, ActorKind, CausalContext, ENGINE_INTERNAL_INVOKE_SCOPE,
+    EngineHostHandle, FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery, Invocation,
+    InvocationId, TraceId,
 };
 use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
@@ -160,10 +160,8 @@ async fn resolve_primitive_targets(
 ) -> Result<ResolvedPrimitiveTargets, String> {
     let actor_id =
         ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?;
-    let observation_id =
-        AuthorityGrantId::new("trusted-local-observation").map_err(|error| error.to_string())?;
-    let mut actor = ActorContext::new(actor_id, ActorKind::Agent, observation_id)
-        .with_session_id(session_id.to_owned());
+    let mut actor =
+        ActorContext::new(actor_id, ActorKind::Agent).with_session_id(session_id.to_owned());
     if let Some(workspace_id) = workspace_id {
         actor = actor.with_workspace_id(workspace_id.to_owned());
     }

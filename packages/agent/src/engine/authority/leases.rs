@@ -16,6 +16,49 @@ use serde::{Deserialize, Serialize};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId};
 
+const RESOURCE_LEASE_TABLE_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS engine_resource_leases (
+  lease_id TEXT PRIMARY KEY,
+  resource_kind TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  holder_invocation_id TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  authority_grant_id TEXT,
+  trace_id TEXT NOT NULL,
+  parent_invocation_id TEXT,
+  idempotency_key TEXT,
+  status TEXT NOT NULL,
+  acquired_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  released_at TEXT
+);
+"#;
+
+const RESOURCE_LEASE_INDEX_SCHEMA: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_resource
+  ON engine_resource_leases(resource_kind, resource_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_trace
+  ON engine_resource_leases(trace_id, acquired_at);
+"#;
+
+const RESOURCE_LEASE_COLUMNS: &[&str] = &[
+    "lease_id",
+    "resource_kind",
+    "resource_id",
+    "holder_invocation_id",
+    "function_id",
+    "actor_id",
+    "authority_grant_id",
+    "trace_id",
+    "parent_invocation_id",
+    "idempotency_key",
+    "status",
+    "acquired_at",
+    "expires_at",
+    "released_at",
+];
+
 /// Lifecycle state for a resource lease.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,8 +109,9 @@ pub struct EngineResourceLease {
     pub function_id: FunctionId,
     /// Actor that requested the lease.
     pub actor_id: ActorId,
-    /// Authority grant used for the request.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant used for the request, when the caller crossed a
+    /// grant-backed boundary.
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Trace propagated from the caller.
     pub trace_id: TraceId,
     /// Parent invocation, if any.
@@ -105,8 +149,8 @@ pub struct AcquireResourceLease {
     pub function_id: FunctionId,
     /// Actor acquiring the lease.
     pub actor_id: ActorId,
-    /// Authority grant used.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant used, when present.
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Optional parent invocation.
@@ -193,31 +237,20 @@ impl SqliteEngineResourceLeaseStore {
         crate::shared::storage::ensure_storage_schema(&self.conn)
             .map_err(|err| sqlite_err_message("lease.storage_schema", err.to_string()))?;
         self.conn
-            .execute_batch(
-                r#"
-CREATE TABLE IF NOT EXISTS engine_resource_leases (
-  lease_id TEXT PRIMARY KEY,
-  resource_kind TEXT NOT NULL,
-  resource_id TEXT NOT NULL,
-  holder_invocation_id TEXT NOT NULL,
-  function_id TEXT NOT NULL,
-  actor_id TEXT NOT NULL,
-  authority_grant_id TEXT NOT NULL,
-  trace_id TEXT NOT NULL,
-  parent_invocation_id TEXT,
-  idempotency_key TEXT,
-  status TEXT NOT NULL,
-  acquired_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  released_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_resource
-  ON engine_resource_leases(resource_kind, resource_id, status, expires_at);
-CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_trace
-  ON engine_resource_leases(trace_id, acquired_at);
-"#,
-            )
-            .map_err(|err| sqlite_err("lease.init", err))
+            .execute_batch(RESOURCE_LEASE_TABLE_SCHEMA)
+            .map_err(|err| sqlite_err("lease.init_table", err))?;
+        self.conn
+            .execute_batch(RESOURCE_LEASE_INDEX_SCHEMA)
+            .map_err(|err| sqlite_err("lease.init_indexes", err))?;
+        crate::shared::storage::ensure_nullable_text_observation(
+            &self.conn,
+            "engine_resource_leases",
+            "authority_grant_id",
+            RESOURCE_LEASE_TABLE_SCHEMA,
+            RESOURCE_LEASE_INDEX_SCHEMA,
+            RESOURCE_LEASE_COLUMNS,
+        )
+        .map_err(|err| sqlite_err_message("lease.migrate_nullable_authority", err.to_string()))
     }
 
     /// Acquire an exclusive resource lease.
@@ -298,7 +331,10 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_leases_trace
                     lease.holder_invocation_id.as_str(),
                     lease.function_id.as_str(),
                     lease.actor_id.as_str(),
-                    lease.authority_grant_id.as_str(),
+                    lease
+                        .authority_grant_id
+                        .as_ref()
+                        .map(AuthorityGrantId::as_str),
                     lease.trace_id.as_str(),
                     lease.parent_invocation_id.as_ref().map(|id| id.as_str()),
                     lease.idempotency_key,
@@ -388,7 +424,10 @@ fn row_to_lease(row: &rusqlite::Row<'_>) -> rusqlite::Result<EngineResourceLease
             .map_err(to_sql_err)?,
         function_id: FunctionId::new(row.get::<_, String>("function_id")?).map_err(to_sql_err)?,
         actor_id: ActorId::new(row.get::<_, String>("actor_id")?).map_err(to_sql_err)?,
-        authority_grant_id: AuthorityGrantId::new(row.get::<_, String>("authority_grant_id")?)
+        authority_grant_id: row
+            .get::<_, Option<String>>("authority_grant_id")?
+            .map(AuthorityGrantId::new)
+            .transpose()
             .map_err(to_sql_err)?,
         trace_id: TraceId::new(row.get::<_, String>("trace_id")?).map_err(to_sql_err)?,
         parent_invocation_id: parent
@@ -433,4 +472,69 @@ fn sqlite_err_message(operation: &'static str, message: impl Into<String>) -> En
 
 fn to_sql_err(error: EngineError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_lease_schema_migrates_and_records_local_lease_without_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tron.sqlite");
+        let legacy_schema = RESOURCE_LEASE_TABLE_SCHEMA.replace(
+            "authority_grant_id TEXT,",
+            "authority_grant_id TEXT NOT NULL,",
+        );
+        assert_ne!(legacy_schema, RESOURCE_LEASE_TABLE_SCHEMA);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&legacy_schema)
+            .unwrap();
+
+        let mut store = SqliteEngineResourceLeaseStore::open(&path).unwrap();
+        let lease = store
+            .acquire(AcquireResourceLease {
+                resource_kind: "file".to_owned(),
+                resource_id: "workspace/example.txt".to_owned(),
+                holder_invocation_id: InvocationId::new("lease-null-invocation").unwrap(),
+                function_id: FunctionId::new("filesystem::patch_apply").unwrap(),
+                actor_id: ActorId::new("agent:lease-null-test").unwrap(),
+                authority_grant_id: None,
+                trace_id: TraceId::new("lease-null-test").unwrap(),
+                parent_invocation_id: None,
+                idempotency_key: Some("lease-null-test".to_owned()),
+                ttl_ms: 1_000,
+            })
+            .unwrap();
+        assert_eq!(lease.authority_grant_id, None);
+        assert_eq!(
+            store
+                .get(&lease.lease_id)
+                .unwrap()
+                .unwrap()
+                .authority_grant_id,
+            None
+        );
+        drop(store);
+
+        let conn = Connection::open(&path).unwrap();
+        let stored_grant: Option<String> = conn
+            .query_row(
+                "SELECT authority_grant_id FROM engine_resource_leases WHERE lease_id = ?1",
+                [lease.lease_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_grant, None);
+        let not_null: i64 = conn
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('engine_resource_leases') \
+                 WHERE name = 'authority_grant_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(not_null, 0);
+    }
 }

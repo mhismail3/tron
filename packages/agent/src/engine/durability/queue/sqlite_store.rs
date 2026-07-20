@@ -13,6 +13,65 @@ use super::{
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::InvocationId;
 
+const QUEUE_TABLE_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS engine_queue_items (
+  receipt_id TEXT PRIMARY KEY,
+  queue TEXT NOT NULL,
+  function_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  actor_kind TEXT NOT NULL,
+  authority_grant_id TEXT,
+  authority_scopes_json TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  parent_invocation_id TEXT,
+  trigger_id TEXT,
+  session_id TEXT,
+  workspace_id TEXT,
+  idempotency_key TEXT,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL,
+  lease_owner TEXT,
+  lease_expires_at TEXT,
+  not_before TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  runtime_metadata_json TEXT NOT NULL DEFAULT '{}',
+  attempt_records_json TEXT NOT NULL DEFAULT '[]'
+);
+"#;
+
+const QUEUE_INDEX_SCHEMA: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
+  ON engine_queue_items(trace_id, created_at);
+"#;
+
+const QUEUE_COLUMNS: &[&str] = &[
+    "receipt_id",
+    "queue",
+    "function_id",
+    "payload_json",
+    "actor_id",
+    "actor_kind",
+    "authority_grant_id",
+    "authority_scopes_json",
+    "trace_id",
+    "parent_invocation_id",
+    "trigger_id",
+    "session_id",
+    "workspace_id",
+    "idempotency_key",
+    "status",
+    "attempts",
+    "lease_owner",
+    "lease_expires_at",
+    "not_before",
+    "created_at",
+    "updated_at",
+    "runtime_metadata_json",
+    "attempt_records_json",
+];
+
 /// SQLite queue store.
 pub struct SqliteEngineQueueStore {
     conn: Connection,
@@ -34,40 +93,22 @@ impl SqliteEngineQueueStore {
         crate::shared::storage::ensure_storage_schema(&self.conn)
             .map_err(|err| sqlite_err("queue.storage_schema", err.to_string()))?;
         self.conn
-            .execute_batch(
-                r#"
-CREATE TABLE IF NOT EXISTS engine_queue_items (
-  receipt_id TEXT PRIMARY KEY,
-  queue TEXT NOT NULL,
-  function_id TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  actor_id TEXT NOT NULL,
-  actor_kind TEXT NOT NULL,
-  authority_grant_id TEXT NOT NULL,
-  authority_scopes_json TEXT NOT NULL,
-  trace_id TEXT NOT NULL,
-  parent_invocation_id TEXT,
-  trigger_id TEXT,
-  session_id TEXT,
-  workspace_id TEXT,
-  idempotency_key TEXT,
-  status TEXT NOT NULL,
-  attempts INTEGER NOT NULL,
-  lease_owner TEXT,
-  lease_expires_at TEXT,
-  not_before TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  runtime_metadata_json TEXT NOT NULL DEFAULT '{}',
-  attempt_records_json TEXT NOT NULL DEFAULT '[]'
-);
-CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
-  ON engine_queue_items(trace_id, created_at);
-"#,
-            )
-            .map_err(|err| sqlite_err("queue.init", err.to_string()))
-            .and_then(|_| self.ensure_runtime_metadata_column())
-            .and_then(|_| self.ensure_attempt_records_column())
+            .execute_batch(QUEUE_TABLE_SCHEMA)
+            .map_err(|err| sqlite_err("queue.init_table", err.to_string()))?;
+        self.conn
+            .execute_batch(QUEUE_INDEX_SCHEMA)
+            .map_err(|err| sqlite_err("queue.init_indexes", err.to_string()))?;
+        self.ensure_runtime_metadata_column()?;
+        self.ensure_attempt_records_column()?;
+        crate::shared::storage::ensure_nullable_text_observation(
+            &self.conn,
+            "engine_queue_items",
+            "authority_grant_id",
+            QUEUE_TABLE_SCHEMA,
+            QUEUE_INDEX_SCHEMA,
+            QUEUE_COLUMNS,
+        )
+        .map_err(|err| sqlite_err("queue.migrate_nullable_authority", err.to_string()))
     }
 
     fn ensure_runtime_metadata_column(&self) -> Result<()> {
@@ -445,5 +486,71 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
             )
             .map_err(|err| sqlite_err("queue.update", err.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{ActorId, ActorKind, FunctionId, RUNTIME_METADATA_TRUSTED_LOCAL, TraceId};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn old_queue_schema_migrates_and_accepts_ungranted_local_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tron.sqlite");
+        let legacy_schema = QUEUE_TABLE_SCHEMA.replace(
+            "authority_grant_id TEXT,",
+            "authority_grant_id TEXT NOT NULL,",
+        );
+        assert_ne!(legacy_schema, QUEUE_TABLE_SCHEMA);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&legacy_schema)
+            .unwrap();
+
+        let mut runtime_metadata = BTreeMap::new();
+        runtime_metadata.insert(RUNTIME_METADATA_TRUSTED_LOCAL.to_owned(), "true".to_owned());
+        let mut store = SqliteEngineQueueStore::open(&path).unwrap();
+        let item = store
+            .enqueue(EnqueueInvocation {
+                queue: "trusted-local".to_owned(),
+                function_id: FunctionId::new("worker_kernel::list").unwrap(),
+                payload: json!({}),
+                actor_id: ActorId::new("agent:queue-null-test").unwrap(),
+                actor_kind: ActorKind::Agent,
+                authority_grant_id: None,
+                authority_scopes: Vec::new(),
+                runtime_metadata,
+                trace_id: TraceId::new("queue-null-test").unwrap(),
+                parent_invocation_id: None,
+                trigger_id: None,
+                session_id: Some("queue-null-test".to_owned()),
+                workspace_id: None,
+                idempotency_key: Some("queue-null-test".to_owned()),
+            })
+            .unwrap();
+
+        assert_eq!(item.authority_grant_id, None);
+        let stored_grant: Option<String> = store
+            .connection()
+            .query_row(
+                "SELECT authority_grant_id FROM engine_queue_items WHERE receipt_id = ?1",
+                [item.receipt_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_grant, None);
+        let not_null: i64 = store
+            .connection()
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('engine_queue_items') \
+                 WHERE name = 'authority_grant_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(not_null, 0);
     }
 }

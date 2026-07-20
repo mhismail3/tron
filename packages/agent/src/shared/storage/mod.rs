@@ -11,6 +11,9 @@
 //! schema only. Generation inspection errors fail closed, archived DB/WAL/SHM
 //! files carry an `archive-manifest.json`, and shared storage schema setup runs
 //! behind a savepoint with drift and payload-reference integrity checks.
+//! Source-owned tables may also use the narrow nullable-observation rebuild
+//! helper to preserve rows while removing historical `NOT NULL` authority-id
+//! ceremony; the helper is transactional and idempotent.
 //! Startup and manual cleanup share one managed diagnostic horizon and active
 //! database budget. Those bounds prune only low-signal diagnostic data and
 //! unowned blobs; they are not chat, session, or memory retention policy.
@@ -39,6 +42,7 @@ pub use payloads::{
     resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
     store_json_value, store_owned_payload_ref,
 };
+pub(crate) use schema::ensure_nullable_text_observation;
 pub use schema::{apply_runtime_pragmas, ensure_storage_schema};
 pub use stats::storage_stats;
 

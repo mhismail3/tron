@@ -371,8 +371,12 @@ mod tests {
         );
         assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
         assert_eq!(
-            envelope.causal_context.authority_grant_id.as_str(),
-            catalog::SYSTEM_AUTHORITY_GRANT
+            envelope
+                .causal_context
+                .authority_grant_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some(catalog::SYSTEM_AUTHORITY_GRANT)
         );
     }
 }

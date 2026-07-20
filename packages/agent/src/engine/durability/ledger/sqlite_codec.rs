@@ -47,6 +47,33 @@ CREATE TABLE IF NOT EXISTS engine_catalog_functions (
   updated_at      TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
+  function_id           TEXT NOT NULL,
+  scope_kind            TEXT NOT NULL,
+  scope_value           TEXT NOT NULL,
+  idempotency_key       TEXT NOT NULL,
+  payload_fingerprint   TEXT NOT NULL,
+  function_revision     INTEGER NOT NULL,
+  replay_behavior_json  TEXT NOT NULL,
+  status_json           TEXT NOT NULL,
+  first_invocation_id   TEXT NOT NULL,
+  latest_invocation_id  TEXT NOT NULL,
+  outcome_value_json    TEXT,
+  outcome_error_json    TEXT,
+  created_at            TEXT NOT NULL,
+  updated_at            TEXT NOT NULL,
+  PRIMARY KEY (function_id, scope_kind, scope_value, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
+  ON engine_catalog_changes(after_revision);
+
+CREATE INDEX IF NOT EXISTS idx_engine_catalog_functions_owner
+  ON engine_catalog_functions(owner_worker_id);
+"#;
+
+/// Canonical invocation table SQL reused by the nullable-authority migration.
+pub(super) const INVOCATION_TABLE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS engine_invocations (
   invocation_id            TEXT PRIMARY KEY,
   function_id              TEXT NOT NULL,
@@ -55,7 +82,7 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   catalog_revision         INTEGER NOT NULL,
   actor_id                 TEXT NOT NULL,
   actor_kind_json          TEXT NOT NULL,
-  authority_grant_id       TEXT NOT NULL,
+  authority_grant_id       TEXT,
   authority_scopes_json    TEXT NOT NULL,
   trace_id                 TEXT NOT NULL,
   parent_invocation_id     TEXT,
@@ -75,34 +102,45 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   error_json               TEXT,
   timestamp                TEXT NOT NULL
 );
+"#;
 
-CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
-  function_id           TEXT NOT NULL,
-  scope_kind            TEXT NOT NULL,
-  scope_value           TEXT NOT NULL,
-  idempotency_key       TEXT NOT NULL,
-  payload_fingerprint   TEXT NOT NULL,
-  function_revision     INTEGER NOT NULL,
-  replay_behavior_json  TEXT NOT NULL,
-  status_json           TEXT NOT NULL,
-  first_invocation_id   TEXT NOT NULL,
-  latest_invocation_id  TEXT NOT NULL,
-  outcome_value_json    TEXT,
-  outcome_error_json    TEXT,
-  created_at            TEXT NOT NULL,
-  updated_at            TEXT NOT NULL,
-  PRIMARY KEY (function_id, scope_kind, scope_value, idempotency_key)
-);
-
+pub(super) const INVOCATION_INDEX_SCHEMA: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_engine_invocations_trace
   ON engine_invocations(trace_id);
-
-CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
-  ON engine_catalog_changes(after_revision);
-
-CREATE INDEX IF NOT EXISTS idx_engine_catalog_functions_owner
-  ON engine_catalog_functions(owner_worker_id);
 "#;
+
+pub(super) const INVOCATION_COLUMNS: &[&str] = &[
+    "invocation_id",
+    "function_id",
+    "worker_id",
+    "function_revision",
+    "catalog_revision",
+    "actor_id",
+    "actor_kind_json",
+    "authority_grant_id",
+    "authority_scopes_json",
+    "trace_id",
+    "parent_invocation_id",
+    "trigger_id",
+    "session_id",
+    "workspace_id",
+    "delivery_mode_json",
+    "idempotency_scope_kind",
+    "idempotency_scope_value",
+    "resource_lease_ids_json",
+    "compensation_status",
+    "produced_resource_refs_json",
+    "idempotency_key",
+    "replayed_from",
+    "succeeded",
+    "result_json",
+    "error_json",
+    "timestamp",
+];
+
+/// Historical placeholder written before trusted-local authority became an
+/// explicit nullable observation. Startup converts it to SQL `NULL` once.
+pub(super) const LEGACY_TRUSTED_LOCAL_AUTHORITY_OBSERVATION: &str = "trusted-local-observation";
 
 pub(super) struct RawCatalogChangeRow {
     pub(super) id: String,
@@ -127,7 +165,7 @@ pub(super) struct RawInvocationRow {
     pub(super) catalog_revision: u64,
     pub(super) actor_id: String,
     pub(super) actor_kind_json: String,
-    pub(super) authority_grant_id: String,
+    pub(super) authority_grant_id: Option<String>,
     pub(super) authority_scopes_json: String,
     pub(super) trace_id: String,
     pub(super) parent_invocation_id: Option<String>,
@@ -199,7 +237,10 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
         catalog_revision: CatalogRevision(row.catalog_revision),
         actor_id: ActorId::new(row.actor_id)?,
         actor_kind: from_json_string::<ActorKind>("invocation.actor_kind", &row.actor_kind_json)?,
-        authority_grant_id: AuthorityGrantId::new(row.authority_grant_id)?,
+        authority_grant_id: row
+            .authority_grant_id
+            .map(AuthorityGrantId::new)
+            .transpose()?,
         authority_scopes: from_json_string(
             "invocation.authority_scopes",
             &row.authority_scopes_json,

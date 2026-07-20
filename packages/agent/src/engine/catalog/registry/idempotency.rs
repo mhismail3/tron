@@ -302,7 +302,14 @@ fn idempotency_scope_value(
         )),
         VisibilityScope::Internal => Ok(IdempotencyScope::new(
             "internal",
-            invocation.causal_context.authority_grant_id.to_string(),
+            invocation
+                .causal_context
+                .authority_grant_id
+                .as_ref()
+                .map_or_else(
+                    || format!("trusted-local:{}", invocation.causal_context.actor_id),
+                    ToString::to_string,
+                ),
         )),
     }
 }

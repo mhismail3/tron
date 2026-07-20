@@ -55,7 +55,7 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].function_id.as_str(), "alpha::read");
     assert_eq!(records[0].actor_id, actor("agent"));
-    assert_eq!(records[0].authority_grant_id, grant("grant"));
+    assert_eq!(records[0].authority_grant_id, Some(grant("grant")));
     assert_eq!(records[0].trace_id, trace("trace"));
     assert_eq!(records[0].parent_invocation_id, Some(parent));
     assert_eq!(records[0].trigger_id, Some(trigger));
@@ -71,6 +71,63 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn trusted_local_mutation_records_lease_and_compensation_without_grant() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("w1", "alpha"), true)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            write_function("alpha::local_write", "w1")
+                .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+                    "file",
+                    "file:{path}",
+                    30_000,
+                ))
+                .with_compensation(CompensationContract::new(
+                    CompensationKind::ManualOnly,
+                    "prior content remains recoverable",
+                )),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+    let invocation = Invocation::new_sync(
+        fid("alpha::local_write"),
+        json!({"path": "notes/example.txt"}),
+        CausalContext::trusted_local(
+            actor("agent"),
+            ActorKind::Agent,
+            trace("trusted-local-write"),
+        )
+        .with_session_id("trusted-local-write")
+        .with_idempotency_key("trusted-local-write"),
+    );
+
+    let result = handle.invoke(invocation).await;
+
+    assert_eq!(result.error, None);
+    let snapshot = handle.replay_snapshot("trusted-local-write").await.unwrap();
+    let record = snapshot
+        .invocations
+        .iter()
+        .find(|record| record.invocation_id == result.invocation_id)
+        .expect("trusted-local invocation record");
+    assert_eq!(record.authority_grant_id, None);
+    assert_eq!(record.resource_lease_ids.len(), 1);
+    let lease = handle
+        .get_resource_lease(&record.resource_lease_ids[0])
+        .await
+        .unwrap()
+        .expect("trusted-local resource lease");
+    assert_eq!(lease.authority_grant_id, None);
+    let compensation = handle.list_compensation_records().await.unwrap();
+    assert_eq!(compensation.len(), 1);
+    assert_eq!(compensation[0].authority_grant_id, None);
 }
 
 #[tokio::test]
@@ -248,7 +305,7 @@ async fn host_unregister_function_updates_discovery_and_watch() {
     host.register_function_for_setup(read_function("alpha::read", "w1"), Some(handler()), true)
         .unwrap();
 
-    let actor_context = ActorContext::new(actor("system"), ActorKind::System, grant("grant"));
+    let actor_context = ActorContext::new(actor("system"), ActorKind::System);
     let query = FunctionQuery {
         actor: Some(actor_context.clone()),
         namespace_prefix: Some("alpha::".to_owned()),
@@ -496,11 +553,7 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
     let functions = tokio::time::timeout(
         std::time::Duration::from_millis(100),
         handle.discover(&FunctionQuery {
-            actor: Some(ActorContext::new(
-                actor("agent"),
-                ActorKind::Agent,
-                grant("grant"),
-            )),
+            actor: Some(ActorContext::new(actor("agent"), ActorKind::Agent)),
             ..FunctionQuery::default()
         }),
     )
@@ -569,11 +622,7 @@ async fn engine_invoke_meta_does_not_block_discovery_while_child_runs() {
     let functions = tokio::time::timeout(
         std::time::Duration::from_millis(100),
         handle.discover(&FunctionQuery {
-            actor: Some(ActorContext::new(
-                actor("agent"),
-                ActorKind::Agent,
-                grant("grant"),
-            )),
+            actor: Some(ActorContext::new(actor("agent"), ActorKind::Agent)),
             ..FunctionQuery::default()
         }),
     )

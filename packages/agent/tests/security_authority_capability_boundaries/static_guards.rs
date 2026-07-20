@@ -79,6 +79,40 @@ fn sacb_public_engine_context_rejects_authority_and_runtime_metadata() {
 }
 
 #[test]
+fn sacb_trusted_local_invocations_never_manufacture_grant_ids() {
+    let model = read_repo_file("packages/agent/src/engine/invocation/model.rs");
+    for required in [
+        "pub authority_grant_id: Option<AuthorityGrantId>",
+        "Self::new_with_authority(actor_id, actor_kind, None, trace_id)",
+        "require_authority_grant_id",
+        "Trusted-local invocations persist `None`/SQL `NULL`",
+    ] {
+        assert!(
+            model.contains(required),
+            "trusted-local causal model missing explicit no-grant contract: {required}"
+        );
+    }
+    assert!(
+        !model.contains("trusted-local-observation"),
+        "trusted-local causal context must not preserve a placeholder grant id"
+    );
+
+    let discovery = read_repo_file("packages/agent/src/engine/catalog/discovery.rs");
+    assert!(
+        !discovery.contains("authority_grant_id") && !discovery.contains("AuthorityGrantId"),
+        "catalog discovery actor context must not carry unused grant ceremony"
+    );
+
+    let surface = read_repo_file("packages/agent/src/domains/agent/loop/primitive_surface.rs");
+    let production_surface = surface.split("#[cfg(test)]").next().unwrap_or(&surface);
+    assert!(
+        !production_surface.contains("trusted-local-observation")
+            && !production_surface.contains("AuthorityGrantId"),
+        "provider tool discovery must use actor provenance directly"
+    );
+}
+
+#[test]
 fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots() {
     let derivation = read_repo_file("packages/agent/src/engine/authority/grants/derivation.rs");
     assert!(

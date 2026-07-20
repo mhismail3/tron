@@ -240,7 +240,6 @@ pub(in crate::engine::primitives) fn actor_context(context: &CausalContext) -> A
     ActorContext {
         actor_id: context.actor_id.clone(),
         actor_kind: context.actor_kind.clone(),
-        authority_grant_id: context.authority_grant_id.clone(),
         authority_scopes: context.authority_scopes.clone(),
         session_id: context.session_id.clone(),
         workspace_id: context.workspace_id.clone(),

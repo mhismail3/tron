@@ -207,7 +207,7 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
         .register_function(internal, Some(handler()), true)
         .unwrap();
 
-    let agent = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"));
+    let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
     let all = catalog.discover_functions(&FunctionQuery {
         actor: Some(agent.clone()),
         ..FunctionQuery::default()
@@ -245,7 +245,7 @@ fn discovery_text_query_matches_tokens_across_canonical_id() {
         )
         .unwrap();
 
-    let agent = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"));
+    let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
     let filtered = catalog.discover_functions(&FunctionQuery {
         text: Some("worker list".to_owned()),
         actor: Some(agent),
@@ -295,7 +295,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
         .register_function(internal_function, Some(handler()), true)
         .unwrap();
 
-    let scoped_actor = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+    let scoped_actor = ActorContext::new(actor("agent"), ActorKind::Agent)
         .with_session_id("session-a")
         .with_workspace_id("workspace-a");
     let scoped = catalog.discover_functions(&FunctionQuery {
@@ -308,7 +308,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
         vec!["alpha::session", "alpha::workspace"]
     );
 
-    let other_session = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+    let other_session = ActorContext::new(actor("agent"), ActorKind::Agent)
         .with_session_id("session-b")
         .with_workspace_id("workspace-a");
     let workspace_only = catalog.discover_functions(&FunctionQuery {
@@ -323,7 +323,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
         vec!["alpha::workspace"]
     );
 
-    let admin = ActorContext::new(actor("admin"), ActorKind::Admin, grant("grant"));
+    let admin = ActorContext::new(actor("admin"), ActorKind::Admin);
     let admin_view = catalog.discover_functions(&FunctionQuery {
         actor: Some(admin),
         include_internal: true,
@@ -372,10 +372,10 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
         .register_function(function, Some(handler()), true)
         .unwrap();
 
-    let matching_session = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
-        .with_session_id("session-a");
-    let other_session = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
-        .with_session_id("session-b");
+    let matching_session =
+        ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-a");
+    let other_session =
+        ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-b");
     assert!(
         catalog
             .inspect_function(&fid("alpha::session"), Some(&matching_session))
@@ -426,8 +426,8 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
         CatalogChangeKind::VisibilityChanged
     );
 
-    let workspace_actor = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
-        .with_workspace_id("workspace-a");
+    let workspace_actor =
+        ActorContext::new(actor("agent"), ActorKind::Agent).with_workspace_id("workspace-a");
     assert!(
         catalog
             .inspect_function(&fid("alpha::session"), Some(&workspace_actor))

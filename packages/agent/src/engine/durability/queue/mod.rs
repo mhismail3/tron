@@ -2,7 +2,9 @@
 //!
 //! Queues provide durable at-least-once handoff for engine invocations. The
 //! primitive stores invocation payload plus causality so a later drain can
-//! invoke the same function with the original authority and trace context. A
+//! invoke the same function with its original trace and, when present, remote
+//! grant context. Trusted-local queue items preserve the explicit local marker
+//! and store no synthetic grant id. A
 //! retried queue item keeps the original logical idempotency key on the item,
 //! but executes retry attempts with attempt-scoped target keys so a stored
 //! handler failure does not turn into a permanent replay result. Queue failure
@@ -19,7 +21,7 @@
 //! invocation ledger does not record an application-level handler failure.
 //! [`EngineQueueDrainer`] is the single claim-and-execute owner for background
 //! queue services and synchronous receipt drains.
-//! Enqueue is also the resource-governance boundary: payload size and
+//! Enqueue is also a reliability boundary: payload size and
 //! per-queue active ready/leased depth are rejected before either queue store
 //! persists the item, and list calls clamp to the owner-defined page cap.
 
@@ -136,8 +138,8 @@ pub struct EngineQueueItem {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant when the queued call crossed a grant-backed boundary.
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Authority scopes.
     pub authority_scopes: Vec<String>,
     /// Engine runtime metadata.
@@ -185,8 +187,8 @@ pub struct EnqueueInvocation {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant.
-    pub authority_grant_id: AuthorityGrantId,
+    /// Authority grant when present.
+    pub authority_grant_id: Option<AuthorityGrantId>,
     /// Authority scopes.
     pub authority_scopes: Vec<String>,
     /// Engine runtime metadata.

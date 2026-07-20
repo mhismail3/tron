@@ -1,8 +1,6 @@
 use serde_json::Value;
 
-use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, DeliveryMode, FunctionId, Invocation, TraceId,
-};
+use crate::engine::{ActorId, ActorKind, DeliveryMode, FunctionId, Invocation, TraceId};
 use crate::shared::server::errors::CapabilityError;
 
 pub(super) fn idempotency_key(
@@ -268,10 +266,9 @@ pub(super) fn system_invocation(
     idempotency_key: &str,
     payload: Value,
 ) -> Result<Invocation, CapabilityError> {
-    let context = crate::engine::CausalContext::new(
+    let context = crate::engine::CausalContext::trusted_local(
         ActorId::new("system:context-control").map_err(id_error)?,
         ActorKind::System,
-        AuthorityGrantId::new("system:context-control-runtime").map_err(id_error)?,
         TraceId::generate(),
     )
     .with_session_id(session_id)
@@ -291,10 +288,9 @@ pub(super) fn ui_system_invocation(
     payload: Value,
     parent: &Invocation,
 ) -> Result<Invocation, CapabilityError> {
-    let context = crate::engine::CausalContext::new(
+    let context = crate::engine::CausalContext::trusted_local(
         ActorId::new("system:context-control-ui").map_err(id_error)?,
         ActorKind::System,
-        AuthorityGrantId::new("system:context-control-ui").map_err(id_error)?,
         TraceId::generate(),
     )
     .with_session_id(session_id)

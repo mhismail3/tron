@@ -78,10 +78,9 @@ async fn invoke_state_list(
     session_id: Option<&str>,
     workspace_id: Option<&str>,
 ) -> Option<Value> {
-    let mut causal = crate::engine::CausalContext::new(
+    let mut causal = crate::engine::CausalContext::trusted_local(
         crate::engine::ActorId::new("system:agent-state-context").ok()?,
         crate::engine::ActorKind::System,
-        crate::engine::AuthorityGrantId::new("engine-system").ok()?,
         crate::engine::TraceId::new("agent-state-context").ok()?,
     )
     .with_scope("state.read")

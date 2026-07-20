@@ -16,6 +16,10 @@
 //! credentials cannot enter SQLite, payload blobs, replay exports, or later
 //! idempotent replays. Both ledger implementations apply that policy at their
 //! storage boundary even when a caller manually constructs a record.
+//! Authority grant ids are nullable observations: authenticated non-local calls
+//! retain their real id, while trusted-local calls persist SQL `NULL`. Startup
+//! transactionally rebuilds the historical `TEXT NOT NULL` shape before any
+//! such row is written and preserves all prior invocation rows.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

@@ -224,11 +224,7 @@ async fn validate_worker_trigger(
             trigger.target_function, connection.worker_token.namespace_claims
         )));
     }
-    let admin_actor = ActorContext::new(
-        ActorId::new("worker-runtime")?,
-        ActorKind::System,
-        AuthorityGrantId::new("worker-runtime")?,
-    );
+    let admin_actor = ActorContext::new(ActorId::new("worker-runtime")?, ActorKind::System);
     let target = host
         .inspect_function(&trigger.target_function, Some(&admin_actor))
         .await?;

@@ -57,7 +57,7 @@ async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target
             payload: json!({"message": "retry"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
-            authority_grant_id: grant("agent-grant"),
+            authority_grant_id: Some(grant("agent-grant")),
             authority_scopes: Vec::new(),
             runtime_metadata: Default::default(),
             trace_id: trace("queue-disconnect"),
@@ -173,7 +173,7 @@ async fn local_external_worker_durable_disconnect_marks_functions_unhealthy() {
         .await
         .unwrap();
 
-    let admin = ActorContext::new(actor("admin"), ActorKind::System, grant("admin-grant"));
+    let admin = ActorContext::new(actor("admin"), ActorKind::System);
     let function = handle
         .inspect_function(&fid("durable_local::echo"), Some(&admin))
         .await

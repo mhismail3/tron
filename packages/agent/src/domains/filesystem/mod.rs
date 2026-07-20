@@ -8,17 +8,17 @@
 //!   diff, write preview/commit, and exact-text patch application under the
 //!   trusted working-directory root.
 //!
-//! The toolbox consumes engine primitives for authority roots, resources,
-//! idempotency, leases, compensation, streams, traces, and replay evidence.
-//! Phase 3 Slice 24A declares the agent toolbox operations in the pending-review
-//! `file_git_module` manifest and derives exact filesystem/resource authority
-//! for them without adding new provider-visible tools.
+//! The toolbox consumes engine primitives for trusted working-directory
+//! containment, resources, idempotency, leases, compensation, streams, traces,
+//! and replay evidence. Accepted local model calls use the Mac user's normal
+//! filesystem authority; containment and leases are correctness mechanisms,
+//! not capability-grant gates.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `agent_tools` | Agent filesystem toolbox with path authority and evidence |
+//! | `agent_tools` | Agent filesystem toolbox with path containment and evidence |
 //! | `contract` | Narrow `filesystem::*` workspace-browser contracts |
 //! | `handlers` | Operation-key binding table |
 //! | `service` | Hardened local filesystem reads/writes for selector UX |
@@ -30,10 +30,9 @@
 //! file tools must resolve paths only from trusted runtime working-directory
 //! metadata, reject traversal and symlink escapes, bound all reads/searches, and
 //! return resource-backed evidence for mutating previews/commits.
-//! The adapter seam for future module replacement is exact-root authority plus
-//! preview/commit parity: a replacement must preserve provider-safe refs,
-//! replay/idempotency evidence, and rollback/disable metadata before binding
-//! policy may later consider routing.
+//! A future worker replacement must preserve path containment,
+//! preview/commit parity, provider-safe refs, replay/idempotency evidence, and
+//! recoverable mutation metadata.
 
 use std::path::PathBuf;
 

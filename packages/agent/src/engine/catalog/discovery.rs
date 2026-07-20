@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::kernel::ids::{ActorId, AuthorityGrantId};
+use crate::engine::kernel::ids::ActorId;
 use crate::engine::kernel::types::{EffectClass, FunctionHealth, RiskLevel, VisibilityScope};
 
 /// Context of the actor performing discovery or invocation.
@@ -12,8 +12,6 @@ pub struct ActorContext {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id.
-    pub authority_grant_id: AuthorityGrantId,
     /// Granted authority scopes.
     pub authority_scopes: Vec<String>,
     /// Optional session id.
@@ -25,15 +23,10 @@ pub struct ActorContext {
 impl ActorContext {
     /// Create an actor context.
     #[must_use]
-    pub fn new(
-        actor_id: ActorId,
-        actor_kind: ActorKind,
-        authority_grant_id: AuthorityGrantId,
-    ) -> Self {
+    pub fn new(actor_id: ActorId, actor_kind: ActorKind) -> Self {
         Self {
             actor_id,
             actor_kind,
-            authority_grant_id,
             authority_scopes: Vec::new(),
             session_id: None,
             workspace_id: None,

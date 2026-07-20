@@ -43,7 +43,7 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         function_id: fid("local::echo"),
         payload: json!({"hello": "worker"}),
         actor_kind: ActorKind::Agent,
-        authority_grant_id: grant("agent-grant"),
+        authority_grant_id: Some(grant("agent-grant")),
         authority_scopes: vec!["local.read".to_owned()],
         trace_id: trace("worker-trace"),
         parent_invocation_id: None,
