@@ -7,8 +7,9 @@
 //! seals it into the staged manifest and lock before the version is hashed.
 //! A bounded staged `sourceDirectory` imports a UTF-8 tree directly; inline
 //! files override it, while symlinks and special files fail before preparation.
-//! Filesystem bundles are canonical. SQLite holds rebuildable route/trigger
-//! indexes plus durable attempt, trace, invocation, inbox, health, and audit ledgers.
+//! Filesystem bundles are canonical; absent optional fields are omitted so an
+//! inspected manifest remains valid `worker_upsert` input. SQLite holds only
+//! rebuildable indexes and durable operational/audit ledgers.
 //!
 //! ## Submodules
 //!
@@ -48,9 +49,8 @@
 //! no framework envelope is injected. A projected event outside the typed
 //! schema is a terminal worker failure, not an endlessly retried delivery. A
 //! persistence failure retains the cursor for retry.
-//! The worker lifecycle observer always runs: edits to the
-//! `autonomousWorkers` profile setting hide or restore the fixed and dynamic
-//! model-tool surface, cancel or resume dispatch, and stop resident services
+//! Edits to `autonomousWorkers` hide or restore fixed/dynamic model tools,
+//! cancel or resume dispatch, and stop resident services
 //! without a server restart or a change to canonical worker state.
 //! Authenticated clients retain read access and lifecycle/stop controls while
 //! autonomy is off, but authoring and invocation remain blocked. Lazy resident
@@ -63,27 +63,27 @@
 //! entries, skips hidden/heavy child trees unless requested, and reports every
 //! truncation cause. An agent abort or server shutdown therefore cannot be held
 //! indefinitely by a home-directory search.
-//! Executable child I/O is concurrent and bounded. Unix child lifecycles use
-//! isolated process groups so cancellation kills background descendants too;
-//! detailed ceilings and fallback behavior belong to the `process` module.
+//! Executable child I/O is concurrent and bounded. Unix process groups make
+//! cancellation kill descendants; trusted-local `PATH` restores conventional
+//! host tools hidden by service launchers. Details belong to `process`.
 //! Command, smoke-test, and health-check working directories are always the
 //! bundle's `files/` directory. A dependency named `N` is acquired beneath
 //! `../dependencies/N`; its optional install command runs within that directory
 //! before validation commands, making the authoring layout deterministic.
-//! Direct-operation lifecycle events and audit retain shape and reliability evidence but
-//! redact credential fields and recognizable secret values before persistence
-//! or broadcast. One-time webhook credentials exist raw only in the active
-//! provider turn that requested them.
+//! Lifecycle events and audit retain reliability evidence while redacting
+//! credential fields and recognizable secrets. One-time webhook credentials
+//! exist raw only in the active provider turn that requested them.
 //! A webhook request body is the worker's ordinary typed input. Object-valued
 //! trigger configuration supplies defaults, request keys override defaults,
 //! and no engine-specific wrapper field is injected.
 //! Unseen inbox attachment is invoked by the engine's internal runtime identity
 //! with session/trace provenance. It therefore crosses internal visibility as
 //! an engine projection and never requires or fabricates an agent grant.
-//! Agent-runner child sessions are coupled to their parent invocation by a
-//! drop guard, so timeout, per-worker stop, disable, stop-all, or shutdown aborts the child. The
-//! inherited worker causal depth is propagated through that child and back onto
-//! every direct tool call; an agent hop cannot reset the depth-16 ceiling.
+//! An agent-runner drop guard aborts its child on timeout, stop, disable, or
+//! shutdown. Causal depth survives the child hop, and pre-admission event
+//! subscription preserves even an immediate provider failure's terminal error.
+//! Core proposal diffs retain exact text, including `git apply`'s terminal
+//! newline. Purge is irreversible/critical; retirement remains recoverable.
 //! Core proposal approval rejects negated or ambiguous messages. A failed
 //! approved cherry-pick is aborted and verified back at its original commit
 //! before the proposal remains in the tested state.

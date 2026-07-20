@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::domains::session::event_store::EventStore;
 
-use super::process::{ProcessTree, wait_with_bounded_output};
+use super::process::{ProcessTree, trusted_local_command_path, wait_with_bounded_output};
 
 const MAX_CORE_TEST_EVIDENCE_BYTES: usize = 64 * 1024;
 
@@ -368,6 +368,7 @@ async fn run_git(cwd: &Path, arguments: &[&str], stdin: Option<&str>) -> Result<
     command
         .args(arguments)
         .current_dir(cwd)
+        .env("PATH", trusted_local_command_path(None)?)
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -407,6 +408,7 @@ async fn run_command(cwd: &Path, command: &[String]) -> Result<String, String> {
     command
         .args(arguments)
         .current_dir(cwd)
+        .env("PATH", trusted_local_command_path(None)?)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

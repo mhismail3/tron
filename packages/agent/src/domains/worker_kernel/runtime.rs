@@ -24,10 +24,13 @@ use crate::engine::{
     PublishStreamEvent, RUNTIME_METADATA_TRIGGER_DEPTH, RiskLevel, StreamActorScope, StreamCursor,
     TraceId, VisibilityScope, WorkerId,
 };
+use crate::shared::protocol::events::TronEvent;
 
 use super::core_proposals::{CoreProposal, CoreProposalService};
 use super::persistence::WorkerStore;
-use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree, wait_with_bounded_output};
+use super::process::{
+    MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
+};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_INVOCATION_SECONDS,
     MAX_PROFILE_CONCURRENCY, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
@@ -984,6 +987,10 @@ impl WorkerRuntime {
         );
         let mut agent_run_guard =
             AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), session_id.clone());
+        // Subscribe before prompt admission. A provider construction failure can
+        // start and finish between the synchronous acknowledgement and the next
+        // scheduler poll; the terminal broadcast is the lossless join point.
+        let mut agent_events = self.orchestrator.subscribe();
         let outcome = self
             .host
             .invoke(Invocation::new_sync(
@@ -995,13 +1002,12 @@ impl WorkerRuntime {
         if let Some(error) = outcome.error {
             return Err(format!("start agent worker: {error}"));
         }
-        loop {
-            if self.orchestrator.get_run_id(&session_id).is_none() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        let terminal_error =
+            wait_for_agent_terminal(&self.orchestrator, &mut agent_events, &session_id).await?;
         agent_run_guard.disarm();
+        if let Some(error) = terminal_error {
+            return Err(format!("agent worker failed: {error}"));
+        }
         let rows = self
             .event_store
             .get_latest_events(&session_id, Some(100))
@@ -2072,6 +2078,38 @@ impl WorkerRuntime {
     }
 }
 
+async fn wait_for_agent_terminal(
+    orchestrator: &Orchestrator,
+    events: &mut tokio::sync::broadcast::Receiver<TronEvent>,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    loop {
+        match events.recv().await {
+            Ok(event) if event.session_id() == session_id => {
+                if let TronEvent::AgentEnd { error, .. } = event {
+                    return Ok(error);
+                }
+            }
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                // A still-active run will publish another terminal event. Once
+                // the registry is empty, however, AgentEnd has already been
+                // emitted and cannot be recovered from this lossy channel.
+                // Fail explicitly instead of waiting until the two-hour worker
+                // ceiling with no producer left to wake this receiver.
+                if orchestrator.get_run_id(session_id).is_none() {
+                    return Err(format!(
+                        "agent event stream missed terminal status after lagging by {skipped} events"
+                    ));
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                return Err("agent event stream closed before the worker run terminated".to_owned());
+            }
+        }
+    }
+}
+
 struct DynamicWorkerHandler {
     runtime: Arc<WorkerRuntime>,
     worker_id: String,
@@ -2246,11 +2284,7 @@ fn spawn_process(
     if let Some(root) = worker_artifact_root(workdir) {
         let dependency_runtime = root.join("dependency-runtime");
         let bin = dependency_runtime.join("bin");
-        let inherited_path = std::env::var_os("PATH").unwrap_or_default();
-        let path = std::env::join_paths(
-            std::iter::once(bin.clone()).chain(std::env::split_paths(&inherited_path)),
-        )
-        .map_err(|error| format!("construct worker dependency PATH: {error}"))?;
+        let path = trusted_local_command_path(Some(&bin))?;
         process
             .env("TRON_WORKER_DEPENDENCY_ROOT", &dependency_runtime)
             .env("PIP_TARGET", dependency_runtime.join("python"))
@@ -2286,7 +2320,8 @@ fn spawn_process(
             )
             .env("TRON_WORKER_TRIGGER_KIND", &invocation.trigger_kind);
     }
-    ProcessTree::spawn(&mut process).map_err(|error| format!("start worker command: {error}"))
+    ProcessTree::spawn(&mut process)
+        .map_err(|error| format!("start worker command '{program}': {error}"))
 }
 
 fn worker_artifact_root(workdir: &Path) -> Option<PathBuf> {
@@ -4441,6 +4476,21 @@ print(json.dumps({
         }
     }
 
+    struct FailingResponderFactory;
+
+    #[async_trait]
+    impl ModelResponderFactory for FailingResponderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+            _settings: &crate::domains::settings::ApiSettings,
+        ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+            Err(ModelResponseError::auth(
+                "agent runner fixture has no configured provider authentication",
+            ))
+        }
+    }
+
     #[tokio::test]
     async fn agent_runner_returns_typed_json() {
         let (runtime, _home) = test_runtime(Some(Arc::new(JsonResponderFactory)));
@@ -4466,6 +4516,44 @@ print(json.dumps({
             result.output,
             Some(json!({"answer":"agent-runner"})),
             "agent worker result: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_runner_captures_a_fast_terminal_provider_failure() {
+        let (runtime, _home) = test_runtime(Some(Arc::new(FailingResponderFactory)));
+        let mut bundle = command_bundle(Vec::new());
+        bundle.name = "Failing Agent Worker".to_owned();
+        bundle.description =
+            "Surfaces a provider failure that races prompt acknowledgement".to_owned();
+        bundle.tool_name = Some("worker_failing_agent_test".to_owned());
+        bundle.runner = WorkerRunner::Agent {
+            instructions: "Return an object.".to_owned(),
+            model: None,
+        };
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let result = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({}),
+                "agent-failure",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, "failed");
+        assert!(
+            result.error.as_deref().is_some_and(|error| error
+                .contains("agent runner fixture has no configured provider authentication")),
+            "fast provider failure was replaced by a generic result error: {result:?}"
+        );
+        assert!(
+            !runtime
+                .store()
+                .summary(&outcome.worker.worker_id)
+                .unwrap()
+                .unwrap()
+                .enabled
         );
     }
 

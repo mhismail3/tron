@@ -23,11 +23,11 @@ fn object_schema() -> Value {
 pub struct WorkerBundle {
     #[serde(default = "default_bundle_schema")]
     pub schema_version: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
     pub name: String,
     pub description: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default = "object_schema")]
     pub input_schema: Value,
@@ -59,7 +59,7 @@ pub struct WorkerBundle {
 pub enum WorkerRunner {
     Agent {
         instructions: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
     },
     Command {
@@ -67,8 +67,14 @@ pub enum WorkerRunner {
     },
     Service {
         command: Vec<String>,
+        #[serde(rename = "invokeUrl", alias = "invoke_url")]
         invoke_url: String,
-        #[serde(default)]
+        #[serde(
+            default,
+            rename = "healthUrl",
+            alias = "health_url",
+            skip_serializing_if = "Option::is_none"
+        )]
         health_url: Option<String>,
     },
 }
@@ -93,7 +99,7 @@ pub struct WorkerDependency {
     /// an omitted value with the fetched file/tree digest before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checksum: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install: Option<WorkerCommand>,
 }
 
@@ -117,6 +123,7 @@ pub enum WorkerTrigger {
     },
     Schedule {
         id: String,
+        #[serde(rename = "everySeconds", alias = "every_seconds")]
         every_seconds: u64,
         #[serde(default = "empty_object")]
         input: Value,
@@ -165,9 +172,9 @@ fn empty_object() -> Value {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SourceProvenance {
     pub source: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checksum: Option<String>,
 }
 

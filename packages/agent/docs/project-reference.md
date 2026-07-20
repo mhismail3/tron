@@ -105,6 +105,9 @@ contains:
 - logical named-secret bindings only;
 - smoke-test and health-check commands plus source provenance.
 
+Absent optional fields are omitted, so the human-inspectable manifest can be
+passed back to `worker_upsert` directly for autonomous improvement.
+
 `verification.json` seals redacted dependency-install, smoke-test, and health-
 check evidence before the version hash is computed. A version must carry at
 least one non-empty provenance source record.
@@ -167,9 +170,12 @@ inbox result before worker code executes.
 An agent worker combines immutable instructions with typed input and output. It
 creates a child session through the existing model loop, waits for terminal
 session truth, extracts the final assistant result, normalizes JSON, validates
-the output schema, and records the result. The child is aborted if its parent
-invocation is dropped by timeout, disable, stop-all, or shutdown. Worker causal
-depth survives the agent hop and is attached to every nested direct tool call.
+the output schema, and records the result. It subscribes before prompt admission
+so even an immediately rejected provider startup yields its concrete terminal
+error instead of a false missing-result diagnosis. The child is aborted if its
+parent invocation is dropped by timeout, disable, stop-all, or shutdown. Worker
+causal depth survives the agent hop and is attached to every nested direct tool
+call.
 
 ### Command runner
 
@@ -181,7 +187,10 @@ process sandbox. A successful command may intentionally ignore its input; Tron
 does not turn the resulting closed stdin pipe into a false worker failure, but
 all other write errors and non-success child exits remain failures. From this
 working directory, a declared dependency named `N` is available at
-`../dependencies/N`. Stdin and both output pipes are handled concurrently.
+`../dependencies/N`. The inherited executable search path is augmented with
+conventional user, Homebrew/MacPorts, and system locations so a service launcher
+cannot hide locally installed dependency or build tools. Stdin and both output
+pipes are handled concurrently.
 Tron drains all output while retaining at most 4 MiB from each pipe; oversized
 stdout fails the invocation instead of allocating without bound or deadlocking.
 On Unix the command and every descendant execute in a dedicated process group;
@@ -301,8 +310,8 @@ Operator controls are:
   active-work stop (webhooks restore only when a token hash exists);
 - rollback — activate a retained version and rotate any restored webhook token;
 - retire — disable routes and triggers while preserving bundles and history;
-- purge — permanently remove a retired worker's bundle and operational rows,
-  while retaining the purge audit entry;
+- purge — as an irreversible critical operation, permanently remove a retired
+  worker's bundle and operational rows while retaining the purge audit entry;
 - stop-all — block new dispatch, cancel active work, and stop resident services;
   queued rows stay visible and resume only after explicit release.
 
@@ -422,6 +431,11 @@ Core changes use a separate boundary from workers. `core_proposal_create`:
 4. runs the supplied test command with a two-hour ceiling;
 5. commits successful work and records branch, commit, worktree, and bounded
    test evidence.
+
+Git and test processes use the same trusted-local executable search path as
+workers, including conventional host tool locations hidden by LaunchAgents.
+Patch text is preserved exactly through the operation boundary, including the
+terminal newline required by standard unified diffs.
 
 Failure removes the temporary worktree/branch and does not retain a proposal.
 Creation never modifies the running tree or binary.

@@ -11,7 +11,10 @@
 //! group synchronously, preventing shells and background helpers from escaping.
 //! Non-Unix targets retain Tokio's direct-child kill-on-drop behavior.
 
+use std::collections::HashSet;
+use std::ffi::{OsStr, OsString};
 use std::io;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::Duration;
 
@@ -19,6 +22,63 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, Command};
 
 pub(super) const MAX_PROCESS_CAPTURE_BYTES: usize = 4 * 1_048_576;
+
+/// Build the executable search path for trusted-local kernel and worker work.
+///
+/// macOS LaunchAgents receive a deliberately minimal `PATH`, which otherwise
+/// makes host-installed package managers and language tools disappear when the
+/// same operation moves from an interactive shell into the durable server.
+/// Preserve the inherited order, then add conventional user/package-manager
+/// locations and system fallbacks. A worker-owned runtime bin, when supplied,
+/// stays first so isolated dependencies take precedence.
+pub(super) fn trusted_local_command_path(
+    worker_runtime_bin: Option<&Path>,
+) -> Result<OsString, String> {
+    build_trusted_local_command_path(
+        worker_runtime_bin,
+        std::env::var_os("PATH").as_deref(),
+        std::env::var_os("HOME").as_deref().map(Path::new),
+    )
+}
+
+fn build_trusted_local_command_path(
+    worker_runtime_bin: Option<&Path>,
+    inherited: Option<&OsStr>,
+    user_home: Option<&Path>,
+) -> Result<OsString, String> {
+    let mut directories = Vec::new();
+    let mut seen = HashSet::<PathBuf>::new();
+    let mut append = |directory: PathBuf| {
+        if seen.insert(directory.clone()) {
+            directories.push(directory);
+        }
+    };
+    if let Some(directory) = worker_runtime_bin {
+        append(directory.to_path_buf());
+    }
+    if let Some(inherited) = inherited {
+        for directory in std::env::split_paths(inherited) {
+            append(directory);
+        }
+    }
+    if let Some(home) = user_home {
+        append(home.join(".local/bin"));
+        append(home.join(".cargo/bin"));
+    }
+    for directory in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/opt/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ] {
+        append(PathBuf::from(directory));
+    }
+    std::env::join_paths(directories)
+        .map_err(|error| format!("construct trusted-local command PATH: {error}"))
+}
 
 /// A child whose descendants share an isolated process group on Unix.
 ///
@@ -187,6 +247,33 @@ mod tests {
     use super::*;
     use std::process::Stdio;
     use tokio::process::Command;
+
+    #[test]
+    fn trusted_local_path_restores_host_tools_hidden_by_launchd() {
+        let inherited = std::env::join_paths(["/usr/bin", "/bin"]).unwrap();
+        let path = build_trusted_local_command_path(
+            Some(Path::new("/worker/dependency-runtime/bin")),
+            Some(&inherited),
+            Some(Path::new("/profile/home")),
+        )
+        .unwrap();
+        let directories = std::env::split_paths(&path).collect::<Vec<_>>();
+        assert_eq!(
+            directories.first().map(PathBuf::as_path),
+            Some(Path::new("/worker/dependency-runtime/bin"))
+        );
+        assert!(directories.contains(&PathBuf::from("/profile/home/.local/bin")));
+        assert!(directories.contains(&PathBuf::from("/profile/home/.cargo/bin")));
+        assert!(directories.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(directories.contains(&PathBuf::from("/usr/local/bin")));
+        assert_eq!(
+            directories
+                .iter()
+                .filter(|directory| directory.as_path() == Path::new("/usr/bin"))
+                .count(),
+            1
+        );
+    }
 
     #[tokio::test]
     async fn concurrent_bounded_drain_avoids_stdin_stdout_pipe_deadlock() {

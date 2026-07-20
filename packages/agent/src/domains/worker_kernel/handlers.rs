@@ -17,7 +17,9 @@ use super::contract::{
     DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS, DEFAULT_TEXT_SEARCH_WALK_ENTRIES,
     MAX_TEXT_SEARCH_TIMEOUT_SECONDS, MAX_TEXT_SEARCH_WALK_ENTRIES,
 };
-use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree, wait_with_bounded_output};
+use super::process::{
+    MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
+};
 use super::runtime::WorkerRuntime;
 use super::types::{InvokeRequest, WorkerBundle};
 
@@ -102,7 +104,7 @@ async fn core_proposal_create(invocation: &Invocation, deps: &Deps) -> Result<Va
                 required_string(&invocation.payload, "title")?,
                 required_string(&invocation.payload, "intent")?,
                 required_string(&invocation.payload, "repositoryPath")?,
-                required_string(&invocation.payload, "patch")?,
+                required_content(&invocation.payload, "patch")?,
                 test_command,
             )
             .await?,
@@ -387,6 +389,7 @@ async fn process_run(invocation: &Invocation, deps: &Deps) -> Result<Value, Stri
     process
         .args(arguments)
         .current_dir(&cwd)
+        .env("PATH", trusted_local_command_path(None)?)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -931,6 +934,18 @@ fn required_string(value: &Value, field: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{field} is required"))
 }
 
+/// Read exact textual content while still rejecting absent or blank values.
+/// Unified diffs require their terminal newline, so the identifier-oriented
+/// `required_string` normalization must never be used for patch bytes.
+fn required_content(value: &Value, field: &str) -> Result<String, String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|content| !content.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("{field} is required"))
+}
+
 fn terms(value: &str) -> Vec<String> {
     value
         .split(|character: char| !character.is_ascii_alphanumeric())
@@ -942,6 +957,16 @@ fn terms(value: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_patch_content_preserves_the_terminal_newline() {
+        let patch = "diff --git a/file b/file\n-old\n+new\n";
+        assert_eq!(
+            required_content(&json!({"patch":patch}), "patch"),
+            Ok(patch.to_owned())
+        );
+        assert!(required_content(&json!({"patch":"  \n"}), "patch").is_err());
+    }
 
     #[test]
     fn bounded_text_search_skips_hidden_and_heavy_directories_by_default() {

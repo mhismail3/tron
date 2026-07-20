@@ -154,10 +154,6 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "worker_kernel::retire",
             "Recoverably retire a worker while preserving versions and run history.",
         ),
-        (
-            "worker_kernel::purge",
-            "Permanently purge a previously retired worker and its bundle.",
-        ),
     ] {
         specs.push(spec(
             method,
@@ -167,6 +163,13 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             description,
         )?);
     }
+    specs.push(spec(
+        "worker_kernel::purge",
+        EffectClass::IrreversibleSideEffect,
+        RiskLevel::Critical,
+        worker_id_schema(false),
+        "Permanently purge a previously retired worker, its bundle, runs, and inbox history.",
+    )?);
     specs.push(spec(
         "worker_kernel::rollback",
         EffectClass::ReversibleSideEffect,
@@ -474,6 +477,10 @@ fn worker_bundle_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::worker_kernel::types::{
+        BUNDLE_SCHEMA, SourceProvenance, WorkerBundle, WorkerDependency, WorkerRunner,
+        WorkerTrigger,
+    };
 
     #[test]
     fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
@@ -562,6 +569,118 @@ mod tests {
                 .as_str()
                 .unwrap_or_default()
                 .contains("../dependencies/<name>")
+        );
+    }
+
+    #[test]
+    fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schema() {
+        let bundle = WorkerBundle {
+            schema_version: BUNDLE_SCHEMA.to_owned(),
+            worker_id: None,
+            name: "Round-trip worker".to_owned(),
+            description: "Proves inspectable canonical bundles remain valid upsert input."
+                .to_owned(),
+            tool_name: None,
+            input_schema: json!({"type":"object"}),
+            output_schema: json!({"type":"object"}),
+            runner: WorkerRunner::Agent {
+                instructions: "Return an object.".to_owned(),
+                model: None,
+            },
+            files: Default::default(),
+            dependencies: vec![WorkerDependency {
+                name: "fixture".to_owned(),
+                source: "file:///tmp/fixture".to_owned(),
+                version: "1".to_owned(),
+                checksum: None,
+                install: None,
+            }],
+            triggers: Vec::new(),
+            secret_bindings: Vec::new(),
+            smoke_tests: Vec::new(),
+            health_checks: Vec::new(),
+            provenance: vec![SourceProvenance {
+                source: "test:round-trip".to_owned(),
+                revision: None,
+                checksum: None,
+            }],
+            routing: Default::default(),
+        };
+        let mut service_bundle = bundle.clone();
+        service_bundle.runner = WorkerRunner::Service {
+            command: vec!["fixture-service".to_owned()],
+            invoke_url: "http://127.0.0.1:9876/invoke".to_owned(),
+            health_url: None,
+        };
+        service_bundle.triggers = vec![WorkerTrigger::Schedule {
+            id: "periodic".to_owned(),
+            every_seconds: 60,
+            input: json!({}),
+        }];
+        let serialized = serde_json::to_value(bundle).expect("serialize canonical bundle");
+        assert!(
+            serialized
+                .pointer("/provenance/0")
+                .and_then(Value::as_object)
+                .is_some_and(|provenance| !provenance.contains_key("checksum"))
+        );
+        let serialized_service =
+            serde_json::to_value(service_bundle).expect("serialize service bundle");
+        assert_eq!(
+            serialized_service.pointer("/runner/invokeUrl"),
+            Some(&json!("http://127.0.0.1:9876/invoke"))
+        );
+        assert!(serialized_service.pointer("/runner/healthUrl").is_none());
+        assert_eq!(
+            serialized_service.pointer("/triggers/0/everySeconds"),
+            Some(&json!(60))
+        );
+        let decoded_service: WorkerBundle = serde_json::from_value(serialized_service.clone())
+            .expect("deserialize canonical service bundle");
+        assert!(matches!(
+            decoded_service.runner,
+            WorkerRunner::Service {
+                health_url: None,
+                ..
+            }
+        ));
+        let upsert = capabilities()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "worker_kernel::upsert")
+            .expect("worker upsert contract");
+        let request_schema = upsert.request_schema.expect("upsert request schema");
+        crate::engine::validate_engine_schema_payload(
+            &crate::engine::FunctionId::new("worker_kernel::upsert").unwrap(),
+            "request",
+            &request_schema,
+            &json!({"bundle":serialized}),
+        )
+        .expect("serialized canonical bundle remains valid worker_upsert input");
+        crate::engine::validate_engine_schema_payload(
+            &crate::engine::FunctionId::new("worker_kernel::upsert").unwrap(),
+            "request",
+            &request_schema,
+            &json!({"bundle":serialized_service}),
+        )
+        .expect("serialized service bundle remains valid worker_upsert input");
+    }
+
+    #[test]
+    fn permanent_worker_purge_is_explicitly_irreversible() {
+        let purge = capabilities()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "worker_kernel::purge")
+            .expect("worker purge contract");
+        assert_eq!(purge.effect_class, EffectClass::IrreversibleSideEffect);
+        assert_eq!(purge.risk_level, RiskLevel::Critical);
+        assert!(
+            purge
+                .description
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Permanently purge")
         );
     }
 
