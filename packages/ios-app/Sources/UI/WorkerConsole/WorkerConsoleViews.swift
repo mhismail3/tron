@@ -19,6 +19,13 @@ enum WorkerVersionAction: Equatable {
     }
 }
 
+private enum EngineDashboardSection: String, CaseIterable {
+    case overview = "Overview"
+    case core = "Core"
+    case workers = "Workers"
+    case activity = "Activity"
+}
+
 struct WorkerConsoleDashboardBand: View {
     let viewModel: WorkerConsoleViewModel
     let action: () -> Void
@@ -35,7 +42,7 @@ struct WorkerConsoleDashboardBand: View {
                     )
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Workers")
+                    Text("Engine")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
                     Text(summaryDetail)
@@ -43,9 +50,9 @@ struct WorkerConsoleDashboardBand: View {
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(2)
                     HStack(spacing: 8) {
-                        metric("Healthy", viewModel.healthyCount)
-                        metric("Enabled", viewModel.enabledCount)
-                        metric("Total", viewModel.workers.count)
+                        metric("Core", viewModel.coreToolCount)
+                        metric("Visible", viewModel.projectedWorkerCount)
+                        metric("Issues", viewModel.attentionCount)
                     }
                 }
 
@@ -68,8 +75,8 @@ struct WorkerConsoleDashboardBand: View {
             .sectionFill(summaryColor, cornerRadius: 12, subtle: true, interactive: true)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("worker-console-dashboard-band")
-        .accessibilityLabel("Open worker console")
+        .accessibilityIdentifier("engine-dashboard-band")
+        .accessibilityLabel("Open engine dashboard")
     }
 
     private var summarySymbol: String {
@@ -82,11 +89,12 @@ struct WorkerConsoleDashboardBand: View {
 
     private var summaryDetail: String {
         if viewModel.stopAll { return "Dispatch is paused; durable work remains queued." }
-        if viewModel.workers.isEmpty { return "Create a persistent worker conversationally." }
+        if !viewModel.autonomousWorkers { return "Autonomous workers are off for this profile." }
+        if viewModel.workers.isEmpty { return "Core ready; create persistent workers conversationally." }
         if viewModel.attentionCount > 0 {
             return "\(viewModel.attentionCount) worker\(viewModel.attentionCount == 1 ? " needs" : "s need") review."
         }
-        return "Persistent autonomous work is ready."
+        return "Core primitives and persistent workers are ready."
     }
 
     private func metric(_ label: String, _ value: Int) -> some View {
@@ -106,18 +114,25 @@ struct WorkerConsoleSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
+    let sessionId: String?
 
     @State private var confirmStopAll = false
+    @State private var selectedSection: EngineDashboardSection = .overview
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     summaryCard
+                    TronSegmentedControl(
+                        options: EngineDashboardSection.allCases.map { ($0.rawValue, $0) },
+                        selection: $selectedSection,
+                        accent: .tronEmerald
+                    )
                     if let error = viewModel.lastError ?? viewModel.monitoringError {
                         WorkerConsoleErrorBanner(message: error)
                     }
-                    workersContent
+                    dashboardContent
                 }
                 .padding(18)
             }
@@ -125,14 +140,14 @@ struct WorkerConsoleSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Worker Console", color: .tronEmerald)
+                    SheetTitle(title: "Engine", color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     SheetPrimaryActionButton(
                         icon: "arrow.clockwise",
                         accent: .tronEmerald,
                         isBusy: viewModel.isRefreshing,
-                        accessibilityLabel: "Refresh workers"
+                        accessibilityLabel: "Refresh engine state"
                     ) {
                         Task { await refresh() }
                     }
@@ -161,12 +176,23 @@ struct WorkerConsoleSheet: View {
                 Text("New dispatch will pause, active work will be cancelled, and resident services will stop. Durable queued work stays visible.")
             }
             .task { await refresh() }
-            .task {
-                await viewModel.monitor(repository: repository, connectionState: connectionState)
-            }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
+    }
+
+    @ViewBuilder
+    private var dashboardContent: some View {
+        switch selectedSection {
+        case .overview:
+            overviewContent
+        case .core:
+            coreContent
+        case .workers:
+            workersContent
+        case .activity:
+            activityContent
+        }
     }
 
     private var summaryCard: some View {
@@ -189,11 +215,11 @@ struct WorkerConsoleSheet: View {
             }
 
             HStack(spacing: 0) {
-                summaryMetric(value: viewModel.healthyCount, label: "Healthy")
+                summaryMetric(value: viewModel.coreToolCount, label: "Core")
                 summaryDivider
-                summaryMetric(value: viewModel.enabledCount, label: "Enabled")
+                summaryMetric(value: viewModel.projectedWorkerCount, label: "Visible")
                 summaryDivider
-                summaryMetric(value: viewModel.workers.count, label: "Persistent")
+                summaryMetric(value: viewModel.availableWorkerCount, label: "Available")
             }
 
             Button {
@@ -224,6 +250,93 @@ struct WorkerConsoleSheet: View {
         .sectionFill(consoleStatus.color, cornerRadius: 12, subtle: true, interactive: false)
     }
 
+    private var overviewContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WorkerConsoleSectionHeader(
+                title: "Compiled engine",
+                detail: "The fixed substrate is separate from replaceable worker behavior."
+            )
+            if let components = viewModel.engineSnapshot?.coreComponents, !components.isEmpty {
+                LazyVStack(spacing: 10) {
+                    ForEach(components) { component in
+                        EngineComponentCard(component: component)
+                    }
+                }
+            } else {
+                WorkerConsoleLoadingState(title: "Loading engine composition")
+            }
+
+            WorkerConsoleSectionHeader(
+                title: "Current agent surface",
+                detail: "Resolved for the selected session at the next provider boundary."
+            )
+            EngineSurfaceCard(viewModel: viewModel)
+
+            if let issue = viewModel.activityInbox.first(where: {
+                ["error", "critical", "warning"].contains(
+                    WorkerConsolePresentation.normalized($0.severity)
+                )
+            }) {
+                WorkerConsoleSectionHeader(
+                    title: "Needs attention",
+                    detail: "Most recent durable worker issue."
+                )
+                WorkerInboxCard(item: issue)
+            }
+        }
+    }
+
+    private var coreContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(["host", "worker_control", "core_change"], id: \.self) { group in
+                let tools = viewModel.coreTools.filter { $0.primitiveGroup == group }
+                WorkerConsoleSectionHeader(
+                    title: EngineDashboardPresentation.groupTitle(group),
+                    detail: EngineDashboardPresentation.groupDetail(group, count: tools.count)
+                )
+                LazyVStack(spacing: 9) {
+                    ForEach(tools) { tool in
+                        EngineCoreToolCard(tool: tool)
+                    }
+                }
+            }
+        }
+    }
+
+    private var activityContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            WorkerConsoleSectionHeader(
+                title: "Durable inbox",
+                detail: "Results and failures emitted by all persistent workers."
+            )
+            if viewModel.activityInbox.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "tray",
+                    text: "No durable worker results."
+                )
+            } else {
+                LazyVStack(spacing: 9) {
+                    ForEach(viewModel.activityInbox) { WorkerInboxCard(item: $0) }
+                }
+            }
+
+            WorkerConsoleSectionHeader(
+                title: "Worker runs",
+                detail: "Queued, active, completed, failed, and interrupted invocations."
+            )
+            if viewModel.activityRuns.isEmpty {
+                WorkerConsoleInlineEmptyState(
+                    symbol: "waveform.path",
+                    text: "No worker runs recorded."
+                )
+            } else {
+                LazyVStack(spacing: 9) {
+                    ForEach(viewModel.activityRuns) { WorkerRunCard(run: $0) }
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var workersContent: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -249,10 +362,13 @@ struct WorkerConsoleSheet: View {
             } else {
                 LazyVStack(spacing: 10) {
                     ForEach(viewModel.workers) { worker in
+                        let surface = viewModel.availableWorkerTools.first {
+                            $0.workerId == worker.workerId
+                        }
                         Button {
                             Task { await viewModel.select(worker.workerId, repository: repository) }
                         } label: {
-                            WorkerConsoleRow(worker: worker)
+                            WorkerConsoleRow(worker: worker, surface: surface)
                         }
                         .buttonStyle(.plain)
                     }
@@ -270,7 +386,10 @@ struct WorkerConsoleSheet: View {
 
     private var consoleStatus: (title: String, detail: String, symbol: String, color: Color) {
         if !connectionState.isConnected {
-            return ("Workers unavailable", connectionState.displayText, "network.slash", .tronTextMuted)
+            return ("Engine unavailable", connectionState.displayText, "network.slash", .tronTextMuted)
+        }
+        if !viewModel.autonomousWorkers {
+            return ("Core visible · autonomy off", "The fixed engine is healthy; model-facing worker tools are disabled for this profile.", "lock.circle", .tronWarning)
         }
         if viewModel.stopAll {
             return ("Dispatch paused", "Queued work is durable and ready to resume.", "pause.circle", .tronWarning)
@@ -279,9 +398,9 @@ struct WorkerConsoleSheet: View {
             return ("Needs review", "A worker reported non-healthy server state.", "exclamationmark.triangle", .tronWarning)
         }
         if viewModel.workers.isEmpty {
-            return ("Ready for workers", "Create autonomous workers conversationally with Tron.", "bolt.horizontal.circle", .tronEmerald)
+            return ("Core ready", "The fixed engine is active; create workers conversationally with Tron.", "bolt.horizontal.circle", .tronEmerald)
         }
-        return ("Workers ready", "The persistent worker runtime is healthy and accepting work.", "checkmark.seal", .tronEmerald)
+        return ("Engine ready", "Core primitives and the persistent worker runtime are active.", "checkmark.seal", .tronEmerald)
     }
 
     private func summaryMetric(value: Int, label: String) -> some View {
@@ -303,7 +422,11 @@ struct WorkerConsoleSheet: View {
     }
 
     private func refresh() async {
-        await viewModel.refresh(repository: repository, connectionState: connectionState)
+        await viewModel.refresh(
+            repository: repository,
+            connectionState: connectionState,
+            sessionId: sessionId
+        )
     }
 
     private func setStopped(_ stopped: Bool) async {
@@ -317,6 +440,7 @@ struct WorkerConsoleSheet: View {
 
 private struct WorkerConsoleRow: View {
     let worker: WorkerSummaryDTO
+    let surface: AvailableWorkerToolDTO?
 
     private var status: WorkerConsoleStatus {
         WorkerConsolePresentation.status(for: worker)
@@ -360,7 +484,19 @@ private struct WorkerConsoleRow: View {
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
-                .lineLimit(1)
+
+                if let surface {
+                    HStack(spacing: 6) {
+                        workerSurfaceBadge("Published", color: .tronSuccess)
+                        if surface.projected {
+                            workerSurfaceBadge("This session", color: .tronEmerald)
+                        }
+                        if surface.promoted {
+                            workerSurfaceBadge("Promoted", color: .tronPurple)
+                        }
+                    }
+                    .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 6)
@@ -376,6 +512,15 @@ private struct WorkerConsoleRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(worker.name), \(status.title), \(worker.runnerKind) worker")
+    }
+
+    private func workerSurfaceBadge(_ title: String, color: Color) -> some View {
+        Text(title)
+            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .glassEffect(.regular.tint(color.opacity(0.14)), in: .capsule)
     }
 }
 

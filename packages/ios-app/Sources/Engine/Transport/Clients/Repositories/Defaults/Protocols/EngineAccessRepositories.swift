@@ -311,6 +311,10 @@ protocol WorkspaceBrowserRepository: AnyObject {
 /// Black-box operational contract for the profile-global worker console.
 @MainActor
 protocol WorkerKernelRepository: AnyObject {
+    func engineSurfaceSnapshot(
+        sessionId: String?,
+        relevanceQuery: String?
+    ) async throws -> EngineIntrospectionSnapshotDTO
     func workers(includeRetired: Bool) async throws -> WorkerListResultDTO
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO
     func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO

@@ -22,7 +22,8 @@ The app has two primary operational surfaces:
 
 - Chat: create and resume sessions, submit prompts and attachments, stop work,
   inspect streamed and reconstructed messages, and manage context settings.
-- Worker Console: inspect and operate profile-global autonomous workers.
+- Engine Dashboard: inspect the compiled core, exact session tool surface,
+  published workers, and durable profile activity; operate worker lifecycle.
 
 The former Agent Cockpit, module activity, capability-binding, package
 lifecycle, and legacy worker-lifecycle UI planes are deleted. Conversational
@@ -61,8 +62,8 @@ stores. `DependencyContainerStorage` and `DependencyContainerRuntimeIO` are the
 only production composition points for these local persistence dependencies.
 
 The Mac app is a packaging, launch-agent, and pairing shell. It is not a second
-operational `/engine` client, so iOS is the current client that owns the Worker
-Console.
+operational `/engine` client, so iOS is the current client that owns the Engine
+Dashboard.
 
 ## Source Layout
 
@@ -76,12 +77,12 @@ Sources/
 │   └── Persistence/             bounded local reconstruction cache
 ├── Session/
 │   ├── Chat/                    chat state and coordination
-│   ├── WorkerKernel/            Worker Console state/view model
+│   ├── WorkerKernel/            Engine Dashboard state and presentation model
 │   └── Timeline/                message reconstruction and presentation
 ├── Support/                     composition, diagnostics, pairing, storage
 └── UI/
     ├── Chat/                    session shell and composer
-    ├── WorkerConsole/           worker dashboard and detail console
+    ├── WorkerConsole/           engine dashboard and worker detail console
     ├── Settings/                product and server settings
     └── Components/              reusable visual primitives
 ```
@@ -123,10 +124,13 @@ capability grant construction.
 
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
 non-model-facing `engine::surface_snapshot` read with optional session context.
-Strongly typed catalog DTOs expose its catalog revision, surface hash, fixed and
-projected counts, exact function/worker versions, selection reasons, and profile
-worker inventory. UI code does not reconstruct model visibility from raw
-catalog `[AnyCodable]` entries.
+Strongly typed catalog DTOs expose compiled component roles, the complete fixed
+tool inventory, catalog revision, surface hash, exact selected surface,
+function/worker versions, every published worker's promoted/projected state,
+selection evidence, and canonical profile worker inventory. UI code does not
+reconstruct model visibility from raw catalog `[AnyCodable]` entries. The exact
+`surface.tools` projection is kept distinct from fixed/published inventories;
+when autonomy is off, fixed tools remain inspectable but explicitly unexposed.
 
 Write calls carry `EngineIdempotencyKey`. User actions use distinct generated
 keys, while retrying the same accepted action retains its operation identity at
@@ -135,7 +139,7 @@ the appropriate coordinator boundary.
 The public transport does not admit internal actor, grant, trace-runtime, or
 worker metadata from the client. The server supplies internal causal context.
 
-## Worker Console
+## Engine Dashboard
 
 ### DTOs
 
@@ -157,10 +161,12 @@ routing metadata are intentionally extensible. Stable operational fields are
 strongly typed.
 
 `Engine/Protocol/Catalog/EngineProtocolTypes+Catalog.swift` additionally owns
-`EngineIntrospectionSnapshotDTO`, `AgentToolSurfaceDTO`, and
-`EngineSurfaceToolDTO`. These are the authoritative client projection for the
-exact fixed/dynamic tool surface selected by the server; the existing raw
-catalog-watch DTO remains an invalidation/change-feed contract only.
+`EngineIntrospectionSnapshotDTO`, `EngineCoreComponentDTO`,
+`AgentToolSurfaceDTO`, `EngineSurfaceToolDTO`, and `AvailableWorkerToolDTO`.
+These are the authoritative client projection for compiled composition, fixed
+inventory, every published direct worker, and the exact fixed/dynamic tool
+surface selected by the server. The existing raw catalog-watch DTO remains an
+invalidation/change-feed contract only.
 
 ### Client and repository
 
@@ -184,14 +190,18 @@ state.
 
 `WorkerConsoleViewModel` is `@MainActor` and owns only presentation state:
 
+- the selected-session engine snapshot, fixed inventory, published worker
+  projection state, and compiled component roles;
+- profile-wide activity runs and inbox results;
 - current list and selection;
 - selected inspection, runs, and inbox;
 - editable JSON invocation input and rendered result;
 - one-time returned webhook credential;
 - refresh/mutation flags, stop-all status, and the last transport error.
 
-`refresh` first loads the profile list, then refreshes the selected worker if it
-still exists. A disconnected refresh clears server-owned rows. `monitor` polls
+`refresh` loads one authoritative, optionally session-scoped engine snapshot,
+then profile activity and the selected worker if it still exists. A disconnected
+refresh clears server-owned rows. `monitor` polls
 both worker stream topics with independent cursors and refreshes only after new
 events. Topic polling is historical replay, so the repository contract requires
 an explicit non-optional cursor and each monitoring pass begins at cursor `0`;
@@ -205,13 +215,23 @@ the worker's actual input schema.
 
 ### Views
 
-The session sidebar contains a compact Worker band showing healthy, enabled,
-and total persistent workers. It opens `WorkerConsoleSheet`. The console uses
+The session sidebar contains a compact Engine band showing core, selected-
+surface, and issue counts. It opens `WorkerConsoleSheet`, whose visible product
+identity is Engine. The sidebar owns the monitoring task, so the dashboard
+continues to receive durable lifecycle/invocation changes while its sheet is
+closed. The dashboard uses
 the same selected typography, semantic color tokens, liquid-glass section
 fills, compact inline sheet chrome, status hierarchy, and progressive evidence
 disclosure as the rest of Tron; raw schemas and durable payloads are supporting
 detail rather than the page's primary visual hierarchy. It provides:
 
+- Overview, Core, Workers, and Activity modes in one compact cockpit;
+- the compiled kernel/product-boundary component map and selected session's
+  exact provider surface revision/hash;
+- every fixed tool grouped as host, worker control, or core change, with
+  progressively disclosed input/output schemas and exposure state;
+- every published worker's distinction between availability, current-session
+  projection, and explicit promotion;
 - profile stop-all/resume with an explanation that queued work remains durable;
 - worker list with runner, health, active hash prefix, and trigger count;
 - detail overview with tool identity and provenance;
@@ -351,7 +371,7 @@ Local storage is bounded and concern-owned:
 Secrets, raw APNs tokens, worker webhook tokens, provider credentials, and
 server authority metadata must never enter local diagnostic logs. Connection
 toasts and compact in-chat error pills remain the immediate attention surfaces;
-worker execution failures belong in the server-owned Worker Console inbox.
+worker execution failures belong in the server-owned Engine Dashboard inbox.
 
 The settings toolbar exposes Logs in every build configuration.
 The client log ingestion service mirrors bounded client logs into the server `logs` table while connected.

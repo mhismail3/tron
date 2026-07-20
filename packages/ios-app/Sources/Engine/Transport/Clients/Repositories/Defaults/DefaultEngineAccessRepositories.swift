@@ -266,6 +266,16 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         self.client = client
     }
 
+    func engineSurfaceSnapshot(
+        sessionId: String?,
+        relevanceQuery: String?
+    ) async throws -> EngineIntrospectionSnapshotDTO {
+        try await client.engineSurfaceSnapshot(
+            sessionId: sessionId,
+            relevanceQuery: relevanceQuery
+        )
+    }
+
     func workers(includeRetired: Bool) async throws -> WorkerListResultDTO {
         try await client.workers(includeRetired: includeRetired)
     }

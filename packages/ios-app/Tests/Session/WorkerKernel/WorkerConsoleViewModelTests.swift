@@ -10,9 +10,20 @@ struct WorkerConsoleViewModelTests {
         let repository = MockWorkerKernelRepository()
         let viewModel = WorkerConsoleViewModel()
 
-        await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.refresh(
+            repository: repository,
+            connectionState: .connected,
+            sessionId: "session-current"
+        )
         #expect(viewModel.workers.map(\.workerId) == ["research"])
         #expect(viewModel.healthyCount == 1)
+        #expect(viewModel.currentSessionId == "session-current")
+        #expect(repository.snapshotSessionIds == ["session-current"])
+        #expect(viewModel.catalogRevision == 42)
+        #expect(viewModel.projectedWorkerCount == 1)
+        #expect(viewModel.availableWorkerTools.map(\.workerId) == ["research"])
+        #expect(viewModel.activityRuns.map(\.invocationId) == ["prior-run"])
+        #expect(viewModel.activityInbox.map(\.inboxId) == ["inbox-1"])
 
         await viewModel.select("research", repository: repository)
         #expect(viewModel.inspection?.versions.first?.version == "v1")
@@ -93,6 +104,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var rollbackVersions: [String] = []
     var lastInput: [String: Any]?
     var polledCursors: [(topic: String, cursor: UInt64)] = []
+    var snapshotSessionIds: [String?] = []
 
     private var worker: WorkerSummaryDTO {
         WorkerSummaryDTO(
@@ -107,6 +119,53 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             health: enabled ? "healthy" : "disabled",
             triggerCount: 1,
             updatedAt: "2026-07-19T12:00:00Z"
+        )
+    }
+
+    func engineSurfaceSnapshot(
+        sessionId: String?,
+        relevanceQuery: String?
+    ) async throws -> EngineIntrospectionSnapshotDTO {
+        snapshotSessionIds.append(sessionId)
+        return EngineIntrospectionSnapshotDTO(
+            format: 1,
+            autonomousWorkers: true,
+            dispatchStopped: false,
+            coreComponents: [
+                EngineCoreComponentDTO(
+                    id: "worker_runtime",
+                    title: "Worker Runtime",
+                    role: "Runs workers",
+                    category: "kernel",
+                    status: "active"
+                )
+            ],
+            fixedTools: [],
+            surface: AgentToolSurfaceDTO(
+                format: 1,
+                catalogRevision: 42,
+                surfaceHash: "surface-test",
+                fixedToolCount: 25,
+                projectedWorkerCount: 1,
+                availableWorkerCount: 1,
+                tools: [],
+                availableWorkers: [
+                    AvailableWorkerToolDTO(
+                        workerId: "research",
+                        modelName: "worker_research",
+                        functionId: "worker_kernel::dynamic_research",
+                        functionRevision: 1,
+                        workerVersion: "v1",
+                        promoted: false,
+                        projected: true,
+                        selectionReason: "relevance",
+                        relevanceScore: 1,
+                        completedRuns: 1,
+                        health: "Healthy"
+                    )
+                ]
+            ),
+            workers: [worker]
         )
     }
 

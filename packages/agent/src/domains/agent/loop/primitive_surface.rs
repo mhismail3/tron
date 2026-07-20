@@ -585,11 +585,19 @@ mod tests {
                     function_id: "worker_kernel::dynamic_recent".to_owned(),
                     function_revision: 2,
                     owner_worker: "worker_kernel".to_owned(),
+                    description: "Recent research".to_owned(),
+                    input_schema: serde_json::json!({"type":"object"}),
+                    output_schema: Some(serde_json::json!({"type":"object"})),
+                    effect_class: "ExternalSideEffect".to_owned(),
+                    risk: "high".to_owned(),
+                    health: "Healthy".to_owned(),
+                    exposed: true,
                     worker_id: Some("recent".to_owned()),
                     worker_version: Some("abcdef1234567890".to_owned()),
                     primitive_group: None,
                     selection_reason: "relevance".to_owned(),
                 }],
+                available_workers: Vec::new(),
             });
         assert!(primer.contains("r42"));
         assert!(primer.contains("1/7 workers"));

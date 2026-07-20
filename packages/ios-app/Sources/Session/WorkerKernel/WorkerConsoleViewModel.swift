@@ -3,7 +3,10 @@ import Foundation
 @Observable
 @MainActor
 final class WorkerConsoleViewModel {
+    var engineSnapshot: EngineIntrospectionSnapshotDTO?
     var workers: [WorkerSummaryDTO] = []
+    var activityRuns: [WorkerInvocationDTO] = []
+    var activityInbox: [WorkerInboxItemDTO] = []
     var selectedWorkerId: String?
     var inspection: WorkerInspectResultDTO?
     var runs: [WorkerInvocationDTO] = []
@@ -18,6 +21,7 @@ final class WorkerConsoleViewModel {
     var stopAll = false
     var lastError: String?
     var monitoringError: String?
+    private(set) var currentSessionId: String?
 
     var selectedWorker: WorkerSummaryDTO? {
         workers.first { $0.workerId == selectedWorkerId }
@@ -37,6 +41,34 @@ final class WorkerConsoleViewModel {
         }.count
     }
 
+    var coreTools: [EngineSurfaceToolDTO] {
+        engineSnapshot?.fixedTools ?? []
+    }
+
+    var availableWorkerTools: [AvailableWorkerToolDTO] {
+        engineSnapshot?.surface.availableWorkers ?? []
+    }
+
+    var projectedWorkerCount: Int {
+        Int(engineSnapshot?.surface.projectedWorkerCount ?? 0)
+    }
+
+    var coreToolCount: Int {
+        coreTools.count
+    }
+
+    var availableWorkerCount: Int {
+        Int(engineSnapshot?.surface.availableWorkerCount ?? 0)
+    }
+
+    var catalogRevision: UInt64? {
+        engineSnapshot?.surface.catalogRevision
+    }
+
+    var autonomousWorkers: Bool {
+        engineSnapshot?.autonomousWorkers ?? false
+    }
+
     var invocationJSONIsValid: Bool {
         (try? Self.decodeJSON(invocationInput)) != nil
     }
@@ -51,10 +83,15 @@ final class WorkerConsoleViewModel {
 
     func refresh(
         repository: any WorkerKernelRepository,
-        connectionState: ConnectionState
+        connectionState: ConnectionState,
+        sessionId: String? = nil
     ) async {
+        currentSessionId = sessionId
         guard connectionState.isConnected else {
+            engineSnapshot = nil
             workers = []
+            activityRuns = []
+            activityInbox = []
             inspection = nil
             runs = []
             inbox = []
@@ -67,9 +104,17 @@ final class WorkerConsoleViewModel {
             hasLoaded = true
         }
         do {
-            let result = try await repository.workers(includeRetired: true)
-            workers = result.workers
-            stopAll = result.stopAll
+            let snapshot = try await repository.engineSurfaceSnapshot(
+                sessionId: sessionId,
+                relevanceQuery: nil
+            )
+            let globalRuns = try await repository.workerRuns(workerId: nil, limit: 50)
+            let globalInbox = try await repository.workerInbox(workerId: nil, limit: 50)
+            engineSnapshot = snapshot
+            workers = snapshot.workers
+            stopAll = snapshot.dispatchStopped
+            activityRuns = globalRuns.runs
+            activityInbox = globalInbox.items
             if let selectedWorkerId,
                workers.contains(where: { $0.workerId == selectedWorkerId }) {
                 try await loadWorker(selectedWorkerId, repository: repository)
@@ -134,7 +179,11 @@ final class WorkerConsoleViewModel {
             }
             monitoringError = pollingError
             if changed {
-                await refresh(repository: repository, connectionState: connectionState)
+                await refresh(
+                    repository: repository,
+                    connectionState: connectionState,
+                    sessionId: currentSessionId
+                )
             }
             try? await Task.sleep(for: .seconds(1))
         }
@@ -278,7 +327,11 @@ final class WorkerConsoleViewModel {
         defer { isMutating = false }
         do {
             try await operation()
-            await refresh(repository: repository, connectionState: connectionState)
+            await refresh(
+                repository: repository,
+                connectionState: connectionState,
+                sessionId: currentSessionId
+            )
             lastError = nil
         } catch {
             lastError = error.localizedDescription

@@ -66,7 +66,7 @@ tests do not maintain parallel name lists.
   bundles and queued work. Re-enabling restores the primitives, rebuilds the
   enabled direct-tool surface from canonical state, and resumes dispatch unless
   profile stop-all is still engaged.
-- The authenticated Worker Console remains operational while autonomy is off:
+- The authenticated Engine Dashboard remains operational while autonomy is off:
   it may inspect state and history or use enable/disable, rollback,
   retire/purge, webhook rotation, and stop controls. Those operations do not
   expose tools or start dispatch until autonomy is enabled. Worker authoring,
@@ -390,8 +390,21 @@ freshly resolved internal turn.
 
 Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
-evidence plus canonical profile worker summaries and stop/autonomy state. The
-operation is deliberately not projected as a model tool.
+evidence plus four explicitly different inventories:
+
+- eight server-owned compiled component roles, categorized as kernel, product
+  infrastructure, or the protected core-change boundary;
+- all 25 fixed tools with their exact schemas, revisions, effect/risk/health,
+  primitive group, and whether autonomy currently exposes them;
+- every published direct worker tool, including its promoted/projected state,
+  selection reason, relevance evidence, health, and immutable worker version;
+- canonical profile worker summaries, stop-all state, and autonomy state.
+
+The selected `surface.tools` array is the exact next provider projection; the
+fixed and available-worker inventories are operator evidence and must not be
+mistaken for provider availability. When autonomy is off, the fixed inventory
+remains inspectable with `exposed: false` while the provider surface contains no
+fixed tools. The operation is deliberately not projected as model vocabulary.
 
 ## Local Authority and Provenance
 
@@ -619,17 +632,23 @@ schemas are not retained through adapters.
 **Minimum iOS:** 26.0. The generated project and documented toolchain workflow
 support Xcode 26 and Xcode 27 without source forks for their runtime SDKs.
 
-The iOS Worker Console is backed by `WorkerKernelClient`,
+The iOS Engine Dashboard is backed by `WorkerKernelClient`,
 `WorkerKernelRepository`, `WorkerConsoleViewModel`, and `UI/WorkerConsole`.
 It exposes:
 
+- an Overview of compiled component roles and the selected session's exact
+  provider surface;
+- a Core inventory of all fixed host, worker-control, and core-change tools,
+  including schemas and current exposure;
+- published workers with distinct Published, This session, and Promoted state;
 - worker list, health, runner, active content version, provenance, and triggers;
 - JSON-schema-aware typed invocation;
-- runs with delivery-attempt counts, durable inbox, and audit history;
+- profile-wide Activity plus per-worker runs, durable inbox, and audit history;
 - stop current work without disabling future dispatch, enable/disable, rollback,
   retained-version restoration after retirement, purge, webhook rotation, and
   stop-all;
-- live refresh from `worker.lifecycle` and `worker.invocations` cursors.
+- live refresh from `worker.lifecycle` and `worker.invocations` cursors, owned by
+  the persistent sidebar task so state remains current while the sheet is closed.
 
 Conversational creation remains the authoring interface; the client does not
 contain a bundle editor. The Mac package is a server supervisor/pairing shell,
@@ -740,7 +759,7 @@ prove that accepted worker workflows remain uninterrupted.
 - Profile settings: `packages/agent/src/domains/settings/profile/types/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
 - iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/Catalog/` and `WorkerKernel/`
-- iOS Worker Console: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
+- iOS Engine Dashboard: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
 
 Nearest `mod.rs` documentation and focused tests are the implementation-level
 truth when this cross-cutting reference and source disagree.

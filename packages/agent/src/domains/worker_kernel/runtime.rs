@@ -192,10 +192,13 @@ impl WorkerRuntime {
         )
         .await?
         .snapshot;
+        let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
         Ok(json!({
             "format": 1,
             "autonomousWorkers": self.autonomous_enabled(),
             "dispatchStopped": self.store.stop_all()?,
+            "coreComponents": super::contract::core_components(),
+            "fixedTools": fixed_tools,
             "surface": surface,
             "workers": self.store.list(true)?,
         }))

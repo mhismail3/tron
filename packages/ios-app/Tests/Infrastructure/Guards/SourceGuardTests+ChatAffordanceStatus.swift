@@ -112,8 +112,8 @@ extension SourceGuardTests {
         #expect(!engineSettings.contains(#"Image(systemName: "chevron.right")"#))
     }
 
-    @Test("Dashboard is the single high-signal worker-console surface")
-    func testDashboardOwnsHighSignalCockpit() throws {
+    @Test("Engine Dashboard is the single high-signal engine surface")
+    func testEngineDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()
         let sidebar = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
@@ -127,6 +127,9 @@ extension SourceGuardTests {
         #expect(sidebar.contains("WorkerConsoleSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
         #expect(sidebar.contains("workerConsoleRefreshKey"))
+        #expect(sidebar.contains("dashboardSessionId"))
+        #expect(sidebar.contains("sessionId: dashboardSessionId"))
+        #expect(sidebar.contains("await workerConsole.monitor("))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
         #expect(sidebar.contains(".task(id: workerConsoleRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))

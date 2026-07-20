@@ -531,9 +531,29 @@ mod tests {
         let value = result.value.expect("surface snapshot value");
         assert_eq!(value["format"], 1);
         assert_eq!(value["autonomousWorkers"], true);
+        assert_eq!(
+            value["coreComponents"]
+                .as_array()
+                .expect("core component inventory")
+                .len(),
+            8
+        );
+        let fixed_tools = value["fixedTools"]
+            .as_array()
+            .expect("fixed tool inventory");
+        assert_eq!(fixed_tools.len(), 25);
+        assert!(fixed_tools.iter().all(|tool| tool["exposed"] == true));
+        assert_eq!(
+            fixed_tools
+                .iter()
+                .filter(|tool| tool["primitiveGroup"] == "host")
+                .count(),
+            6
+        );
         assert!(value["surface"]["catalogRevision"].is_u64());
         assert_eq!(value["surface"]["fixedToolCount"], 25);
         assert!(value["surface"]["surfaceHash"].is_string());
+        assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["workers"].is_array());
 
         let surface =
@@ -556,6 +576,32 @@ mod tests {
                 .iter()
                 .all(|tool| tool.function_id != "engine::surface_snapshot")
         );
+    }
+
+    #[tokio::test]
+    async fn engine_surface_snapshot_keeps_fixed_inventory_visible_when_autonomy_is_off() {
+        let ctx = crate::shared::server::test_support::make_test_context();
+        let result = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("engine::surface_snapshot").expect("surface function id"),
+                json!({}),
+                trusted_local_context("engine-surface-snapshot-disabled"),
+            ))
+            .await;
+        assert_eq!(
+            result.error, None,
+            "disabled engine surface snapshot failed: {:?}",
+            result.error
+        );
+        let value = result.value.expect("disabled surface snapshot value");
+        assert_eq!(value["autonomousWorkers"], false);
+        let fixed_tools = value["fixedTools"]
+            .as_array()
+            .expect("fixed tool inventory");
+        assert_eq!(fixed_tools.len(), 25);
+        assert!(fixed_tools.iter().all(|tool| tool["exposed"] == false));
+        assert_eq!(value["surface"]["fixedToolCount"], 0);
     }
 
     #[tokio::test]

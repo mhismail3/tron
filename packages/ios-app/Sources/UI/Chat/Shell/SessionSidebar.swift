@@ -170,12 +170,17 @@ struct SessionSidebar: View {
         }
         .task(id: workerConsoleRefreshKey) {
             await refreshWorkerConsole()
+            await workerConsole.monitor(
+                repository: dependencies.workerKernelRepository,
+                connectionState: dependencies.connectionRepository.connectionState
+            )
         }
         .sheet(isPresented: $showWorkerConsole) {
             WorkerConsoleSheet(
                 viewModel: workerConsole,
                 repository: dependencies.workerKernelRepository,
-                connectionState: dependencies.connectionRepository.connectionState
+                connectionState: dependencies.connectionRepository.connectionState,
+                sessionId: dashboardSessionId
             )
         }
     }
@@ -258,7 +263,8 @@ struct SessionSidebar: View {
     private func refreshWorkerConsole() async {
         await workerConsole.refresh(
             repository: dependencies.workerKernelRepository,
-            connectionState: dependencies.connectionRepository.connectionState
+            connectionState: dependencies.connectionRepository.connectionState,
+            sessionId: dashboardSessionId
         )
     }
 

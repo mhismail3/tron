@@ -57,6 +57,26 @@ struct WorkerConsolePresentationTests {
         #expect(provenance.first?.revision == "2-authenticated-model")
     }
 
+    @Test("Engine primitive groups and projection reasons use stable operator language")
+    func engineDashboardProjection() {
+        #expect(EngineDashboardPresentation.groupTitle("host") == "Host primitives")
+        #expect(EngineDashboardPresentation.groupTitle("worker_control") == "Worker controls")
+        #expect(EngineDashboardPresentation.groupTitle("core_change") == "Core changes")
+        #expect(
+            EngineDashboardPresentation.groupDetail("host", count: 6)
+                .hasPrefix("6 fixed tools")
+        )
+        #expect(
+            EngineDashboardPresentation.selectionReason("session_promotion")
+                == "Promoted for this session"
+        )
+        #expect(
+            EngineDashboardPresentation.selectionReason("relevance")
+                == "Relevant to the current task"
+        )
+        #expect(EngineDashboardPresentation.selectionReason(nil) == "Available")
+    }
+
     private func worker(
         enabled: Bool = true,
         retired: Bool = false,

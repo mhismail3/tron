@@ -41,8 +41,12 @@
 //! resolve a fresh surface. Session discovery promotions live in durable scoped
 //! engine state, so restart does not erase a worker the session already found.
 //! The authenticated `engine::surface_snapshot` read returns that same
-//! provider-neutral projection plus canonical profile worker summaries; it is
-//! not itself model vocabulary.
+//! provider-neutral projection, every published worker's projection status,
+//! the complete fixed-tool inventory, compiled engine-component roles, and
+//! canonical profile worker summaries; it is not itself model vocabulary.
+//! Fixed inventory remains inspectable while autonomy is off and marks each
+//! tool unexposed, so operator introspection never masquerades as provider
+//! availability.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute
@@ -301,6 +305,35 @@ mod tests {
             descriptors
                 .windows(2)
                 .all(|pair| pair[0].order < pair[1].order)
+        );
+    }
+
+    #[test]
+    fn engine_component_manifest_distinguishes_kernel_from_product_shell() {
+        let components = contract::core_components();
+        assert_eq!(components.len(), 8);
+        assert_eq!(
+            components
+                .iter()
+                .map(|component| component.id)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            components.len()
+        );
+        assert!(
+            components
+                .iter()
+                .any(|component| component.category == "kernel")
+        );
+        assert!(
+            components
+                .iter()
+                .any(|component| component.category == "product_infrastructure")
+        );
+        assert!(
+            components
+                .iter()
+                .any(|component| component.category == "protected_boundary")
         );
     }
 }

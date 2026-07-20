@@ -1,14 +1,22 @@
 import Foundation
 import Testing
 
-@Suite("Worker Console Visual Contract Tests")
+@Suite("Engine Dashboard Visual Contract Tests")
 struct WorkerConsoleVisualContractTests {
-    @Test("Worker Console keeps the shared cockpit visual language")
+    @Test("Engine Dashboard keeps the shared cockpit visual language")
     func sharedCockpitVisualLanguage() throws {
-        let source = try workerConsoleSource()
+        let source = try dashboardSource()
 
-        #expect(source.contains("SheetTitle(title: \"Worker Console\""))
+        #expect(source.contains("SheetTitle(title: \"Engine\""))
         #expect(source.contains("SheetPrimaryActionButton("))
+        #expect(source.contains("TronSegmentedControl("))
+        #expect(source.contains("case overview = \"Overview\""))
+        #expect(source.contains("case core = \"Core\""))
+        #expect(source.contains("case workers = \"Workers\""))
+        #expect(source.contains("case activity = \"Activity\""))
+        #expect(source.contains("EngineComponentCard("))
+        #expect(source.contains("EngineSurfaceCard("))
+        #expect(source.contains("EngineCoreToolCard("))
         #expect(source.components(separatedBy: "TronTypography").count > 100)
         #expect(source.components(separatedBy: "sectionFill").count > 12)
         #expect(source.contains("WorkerConsoleEmptyState("))
@@ -22,11 +30,14 @@ struct WorkerConsoleVisualContractTests {
         #expect(!source.contains("List {"))
     }
 
-    private func workerConsoleSource() throws -> String {
+    private func dashboardSource() throws -> String {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let sourceURL = testDirectory
-            .appendingPathComponent("../../../Sources/UI/WorkerConsole/WorkerConsoleViews.swift")
+        let sourceDirectory = testDirectory
+            .appendingPathComponent("../../../Sources/UI/WorkerConsole")
             .standardizedFileURL
-        return try String(contentsOf: sourceURL, encoding: .utf8)
+        return try ["WorkerConsoleViews.swift", "EngineDashboardViews.swift"]
+            .map { sourceDirectory.appendingPathComponent($0) }
+            .map { try String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
     }
 }

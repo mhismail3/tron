@@ -62,6 +62,14 @@ pub(crate) struct SurfaceToolSnapshot {
     pub(crate) function_id: String,
     pub(crate) function_revision: u64,
     pub(crate) owner_worker: String,
+    pub(crate) description: String,
+    pub(crate) input_schema: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) output_schema: Option<Value>,
+    pub(crate) effect_class: String,
+    pub(crate) risk: String,
+    pub(crate) health: String,
+    pub(crate) exposed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) worker_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,6 +77,26 @@ pub(crate) struct SurfaceToolSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) primitive_group: Option<String>,
     pub(crate) selection_reason: String,
+}
+
+/// Publication and selection evidence for every enabled direct worker tool,
+/// including workers not projected into this particular provider request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AvailableWorkerToolSnapshot {
+    pub(crate) worker_id: String,
+    pub(crate) model_name: String,
+    pub(crate) function_id: String,
+    pub(crate) function_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) worker_version: Option<String>,
+    pub(crate) promoted: bool,
+    pub(crate) projected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) selection_reason: Option<String>,
+    pub(crate) relevance_score: usize,
+    pub(crate) completed_runs: u64,
+    pub(crate) health: String,
 }
 
 /// Exact provider-neutral surface resolved for one agent request boundary.
@@ -82,6 +110,7 @@ pub(crate) struct EngineSurfaceSnapshot {
     pub(crate) projected_worker_count: usize,
     pub(crate) available_worker_count: usize,
     pub(crate) tools: Vec<SurfaceToolSnapshot>,
+    pub(crate) available_workers: Vec<AvailableWorkerToolSnapshot>,
 }
 
 /// One live function selected for provider adaptation.
@@ -185,23 +214,51 @@ pub(crate) async fn resolve_tool_surface(
             .then_with(|| right.2.cmp(&left.2))
             .then_with(|| left.3.as_str().cmp(right.3.as_str()))
     });
-    let selected_dynamic = dynamic
-        .into_iter()
-        .filter(|(is_promoted, relevance, _, _)| {
-            *is_promoted || query_terms.is_empty() || *relevance > 0
-        })
-        .take(MAX_RELEVANT_WORKERS)
-        .map(|(is_promoted, relevance, _, id)| {
-            let reason = if is_promoted {
-                "session_promotion"
-            } else if relevance > 0 {
-                "relevance"
-            } else {
-                "default"
-            };
-            (id, reason)
-        })
+    let mut selected_dynamic = dynamic
+        .iter()
+        .filter(|(is_promoted, _, _, _)| *is_promoted)
+        .map(|(_, _, _, id)| (id.clone(), "session_promotion"))
         .collect::<BTreeMap<_, _>>();
+    for (is_promoted, relevance, _, id) in &dynamic {
+        if *is_promoted
+            || (!query_terms.is_empty() && *relevance == 0)
+            || selected_dynamic.len() >= MAX_RELEVANT_WORKERS
+        {
+            continue;
+        }
+        let reason = if *relevance > 0 {
+            "relevance"
+        } else {
+            "default"
+        };
+        let _ = selected_dynamic.insert(id.clone(), reason);
+    }
+    let available_workers = dynamic
+        .iter()
+        .filter_map(|(is_promoted, relevance, successes, id)| {
+            let function = functions.iter().find(|function| function.id == *id)?;
+            let worker_id = function.metadata.get("workerId")?.as_str()?.to_owned();
+            let model_name = model_tool_name(function)?;
+            let selection_reason = selected_dynamic.get(id).map(|reason| (*reason).to_owned());
+            Some(AvailableWorkerToolSnapshot {
+                worker_id,
+                model_name,
+                function_id: id.as_str().to_owned(),
+                function_revision: function.revision.0,
+                worker_version: function
+                    .metadata
+                    .get("workerVersion")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                promoted: *is_promoted,
+                projected: selection_reason.is_some(),
+                selection_reason,
+                relevance_score: *relevance,
+                completed_runs: *successes,
+                health: serialized_key(&function.health),
+            })
+        })
+        .collect::<Vec<_>>();
 
     let mut seen_names = BTreeSet::new();
     let mut resolved = Vec::new();
@@ -240,6 +297,16 @@ pub(crate) async fn resolve_tool_surface(
             function_id: function.id.as_str().to_owned(),
             function_revision: function.revision.0,
             owner_worker: function.owner_worker.as_str().to_owned(),
+            description: function.description.clone(),
+            input_schema: function
+                .request_schema
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({"type":"object"})),
+            output_schema: function.response_schema.clone(),
+            effect_class: serialized_key(&function.effect_class),
+            risk: function.risk_level.as_str().to_owned(),
+            health: serialized_key(&function.health),
+            exposed: true,
             worker_id: is_dynamic.then(|| {
                 function
                     .metadata
@@ -284,8 +351,63 @@ pub(crate) async fn resolve_tool_surface(
             projected_worker_count,
             available_worker_count,
             tools: snapshot_tools,
+            available_workers,
         },
     })
+}
+
+/// Inspect the canonical fixed model-tool inventory independently of whether
+/// autonomous mode currently projects those tools to a provider request.
+pub(crate) async fn fixed_tool_inventory(
+    host: &EngineHostHandle,
+    resolved_surface: &EngineSurfaceSnapshot,
+) -> Result<Vec<SurfaceToolSnapshot>, String> {
+    let mut tools = Vec::with_capacity(super::contract::core_primitives().len());
+    let inspector = ActorContext::new(
+        ActorId::new("system:engine-introspection").map_err(|error| error.to_string())?,
+        ActorKind::System,
+    );
+    for descriptor in super::contract::core_primitives() {
+        let function_id =
+            crate::engine::FunctionId::new(format!("worker_kernel::{}", descriptor.operation_key))
+                .map_err(|error| error.to_string())?;
+        let function = host
+            .inspect_function(&function_id, Some(&inspector))
+            .await
+            .map_err(|error| error.to_string())?;
+        let exposed = resolved_surface
+            .tools
+            .iter()
+            .any(|tool| tool.function_id == function.id.as_str());
+        tools.push(SurfaceToolSnapshot {
+            model_name: descriptor.model_name.to_owned(),
+            function_id: function.id.as_str().to_owned(),
+            function_revision: function.revision.0,
+            owner_worker: function.owner_worker.as_str().to_owned(),
+            description: function.description.clone(),
+            input_schema: function
+                .request_schema
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({"type":"object"})),
+            output_schema: function.response_schema.clone(),
+            effect_class: serialized_key(&function.effect_class),
+            risk: function.risk_level.as_str().to_owned(),
+            health: serialized_key(&function.health),
+            exposed,
+            worker_id: None,
+            worker_version: None,
+            primitive_group: Some(descriptor.group.as_str().to_owned()),
+            selection_reason: "fixed".to_owned(),
+        });
+    }
+    Ok(tools)
+}
+
+fn serialized_key<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 fn surface_hash(tools: &[SurfaceToolSnapshot]) -> Result<String, String> {
@@ -338,6 +460,13 @@ mod tests {
             function_id: "worker::demo".to_owned(),
             function_revision: 1,
             owner_worker: "demo".to_owned(),
+            description: "Demo worker".to_owned(),
+            input_schema: serde_json::json!({"type":"object"}),
+            output_schema: Some(serde_json::json!({"type":"object"})),
+            effect_class: "PureRead".to_owned(),
+            risk: "low".to_owned(),
+            health: "Healthy".to_owned(),
+            exposed: true,
             worker_id: Some("demo".to_owned()),
             worker_version: Some("abc".to_owned()),
             primitive_group: None,

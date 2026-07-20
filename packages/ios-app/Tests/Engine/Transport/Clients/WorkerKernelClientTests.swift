@@ -75,6 +75,34 @@ struct WorkerKernelClientTests {
                 format: 1,
                 autonomousWorkers: true,
                 dispatchStopped: false,
+                coreComponents: [
+                    EngineCoreComponentDTO(
+                        id: "worker_runtime",
+                        title: "Worker Runtime",
+                        role: "Runs workers",
+                        category: "kernel",
+                        status: "active"
+                    )
+                ],
+                fixedTools: [
+                    EngineSurfaceToolDTO(
+                        modelName: "filesystem_read",
+                        functionId: "worker_kernel::filesystem_read",
+                        functionRevision: 1,
+                        ownerWorker: "worker_kernel",
+                        description: "Read a local file",
+                        inputSchema: AnyCodable(["type": "object"]),
+                        outputSchema: AnyCodable(["type": "object"]),
+                        effectClass: "PureRead",
+                        risk: "low",
+                        health: "Healthy",
+                        exposed: true,
+                        workerId: nil,
+                        workerVersion: nil,
+                        primitiveGroup: "host",
+                        selectionReason: "fixed"
+                    )
+                ],
                 surface: AgentToolSurfaceDTO(
                     format: 1,
                     catalogRevision: 42,
@@ -88,10 +116,32 @@ struct WorkerKernelClientTests {
                             functionId: "worker_kernel::dynamic_research",
                             functionRevision: 2,
                             ownerWorker: "worker_kernel",
+                            description: "Research recent sources",
+                            inputSchema: AnyCodable(["type": "object"]),
+                            outputSchema: AnyCodable(["type": "object"]),
+                            effectClass: "ExternalSideEffect",
+                            risk: "high",
+                            health: "Healthy",
+                            exposed: true,
                             workerId: "research",
                             workerVersion: "v2",
                             primitiveGroup: nil,
                             selectionReason: "relevance"
+                        )
+                    ],
+                    availableWorkers: [
+                        AvailableWorkerToolDTO(
+                            workerId: "research",
+                            modelName: "worker_research",
+                            functionId: "worker_kernel::dynamic_research",
+                            functionRevision: 2,
+                            workerVersion: "v2",
+                            promoted: false,
+                            projected: true,
+                            selectionReason: "relevance",
+                            relevanceScore: 1,
+                            completedRuns: 3,
+                            health: "Healthy"
                         )
                     ]
                 ),
@@ -106,6 +156,9 @@ struct WorkerKernelClientTests {
 
         #expect(snapshot.surface.catalogRevision == 42)
         #expect(snapshot.surface.tools.first?.selectionReason == "relevance")
+        #expect(snapshot.surface.availableWorkers.first?.projected == true)
+        #expect(snapshot.coreComponents.first?.category == "kernel")
+        #expect(snapshot.fixedTools.first?.primitiveGroup == "host")
         #expect(snapshot.workers.first?.workerId == "research")
     }
 
