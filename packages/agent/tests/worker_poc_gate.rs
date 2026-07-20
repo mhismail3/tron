@@ -25,7 +25,13 @@ struct Criteria {
     minimum_substantive_scenarios: usize,
     minimum_distinct_days: usize,
     minimum_autonomous_adaptations: usize,
+    #[serde(default = "default_minimum_proactive_adaptations")]
+    minimum_proactive_adaptations: usize,
     prohibited_unresolved_failure_causes: BTreeSet<String>,
+}
+
+const fn default_minimum_proactive_adaptations() -> usize {
+    1
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,18 +42,27 @@ struct Observation {
     summary: String,
     substantive: bool,
     autonomous_adaptation: bool,
+    #[serde(default)]
+    proactive_adaptation: bool,
     status: ObservationStatus,
     #[serde(default)]
     failure_cause: Option<String>,
     #[serde(default)]
     resolved: bool,
+    #[serde(default)]
+    resolved_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    resolution_evidence: Vec<String>,
     evidence: Vec<String>,
+    #[serde(default)]
+    notes: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
 enum ObservationStatus {
+    #[serde(rename = "passed", alias = "succeeded")]
     Passed,
+    #[serde(rename = "failed")]
     Failed,
 }
 
@@ -83,6 +98,43 @@ fn gate_errors(ledger: &Ledger) -> Vec<String> {
         {
             errors.push(format!(
                 "observation {} requires concrete non-empty evidence refs",
+                observation.id
+            ));
+        }
+        if observation.notes.iter().any(|item| item.trim().is_empty()) {
+            errors.push(format!(
+                "observation {} contains an empty note",
+                observation.id
+            ));
+        }
+        if observation.proactive_adaptation && !observation.autonomous_adaptation {
+            errors.push(format!(
+                "observation {} cannot be proactive without an autonomous adaptation",
+                observation.id
+            ));
+        }
+        if observation.status == ObservationStatus::Failed
+            && observation
+                .failure_cause
+                .as_deref()
+                .is_none_or(str::is_empty)
+        {
+            errors.push(format!(
+                "failed observation {} requires a failure cause",
+                observation.id
+            ));
+        }
+        if observation.status == ObservationStatus::Failed
+            && observation.resolved
+            && (observation.resolved_at.is_none()
+                || observation.resolution_evidence.is_empty()
+                || observation
+                    .resolution_evidence
+                    .iter()
+                    .any(|item| item.trim().is_empty()))
+        {
+            errors.push(format!(
+                "resolved failure {} requires resolvedAt and concrete resolutionEvidence",
                 observation.id
             ));
         }
@@ -138,6 +190,16 @@ fn gate_errors(ledger: &Ledger) -> Vec<String> {
             ledger.criteria.minimum_autonomous_adaptations, autonomous
         ));
     }
+    let proactive = passed
+        .iter()
+        .filter(|observation| observation.proactive_adaptation)
+        .count();
+    if proactive < ledger.criteria.minimum_proactive_adaptations {
+        errors.push(format!(
+            "requires {} proactive worker creations or improvements; found {}",
+            ledger.criteria.minimum_proactive_adaptations, proactive
+        ));
+    }
     errors
 }
 
@@ -163,6 +225,11 @@ fn committed_empirical_ledger_stays_open_until_real_observations_exist() {
             .iter()
             .any(|error| error.contains("3 autonomous worker creations"))
     );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("1 proactive worker creations"))
+    );
 }
 
 #[test]
@@ -179,10 +246,14 @@ fn gate_accepts_only_evidenced_multi_day_autonomous_proof() {
             summary: format!("Substantive scenario {index}"),
             substantive: true,
             autonomous_adaptation: index < 3,
+            proactive_adaptation: index == 0,
             status: ObservationStatus::Passed,
             failure_cause: None,
             resolved: false,
+            resolved_at: None,
+            resolution_evidence: Vec::new(),
             evidence: vec![format!("inbox:scenario-{index}")],
+            notes: Vec::new(),
         })
         .collect();
     let ledger = Ledger {
@@ -191,6 +262,7 @@ fn gate_accepts_only_evidenced_multi_day_autonomous_proof() {
             minimum_substantive_scenarios: 10,
             minimum_distinct_days: 3,
             minimum_autonomous_adaptations: 3,
+            minimum_proactive_adaptations: 1,
             prohibited_unresolved_failure_causes: BTreeSet::from([
                 "authority_ceremony".to_owned(),
                 "hidden_actuator".to_owned(),
@@ -200,6 +272,35 @@ fn gate_accepts_only_evidenced_multi_day_autonomous_proof() {
         },
         observations,
     };
+    assert!(gate_errors(&ledger).is_empty());
+}
+
+#[test]
+fn gate_accepts_rich_local_evidence_and_the_succeeded_status_alias() {
+    let ledger: Ledger = serde_json::from_value(serde_json::json!({
+        "format": "tron.worker_poc_observations.v1",
+        "criteria": {
+            "minimumSubstantiveScenarios": 1,
+            "minimumDistinctDays": 1,
+            "minimumAutonomousAdaptations": 1,
+            "minimumProactiveAdaptations": 1,
+            "prohibitedUnresolvedFailureCauses": ["authority_ceremony"]
+        },
+        "observations": [{
+            "id": "real-proactive-adaptation",
+            "completedAt": "2026-07-20T14:58:43Z",
+            "summary": "A live session created and invoked a durable worker proactively.",
+            "substantive": true,
+            "autonomousAdaptation": true,
+            "proactiveAdaptation": true,
+            "status": "succeeded",
+            "resolved": true,
+            "evidence": ["session:real", "worker:real"],
+            "notes": ["The user requested the task, not worker creation."]
+        }]
+    }))
+    .expect("decode rich local ledger");
+
     assert!(gate_errors(&ledger).is_empty());
 }
 

@@ -4,6 +4,7 @@
     "minimumSubstantiveScenarios": 10,
     "minimumDistinctDays": 3,
     "minimumAutonomousAdaptations": 3,
+    "minimumProactiveAdaptations": 1,
     "prohibitedUnresolvedFailureCauses": [
       "authority_ceremony",
       "hidden_actuator",

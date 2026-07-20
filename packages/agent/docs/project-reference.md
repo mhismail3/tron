@@ -655,8 +655,15 @@ demonstrate:
 - at least 10 substantive passed scenarios;
 - at least three distinct calendar days;
 - at least three autonomous worker creations or improvements;
+- at least one of those adaptations initiated proactively during an ordinary
+  task that did not explicitly request worker creation;
 - no unresolved failure caused by authority ceremony, a hidden actuator, a
   proposal-only transition, or blocked activation of a valid worker.
+
+The local ledger accepts `succeeded` as the human-facing alias for `passed` and
+retains proactive-adaptation, resolution timestamp/evidence, and notes fields.
+Resolved failures must include both a timestamp and concrete resolution refs;
+these richer records remain validated rather than being discarded for CI.
 
 Validate a local evidence ledger with:
 
