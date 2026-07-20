@@ -613,6 +613,9 @@ extension SourceGuardTests {
 
         #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Beta on iPhone""#))
         #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Prod Fast Debug on iPhone""#))
+        #expect(environment.contains(
+            #"command = "env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer TRON_IOS_REQUIRED_SDK_MAJOR=27 TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-beta install""#
+        ))
         #expect(environment.contains("TRON_IOS_DEVICE_NAME=iPhone"))
         #expect(environment.contains(#"TRON_IOS_SCHEME='Tron Fast'"#))
         #expect(environment.contains("TRON_IOS_CONFIGURATION=ProdDebug"))
@@ -663,6 +666,9 @@ extension SourceGuardTests {
         #expect(!installScript.contains(".xcworkspace"))
         #expect(installScript.contains("TRON_IOS_SCHEME"))
         #expect(installScript.contains("TRON_IOS_CONFIGURATION"))
+        #expect(installScript.contains("TRON_IOS_REQUIRED_SDK_MAJOR"))
+        #expect(installScript.contains("xcrun --sdk iphoneos --show-sdk-version"))
+        #expect(installScript.contains(#"printf 'iPhoneOS SDK %s\n'"#))
         #expect(!installScript.contains("install|start)"))
         #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))
         #expect(!installScript.contains(#"find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1"#))

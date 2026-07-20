@@ -13,6 +13,7 @@ DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
 LAUNCH_AFTER_INSTALL=1
 LAUNCH_TIMEOUT_SECONDS="${TRON_IOS_LAUNCH_TIMEOUT_SECONDS:-20}"
+REQUIRED_SDK_MAJOR="${TRON_IOS_REQUIRED_SDK_MAJOR:-}"
 
 usage() {
     cat <<'USAGE'
@@ -27,6 +28,8 @@ Environment overrides:
   TRON_IOS_DEVICE_NAME     Physical iOS device name
   TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron Beta
   TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Beta
+  TRON_IOS_REQUIRED_SDK_MAJOR
+                           Fail before building unless iphoneos uses this SDK major
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
                            devicectl process launch timeout, defaults to 20
 
@@ -43,9 +46,20 @@ die() {
 
 require_full_xcode() {
     local selected_xcode
-    selected_xcode="$(xcode-select -p)"
+    selected_xcode="${DEVELOPER_DIR:-$(xcode-select -p)}"
     if [[ "$selected_xcode" == "/Library/Developer/CommandLineTools"* ]]; then
-        die "xcode-select points to Command Line Tools, not full Xcode: $selected_xcode"
+        die "selected developer directory points to Command Line Tools, not full Xcode: $selected_xcode"
+    fi
+    if [ -n "$REQUIRED_SDK_MAJOR" ]; then
+        case "$REQUIRED_SDK_MAJOR" in
+            *[!0-9]*|'') die "TRON_IOS_REQUIRED_SDK_MAJOR must be an integer" ;;
+        esac
+        local sdk_version sdk_major
+        sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+        sdk_major="${sdk_version%%.*}"
+        if [ "$sdk_major" != "$REQUIRED_SDK_MAJOR" ]; then
+            die "selected Xcode at $selected_xcode provides iphoneos SDK $sdk_version; SDK major $REQUIRED_SDK_MAJOR is required"
+        fi
     fi
 }
 
@@ -176,6 +190,7 @@ build_install_launch() {
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
 
     xcodebuild -version
+    printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
     xcodegen generate
 

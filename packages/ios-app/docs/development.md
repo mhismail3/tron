@@ -99,8 +99,15 @@ missing Apple account or development certificate are therefore shown directly
 in the action output; repair those in Xcode's Apple Accounts settings, then run
 the same rebuild action again.
 `Rebuild + Install + Launch iOS Prod Fast Debug on iPhone` uses the same helper
-with `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so
-it builds the fast production-bundle app and launches it on the selected iPhone.
+with `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`,
+`TRON_IOS_REQUIRED_SDK_MAJOR=27`, `TRON_IOS_SCHEME='Tron Fast'`, and
+`TRON_IOS_CONFIGURATION=ProdDebug`. It therefore builds the fast
+production-bundle app against the iOS 27 SDK and launches it on the selected
+iPhone. The helper fails before compilation if that selected Xcode no longer
+provides an iOS 27 SDK; it must never silently fall back to the system-selected
+iOS 26 SDK because SDK-linked SwiftUI behavior, including scroll-edge effects,
+would differ. The action prints both the Xcode version and selected iPhoneOS SDK
+before compiling so its toolchain is visible in the action log.
 `Rebuild + Install + Launch iOS Prod Release on iPhone` uses
 `TRON_IOS_SCHEME=Tron` and
 `TRON_IOS_CONFIGURATION=Prod`, so it builds the optimized production app,
@@ -131,7 +138,9 @@ export TRON_IOS_DEVICE_NAME=<device-name>
 
 The helper also accepts `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` for local
 variants. Defaults remain `Tron Beta` and `Beta`; the fast production action sets
-them to `Tron Fast` and `ProdDebug`.
+them to `Tron Fast` and `ProdDebug`. `TRON_IOS_REQUIRED_SDK_MAJOR` is an optional
+preflight for SDK-sensitive workflows; the Codex Prod Fast action sets it to
+`27` and explicitly selects Xcode beta.
 
 ## Build Configurations
 
