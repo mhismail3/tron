@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-19 for the worker-first autonomous POC.
+> Last verified: 2026-07-20 for the worker-first autonomous POC.
 
 ## Overview
 
@@ -134,7 +134,8 @@ worker metadata from the client. The server supplies internal causal context.
 - `WorkerInspectResultDTO` for the bundle, versions, triggers, audit, and
   canonical version directory;
 - `WorkerInvocationDTO` for queued/running/terminal runs, typed input/output,
-  idempotency, trace, causal depth, trigger kind, and timestamps;
+  idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
+  count, and timestamps;
 - `WorkerInboxItemDTO` for durable visible results and failures;
 - request/response DTOs for invocation, rollback, stop-all, purge, and webhook
   token rotation.
@@ -192,7 +193,7 @@ persistent workers. It opens `WorkerConsoleSheet`, which provides:
 - input schema plus typed JSON invocation;
 - trigger status and webhook rotation;
 - retained versions and rollback;
-- recent runs, inbox, and audit history;
+- recent runs with delivery-attempt counts, inbox, and audit history;
 - enable/disable, retirement, and confirmation-backed permanent purge.
 
 An empty console explicitly directs the user to create workers

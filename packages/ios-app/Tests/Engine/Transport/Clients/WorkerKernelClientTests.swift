@@ -90,6 +90,7 @@ struct WorkerKernelClientTests {
                     traceId: "trace-1",
                     causalDepth: 0,
                     triggerKind: "manual",
+                    attemptCount: 1,
                     createdAt: "2026-07-19T12:00:00Z",
                     startedAt: nil,
                     completedAt: "2026-07-19T12:00:01Z"

@@ -319,7 +319,7 @@ private struct WorkerDetailSheet: View {
             Text("Runs").font(.headline)
             ForEach(viewModel.runs.prefix(20)) { run in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(run.status) · \(run.triggerKind)")
+                    Text("\(run.status) · \(run.triggerKind) · \(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")")
                         .font(.subheadline.weight(.semibold))
                     Text(run.invocationId).font(.caption.monospaced()).foregroundStyle(.secondary)
                     if let error = run.error { Text(error).font(.caption).foregroundStyle(.tronError) }

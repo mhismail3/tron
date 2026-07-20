@@ -85,7 +85,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         json!({
             "type":"object","additionalProperties":false,"required":["bundle"],
             "properties":{
-                "bundle":{"type":"object","additionalProperties":true},
+                "bundle":worker_bundle_schema(),
                 "predecessorWorkerId":{"type":"string"}
             }
         }),
@@ -251,4 +251,236 @@ fn worker_id_schema(include_version: bool) -> Value {
 
 fn open_response() -> Value {
     json!({"type":"object","additionalProperties":true})
+}
+
+/// Keep the complete worker authoring contract on the model-facing operation.
+/// `WorkerBundle` remains the decoding authority; this schema makes that same
+/// contract discoverable to an agent without a separate proposal or manual.
+fn worker_bundle_schema() -> Value {
+    let command = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["command"],
+        "properties":{
+            "command":{"type":"array","minItems":1,"items":{"type":"string"}},
+            "timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}
+        }
+    });
+    json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":[
+            "schemaVersion","name","description","inputSchema","outputSchema",
+            "runner","provenance"
+        ],
+        "properties":{
+            "schemaVersion":{
+                "type":"string",
+                "enum":["tron.worker_bundle.v1"],
+                "description":"Version of the complete persistent-worker bundle contract."
+            },
+            "workerId":{
+                "type":"string",
+                "description":"Optional stable kebab-case identity. An existing id is updated directly; a new suggested id still yields to a near-identical semantic match."
+            },
+            "name":{"type":"string","minLength":1},
+            "description":{
+                "type":"string",
+                "minLength":1,
+                "description":"Explain when the agent should route work to this worker."
+            },
+            "toolName":{
+                "type":"string",
+                "description":"Optional stable direct tool name. Omit to retain the predecessor name or derive worker_<name>."
+            },
+            "inputSchema":{
+                "type":"object",
+                "description":"JSON object schema for typed worker input."
+            },
+            "outputSchema":{
+                "type":"object",
+                "description":"JSON object schema for typed worker output."
+            },
+            "runner":{
+                "description":"Exactly one durable runner contract.",
+                "oneOf":[
+                    {
+                        "type":"object","additionalProperties":false,
+                        "required":["kind","instructions"],
+                        "properties":{
+                            "kind":{"type":"string","enum":["agent"]},
+                            "instructions":{"type":"string","minLength":1},
+                            "model":{"type":"string"}
+                        }
+                    },
+                    {
+                        "type":"object","additionalProperties":false,
+                        "required":["kind","command"],
+                        "properties":{
+                            "kind":{"type":"string","enum":["command"]},
+                            "command":{"type":"array","minItems":1,"items":{"type":"string"}}
+                        }
+                    },
+                    {
+                        "type":"object","additionalProperties":false,
+                        "required":["kind","command","invokeUrl"],
+                        "properties":{
+                            "kind":{"type":"string","enum":["service"]},
+                            "command":{"type":"array","minItems":1,"items":{"type":"string"}},
+                            "invokeUrl":{"type":"string"},
+                            "healthUrl":{"type":"string"}
+                        }
+                    }
+                ]
+            },
+            "files":{
+                "type":"object",
+                "description":"Relative source-file paths mapped to complete UTF-8 string contents.",
+                "additionalProperties":{"type":"string"}
+            },
+            "dependencies":{
+                "type":"array",
+                "items":{
+                    "type":"object","additionalProperties":false,
+                    "required":["name","source","version","checksum"],
+                    "properties":{
+                        "name":{"type":"string"},
+                        "source":{"type":"string"},
+                        "version":{"type":"string","description":"Exact version or source revision; never latest or a range."},
+                        "checksum":{"type":"string","description":"Expected sha256:<64 lowercase or uppercase hex> source-tree digest."},
+                        "install":command
+                    }
+                }
+            },
+            "triggers":{
+                "type":"array",
+                "items":{
+                    "oneOf":[
+                        {
+                            "type":"object","additionalProperties":false,
+                            "required":["kind","id"],
+                            "properties":{
+                                "kind":{"type":"string","enum":["manual"]},
+                                "id":{"type":"string"}
+                            }
+                        },
+                        {
+                            "type":"object","additionalProperties":false,
+                            "required":["kind","id","everySeconds"],
+                            "properties":{
+                                "kind":{"type":"string","enum":["schedule"]},
+                                "id":{"type":"string"},
+                                "everySeconds":{"type":"integer","minimum":1},
+                                "input":{}
+                            }
+                        },
+                        {
+                            "type":"object","additionalProperties":false,
+                            "required":["kind","id","topic"],
+                            "properties":{
+                                "kind":{"type":"string","enum":["engine_event"]},
+                                "id":{"type":"string"},
+                                "topic":{"type":"string","minLength":1},
+                                "filter":{"type":"object"},
+                                "input":{}
+                            }
+                        },
+                        {
+                            "type":"object","additionalProperties":false,
+                            "required":["kind","id"],
+                            "properties":{
+                                "kind":{"type":"string","enum":["webhook"]},
+                                "id":{"type":"string"},
+                                "input":{}
+                            }
+                        }
+                    ]
+                }
+            },
+            "secretBindings":{
+                "type":"array",
+                "description":"Logical vault names only; never include secret values.",
+                "items":{
+                    "oneOf":[
+                        {"type":"string"},
+                        {
+                            "type":"object","additionalProperties":false,
+                            "required":["name"],
+                            "properties":{
+                                "name":{"type":"string"},
+                                "required":{"type":"boolean"}
+                            }
+                        }
+                    ]
+                }
+            },
+            "smokeTests":{"type":"array","items":command},
+            "healthChecks":{"type":"array","items":command},
+            "provenance":{
+                "type":"array","minItems":1,
+                "items":{
+                    "type":"object","additionalProperties":false,
+                    "required":["source"],
+                    "properties":{
+                        "source":{"type":"string","minLength":1},
+                        "revision":{"type":"string"},
+                        "checksum":{"type":"string"}
+                    }
+                }
+            },
+            "routing":{
+                "type":"object","additionalProperties":false,
+                "properties":{
+                    "intents":{"type":"array","items":{"type":"string"}},
+                    "examples":{"type":"array","items":{"type":"string"}}
+                }
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
+        let upsert = capabilities()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "worker_kernel::upsert")
+            .expect("worker upsert contract");
+        let schema = upsert.request_schema.expect("upsert request schema");
+        let bundle = &schema["properties"]["bundle"];
+        assert_eq!(bundle["additionalProperties"], false);
+        assert!(
+            bundle["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field == "provenance")
+        );
+        assert_eq!(
+            bundle["properties"]["runner"]["oneOf"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            bundle["properties"]["triggers"]["items"]["oneOf"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(
+            bundle["properties"]["healthChecks"]["items"]["properties"]["timeoutSeconds"]["maximum"],
+            7200
+        );
+        assert_eq!(
+            bundle["properties"]["files"]["additionalProperties"]["type"],
+            "string"
+        );
+    }
 }

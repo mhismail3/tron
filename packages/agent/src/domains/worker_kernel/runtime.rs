@@ -26,7 +26,7 @@ use crate::engine::{
 };
 
 use super::core_proposals::{CoreProposal, CoreProposalService};
-use super::store::WorkerStore;
+use super::persistence::WorkerStore;
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_INVOCATION_SECONDS,
     MAX_PROFILE_CONCURRENCY, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
@@ -166,21 +166,14 @@ impl WorkerRuntime {
             .await;
         self.reset_worker_stop(&outcome.worker.worker_id);
         if let Err(error) = self.register_dynamic_tool(&outcome.worker.worker_id).await {
-            let reason = format!("dynamic tool activation failed: {error}");
-            self.store.mark_failed(&outcome.worker.worker_id, &reason)?;
-            self.unregister_dynamic_tool(&outcome.worker.worker_id)
+            let reason = self
+                .handle_tool_activation_failure(
+                    &outcome.worker.worker_id,
+                    &outcome.version,
+                    "activation",
+                    &error,
+                )
                 .await;
-            self.publish_event(
-                "worker.failed",
-                json!({
-                    "workerId": outcome.worker.worker_id,
-                    "version": outcome.version,
-                    "reason": reason,
-                    "disabled": true,
-                }),
-                None,
-            )
-            .await;
             return Err(reason);
         }
         self.publish_event(
@@ -196,23 +189,116 @@ impl WorkerRuntime {
         Ok(outcome)
     }
 
+    async fn handle_tool_activation_failure(
+        &self,
+        worker_id: &str,
+        version: &str,
+        phase: &str,
+        error: &str,
+    ) -> String {
+        let secrets = self.load_all_vault_secrets().unwrap_or_default();
+        let reason =
+            redact_known_secrets(&format!("dynamic tool {phase} failed: {error}"), &secrets);
+        let mut recording_failures = Vec::new();
+        if let Err(recording_error) = self.store.mark_failed(worker_id, &reason) {
+            recording_failures.push(format!("disable failed worker: {recording_error}"));
+        }
+        if let Err(recording_error) = self.store.record_system_inbox(
+            worker_id,
+            phase,
+            &json!({
+                "status":"failed",
+                "phase":phase,
+                "workerId":worker_id,
+                "version":version,
+                "error":reason,
+                "disabled":true,
+            }),
+        ) {
+            recording_failures.push(format!("record failure inbox: {recording_error}"));
+        }
+        self.cancel_worker(worker_id);
+        self.unregister_dynamic_tool(worker_id).await;
+        self.stop_residents(Some(worker_id)).await;
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":"failed",
+                "phase":phase,
+                "workerId":worker_id,
+                "version":version,
+                "reason":reason,
+                "disabled":true,
+            }),
+            None,
+        )
+        .await;
+        if recording_failures.is_empty() {
+            reason
+        } else {
+            format!("{reason}; {}", recording_failures.join("; "))
+        }
+    }
+
     async fn prepare_dependencies_and_test(&self, prepared: &PreparedWorker) -> Result<(), String> {
         let workdir = prepared.staging_dir.join("files");
         let dependencies = prepared.staging_dir.join("dependencies");
         let runtime = prepared.staging_dir.join("dependency-runtime");
         let secrets = self.load_secrets(&prepared.bundle)?;
+        let redactions = self.load_all_vault_secrets()?;
+        let mut install_evidence = Vec::new();
+        let mut smoke_evidence = Vec::new();
+        let mut health_evidence = Vec::new();
         std::fs::create_dir_all(&dependencies).map_err(|error| error.to_string())?;
         std::fs::create_dir_all(&runtime).map_err(|error| error.to_string())?;
         for dependency in &prepared.bundle.dependencies {
             let dependency_dir = dependencies.join(&dependency.name);
-            self.fetch_dependency(dependency, &dependency_dir).await?;
+            self.fetch_dependency(dependency, &dependency_dir)
+                .await
+                .map_err(|error| redact_known_secrets(&error, &redactions))?;
             if let Some(install) = &dependency.install {
-                run_worker_command(install, &dependency_dir, None, &secrets).await?;
+                let output = run_worker_command(install, &dependency_dir, None, &secrets, None)
+                    .await
+                    .map_err(|error| redact_known_secrets(&error, &redactions))?;
+                install_evidence.push(json!({
+                    "dependency":dependency.name,
+                    "command":install.command,
+                    "output":redact_json_known_secrets(output, &redactions),
+                }));
             }
         }
         for test in &prepared.bundle.smoke_tests {
-            run_worker_command(test, &workdir, None, &secrets).await?;
+            let output = run_worker_command(test, &workdir, None, &secrets, None)
+                .await
+                .map_err(|error| redact_known_secrets(&error, &redactions))?;
+            smoke_evidence.push(json!({
+                "command":test.command,
+                "output":redact_json_known_secrets(output, &redactions),
+            }));
         }
+        for check in &prepared.bundle.health_checks {
+            let output = run_worker_command(check, &workdir, None, &secrets, None)
+                .await
+                .map_err(|error| redact_known_secrets(&error, &redactions))?;
+            health_evidence.push(json!({
+                "command":check.command,
+                "output":redact_json_known_secrets(output, &redactions),
+            }));
+        }
+        let verification = json!({
+            "format":"tron.worker_verification.v1",
+            "verifiedAt":chrono::Utc::now().to_rfc3339(),
+            "dependencies":prepared.bundle.dependencies,
+            "dependencyInstalls":install_evidence,
+            "smokeTests":smoke_evidence,
+            "healthChecks":health_evidence,
+            "status":"passed",
+        });
+        std::fs::write(
+            prepared.staging_dir.join("verification.json"),
+            serde_json::to_vec_pretty(&verification).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| format!("write worker verification evidence: {error}"))?;
         Ok(())
     }
 
@@ -245,7 +331,7 @@ impl WorkerRuntime {
                 ],
                 timeout_seconds: 1_800,
             };
-            run_worker_command(&clone, destination, None, &HashMap::new()).await?;
+            run_worker_command(&clone, destination, None, &HashMap::new(), None).await?;
             let checkout = WorkerCommand {
                 command: vec![
                     "git".to_owned(),
@@ -256,7 +342,7 @@ impl WorkerRuntime {
                 ],
                 timeout_seconds: 300,
             };
-            run_worker_command(&checkout, destination, None, &HashMap::new()).await?;
+            run_worker_command(&checkout, destination, None, &HashMap::new(), None).await?;
             let _ = std::fs::remove_dir_all(destination.join(".git"));
         } else {
             let url = url::Url::parse(&dependency.source)
@@ -340,6 +426,7 @@ impl WorkerRuntime {
             &request.input,
         )
         .map_err(|error| format!("worker input does not match its schema: {error}"))?;
+        self.reject_secret_material_in_value(&request.input, "worker input")?;
         let (queued, replayed) = self.store.begin_invocation(
             &request.worker_id,
             &worker.summary.active_version,
@@ -437,7 +524,7 @@ impl WorkerRuntime {
             FunctionId::new(format!("worker_kernel::dynamic_{}", queued.worker_id))
                 .map_err(|error| error.to_string())?;
         let execution = execution.and_then(|output| {
-            let secrets = self.load_secrets(&worker.bundle)?;
+            let secrets = self.load_all_vault_secrets()?;
             let output = redact_json_known_secrets(output, &secrets);
             crate::engine::validate_engine_schema_payload(
                 &worker_function,
@@ -455,12 +542,25 @@ impl WorkerRuntime {
                 Ok(&output),
             )?,
             Err(error) => {
-                let secrets = self.load_secrets(&worker.bundle).unwrap_or_default();
+                let secrets = self.load_all_vault_secrets().unwrap_or_default();
                 let redacted = redact_known_secrets(&error, &secrets);
                 if !was_stopped {
                     self.store.mark_failed(&queued.worker_id, &redacted)?;
                     self.unregister_dynamic_tool(&queued.worker_id).await;
                     self.stop_residents(Some(&queued.worker_id)).await;
+                    self.publish_event(
+                        "worker.lifecycle",
+                        json!({
+                            "action":"failed",
+                            "phase":"execution",
+                            "workerId":queued.worker_id,
+                            "version":queued.worker_version,
+                            "reason":redacted,
+                            "disabled":true,
+                        }),
+                        TraceId::new(queued.trace_id.clone()).ok(),
+                    )
+                    .await;
                 }
                 self.store.complete_invocation(
                     &queued.invocation_id,
@@ -511,6 +611,7 @@ impl WorkerRuntime {
                     &worker.version_dir.join("files"),
                     Some(&invocation.input),
                     &secrets,
+                    Some(invocation),
                 )
                 .await
             }
@@ -532,6 +633,11 @@ impl WorkerRuntime {
                     let response = self
                         .http
                         .post(invoke_url)
+                        .header("x-tron-invocation-id", &invocation.invocation_id)
+                        .header("x-tron-idempotency-key", &invocation.idempotency_key)
+                        .header("x-tron-trace-id", &invocation.trace_id)
+                        .header("x-tron-causal-depth", invocation.causal_depth.to_string())
+                        .header("x-tron-trigger-kind", &invocation.trigger_kind)
                         .json(&invocation.input)
                         .send()
                         .await
@@ -615,9 +721,17 @@ impl WorkerRuntime {
             )
             .map_err(|error| format!("create agent worker session: {error}"))?;
         let prompt = format!(
-            "You are executing persistent worker '{}'. Follow its durable contract exactly.\n\n{}\n\nInput JSON:\n{}\n\nNamed secrets, when configured, are available as files under {}. Never reveal their values. Return only the result required by the output schema.",
+            "You are executing persistent worker '{}'. Follow its durable contract exactly.\n\n{}\n\nInvocation metadata (preserve the idempotency key when deduplicating side effects):\n{}\n\nInput JSON:\n{}\n\nNamed secrets, when configured, are available as files under {}. Never reveal their values. Return only the result required by the output schema.",
             worker.summary.name,
             instructions,
+            serde_json::to_string_pretty(&json!({
+                "invocationId":invocation.invocation_id,
+                "idempotencyKey":invocation.idempotency_key,
+                "traceId":invocation.trace_id,
+                "causalDepth":invocation.causal_depth,
+                "triggerKind":invocation.trigger_kind,
+            }))
+            .map_err(|error| error.to_string())?,
             serde_json::to_string_pretty(&invocation.input).map_err(|error| error.to_string())?,
             secret_dir.display(),
         );
@@ -629,7 +743,10 @@ impl WorkerRuntime {
         )
         .with_scope("agent.write")
         .with_session_id(session_id.clone())
-        .with_idempotency_key(format!("worker-agent:{}", invocation.invocation_id))
+        .with_idempotency_key(format!(
+            "worker-agent:{}",
+            hex::encode(Sha256::digest(invocation.idempotency_key.as_bytes()))
+        ))
         .with_runtime_metadata(
             "workerCausalDepth",
             invocation.causal_depth.saturating_add(1).to_string(),
@@ -698,6 +815,7 @@ impl WorkerRuntime {
                 &worker.version_dir.join("files"),
                 secrets,
                 Stdio::null(),
+                None,
             )?);
             if let Some(url) = health_url {
                 let mut healthy = false;
@@ -743,7 +861,16 @@ impl WorkerRuntime {
         let worker = self.store.set_enabled(worker_id, enabled)?;
         if enabled {
             self.reset_worker_stop(worker_id);
-            self.register_dynamic_tool(worker_id).await?;
+            if let Err(error) = self.register_dynamic_tool(worker_id).await {
+                return Err(self
+                    .handle_tool_activation_failure(
+                        worker_id,
+                        &worker.active_version,
+                        "enable",
+                        &error,
+                    )
+                    .await);
+            }
         } else {
             self.cancel_worker(worker_id);
             self.unregister_dynamic_tool(worker_id).await;
@@ -760,7 +887,11 @@ impl WorkerRuntime {
         let (worker, webhooks) = self.store.rollback(worker_id, version)?;
         self.stop_obsolete_residents(worker_id, version).await;
         self.reset_worker_stop(worker_id);
-        self.register_dynamic_tool(worker_id).await?;
+        if let Err(error) = self.register_dynamic_tool(worker_id).await {
+            return Err(self
+                .handle_tool_activation_failure(worker_id, version, "rollback", &error)
+                .await);
+        }
         Ok(json!({"worker":worker,"webhooks":webhooks}))
     }
 
@@ -809,22 +940,63 @@ impl WorkerRuntime {
     }
 
     async fn register_active_tools(self: &Arc<Self>) -> Result<(), String> {
+        let mut failures = Vec::new();
         for worker in self.store.list(false)? {
-            if worker.enabled && !worker.retired {
-                self.register_dynamic_tool(&worker.worker_id).await?;
+            if !worker.enabled || worker.retired {
+                continue;
+            }
+            if let Err(error) = self.register_dynamic_tool(&worker.worker_id).await {
+                failures.push(
+                    self.handle_tool_activation_failure(
+                        &worker.worker_id,
+                        &worker.active_version,
+                        "startup",
+                        &error,
+                    )
+                    .await,
+                );
             }
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join(" | "))
+        }
     }
 
     async fn register_dynamic_tool(self: &Arc<Self>, worker_id: &str) -> Result<(), String> {
         let active = self.store.load_active(worker_id)?;
+        let success_evidence = self.store.success_evidence(worker_id)?;
+        let provenance = active
+            .bundle
+            .provenance
+            .iter()
+            .take(3)
+            .map(|source| {
+                source.revision.as_ref().map_or_else(
+                    || source.source.clone(),
+                    |revision| format!("{}@{revision}", source.source),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let model_description = format!(
+            "{}\nPersistent worker evidence: health={}; activeVersion={}; completedRuns={}; lastCompletedAt={}; provenance={}",
+            active.summary.description,
+            active.summary.health,
+            active.summary.active_version,
+            success_evidence["completedRuns"].as_u64().unwrap_or(0),
+            success_evidence["lastCompletedAt"]
+                .as_str()
+                .unwrap_or("none"),
+            provenance,
+        );
         let function_id = FunctionId::new(format!("worker_kernel::dynamic_{worker_id}"))
             .map_err(|error| error.to_string())?;
         let mut definition = FunctionDefinition::new(
             function_id,
             WorkerId::new("worker_kernel").map_err(|error| error.to_string())?,
-            active.summary.description.clone(),
+            model_description,
             VisibilityScope::System,
             EffectClass::ExternalSideEffect,
         )
@@ -842,7 +1014,7 @@ impl WorkerRuntime {
             "workerRouting": active.bundle.routing,
             "workerProvenance": active.bundle.provenance,
             "workerHealth": active.summary.health,
-            "workerSuccessEvidence": self.store.success_evidence(worker_id)?,
+            "workerSuccessEvidence": success_evidence,
             "trustedLocalKernel": true,
             "contextPrimerLevel": "relevant",
         });
@@ -1108,7 +1280,7 @@ impl WorkerRuntime {
     }
 
     fn reject_secret_material_in_bundle(&self, bundle: &WorkerBundle) -> Result<(), String> {
-        let secrets = self.load_secrets(bundle)?;
+        let secrets = self.load_all_vault_secrets()?;
         if secrets.is_empty() {
             return Ok(());
         }
@@ -1122,6 +1294,50 @@ impl WorkerRuntime {
             }
         }
         Ok(())
+    }
+
+    fn reject_secret_material_in_value(&self, value: &Value, surface: &str) -> Result<(), String> {
+        let secrets = self.load_all_vault_secrets()?;
+        if secrets.is_empty() {
+            return Ok(());
+        }
+        let encoded = serde_json::to_string(value)
+            .map_err(|error| format!("encode {surface} for secret scan: {error}"))?;
+        for (name, secret) in secrets {
+            if secret.len() >= 4 && encoded.contains(&secret) {
+                return Err(format!(
+                    "{surface} contains the value of vault secret '{name}'; workers receive secrets only through declared logical bindings"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn load_all_vault_secrets(&self) -> Result<HashMap<String, String>, String> {
+        let vault = self.store.home().join("workspace").join("vault");
+        if !vault.is_dir() {
+            return Ok(HashMap::new());
+        }
+        let mut secrets = HashMap::new();
+        for entry in walkdir::WalkDir::new(&vault).follow_links(false) {
+            let entry = entry.map_err(|error| format!("scan named-secret vault: {error}"))?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(&vault)
+                .map_err(|error| error.to_string())?
+                .display()
+                .to_string();
+            let value = std::fs::read_to_string(entry.path())
+                .map_err(|error| format!("read named-secret vault entry '{relative}': {error}"))?;
+            let value = value.trim_end().to_owned();
+            if !value.is_empty() {
+                let _ = secrets.insert(relative, value);
+            }
+        }
+        Ok(secrets)
     }
 
     async fn publish_event(&self, topic: &str, payload: Value, trace_id: Option<TraceId>) {
@@ -1195,8 +1411,9 @@ async fn run_worker_command(
     workdir: &Path,
     input: Option<&Value>,
     secrets: &HashMap<String, String>,
+    invocation: Option<&InvocationRecord>,
 ) -> Result<Value, String> {
-    let mut child = spawn_process(&spec.command, workdir, secrets, Stdio::piped())?;
+    let mut child = spawn_process(&spec.command, workdir, secrets, Stdio::piped(), invocation)?;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         stdin
             .write_all(
@@ -1231,13 +1448,11 @@ async fn run_worker_command(
     if output.stdout.is_empty() {
         return Ok(json!({}));
     }
-    serde_json::from_slice(&output.stdout)
-        .or_else(|_| {
-            Ok::<Value, serde_json::Error>(json!({
-                "stdout": String::from_utf8_lossy(&output.stdout).trim_end()
-            }))
+    Ok(serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+        json!({
+            "stdout": String::from_utf8_lossy(&output.stdout).trim_end()
         })
-        .map_err(|error| error.to_string())
+    }))
 }
 
 fn spawn_process(
@@ -1245,6 +1460,7 @@ fn spawn_process(
     workdir: &Path,
     secrets: &HashMap<String, String>,
     stdout: Stdio,
+    invocation: Option<&InvocationRecord>,
 ) -> Result<Child, String> {
     let (program, arguments) = command
         .split_first()
@@ -1293,6 +1509,17 @@ fn spawn_process(
                 .collect::<String>()
         );
         process.env(env_name, value);
+    }
+    if let Some(invocation) = invocation {
+        process
+            .env("TRON_WORKER_INVOCATION_ID", &invocation.invocation_id)
+            .env("TRON_WORKER_IDEMPOTENCY_KEY", &invocation.idempotency_key)
+            .env("TRON_WORKER_TRACE_ID", &invocation.trace_id)
+            .env(
+                "TRON_WORKER_CAUSAL_DEPTH",
+                invocation.causal_depth.to_string(),
+            )
+            .env("TRON_WORKER_TRIGGER_KIND", &invocation.trigger_kind);
     }
     process
         .spawn()
@@ -1483,6 +1710,7 @@ mod tests {
             triggers: Vec::new(),
             secret_bindings: Vec::new(),
             smoke_tests: Vec::new(),
+            health_checks: Vec::new(),
             provenance: vec![super::super::types::SourceProvenance {
                 source: "test:deterministic".to_owned(),
                 revision: Some("1".to_owned()),
@@ -1607,6 +1835,15 @@ print(json.dumps({
             )],
             smoke_tests: vec![WorkerCommand {
                 command: vec!["python3".to_owned(), "recent_research.py".to_owned()],
+                timeout_seconds: 10,
+            }],
+            health_checks: vec![WorkerCommand {
+                command: vec![
+                    "python3".to_owned(),
+                    "-m".to_owned(),
+                    "py_compile".to_owned(),
+                    "recent_research.py".to_owned(),
+                ],
                 timeout_seconds: 10,
             }],
             provenance: vec![super::super::types::SourceProvenance {
@@ -1817,14 +2054,13 @@ print(json.dumps({
 
     #[tokio::test]
     async fn command_runner_upserts_invokes_and_replays_idempotently() {
-        let (runtime, _home) = test_runtime(None);
-        let outcome = runtime
-            .upsert(
-                command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
-                None,
-            )
-            .await
-            .unwrap();
+        let (runtime, home) = test_runtime(None);
+        let command = vec![
+            "python3".to_owned(),
+            "-c".to_owned(),
+            "import json,os,sys; value=json.load(sys.stdin); value['idempotencyKey']=os.environ['TRON_WORKER_IDEMPOTENCY_KEY']; value['traceId']=os.environ['TRON_WORKER_TRACE_ID']; print(json.dumps(value))".to_owned(),
+        ];
+        let outcome = runtime.upsert(command_bundle(command), None).await.unwrap();
         let first = runtime
             .invoke(request(
                 &outcome.worker.worker_id,
@@ -1843,9 +2079,38 @@ print(json.dumps({
             .unwrap();
 
         assert_eq!(first.status, "completed");
-        assert_eq!(first.output, Some(json!({"topic":"workers"})));
+        assert_eq!(first.attempt_count, 1);
+        assert_eq!(
+            first.output,
+            Some(json!({
+                "topic":"workers",
+                "idempotencyKey":"same-key",
+                "traceId":"trace-same-key",
+            }))
+        );
         assert_eq!(replay.invocation_id, first.invocation_id);
         assert_eq!(runtime.store().runs(None, 10).unwrap().len(), 1);
+        assert_eq!(
+            runtime
+                .store()
+                .attempts(&first.invocation_id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            runtime.store().trace("trace-same-key").unwrap().unwrap()["suppressedCount"],
+            1
+        );
+        assert!(
+            home.path()
+                .join("workspace/workers")
+                .join(&outcome.worker.worker_id)
+                .join("versions")
+                .join(&outcome.version)
+                .join("verification.json")
+                .is_file()
+        );
 
         let direct = runtime
             .host
@@ -1870,7 +2135,101 @@ print(json.dumps({
             "direct worker error: {:?}",
             direct.error
         );
-        assert_eq!(direct.value, Some(json!({"topic":"direct typed tool"})));
+        assert_eq!(
+            direct.value,
+            Some(json!({
+                "topic":"direct typed tool",
+                "idempotencyKey":"worker-direct-call",
+                "traceId":"worker-direct-trace",
+            }))
+        );
+        let inspection_actor = crate::engine::ActorContext::new(
+            ActorId::new("system:worker-tool-evidence-test").unwrap(),
+            ActorKind::System,
+            crate::engine::AuthorityGrantId::new("worker-tool-evidence-test").unwrap(),
+        );
+        let definition = runtime
+            .host
+            .inspect_function(
+                &FunctionId::new(format!(
+                    "worker_kernel::dynamic_{}",
+                    outcome.worker.worker_id
+                ))
+                .unwrap(),
+                Some(&inspection_actor),
+            )
+            .await
+            .unwrap();
+        assert!(definition.description.contains("health=healthy"));
+        assert!(definition.description.contains("completedRuns=2"));
+        assert!(definition.description.contains("test:deterministic@1"));
+    }
+
+    #[tokio::test]
+    async fn update_routes_new_work_immediately_while_old_version_drains() {
+        let (runtime, home) = test_runtime(None);
+        let started = home.path().join("old-started");
+        let release = home.path().join("release-old");
+        let old_command = format!(
+            "touch '{}'; while [ ! -f '{}' ]; do sleep 0.02; done; printf '{{\"version\":\"old\"}}'",
+            started.display(),
+            release.display()
+        );
+        let first = runtime
+            .upsert(
+                command_bundle(vec!["sh".to_owned(), "-c".to_owned(), old_command]),
+                None,
+            )
+            .await
+            .unwrap();
+        let worker_id = first.worker.worker_id.clone();
+        let old_version = first.version.clone();
+        let old_runtime = Arc::clone(&runtime);
+        let old_worker = worker_id.clone();
+        let old_run = tokio::spawn(async move {
+            old_runtime
+                .invoke(request(&old_worker, json!({}), "draining-old"))
+                .await
+                .unwrap()
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !started.is_file() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let mut updated = command_bundle(vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "printf '{\"version\":\"new\"}'".to_owned(),
+        ]);
+        updated
+            .description
+            .push_str(" updated while prior work drains");
+        let second = runtime.upsert(updated, Some(&worker_id)).await.unwrap();
+        assert_ne!(second.version, old_version);
+        let new_run = runtime
+            .invoke(request(&worker_id, json!({}), "routed-new"))
+            .await
+            .unwrap();
+        assert_eq!(new_run.worker_version, second.version);
+        assert_eq!(new_run.output, Some(json!({"version":"new"})));
+
+        std::fs::write(&release, "release").unwrap();
+        let drained = old_run.await.unwrap();
+        assert_eq!(drained.worker_version, old_version);
+        assert_eq!(drained.output, Some(json!({"version":"old"})));
+        assert_eq!(
+            runtime
+                .store()
+                .load_active(&worker_id)
+                .unwrap()
+                .summary
+                .active_version,
+            second.version
+        );
     }
 
     #[tokio::test]
@@ -2222,6 +2581,19 @@ print(json.dumps({
                 .await
                 .is_err()
         );
+        let mut bad_health =
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+        bad_health.description.push_str(" health update");
+        bad_health.health_checks.push(WorkerCommand {
+            command: vec!["sh".to_owned(), "-c".to_owned(), "exit 10".to_owned()],
+            timeout_seconds: 5,
+        });
+        assert!(
+            runtime
+                .upsert(bad_health, Some("echo-worker"))
+                .await
+                .is_err()
+        );
         assert_eq!(
             runtime
                 .store()
@@ -2260,6 +2632,9 @@ print(json.dumps({
             .unwrap();
         assert!(!summary.enabled);
         assert_eq!(summary.health, "failed");
+        let inspection = runtime.store().inspect(&outcome.worker.worker_id).unwrap();
+        assert_eq!(inspection["route"]["enabled"], false);
+        assert_eq!(inspection["healthHistory"][0]["status"], "failed");
         let inbox = runtime
             .store()
             .inbox(Some(&outcome.worker.worker_id), 10)
@@ -2276,12 +2651,62 @@ print(json.dumps({
     }
 
     #[tokio::test]
+    async fn direct_tool_activation_failure_cannot_leave_an_enabled_unroutable_worker() {
+        let (runtime, _home) = test_runtime(None);
+        let outcome = runtime
+            .upsert(
+                command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let reason = runtime
+            .handle_tool_activation_failure(
+                &outcome.worker.worker_id,
+                &outcome.version,
+                "enable",
+                "synthetic catalog collision",
+            )
+            .await;
+
+        assert!(reason.contains("synthetic catalog collision"));
+        let inspection = runtime.store().inspect(&outcome.worker.worker_id).unwrap();
+        assert_eq!(inspection["worker"]["enabled"], false);
+        assert_eq!(inspection["route"]["enabled"], false);
+        assert_eq!(inspection["healthHistory"][0]["status"], "failed");
+        let inbox = runtime
+            .store()
+            .inbox(Some(&outcome.worker.worker_id), 10)
+            .unwrap();
+        assert_eq!(inbox[0]["severity"], "error");
+        assert_eq!(inbox[0]["result"]["phase"], "enable");
+        assert!(
+            runtime
+                .host
+                .inspect_function(
+                    &FunctionId::new(format!(
+                        "worker_kernel::dynamic_{}",
+                        outcome.worker.worker_id
+                    ))
+                    .unwrap(),
+                    None,
+                )
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn secret_values_are_injected_then_redacted_from_durable_results() {
+        let (captured_logs, _log_guard) = crate::shared::observability::capture_logs();
         let (runtime, home) = test_runtime(None);
         let vault = home.path().join("workspace/vault");
         std::fs::create_dir_all(&vault).unwrap();
         let secret = "top-secret-test-value";
+        let undeclared_secret = "another-vault-only-secret";
         std::fs::write(vault.join("api-key"), secret).unwrap();
+        std::fs::write(vault.join("other-key"), undeclared_secret).unwrap();
         let mut bundle = command_bundle(vec![
             "sh".to_owned(),
             "-c".to_owned(),
@@ -2302,6 +2727,92 @@ print(json.dumps({
             serde_json::to_string(&runtime.store().inbox(None, 10).unwrap()).unwrap()
         );
         assert!(!diagnostics.contains(secret));
+        assert!(
+            runtime
+                .invoke(request(
+                    &outcome.worker.worker_id,
+                    json!({"copiedSecret":secret}),
+                    "secret-in-input",
+                ))
+                .await
+                .unwrap_err()
+                .contains("only through declared logical bindings")
+        );
+        assert_eq!(runtime.store().runs(None, 10).unwrap().len(), 1);
+
+        let mut failing = bundle.clone();
+        failing
+            .description
+            .push_str(" with failure redaction evidence");
+        failing.runner = WorkerRunner::Command {
+            command: vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "printf '%s' \"$TRON_SECRET_API_KEY\" >&2; exit 17".to_owned(),
+            ],
+        };
+        let failed_version = runtime
+            .upsert(failing, Some(&outcome.worker.worker_id))
+            .await
+            .unwrap();
+        let failed = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({}),
+                "secret-error",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed.status, "failed");
+        assert!(
+            failed
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("[REDACTED]") && !error.contains(secret))
+        );
+        let events = runtime
+            .host
+            .poll_stream_topic(
+                "worker.invocations",
+                StreamCursor(0),
+                100,
+                &StreamActorScope::admin(),
+            )
+            .await
+            .unwrap();
+        let operational_evidence = format!(
+            "{}{}{}{}{:?}",
+            serde_json::to_string(&runtime.store().inspect(&outcome.worker.worker_id).unwrap())
+                .unwrap(),
+            serde_json::to_string(&runtime.store().runs(None, 100).unwrap()).unwrap(),
+            serde_json::to_string(&runtime.store().inbox(None, 100).unwrap()).unwrap(),
+            serde_json::to_string(&events).unwrap(),
+            captured_logs.events(),
+        );
+        assert!(!operational_evidence.contains(secret));
+        for entry in walkdir::WalkDir::new(
+            home.path()
+                .join("workspace/workers")
+                .join(&outcome.worker.worker_id),
+        )
+        .follow_links(false)
+        {
+            let entry = entry.unwrap();
+            if entry.file_type().is_file() {
+                let bytes = std::fs::read(entry.path()).unwrap();
+                assert!(
+                    !bytes
+                        .windows(secret.len())
+                        .any(|window| window == secret.as_bytes()),
+                    "secret leaked into {}",
+                    entry.path().display()
+                );
+            }
+        }
+        assert_eq!(
+            failed_version.worker.active_version, failed.worker_version,
+            "redaction failure must still be pinned to the activated version"
+        );
 
         bundle
             .files
@@ -2312,6 +2823,19 @@ print(json.dumps({
                 .await
                 .unwrap_err()
                 .contains("contains the value")
+        );
+
+        let mut undeclared_leak =
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+        undeclared_leak
+            .files
+            .insert("undeclared.txt".to_owned(), undeclared_secret.to_owned());
+        assert!(
+            runtime
+                .upsert(undeclared_leak, None)
+                .await
+                .unwrap_err()
+                .contains("other-key")
         );
     }
 
@@ -2327,6 +2851,7 @@ print(json.dumps({
             temporary.path(),
             None,
             &HashMap::new(),
+            None,
         )
         .await
         .unwrap_err();
@@ -2349,8 +2874,12 @@ print(json.dumps({
 
         async fn respond(
             &self,
-            _request: ModelResponseRequest,
+            request: ModelResponseRequest,
         ) -> Result<ModelResponse, ModelResponseError> {
+            let context = serde_json::to_string(&request.context.messages)
+                .expect("serialize agent worker prompt context");
+            assert!(context.contains("idempotencyKey"), "{context}");
+            assert!(context.contains("trace-agent"), "{context}");
             let text = "{\"answer\":\"agent-runner\"}";
             let events = vec![
                 Ok(StreamEvent::Start),
@@ -2424,7 +2953,8 @@ class H(http.server.BaseHTTPRequestHandler):
  def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
  def do_POST(self):
   n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n)
-  self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(body)
+  value=json.loads(body); value['idempotencyKey']=self.headers.get('x-tron-idempotency-key'); value['traceId']=self.headers.get('x-tron-trace-id')
+  self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(json.dumps(value).encode())
  def log_message(self,*args): pass
 http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()"#;
         let mut bundle = command_bundle(Vec::new());
@@ -2453,7 +2983,14 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
                 ))
                 .await
                 .unwrap();
-            assert_eq!(result.output, Some(json!({"index":index})));
+            assert_eq!(
+                result.output,
+                Some(json!({
+                    "index":index,
+                    "idempotencyKey":format!("service-{index}"),
+                    "traceId":format!("trace-service-{index}"),
+                }))
+            );
         }
         assert_eq!(runtime.residents.len(), 1);
         runtime.shutdown().await;

@@ -106,10 +106,8 @@ fn domain_workers_expose_contracts_not_services() {
     for required in [
         "mod contract;",
         "mod core_proposals;",
-        "mod migration;",
+        "mod persistence;",
         "mod runtime;",
-        "mod snapshot;",
-        "mod store;",
         "mod types;",
     ] {
         assert!(
@@ -190,6 +188,7 @@ fn state_stores_are_owner_private() {
         "packages/agent/src/domains/auth/",
         "packages/agent/src/domains/session/event_store/",
         "packages/agent/src/domains/settings/profile/",
+        "packages/agent/src/domains/worker_kernel/persistence/",
         "packages/agent/src/engine/authority/",
         "packages/agent/src/engine/durability/",
         "packages/agent/src/engine/invocation/host/",
@@ -329,6 +328,7 @@ fn boundary_errors_do_not_leak_impl_errors() {
                     "packages/agent/src/engine/durability/",
                     "packages/agent/src/domains/model/",
                     "packages/agent/src/domains/session/event_store/",
+                    "packages/agent/src/domains/worker_kernel/persistence/",
                     "packages/agent/src/shared/observability/transport.rs",
                     "packages/agent/src/shared/server/error_mapping/mod.rs",
                     "packages/agent/src/transport/",

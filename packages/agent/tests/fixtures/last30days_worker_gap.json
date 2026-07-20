@@ -1,7 +1,7 @@
 {
   "format": "tron.worker_replay.v1",
   "sourceSessionId": "sess_019f7c25-3191-77d2-9886-a5ee8e08236f",
-  "workingDirectory": "/Users/moose/Workspace/testspace",
+  "workingDirectory": "/Users/<USER>/Workspace/testspace",
   "prompt": "Create a new persistent worker/trigger in the Tron engine that duplicates this logic https://github.com/mvanhorn/last30days-skill - I want a worker created and configured to automatically run this skill when triggered",
   "sourceUrl": "https://github.com/mvanhorn/last30days-skill",
   "observedOperations": [

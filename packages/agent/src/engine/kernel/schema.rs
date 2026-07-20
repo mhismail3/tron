@@ -89,11 +89,18 @@ fn validate_schema_node(
     }
 
     if let Some(additional) = object.get("additionalProperties") {
-        if !additional.is_boolean() {
+        if additional.is_object() {
+            validate_schema_node(
+                function_id,
+                direction,
+                additional,
+                &format!("{path}.additionalProperties"),
+            )?;
+        } else if !additional.is_boolean() {
             return Err(invalid_schema(
                 function_id,
                 direction,
-                format!("{path}.additionalProperties must be a boolean"),
+                format!("{path}.additionalProperties must be a boolean or schema"),
             ));
         }
     }
@@ -442,13 +449,14 @@ fn validate_payload_node(
         }
     }
 
-    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
-        let Some(payload_object) = payload.as_object() else {
-            return Ok(());
-        };
-        if object.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
-            for key in payload_object.keys() {
-                if !properties.contains_key(key) {
+    if let Some(payload_object) = payload.as_object() {
+        let properties = object.get("properties").and_then(Value::as_object);
+        for (key, value) in payload_object {
+            if properties.is_some_and(|properties| properties.contains_key(key)) {
+                continue;
+            }
+            match object.get("additionalProperties") {
+                Some(Value::Bool(false)) => {
                     return Err(schema_violation(
                         function_id,
                         direction,
@@ -456,8 +464,22 @@ fn validate_payload_node(
                         "additional property is not allowed".to_owned(),
                     ));
                 }
+                Some(additional @ Value::Object(_)) => validate_payload_node(
+                    function_id,
+                    direction,
+                    additional,
+                    value,
+                    &format!("{path}.{key}"),
+                )?,
+                _ => {}
             }
         }
+    }
+
+    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+        let Some(payload_object) = payload.as_object() else {
+            return Ok(());
+        };
         for (key, child_schema) in properties {
             if let Some(child_payload) = payload_object.get(key) {
                 validate_payload_node(
@@ -610,6 +632,38 @@ mod tests {
             &json!({"command": "date"}),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn schema_valued_additional_properties_are_enforced() {
+        let schema = json!({
+            "type":"object",
+            "properties":{
+                "files":{
+                    "type":"object",
+                    "additionalProperties":{"type":"string"}
+                }
+            },
+            "required":["files"],
+            "additionalProperties":false
+        });
+
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"files":{"worker.py":"print('ok')"}}),
+        )
+        .unwrap();
+        let error = validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"files":{"worker.py":17}}),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("$.files.worker.py"));
+        assert!(error.to_string().contains("type string"));
     }
 
     #[test]

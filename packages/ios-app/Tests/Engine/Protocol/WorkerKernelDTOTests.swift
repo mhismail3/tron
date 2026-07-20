@@ -70,7 +70,7 @@ struct WorkerKernelDTOTests {
           "invocationId":"run-1","workerId":"recent-research","workerVersion":"abc123",
           "status":"completed","input":{"query":"Tron"},"output":{"items":[1,2]},
           "error":null,"idempotencyKey":"test-key","traceId":"trace-1","causalDepth":1,
-          "triggerKind":"manual","createdAt":"2026-07-19T12:00:00Z",
+          "triggerKind":"manual","attemptCount":2,"createdAt":"2026-07-19T12:00:00Z",
           "startedAt":"2026-07-19T12:00:01Z","completedAt":"2026-07-19T12:00:02Z"
         }]}
         """#
@@ -86,6 +86,7 @@ struct WorkerKernelDTOTests {
         let inbox = try JSONDecoder().decode(WorkerInboxResultDTO.self, from: Data(inboxJSON.utf8))
 
         #expect(runs.runs.first?.status == "completed")
+        #expect(runs.runs.first?.attemptCount == 2)
         #expect(runs.runs.first?.output != nil)
         #expect(inbox.items.first?.seen == false)
         let result = try #require(inbox.items.first?.result.value as? [String: Any])

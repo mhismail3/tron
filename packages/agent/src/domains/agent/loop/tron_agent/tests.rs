@@ -80,6 +80,215 @@ struct DirectWorkerListLoopResponder {
     observed_result: Arc<Mutex<Option<String>>>,
 }
 
+struct AutonomousAdaptationResponder {
+    calls: Arc<AtomicUsize>,
+}
+
+impl AutonomousAdaptationResponder {
+    fn tool_call(
+        invocation_id: &str,
+        name: &str,
+        arguments: serde_json::Map<String, serde_json::Value>,
+    ) -> ModelResponse {
+        model_response(vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::CapabilityInvocationDraftStart {
+                invocation_id: invocation_id.to_owned(),
+                name: name.to_owned(),
+            }),
+            Ok(StreamEvent::CapabilityInvocationDraftDelta {
+                invocation_id: invocation_id.to_owned(),
+                arguments_delta: serde_json::to_string(&arguments).expect("arguments json"),
+            }),
+            Ok(StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation:
+                    crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+                        invocation_id,
+                        name,
+                        arguments,
+                    ),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![],
+                    token_usage: None,
+                },
+                stop_reason: "capability_invocation".to_owned(),
+            }),
+        ])
+    }
+
+    fn result_text(request: &ModelResponseRequest, invocation_id: &str) -> String {
+        request
+            .context
+            .messages
+            .iter()
+            .find_map(|message| match message {
+                Message::CapabilityResult {
+                    invocation_id: observed,
+                    content,
+                    ..
+                } if observed == invocation_id => Some(match content {
+                    CapabilityResultMessageContent::Text(text) => text.clone(),
+                    CapabilityResultMessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|block| match block {
+                            crate::shared::protocol::content::CapabilityResultContent::Text {
+                                text,
+                            } => Some(text.as_str()),
+                            crate::shared::protocol::content::CapabilityResultContent::Image {
+                                ..
+                            } => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing result for {invocation_id}"))
+    }
+}
+
+#[async_trait]
+impl ModelResponder for AutonomousAdaptationResponder {
+    fn info(&self) -> ModelResponderInfo {
+        test_responder_info()
+    }
+
+    async fn respond(
+        &self,
+        request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        const TOOL: &str = "worker_model_authored_research";
+        let names = request
+            .context
+            .capabilities
+            .as_ref()
+            .expect("provider capabilities")
+            .iter()
+            .map(|capability| capability.name.as_str())
+            .collect::<Vec<_>>();
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        match call {
+            0 => {
+                assert!(names.contains(&"worker_upsert"), "{names:?}");
+                assert!(!names.contains(&"execute"), "{names:?}");
+                let upsert = request
+                    .context
+                    .capabilities
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .find(|capability| capability.name == "worker_upsert")
+                    .expect("worker_upsert tool schema");
+                let bundle = &upsert.parameters.properties.as_ref().unwrap()["bundle"];
+                assert_eq!(bundle["additionalProperties"], false);
+                assert_eq!(
+                    bundle["properties"]["runner"]["oneOf"]
+                        .as_array()
+                        .unwrap()
+                        .len(),
+                    3
+                );
+                assert!(bundle["properties"].get("healthChecks").is_some());
+                let serialized_messages = serde_json::to_string(&request.context.messages)
+                    .expect("serialize natural-language request");
+                assert!(
+                    serialized_messages.contains("https://github.com/mvanhorn/last30days-skill"),
+                    "{serialized_messages}"
+                );
+                let bundle = serde_json::json!({
+                    "schemaVersion":"tron.worker_bundle.v1",
+                    "workerId":"model-authored-research",
+                    "name":"Model Authored Recent Research",
+                    "description":"Reusable recent research synthesized from the referenced upstream method",
+                    "toolName":TOOL,
+                    "inputSchema":{
+                        "type":"object",
+                        "required":["query"],
+                        "properties":{"query":{"type":"string"}},
+                        "additionalProperties":false
+                    },
+                    "outputSchema":{
+                        "type":"object",
+                        "required":["query","source","useful"],
+                        "properties":{
+                            "query":{"type":"string"},
+                            "source":{"type":"string"},
+                            "useful":{"type":"boolean"}
+                        },
+                        "additionalProperties":false
+                    },
+                    "runner":{
+                        "kind":"command",
+                        "command":[
+                            "python3","-c",
+                            "import json,sys; value=json.load(sys.stdin); print(json.dumps({'query':value['query'],'source':'last30days','useful':True}))"
+                        ]
+                    },
+                    "triggers":[{"kind":"manual","id":"manual"}],
+                    "smokeTests":[{
+                        "command":["python3","-c","print('{}')"],
+                        "timeoutSeconds":10
+                    }],
+                    "healthChecks":[{
+                        "command":["python3","-c","import sys; sys.exit(0)"],
+                        "timeoutSeconds":10
+                    }],
+                    "provenance":[{
+                        "source":"https://github.com/mvanhorn/last30days-skill",
+                        "revision":"deterministic-replay-v1"
+                    }],
+                    "routing":{
+                        "intents":["recent research","last 30 days"],
+                        "examples":["Research recent autonomous worker changes"]
+                    }
+                });
+                Ok(Self::tool_call(
+                    "tc-proactive-upsert",
+                    "worker_upsert",
+                    serde_json::Map::from_iter([("bundle".to_owned(), bundle)]),
+                ))
+            }
+            1 => {
+                assert!(names.contains(&TOOL), "new worker was not live: {names:?}");
+                let upsert = Self::result_text(&request, "tc-proactive-upsert");
+                assert!(upsert.contains("model-authored-research"), "{upsert}");
+                Ok(Self::tool_call(
+                    "tc-proactive-invoke",
+                    TOOL,
+                    serde_json::Map::from_iter([(
+                        "query".to_owned(),
+                        serde_json::json!("autonomous worker changes"),
+                    )]),
+                ))
+            }
+            2 => {
+                assert!(names.contains(&TOOL), "{names:?}");
+                let result = Self::result_text(&request, "tc-proactive-invoke");
+                assert!(result.contains("autonomous worker changes"), "{result}");
+                assert!(result.contains("last30days"), "{result}");
+                Ok(model_response(vec![
+                    Ok(StreamEvent::Start),
+                    Ok(StreamEvent::TextDelta {
+                        delta: "The research task completed successfully. I also created and activated the persistent typed worker worker_model_authored_research so this workflow is immediately reusable and survives restart.".to_owned(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        message: AssistantMessage {
+                            content: vec![AssistantContent::text(
+                                "The research task completed successfully. I also created and activated the persistent typed worker worker_model_authored_research so this workflow is immediately reusable and survives restart.",
+                            )],
+                            token_usage: None,
+                        },
+                        stop_reason: "end_turn".to_owned(),
+                    }),
+                ]))
+            }
+            _ => panic!("unexpected autonomous adaptation responder call {call}"),
+        }
+    }
+}
+
 #[async_trait]
 impl ModelResponder for DirectWorkerListLoopResponder {
     fn info(&self) -> ModelResponderInfo {
@@ -320,6 +529,53 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
     let persisted_messages =
         serde_json::to_string(&agent.context_manager().get_messages()).expect("messages");
     assert!(persisted_messages.contains("continued after direct worker tool"));
+}
+
+#[tokio::test]
+async fn natural_language_task_proactively_creates_invokes_and_reports_persistent_worker() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+    let home = ctx.profile_runtime.home().to_path_buf();
+    let mut agent = TronAgent::new(
+        AgentConfig {
+            max_turns: 3,
+            ..AgentConfig::default()
+        },
+        make_primitive_loop_deps(
+            AutonomousAdaptationResponder {
+                calls: Arc::clone(&calls),
+            },
+            ctx.engine_host.clone(),
+        ),
+        "proactive-adaptation-session".into(),
+    );
+
+    let result = agent
+        .run(
+            "Research recent autonomous worker changes using https://github.com/mvanhorn/last30days-skill and return a useful result.",
+            crate::domains::agent::r#loop::types::RunContext {
+                run_id: Some("proactive-adaptation-run".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(
+        result.error.is_none(),
+        "agent run failed: {:?}",
+        result.error
+    );
+    assert_eq!(result.turns_executed, 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    let state = home.join("workspace/workers/model-authored-research/worker.json");
+    assert!(
+        state.is_file(),
+        "persistent worker state missing at {}",
+        state.display()
+    );
+    let messages = serde_json::to_string(&agent.context_manager().get_messages()).unwrap();
+    assert!(messages.contains("research task completed successfully"));
+    assert!(messages.contains("created and activated"));
 }
 
 #[tokio::test]

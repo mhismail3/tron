@@ -44,6 +44,10 @@ pub struct WorkerBundle {
     pub secret_bindings: Vec<WorkerSecretBinding>,
     #[serde(default)]
     pub smoke_tests: Vec<WorkerCommand>,
+    /// Runner-specific checks that must pass before activation. Their results
+    /// are sealed into the immutable version's verification evidence.
+    #[serde(default)]
+    pub health_checks: Vec<WorkerCommand>,
     #[serde(default)]
     pub provenance: Vec<SourceProvenance>,
     #[serde(default)]
@@ -264,6 +268,9 @@ pub struct InvocationRecord {
     pub trace_id: String,
     pub causal_depth: u32,
     pub trigger_kind: String,
+    /// Durable delivery attempts made for this invocation. Values greater than
+    /// one are explicit at-least-once redelivery evidence.
+    pub attempt_count: u32,
     pub created_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,

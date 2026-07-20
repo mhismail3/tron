@@ -7,8 +7,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::super::types::{WorkerBundle, WorkerState, WorkerTrigger};
 use super::store::validate_bundle;
-use super::types::{WorkerBundle, WorkerState, WorkerTrigger};
 
 const REBUILD_FORMAT: &str = "tron.worker_index_rebuild.v1";
 const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v1";
@@ -164,6 +164,51 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
                 ],
             )
             .map_err(|error| format!("rebuild worker '{worker_id}': {error}"))?;
+        transaction
+            .execute(
+                "INSERT INTO worker_routes(worker_id,worker_version,tool_name,description,routing_json,enabled,updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(worker_id) DO UPDATE SET worker_version=excluded.worker_version,
+                    tool_name=excluded.tool_name,description=excluded.description,
+                    routing_json=excluded.routing_json,enabled=excluded.enabled,
+                    updated_at=excluded.updated_at",
+                params![
+                    worker_id,
+                    state.active_version,
+                    tool_name,
+                    active_bundle.description,
+                    serde_json::to_string(&active_bundle.routing)
+                        .map_err(|error| error.to_string())?,
+                    i64::from(state.enabled && !state.retired),
+                    now,
+                ],
+            )
+            .map_err(|error| format!("rebuild worker route '{worker_id}': {error}"))?;
+        let has_health = transaction
+            .query_row(
+                "SELECT 1 FROM worker_health WHERE worker_id=?1 LIMIT 1",
+                [&worker_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|error| format!("inspect worker health history: {error}"))?
+            .is_some();
+        if !has_health {
+            transaction
+                .execute(
+                    "INSERT INTO worker_health(health_id,worker_id,worker_version,status,source,details_json,recorded_at)
+                     VALUES (?1,?2,?3,?4,'reconstruction','{}',?5)",
+                    params![
+                        format!("worker_health_{}", uuid::Uuid::now_v7()),
+                        worker_id,
+                        state.active_version,
+                        health,
+                        now,
+                    ],
+                )
+                .map_err(|error| format!("rebuild worker health '{worker_id}': {error}"))?;
+        }
+        prune_stale_version_indexes(&transaction, &worker_id, &versions, &mut report)?;
         for (version, bundle) in &versions {
             transaction
                 .execute(
@@ -212,6 +257,38 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
         }
     }
     write_json_atomic(&root.join("index-rebuild-report.json"), &report)
+}
+
+fn prune_stale_version_indexes(
+    transaction: &rusqlite::Transaction<'_>,
+    worker_id: &str,
+    versions: &[(String, WorkerBundle)],
+    report: &mut RebuildReport,
+) -> Result<(), String> {
+    let placeholders = (0..versions.len())
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut values = vec![rusqlite::types::Value::Text(worker_id.to_owned())];
+    values.extend(
+        versions
+            .iter()
+            .map(|(version, _)| rusqlite::types::Value::Text(version.clone())),
+    );
+    let removed = transaction
+        .execute(
+            &format!(
+                "DELETE FROM worker_versions WHERE worker_id=? AND version NOT IN ({placeholders})"
+            ),
+            rusqlite::params_from_iter(values),
+        )
+        .map_err(|error| format!("remove stale worker version indexes: {error}"))?;
+    if removed > 0 {
+        report
+            .removed_stale_indexes
+            .push(format!("{worker_id}:worker_versions:{removed}"));
+    }
+    Ok(())
 }
 
 fn rebuild_triggers(
@@ -435,10 +512,17 @@ fn disable_existing_index(
     worker_id: &str,
     health: &str,
 ) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
     connection
         .execute(
             "UPDATE workers SET enabled=0,health=?2,updated_at=?3 WHERE worker_id=?1",
-            params![worker_id, health, chrono::Utc::now().to_rfc3339()],
+            params![worker_id, health, now],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "UPDATE worker_routes SET enabled=0,updated_at=?2 WHERE worker_id=?1",
+            params![worker_id, now],
         )
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -542,6 +626,7 @@ mod tests {
             }],
             secret_bindings: Vec::new(),
             smoke_tests: Vec::new(),
+            health_checks: Vec::new(),
             provenance: vec![SourceProvenance {
                 source: "legacy:test".to_owned(),
                 revision: Some("1".to_owned()),

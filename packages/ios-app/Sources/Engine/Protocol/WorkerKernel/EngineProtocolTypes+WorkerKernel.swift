@@ -72,6 +72,7 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
     let traceId: String
     let causalDepth: UInt32
     let triggerKind: String
+    let attemptCount: UInt32
     let createdAt: String
     let startedAt: String?
     let completedAt: String?

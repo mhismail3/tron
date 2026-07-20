@@ -59,8 +59,10 @@ Worker bundles live under:
 ```
 
 Each version contains its schemas, runner, source or instructions, dependency
-lock, provenance, triggers, secret-binding names, and smoke tests. SQLite holds
-rebuildable indexes and operational history.
+lock, provenance, triggers, secret-binding names, smoke tests, health checks,
+and sealed verification evidence. SQLite holds rebuildable routes and trigger
+indexes plus durable attempts, causal traces, inbox results, health, and audit
+history.
 
 ## Install
 
@@ -131,8 +133,9 @@ scripts/tron ci fmt check clippy test
 scripts/personal-info-guard.sh
 ```
 
-The deterministic `last30days` replay is part of the Rust library suite. Its
-real upstream dependency proof is deliberately opt-in:
+The deterministic `last30days` replay and a natural-language model-loop proof
+of proactive create → immediate typed call → report are part of the Rust
+library suite. Its real upstream dependency proof is deliberately opt-in:
 
 ```bash
 TRON_WORKER_LIVE_NETWORK=1 \

@@ -443,7 +443,9 @@ async fn ws_auth_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::server::test_support::make_test_context;
+    use crate::shared::server::test_support::{
+        make_test_context, make_test_context_with_autonomous_workers,
+    };
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -457,6 +459,14 @@ mod tests {
     fn make_server() -> TronServer {
         let ctx = make_test_context();
         TronServer::new(ServerConfig::default(), ctx, make_metrics_handle())
+    }
+
+    fn make_autonomous_server() -> TronServer {
+        TronServer::new(
+            ServerConfig::default(),
+            make_test_context_with_autonomous_workers(),
+            make_metrics_handle(),
+        )
     }
 
     fn make_server_with_auth() -> (TronServer, tempfile::TempDir, String) {
@@ -600,6 +610,146 @@ mod tests {
         let authorized_resp = app.oneshot(authorized).await.unwrap();
         assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
         assert_ne!(authorized_resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn worker_webhook_is_loopback_token_authenticated_and_durably_dispatched() {
+        let server = make_autonomous_server();
+        let created = server
+            .runtime_context()
+            .engine_host
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("worker_kernel::upsert").unwrap(),
+                serde_json::json!({
+                    "bundle":{
+                        "schemaVersion":"tron.worker_bundle.v1",
+                        "workerId":"http-webhook-fixture",
+                        "name":"HTTP Webhook Fixture",
+                        "description":"Exercises the authenticated loopback HTTP trigger",
+                        "toolName":"worker_http_webhook_fixture",
+                        "inputSchema":{"type":"object"},
+                        "outputSchema":{"type":"object"},
+                        "runner":{"kind":"command","command":["sh","-c","cat"]},
+                        "triggers":[{
+                            "kind":"webhook",
+                            "id":"incoming",
+                            "input":{"configured":true}
+                        }],
+                        "smokeTests":[],
+                        "healthChecks":[],
+                        "provenance":[{"source":"test:http-webhook"}]
+                    }
+                }),
+                crate::engine::CausalContext::trusted_local(
+                    crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
+                    crate::engine::ActorKind::Agent,
+                    crate::engine::TraceId::new("webhook-http-create").unwrap(),
+                )
+                .with_session_id("webhook-http-session")
+                .with_idempotency_key("webhook-http-create"),
+            ))
+            .await;
+        assert!(
+            created.error.is_none(),
+            "worker upsert failed: {:?}",
+            created.error
+        );
+        let created = created.value.unwrap();
+        let token = created["webhooks"][0]["token"].as_str().unwrap();
+        let path = created["webhooks"][0]["path"].as_str().unwrap();
+        let app = server.router();
+
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-tron-worker-token", token)
+            .header("x-tron-idempotency-key", "http-delivery-1")
+            .body(Body::from(r#"{"requestValue":7}"#))
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:41001".parse::<SocketAddr>().unwrap(),
+        ));
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), 100_000)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["status"], "queued");
+        assert_eq!(result["idempotencyKey"], "webhook:incoming:http-delivery-1");
+
+        let completed = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let outcome = server
+                    .runtime_context()
+                    .engine_host
+                    .invoke(crate::engine::Invocation::new_sync(
+                        crate::engine::FunctionId::new("worker_kernel::runs").unwrap(),
+                        serde_json::json!({"workerId":"http-webhook-fixture","limit":10}),
+                        crate::engine::CausalContext::trusted_local(
+                            crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
+                            crate::engine::ActorKind::Agent,
+                            crate::engine::TraceId::new("webhook-http-runs").unwrap(),
+                        )
+                        .with_session_id("webhook-http-session")
+                        .with_idempotency_key(format!(
+                            "webhook-http-runs:{}",
+                            uuid::Uuid::now_v7()
+                        )),
+                    ))
+                    .await;
+                assert!(
+                    outcome.error.is_none(),
+                    "worker runs failed: {:?}",
+                    outcome.error
+                );
+                let runs = outcome.value.unwrap();
+                if let Some(run) = runs["runs"]
+                    .as_array()
+                    .and_then(|runs| runs.first())
+                    .filter(|run| run["status"] == "completed")
+                {
+                    break run.clone();
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("webhook invocation should be dispatched from its durable queue");
+        assert_eq!(completed["attemptCount"], 1);
+        assert_eq!(completed["output"]["configured"], true);
+        assert_eq!(completed["output"]["webhook"]["requestValue"], 7);
+
+        let mut wrong = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-tron-worker-token", "wrong-token")
+            .body(Body::from("{}"))
+            .unwrap();
+        wrong.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:41002".parse::<SocketAddr>().unwrap(),
+        ));
+        assert_eq!(
+            app.clone().oneshot(wrong).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let mut remote = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-tron-worker-token", token)
+            .body(Body::from("{}"))
+            .unwrap();
+        remote.extensions_mut().insert(ConnectInfo(
+            "203.0.113.7:41003".parse::<SocketAddr>().unwrap(),
+        ));
+        assert_eq!(
+            app.oneshot(remote).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-19 on `codex/worker-first-autonomy-poc`.
+> Last verified: 2026-07-20 on `codex/worker-first-autonomy-poc`.
 
 This document describes the active worker-first implementation. Git history is
 the record of the removed capability-governance and module-proposal system; it
@@ -74,6 +74,7 @@ Filesystem bundles are canonical:
         ├── content.sha256
         ├── dependencies.lock.json
         ├── provenance.json
+        ├── verification.json
         ├── files/
         ├── dependencies/
         └── dependency-runtime/
@@ -90,14 +91,19 @@ contains:
 - exact dependency sources, revisions, and SHA-256 checksums;
 - manual, schedule, engine-event, and webhook triggers;
 - logical named-secret bindings only;
-- smoke-test commands and source provenance.
+- smoke-test and health-check commands plus source provenance.
 
-The SQLite worker database is disposable for bundle discovery and trigger
-configuration but durable for operational history. Startup reconstructs the
-catalog from valid filesystem bundles, disables invalid entries, resets
-interrupted `running` invocations to `queued`, and writes an index-rebuild
-report. Webhook hashes cannot be reconstructed, so rebuilt webhook triggers
-remain disabled until token rotation.
+`verification.json` seals redacted dependency-install, smoke-test, and health-
+check evidence before the version hash is computed. A version must carry at
+least one non-empty provenance source record.
+
+The SQLite worker database is rebuildable for routes, bundle discovery, and
+trigger configuration but durable for operational history. Startup reconstructs
+the catalog from valid filesystem bundles, disables invalid entries, marks each
+interrupted delivery attempt `interrupted`, resets its `running` invocation to
+`queued`, and writes an index-rebuild report. Webhook hashes cannot be
+reconstructed, so rebuilt webhook triggers remain disabled until token
+rotation.
 
 ## Atomic `worker_upsert`
 
@@ -105,15 +111,16 @@ One request carries the complete candidate bundle and an optional predecessor.
 The runtime:
 
 1. validates identity, schemas, runner configuration, relative paths, trigger
-   definitions, secret names, and dependency locks;
+   definitions, secret names, provenance, and dependency locks;
 2. chooses the explicit predecessor or detects the closest semantic overlap by
    name/description terms, preferring an update over a duplicate;
 3. stages outside the active worker directory;
 4. fetches dependencies into worker-owned directories and verifies exact tree
    checksums;
-5. runs dependency installation and smoke tests with the worker dependency
-   environment, never the Tron installation environment;
-6. seals the staged tree with its content hash;
+5. runs dependency installation, smoke tests, and health checks with the worker
+   dependency environment, never the Tron installation environment;
+6. writes redacted verification evidence and seals the staged tree with its
+   content hash;
 7. publishes the immutable version, updates `worker.json` and indexes,
    registers triggers, and installs the direct typed tool;
 8. emits lifecycle evidence and returns one-time webhook credentials.
@@ -122,8 +129,9 @@ Any failure before publication abandons staging and leaves the prior active
 version untouched. Existing invocations retain their pinned version while new
 invocations route to the newly active version. SQLite index changes commit before
 the canonical filesystem pointer, so startup reconstruction returns any crash in
-that interval to the prior active version. Prior versions remain available
-for explicit rollback.
+that interval to the prior active version. If the pointer write reports an
+error, Tron removes the unpublished candidate before reconstruction, including
+its stale version index. Prior versions remain available for explicit rollback.
 
 ## Runners
 
@@ -164,9 +172,11 @@ Secret bindings resolve logical names from:
 
 Required bindings fail execution when absent; optional bindings permit graceful
 fallback. Values are injected as normalized `TRON_SECRET_*` environment
-variables. Upsert rejects a bundle containing any currently bound secret value.
-Known values are redacted from runner output, errors, inbox records, events,
-and diagnostics. Raw values are never stored in manifests or worker SQLite.
+variables. Upsert scans against every readable vault value, including undeclared
+ones, and rejects a candidate containing one. Invocation input containing a
+known vault value is rejected before it is persisted. Known values are redacted
+from verification evidence, runner output, errors, inbox records, events, and
+diagnostics. Raw values are never stored in manifests or worker SQLite.
 
 ## Dispatcher and Delivery Contract
 
@@ -180,12 +190,20 @@ All invocation sources enter the same durable queue:
   `X-Tron-Worker-Token` or `Authorization: Bearer` and optional
   `X-Tron-Idempotency-Key`.
 
-Delivery is at least once. Tron persists `queued` before execution. On restart,
-interrupted work returns to `queued`. A `(workerId, idempotencyKey)` uniqueness
-constraint suppresses repeated delivery; workers also receive the idempotency
-key in their durable invocation record. Every run records a trace id, causal
-depth, trigger kind, pinned version, timestamps, input, output or error, and
+Delivery is at least once. Tron persists `queued` before execution and records a
+numbered attempt whenever a dispatcher claims it. On restart, the unfinished
+attempt becomes `interrupted` and its invocation returns to `queued` for a new
+attempt. A `(workerId, idempotencyKey)` uniqueness constraint suppresses repeated
+delivery. The idempotency key, invocation id, trace, depth, and trigger kind are
+also passed to command runners as `TRON_WORKER_*` variables, to agent runners in
+their durable prompt contract, and to resident services as `X-Tron-*` headers.
+Every run records its pinned version, timestamps, input, output or error, and
 inbox result.
+
+The causal ledger stores trace roots, maximum observed depth, invocation and
+suppression counts, and the unique worker/trigger/idempotency deliveries seen in
+that trace. Repeated deliveries are returned idempotently without another
+execution and leave explicit suppression audit evidence.
 
 Profile ceilings are fixed reliability limits:
 
@@ -225,7 +243,10 @@ Operator controls are:
 ## Model-Facing Tools
 
 When autonomy is enabled, fixed kernel operations are direct typed tools. There
-is no wrapper operation field.
+is no wrapper operation field. `worker_upsert` publishes the complete bundle
+schema—including every runner, trigger, dependency lock, named-secret binding,
+test, health check, provenance record, and routing field—to the model; authoring
+does not depend on hidden documentation.
 
 ### Host primitives
 
@@ -257,6 +278,11 @@ is no wrapper operation field.
 Every enabled worker is also registered as a stable direct typed tool using the
 bundle's `toolName`, input schema, output schema, description, routing metadata,
 provenance, health, version, and recent success evidence.
+
+The provider-visible tool description carries a compact health, active-version,
+provenance, completed-run, and last-success summary. Those observations are
+therefore available to the model choosing among the relevant tools, rather than
+being hidden selection metadata.
 
 At each model turn Tron ranks dynamic workers by explicit session promotion,
 query overlap, recent successes, and identity, selecting at most 12. A
@@ -397,10 +423,15 @@ The rebuildable worker database is
 | `worker_schema` | worker index schema version |
 | `workers` | rebuildable current catalog |
 | `worker_versions` | rebuildable version index |
+| `worker_routes` | rebuildable direct-tool route and routing metadata |
 | `worker_triggers` | rebuildable trigger configuration and cursors |
-| `worker_invocations` | durable queue, attempts, idempotency, trace, results |
+| `worker_invocations` | durable queue, idempotency, pinned version, and results |
+| `worker_attempts` | numbered execution/redelivery attempts |
+| `worker_causal_traces` | trace roots, depth, delivery, and suppression counters |
+| `worker_trace_deliveries` | unique worker/trigger/idempotency combinations per trace |
 | `worker_inbox` | durable visible results/failures and seen state |
 | `worker_audit` | lifecycle and mutation evidence |
+| `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable profile stop-all state |
 
 Raw device tokens remain outside generic resources in a private `0600` file
@@ -449,7 +480,7 @@ It exposes:
 
 - worker list, health, runner, active content version, provenance, and triggers;
 - JSON-schema-aware typed invocation;
-- runs, durable inbox, and audit history;
+- runs with delivery-attempt counts, durable inbox, and audit history;
 - enable/disable, rollback, retirement, purge, webhook rotation, and stop-all;
 - live refresh from `worker.lifecycle` and `worker.invocations` cursors.
 
@@ -479,10 +510,15 @@ Deterministic tests cover:
   retirement, purge, and reconstruction;
 - command, agent, and resident-service runners;
 - manual, schedule, engine-event, and authenticated webhook dispatch;
-- restart recovery, idempotency, causal depth, concurrency queueing, timeout,
-  stop/disable, failure disablement, inbox, and secret redaction;
-- dynamic typed tools, relevance selection, discovery promotion, and absence of
-  local grant creation;
+- restart recovery with explicit attempts, idempotency propagation, loop
+  suppression, causal depth, concurrency queueing, timeout, stop/disable,
+  failure disablement, inbox, and all-vault secret rejection/redaction;
+- a natural-language model loop that proactively upserts a complete worker,
+  sees its direct typed tool immediately, invokes it, and reports the persistent
+  adaptation; plus relevance selection, discovery promotion, complete tool
+  schemas, and absence of local grant creation;
+- the real loopback HTTP webhook route, including token success/failure,
+  durable dispatch, and remote-peer rejection;
 - remote auth, snapshot/restore, legacy import reporting, and isolated core
   proposal approval;
 - iOS protocol, repository, view-model, settings, and build parity.

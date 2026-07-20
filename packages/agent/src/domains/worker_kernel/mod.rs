@@ -4,7 +4,8 @@
 //! staged, dependency-locked, smoke-tested, atomically versioned, activated,
 //! and projected as a direct typed model tool by one `worker_upsert` call.
 //! Filesystem bundles are canonical; the dedicated SQLite database is a
-//! rebuildable runtime index plus invocation/inbox ledger.
+//! rebuildable route/trigger indexes plus durable attempt, causal-trace,
+//! invocation, inbox, health, and audit ledgers.
 //!
 //! ## Submodules
 //!
@@ -12,23 +13,28 @@
 //! |--------|---------|
 //! | `contract` | Fixed direct worker-management contracts |
 //! | `handlers` | Model/client operation bindings |
-//! | `migration` | Filesystem index reconstruction and explicit legacy import reporting |
+//! | `persistence` | Canonical bundles, snapshots, index reconstruction, and durable operational ledgers |
 //! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
-//! | `snapshot` | Recoverable pre-conversion state snapshot |
-//! | `store` | Canonical bundles, versions, triggers, invocations, and inbox |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //!
 //! # Invariants
 //!
 //! Worker activation is atomic with respect to the canonical active pointer:
-//! failed dependency or smoke-test work never changes the active version. The
-//! rebuildable SQLite indexes commit before the pointer; startup reconstruction
-//! therefore recovers a crash before pointer publication to the prior version.
+//! failed dependency, smoke-test, or health-check work never changes the active
+//! version. Successful pre-activation evidence is sealed into the immutable
+//! version before hashing. The rebuildable SQLite indexes commit before the
+//! pointer; startup reconstruction therefore recovers a crash before pointer
+//! publication to the prior version. A reported pointer-write failure removes
+//! the unpublished candidate before rebuilding those indexes.
 //! Failure while registering an already-published direct tool disables it and
 //! records the failure rather than leaving an enabled but unreachable worker.
 //! Local worker execution is deliberately not capability-authorized. Named
-//! secret values are injected only at runtime and never written into bundles,
-//! manifests, invocation records, events, or logs.
+//! secret values are injected only at runtime; known vault values are rejected
+//! from candidate bundles and invocation inputs, then redacted from outputs and
+//! errors so they never enter manifests, operational records, events, or logs.
+//! Every claimed delivery creates a numbered attempt. Interrupted attempts are
+//! terminalized before their invocation is requeued, making at-least-once
+//! redelivery and causal-loop suppression directly inspectable.
 
 use std::sync::Arc;
 
@@ -39,23 +45,21 @@ use crate::domains::registration::worker::{DomainRegistrationContext, DomainWork
 mod contract;
 mod core_proposals;
 mod handlers;
-mod migration;
+mod persistence;
 mod runtime;
-mod snapshot;
-mod store;
 mod types;
 
 pub(crate) use runtime::WorkerRuntime;
 
 pub(crate) fn list_state_snapshots() -> Result<Vec<std::path::PathBuf>, String> {
-    snapshot::list_snapshots(&crate::shared::foundation::paths::tron_home())
+    persistence::list_snapshots(&crate::shared::foundation::paths::tron_home())
         .map_err(|error| error.to_string())
 }
 
 pub(crate) fn restore_state_snapshot(
     snapshot: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
-    snapshot::restore_snapshot(snapshot, &crate::shared::foundation::paths::tron_home())
+    persistence::restore_snapshot(snapshot, &crate::shared::foundation::paths::tron_home())
         .map_err(|error| error.to_string())
 }
 
@@ -72,7 +76,7 @@ pub(crate) fn registration(
 ) -> crate::engine::Result<Registration> {
     let autonomous = deps.profile_runtime.current().settings.autonomous_workers;
     let current_profile = deps.profile_runtime.current();
-    let store = store::WorkerStore::open(
+    let store = persistence::WorkerStore::open(
         deps.profile_runtime.home().to_path_buf(),
         current_profile.profile_name(),
     )

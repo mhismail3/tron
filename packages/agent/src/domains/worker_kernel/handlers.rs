@@ -566,7 +566,21 @@ async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
         .and_then(Value::as_u64)
         .unwrap_or(100)
         .min(500) as u32;
-    Ok(json!({"runs":deps.runtime.store().runs(worker_id, limit)?}))
+    let runs = deps.runtime.store().runs(worker_id, limit)?;
+    let mut attempts = serde_json::Map::new();
+    let mut traces = serde_json::Map::new();
+    for run in &runs {
+        let _ = attempts.insert(
+            run.invocation_id.clone(),
+            Value::Array(deps.runtime.store().attempts(&run.invocation_id)?),
+        );
+        if !traces.contains_key(&run.trace_id)
+            && let Some(trace) = deps.runtime.store().trace(&run.trace_id)?
+        {
+            let _ = traces.insert(run.trace_id.clone(), trace);
+        }
+    }
+    Ok(json!({"runs":runs,"attempts":attempts,"traces":traces}))
 }
 
 async fn rotate_webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
