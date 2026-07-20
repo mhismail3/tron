@@ -9,7 +9,7 @@ use dashmap::{DashMap, DashSet};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -21,12 +21,13 @@ use crate::domains::session::event_store::EventStore;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
     FunctionHealth, FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation,
-    PublishStreamEvent, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
-    WorkerId,
+    PublishStreamEvent, RUNTIME_METADATA_TRIGGER_DEPTH, RiskLevel, StreamActorScope, StreamCursor,
+    TraceId, VisibilityScope, WorkerId,
 };
 
 use super::core_proposals::{CoreProposal, CoreProposalService};
 use super::persistence::WorkerStore;
+use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree, wait_with_bounded_output};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_INVOCATION_SECONDS,
     MAX_PROFILE_CONCURRENCY, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
@@ -34,18 +35,52 @@ use super::types::{
 };
 
 struct ResidentProcess {
-    child: Option<Child>,
+    child: Option<ProcessTree>,
     consecutive_health_failures: u8,
+    runtime_root: Option<PathBuf>,
 }
 
 const RESIDENT_HEALTH_FAILURE_LIMIT: u8 = 3;
 const RESIDENT_HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_DEPENDENCY_DOWNLOAD_BYTES: usize = 128 * 1_048_576;
 
 struct RemoveDirectoryOnDrop(PathBuf);
 
 impl Drop for RemoveDirectoryOnDrop {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Couples an agent-runner child session to its durable worker invocation.
+/// Dropping the worker future because of timeout, disable, stop-all, autonomy
+/// shutdown, or server shutdown must also cancel the asynchronously spawned
+/// child agent; otherwise consequential work can outlive its terminal record.
+struct AbortAgentRunOnDrop {
+    orchestrator: Arc<Orchestrator>,
+    session_id: String,
+    armed: bool,
+}
+
+impl AbortAgentRunOnDrop {
+    fn new(orchestrator: Arc<Orchestrator>, session_id: String) -> Self {
+        Self {
+            orchestrator,
+            session_id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for AbortAgentRunOnDrop {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.orchestrator.abort(&self.session_id);
+        }
     }
 }
 
@@ -86,6 +121,18 @@ impl WorkerRuntime {
         event_store: Arc<EventStore>,
         profile_runtime: Arc<ProfileRuntime>,
     ) -> Result<Arc<Self>, String> {
+        for runtime_directory in ["worker-invocations", "worker-services"] {
+            let path = store
+                .home()
+                .join("internal")
+                .join("run")
+                .join(runtime_directory);
+            if path.exists() {
+                std::fs::remove_dir_all(&path).map_err(|error| {
+                    format!("remove stale {runtime_directory} runtime state: {error}")
+                })?;
+            }
+        }
         let stopped = store.stop_all()?;
         let kernel_visibility = profile_runtime.current().settings.autonomous_workers;
         let core_proposals = CoreProposalService::new(store.home(), Arc::clone(&event_store))?;
@@ -425,18 +472,31 @@ impl WorkerRuntime {
                 .map_err(|error| format!("fetch dependency '{}': {error}", dependency.name))?;
             if response
                 .content_length()
-                .is_some_and(|length| length > 134_217_728)
+                .is_some_and(|length| length > MAX_DEPENDENCY_DOWNLOAD_BYTES as u64)
             {
                 return Err(format!("dependency '{}' exceeds 128 MiB", dependency.name));
             }
-            let bytes = response
-                .bytes()
+            let destination_file = destination.join("source");
+            let mut file = tokio::fs::File::create(&destination_file)
                 .await
-                .map_err(|error| format!("read dependency '{}': {error}", dependency.name))?;
-            if bytes.len() > 134_217_728 {
-                return Err(format!("dependency '{}' exceeds 128 MiB", dependency.name));
+                .map_err(|error| format!("store dependency '{}': {error}", dependency.name))?;
+            let mut response = response;
+            let mut downloaded = 0_usize;
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|error| format!("read dependency '{}': {error}", dependency.name))?
+            {
+                downloaded = downloaded.saturating_add(chunk.len());
+                if downloaded > MAX_DEPENDENCY_DOWNLOAD_BYTES {
+                    return Err(format!("dependency '{}' exceeds 128 MiB", dependency.name));
+                }
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|error| format!("store dependency '{}': {error}", dependency.name))?;
             }
-            std::fs::write(destination.join("source"), bytes)
+            file.flush()
+                .await
                 .map_err(|error| format!("store dependency '{}': {error}", dependency.name))?;
         }
         let actual = format!("sha256:{}", digest_tree(destination)?);
@@ -482,7 +542,7 @@ impl WorkerRuntime {
                 request.causal_depth
             ));
         }
-        let worker = self.store.load_active(&request.worker_id)?;
+        let worker = self.store.load_indexed_active(&request.worker_id)?;
         if !worker.summary.enabled || worker.summary.retired {
             return Err(format!("worker '{}' is not enabled", request.worker_id));
         }
@@ -532,12 +592,22 @@ impl WorkerRuntime {
         if !self.autonomous_enabled() {
             return Err("worker autonomy was disabled while the invocation was queued".to_owned());
         }
-        let worker = self
+        let summary = self
             .store
-            .load_version(&queued.worker_id, &queued.worker_version)?;
-        if !worker.summary.enabled || worker.summary.retired {
+            .summary(&queued.worker_id)?
+            .ok_or_else(|| format!("worker '{}' was not found", queued.worker_id))?;
+        if !summary.enabled || summary.retired {
             return Ok(queued);
         }
+        let worker = match self
+            .store
+            .load_version(&queued.worker_id, &queued.worker_version)
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                return self.fail_queued_integrity_check(queued, &error).await;
+            }
+        };
         let global_stop = self.execution_stop.lock().await.clone();
         let worker_stop = self.worker_stop(&queued.worker_id);
         let profile_permit = self.profile_limit.clone().acquire_owned();
@@ -661,6 +731,62 @@ impl WorkerRuntime {
         Ok(completed)
     }
 
+    async fn fail_queued_integrity_check(
+        &self,
+        queued: InvocationRecord,
+        error: &str,
+    ) -> Result<InvocationRecord, String> {
+        if !self.store.claim_running(&queued.invocation_id)? {
+            return self
+                .store
+                .invocation(&queued.invocation_id)?
+                .ok_or_else(|| {
+                    "worker invocation disappeared during integrity failure".to_owned()
+                });
+        }
+        let secrets = self.load_all_vault_secrets().unwrap_or_default();
+        let reason = redact_known_secrets(
+            &format!("worker immutable-version integrity check failed: {error}"),
+            &secrets,
+        );
+        self.store
+            .mark_failed(&queued.worker_id, "integrity", &reason)?;
+        self.cancel_worker(&queued.worker_id);
+        self.unregister_dynamic_tool(&queued.worker_id).await;
+        self.stop_residents(Some(&queued.worker_id)).await;
+        let completed = self.store.complete_invocation(
+            &queued.invocation_id,
+            &queued.worker_id,
+            Err(&reason),
+        )?;
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":"failed",
+                "phase":"integrity",
+                "workerId":queued.worker_id,
+                "version":queued.worker_version,
+                "reason":reason,
+                "disabled":true,
+            }),
+            TraceId::new(queued.trace_id.clone()).ok(),
+        )
+        .await;
+        self.publish_event(
+            "worker.invocations",
+            json!({
+                "action":completed.status,
+                "invocationId":completed.invocation_id,
+                "workerId":completed.worker_id,
+                "error":completed.error,
+                "causalDepth":completed.causal_depth,
+            }),
+            TraceId::new(completed.trace_id.clone()).ok(),
+        )
+        .await;
+        Ok(completed)
+    }
+
     async fn execute_worker(
         self: &Arc<Self>,
         worker: &ActiveWorker,
@@ -676,13 +802,19 @@ impl WorkerRuntime {
                     .await
             }
             WorkerRunner::Command { command } => {
+                let (runtime_root, workdir) = self.materialize_runtime_artifact(
+                    worker,
+                    "worker-invocations",
+                    &invocation.invocation_id,
+                )?;
+                let _runtime_cleanup = RemoveDirectoryOnDrop(runtime_root);
                 let command = WorkerCommand {
                     command: command.clone(),
                     timeout_seconds: MAX_INVOCATION_SECONDS,
                 };
                 run_worker_command(
                     &command,
-                    &worker.version_dir.join("files"),
+                    &workdir,
                     Some(&invocation.input),
                     &secrets,
                     Some(invocation),
@@ -704,7 +836,7 @@ impl WorkerRuntime {
                 let result = async {
                     self.ensure_resident(worker, command, health_url.as_deref(), &secrets)
                         .await?;
-                    let response = self
+                    let mut response = self
                         .http
                         .post(invoke_url)
                         .header("x-tron-invocation-id", &invocation.invocation_id)
@@ -717,10 +849,12 @@ impl WorkerRuntime {
                         .await
                         .map_err(|error| format!("invoke resident worker: {error}"))?;
                     let status = response.status();
-                    let bytes = response
-                        .bytes()
-                        .await
-                        .map_err(|error| format!("read resident worker response: {error}"))?;
+                    let bytes = read_http_body_limited(
+                        &mut response,
+                        MAX_PROCESS_CAPTURE_BYTES,
+                        "resident worker response",
+                    )
+                    .await?;
                     if !status.is_success() {
                         return Err(format!(
                             "resident worker returned {status}: {}",
@@ -748,6 +882,28 @@ impl WorkerRuntime {
         }
     }
 
+    fn materialize_runtime_artifact(
+        &self,
+        worker: &ActiveWorker,
+        category: &str,
+        identity: &str,
+    ) -> Result<(PathBuf, PathBuf), String> {
+        let runtime_root = self
+            .store
+            .home()
+            .join("internal")
+            .join("run")
+            .join(category)
+            .join(identity);
+        if runtime_root.exists() {
+            std::fs::remove_dir_all(&runtime_root)
+                .map_err(|error| format!("reset worker runtime artifact: {error}"))?;
+        }
+        let artifact = runtime_root.join("artifact");
+        copy_tree(&worker.version_dir, &artifact)?;
+        Ok((runtime_root, artifact.join("files")))
+    }
+
     async fn execute_agent(
         &self,
         worker: &ActiveWorker,
@@ -756,18 +912,12 @@ impl WorkerRuntime {
         model: Option<&str>,
         secrets: &HashMap<String, String>,
     ) -> Result<Value, String> {
-        let ephemeral = self
-            .store
-            .home()
-            .join("internal")
-            .join("run")
-            .join("worker-invocations")
-            .join(&invocation.invocation_id);
+        let (ephemeral, workdir) = self.materialize_runtime_artifact(
+            worker,
+            "worker-invocations",
+            &invocation.invocation_id,
+        )?;
         let _ephemeral_cleanup = RemoveDirectoryOnDrop(ephemeral.clone());
-        let workdir = ephemeral.join("work");
-        std::fs::create_dir_all(&workdir)
-            .map_err(|error| format!("create agent worker work directory: {error}"))?;
-        copy_tree(&worker.version_dir.join("files"), &workdir)?;
         let secret_dir = ephemeral.join("secrets");
         if !secrets.is_empty() {
             std::fs::create_dir_all(&secret_dir)
@@ -822,9 +972,11 @@ impl WorkerRuntime {
             hex::encode(Sha256::digest(invocation.idempotency_key.as_bytes()))
         ))
         .with_runtime_metadata(
-            "workerCausalDepth",
+            RUNTIME_METADATA_TRIGGER_DEPTH,
             invocation.causal_depth.saturating_add(1).to_string(),
         );
+        let mut agent_run_guard =
+            AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), session_id.clone());
         let outcome = self
             .host
             .invoke(Invocation::new_sync(
@@ -842,6 +994,7 @@ impl WorkerRuntime {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        agent_run_guard.disarm();
         let rows = self
             .event_store
             .get_latest_events(&session_id, Some(100))
@@ -874,6 +1027,7 @@ impl WorkerRuntime {
                 Arc::new(Mutex::new(ResidentProcess {
                     child: None,
                     consecutive_health_failures: 0,
+                    runtime_root: None,
                 }))
             })
             .clone();
@@ -887,15 +1041,36 @@ impl WorkerRuntime {
         };
         if !still_running {
             if let Some(child) = process.child.as_mut() {
-                let _ = child.kill().await;
+                child.terminate().await;
             }
-            process.child = Some(spawn_process(
+            if let Some(runtime_root) = process.runtime_root.take() {
+                let _ = std::fs::remove_dir_all(runtime_root);
+            }
+            let (runtime_root, workdir) = self.materialize_runtime_artifact(
+                worker,
+                "worker-services",
+                &format!("{}-{}", worker.summary.worker_id, uuid::Uuid::now_v7()),
+            )?;
+            let child = spawn_process(
                 command,
-                &worker.version_dir.join("files"),
+                &workdir,
                 secrets,
                 Stdio::null(),
+                // Resident output is not part of an invocation result. Leaving
+                // stderr piped without a reader eventually blocks a normally
+                // logging service once the OS pipe fills.
+                Stdio::null(),
                 None,
-            )?);
+            );
+            let child = match child {
+                Ok(child) => child,
+                Err(error) => {
+                    let _ = std::fs::remove_dir_all(&runtime_root);
+                    return Err(error);
+                }
+            };
+            process.child = Some(child);
+            process.runtime_root = Some(runtime_root);
             process.consecutive_health_failures = 0;
             if let Some(url) = health_url {
                 let mut healthy = false;
@@ -924,7 +1099,10 @@ impl WorkerRuntime {
                 }
                 if !healthy {
                     if let Some(child) = process.child.as_mut() {
-                        let _ = child.kill().await;
+                        child.terminate().await;
+                    }
+                    if let Some(runtime_root) = process.runtime_root.take() {
+                        let _ = std::fs::remove_dir_all(runtime_root);
                     }
                     return Err("resident worker failed its startup health check".to_owned());
                 }
@@ -1660,8 +1838,10 @@ impl WorkerRuntime {
         if let Some((_, process)) = self.residents.remove(key) {
             let mut process = process.lock().await;
             if let Some(mut child) = process.child.take() {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                child.terminate().await;
+            }
+            if let Some(runtime_root) = process.runtime_root.take() {
+                let _ = std::fs::remove_dir_all(runtime_root);
             }
         }
         let _ = self.resident_users.remove(key);
@@ -1809,7 +1989,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
         let depth = invocation
             .causal_context
             .runtime_metadata
-            .get("workerCausalDepth")
+            .get(RUNTIME_METADATA_TRIGGER_DEPTH)
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0);
         let idempotency_key = invocation
@@ -1840,6 +2020,36 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
     }
 }
 
+async fn read_http_body_limited(
+    response: &mut reqwest::Response,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(format!("{label} exceeds the {max_bytes}-byte ceiling"));
+    }
+    let mut body = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(max_bytes as u64) as usize,
+    );
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("read {label}: {error}"))?
+    {
+        if body.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(format!("{label} exceeds the {max_bytes}-byte ceiling"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 async fn run_worker_command(
     spec: &WorkerCommand,
     workdir: &Path,
@@ -1847,45 +2057,56 @@ async fn run_worker_command(
     secrets: &HashMap<String, String>,
     invocation: Option<&InvocationRecord>,
 ) -> Result<Value, String> {
-    let mut child = spawn_process(&spec.command, workdir, secrets, Stdio::piped(), invocation)?;
-    let mut input_write_error = None;
-    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
-        if let Err(error) = stdin
-            .write_all(
-                &serde_json::to_vec(input)
-                    .map_err(|error| format!("encode worker input: {error}"))?,
-            )
-            .await
-        {
-            input_write_error = Some(error);
-        }
-    }
-    let output = tokio::time::timeout(
+    let child = spawn_process(
+        &spec.command,
+        workdir,
+        secrets,
+        Stdio::piped(),
+        Stdio::piped(),
+        invocation,
+    )?;
+    let input = input
+        .map(serde_json::to_vec)
+        .transpose()
+        .map_err(|error| format!("encode worker input: {error}"))?;
+    let output = wait_with_bounded_output(
+        child,
+        input,
         Duration::from_secs(spec.timeout_seconds),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| {
         format!(
             "worker command timed out after {} seconds",
             spec.timeout_seconds
-        )
-    })?
+        ),
+        MAX_PROCESS_CAPTURE_BYTES,
+    )
+    .await
     .map_err(|error| format!("wait for worker command: {error}"))?;
     if !output.status.success() {
+        let truncation = if output.stderr_truncated {
+            "\n[stderr truncated at 4194304 bytes]"
+        } else {
+            ""
+        };
         return Err(redact_known_secrets(
             &format!(
-                "worker command exited {}: {}",
+                "worker command exited {}: {}{}",
                 output.status,
-                String::from_utf8_lossy(&output.stderr)
+                String::from_utf8_lossy(&output.stderr),
+                truncation,
             ),
             secrets,
         ));
     }
-    if let Some(error) = input_write_error
-        && error.kind() != std::io::ErrorKind::BrokenPipe
+    if let Some((kind, error)) = output.input_error
+        && kind != std::io::ErrorKind::BrokenPipe
     {
         return Err(format!("write worker input: {error}"));
+    }
+    if output.stdout_truncated {
+        return Err(format!(
+            "worker command stdout exceeded the {}-byte capture ceiling",
+            MAX_PROCESS_CAPTURE_BYTES
+        ));
     }
     if output.stdout.is_empty() {
         return Ok(json!({}));
@@ -1902,8 +2123,9 @@ fn spawn_process(
     workdir: &Path,
     secrets: &HashMap<String, String>,
     stdout: Stdio,
+    stderr: Stdio,
     invocation: Option<&InvocationRecord>,
-) -> Result<Child, String> {
+) -> Result<ProcessTree, String> {
     let (program, arguments) = command
         .split_first()
         .ok_or_else(|| "worker command has no program".to_owned())?;
@@ -1918,7 +2140,7 @@ fn spawn_process(
         .current_dir(workdir)
         .stdin(Stdio::piped())
         .stdout(stdout)
-        .stderr(Stdio::piped())
+        .stderr(stderr)
         .kill_on_drop(true);
     if let Some(root) = worker_artifact_root(workdir) {
         let dependency_runtime = root.join("dependency-runtime");
@@ -1963,9 +2185,7 @@ fn spawn_process(
             )
             .env("TRON_WORKER_TRIGGER_KIND", &invocation.trigger_kind);
     }
-    process
-        .spawn()
-        .map_err(|error| format!("start worker command: {error}"))
+    ProcessTree::spawn(&mut process).map_err(|error| format!("start worker command: {error}"))
 }
 
 fn worker_artifact_root(workdir: &Path) -> Option<PathBuf> {
@@ -1981,7 +2201,7 @@ fn digest_tree(root: &Path) -> Result<String, String> {
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    entries.retain(|entry| entry.file_type().is_file());
+    entries.retain(|entry| entry.file_type().is_file() || entry.file_type().is_symlink());
     entries.sort_by(|left, right| left.path().cmp(right.path()));
     let mut digest = Sha256::new();
     for entry in entries {
@@ -1991,8 +2211,18 @@ fn digest_tree(root: &Path) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
         digest.update(relative.to_string_lossy().as_bytes());
         digest.update([0]);
-        digest.update(std::fs::read(entry.path()).map_err(|error| error.to_string())?);
-        digest.update([0xff]);
+        if entry.file_type().is_symlink() {
+            digest.update(
+                std::fs::read_link(entry.path())
+                    .map_err(|error| error.to_string())?
+                    .to_string_lossy()
+                    .as_bytes(),
+            );
+            digest.update([0xfe]);
+        } else {
+            digest.update(std::fs::read(entry.path()).map_err(|error| error.to_string())?);
+            digest.update([0xff]);
+        }
     }
     Ok(hex::encode(digest.finalize()))
 }
@@ -2105,9 +2335,40 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
             std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+        } else if entry.file_type().is_symlink() {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            copy_symlink(entry.path(), &target)?;
+        } else {
+            return Err(format!(
+                "worker artifact contains unsupported special file {}",
+                entry.path().display()
+            ));
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn copy_symlink(source: &Path, destination: &Path) -> Result<(), String> {
+    let target = std::fs::read_link(source)
+        .map_err(|error| format!("read worker symlink {}: {error}", source.display()))?;
+    std::os::unix::fs::symlink(&target, destination).map_err(|error| {
+        format!(
+            "copy worker symlink {} -> {}: {error}",
+            destination.display(),
+            target.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn copy_symlink(source: &Path, _destination: &Path) -> Result<(), String> {
+    Err(format!(
+        "worker symlink copies are not supported on this platform: {}",
+        source.display()
+    ))
 }
 
 #[cfg(unix)]
@@ -2533,6 +2794,54 @@ print(json.dumps({
         assert_eq!(lock[0]["checksum"], expected);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dependency_hash_and_runtime_copy_preserve_symlink_targets() {
+        let (runtime, home) = test_runtime(None);
+        let source = home.path().join("symlink-dependency-source");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("target.txt"), "linked content").unwrap();
+        std::os::unix::fs::symlink("target.txt", source.join("current.txt")).unwrap();
+        let expected = format!("sha256:{}", digest_tree(&source).unwrap());
+        let mut bundle = command_bundle(vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "test \"$(cat ../dependencies/upstream/current.txt)\" = 'linked content'; printf '{\"linked\":true}'".to_owned(),
+        ]);
+        bundle.dependencies.push(WorkerDependency {
+            name: "upstream".to_owned(),
+            source: format!("file://{}", source.display()),
+            version: "fixture-1".to_owned(),
+            checksum: None,
+            install: None,
+        });
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let active = runtime
+            .store()
+            .load_active(&outcome.worker.worker_id)
+            .unwrap();
+
+        assert_eq!(
+            active.bundle.dependencies[0].checksum.as_deref(),
+            Some(expected.as_str())
+        );
+        assert!(
+            std::fs::symlink_metadata(active.version_dir.join("dependencies/upstream/current.txt"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let record = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({}),
+                "symlink-runtime-copy",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(record.output, Some(json!({"linked":true})));
+    }
+
     #[tokio::test]
     async fn command_runner_upserts_invokes_and_replays_idempotently() {
         let (runtime, home) = test_runtime(None);
@@ -2644,6 +2953,52 @@ print(json.dumps({
         assert!(definition.description.contains("health=healthy"));
         assert!(definition.description.contains("completedRuns=2"));
         assert!(definition.description.contains("test:deterministic@1"));
+    }
+
+    #[tokio::test]
+    async fn command_runner_writes_only_to_its_disposable_runtime_copy() {
+        let (runtime, home) = test_runtime(None);
+        let outcome = runtime
+            .upsert(
+                command_bundle(vec![
+                    "sh".to_owned(),
+                    "-c".to_owned(),
+                    "printf runtime > runtime-only.txt; printf '{\"isolated\":true}'".to_owned(),
+                ]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let record = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({}),
+                "runtime-copy",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(record.output, Some(json!({"isolated":true})));
+        assert!(
+            !home
+                .path()
+                .join("workspace/workers")
+                .join(&outcome.worker.worker_id)
+                .join("versions")
+                .join(&outcome.version)
+                .join("files/runtime-only.txt")
+                .exists(),
+            "worker execution mutated its immutable canonical version"
+        );
+        assert!(
+            !home
+                .path()
+                .join("internal/run/worker-invocations")
+                .join(&record.invocation_id)
+                .exists(),
+            "terminal command runtime copy was not removed"
+        );
     }
 
     #[tokio::test]
@@ -2979,11 +3334,15 @@ print(json.dumps({
 
     #[tokio::test]
     async fn disabling_a_worker_stops_its_active_invocation() {
-        let (runtime, _home) = test_runtime(None);
+        let (runtime, home) = test_runtime(None);
+        let child_started = home.path().join("disable-descendant-started");
+        let child_survived = home.path().join("disable-descendant-survived");
         let mut bundle = command_bundle(vec![
-            "sh".to_owned(),
+            "python3".to_owned(),
             "-c".to_owned(),
-            "sleep 30; cat".to_owned(),
+            "import pathlib,subprocess,sys,time; subprocess.Popen([sys.executable,'-c','import pathlib,sys,time; time.sleep(.4); pathlib.Path(sys.argv[1]).write_text(\"survived\")',sys.argv[2]]); pathlib.Path(sys.argv[1]).write_text('started'); time.sleep(30)".to_owned(),
+            child_started.display().to_string(),
+            child_survived.display().to_string(),
         ]);
         bundle.triggers = vec![WorkerTrigger::Manual {
             id: "manual".to_owned(),
@@ -2999,19 +3358,14 @@ print(json.dumps({
                     .await
             })
         };
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         while tokio::time::Instant::now() < deadline {
-            if runtime
-                .store()
-                .runs(Some(&worker_id), 10)
-                .unwrap()
-                .iter()
-                .any(|run| run.status == "running")
-            {
+            if child_started.exists() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        assert!(child_started.exists(), "worker descendant never started");
 
         runtime.set_enabled(&worker_id, false).await.unwrap();
         let result = invoking.await.unwrap().unwrap();
@@ -3028,6 +3382,11 @@ print(json.dumps({
         let disabled = runtime.store().inspect(&worker_id).unwrap();
         assert_eq!(disabled["route"]["enabled"], false);
         assert_eq!(disabled["triggers"][0]["enabled"], false);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !child_survived.exists(),
+            "worker descendant survived disable"
+        );
 
         runtime.set_enabled(&worker_id, true).await.unwrap();
         let enabled = runtime.store().inspect(&worker_id).unwrap();
@@ -3252,6 +3611,73 @@ print(json.dumps({
                 .unwrap()
                 .iter()
                 .any(|item| item["action"] == "failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn canonical_version_tampering_disables_routing_before_execution() {
+        let (runtime, _home) = test_runtime(None);
+        let outcome = runtime
+            .upsert(
+                command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+                None,
+            )
+            .await
+            .unwrap();
+        let active = runtime
+            .store()
+            .load_active(&outcome.worker.worker_id)
+            .unwrap();
+        std::fs::write(active.version_dir.join("files/tampered.txt"), "changed").unwrap();
+
+        let record = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({}),
+                "tampered-version",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(record.status, "failed", "{record:?}");
+        assert!(
+            record
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("integrity check failed")),
+            "{record:?}"
+        );
+        assert_eq!(record.attempt_count, 1);
+        assert_eq!(
+            runtime
+                .store()
+                .summary(&outcome.worker.worker_id)
+                .unwrap()
+                .unwrap()
+                .enabled,
+            false
+        );
+        assert_eq!(
+            runtime
+                .store()
+                .inbox(Some(&outcome.worker.worker_id), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            runtime
+                .host
+                .inspect_function(
+                    &FunctionId::new(format!(
+                        "worker_kernel::dynamic_{}",
+                        outcome.worker.worker_id
+                    ))
+                    .unwrap(),
+                    None,
+                )
+                .await
+                .is_err()
         );
     }
 
@@ -3555,17 +3981,49 @@ print(json.dumps({
         assert_eq!(output, json!({"accepted":true}));
     }
 
+    #[tokio::test]
+    async fn worker_command_rejects_oversized_stdout_after_draining_the_child() {
+        let temporary = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        let error = run_worker_command(
+            &WorkerCommand {
+                command: vec![
+                    "python3".to_owned(),
+                    "-c".to_owned(),
+                    format!(
+                        "import sys; sys.stdout.write('x'*{})",
+                        MAX_PROCESS_CAPTURE_BYTES + 1
+                    ),
+                ],
+                timeout_seconds: 5,
+            },
+            temporary.path(),
+            None,
+            &HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("capture ceiling"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
     struct JsonResponder;
+
+    fn worker_test_responder_info() -> ModelResponderInfo {
+        ModelResponderInfo {
+            provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+            provider_name: "worker-test",
+            model: "worker-test-model".to_owned(),
+            context_window: 20_000,
+        }
+    }
 
     #[async_trait]
     impl ModelResponder for JsonResponder {
         fn info(&self) -> ModelResponderInfo {
-            ModelResponderInfo {
-                provider_type: crate::shared::protocol::messages::Provider::Anthropic,
-                provider_name: "worker-test",
-                model: "worker-test-model".to_owned(),
-                context_window: 20_000,
-            }
+            worker_test_responder_info()
         }
 
         async fn respond(
@@ -3638,13 +4096,264 @@ print(json.dumps({
         );
     }
 
+    struct NestedDepthResponder {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl NestedDepthResponder {
+        fn response(events: Vec<Result<StreamEvent, ModelResponseError>>) -> ModelResponse {
+            ModelResponse {
+                info: worker_test_responder_info(),
+                stream: Box::pin(stream::iter(events)) as ModelResponseStream,
+            }
+        }
+
+        fn tool_call() -> ModelResponse {
+            let arguments = serde_json::Map::from_iter([
+                ("workerId".to_owned(), json!("nested-depth-target")),
+                ("input".to_owned(), json!({})),
+                ("idempotencyKey".to_owned(), json!("nested-depth-delivery")),
+            ]);
+            Self::response(vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::CapabilityInvocationDraftStart {
+                    invocation_id: "nested-depth-call".to_owned(),
+                    name: "worker_invoke".to_owned(),
+                }),
+                Ok(StreamEvent::CapabilityInvocationDraftDelta {
+                    invocation_id: "nested-depth-call".to_owned(),
+                    arguments_delta: serde_json::to_string(&arguments).unwrap(),
+                }),
+                Ok(StreamEvent::CapabilityInvocationDraftEnd {
+                    capability_invocation:
+                        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+                            "nested-depth-call",
+                            "worker_invoke",
+                            arguments,
+                        ),
+                }),
+                Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: Vec::new(),
+                        token_usage: None,
+                    },
+                    stop_reason: "capability_invocation".to_owned(),
+                }),
+            ])
+        }
+    }
+
+    #[async_trait]
+    impl ModelResponder for NestedDepthResponder {
+        fn info(&self) -> ModelResponderInfo {
+            worker_test_responder_info()
+        }
+
+        async fn respond(
+            &self,
+            request: ModelResponseRequest,
+        ) -> Result<ModelResponse, ModelResponseError> {
+            match self.calls.fetch_add(1, Ordering::SeqCst) {
+                0 => {
+                    let tools = request
+                        .context
+                        .capabilities
+                        .as_ref()
+                        .expect("agent worker tools")
+                        .iter()
+                        .map(|tool| tool.name.as_str())
+                        .collect::<Vec<_>>();
+                    assert!(tools.contains(&"worker_invoke"), "{tools:?}");
+                    Ok(Self::tool_call())
+                }
+                1 => {
+                    let messages = serde_json::to_string(&request.context.messages).unwrap();
+                    assert!(
+                        messages.contains("causal depth 17") && messages.contains("limit 16"),
+                        "nested worker call escaped the causal ceiling: {messages}"
+                    );
+                    let result = "{\"answer\":\"depth-blocked\"}";
+                    Ok(Self::response(vec![
+                        Ok(StreamEvent::Start),
+                        Ok(StreamEvent::TextDelta {
+                            delta: result.to_owned(),
+                        }),
+                        Ok(StreamEvent::Done {
+                            message: AssistantMessage {
+                                content: vec![AssistantContent::text(result)],
+                                token_usage: None,
+                            },
+                            stop_reason: "end_turn".to_owned(),
+                        }),
+                    ]))
+                }
+                call => panic!("unexpected nested-depth responder call {call}"),
+            }
+        }
+    }
+
+    struct NestedDepthResponderFactory {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ModelResponderFactory for NestedDepthResponderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+            _settings: &crate::domains::settings::ApiSettings,
+        ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+            Ok(Arc::new(NestedDepthResponder {
+                calls: Arc::clone(&self.calls),
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_runner_preserves_causal_depth_for_nested_worker_calls() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (runtime, _home) = test_runtime(Some(Arc::new(NestedDepthResponderFactory {
+            calls: Arc::clone(&calls),
+        })));
+
+        let mut target = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
+        target.worker_id = Some("nested-depth-target".to_owned());
+        target.name = "Nested Depth Target".to_owned();
+        target.description =
+            "Target used only to detect an escaped causal-depth ceiling".to_owned();
+        target.tool_name = Some("worker_nested_depth_target".to_owned());
+        runtime.upsert(target, None).await.unwrap();
+
+        let mut agent = command_bundle(Vec::new());
+        agent.worker_id = Some("nested-depth-agent".to_owned());
+        agent.name = "Nested Depth Agent".to_owned();
+        agent.description = "Agent runner that attempts one nested worker dispatch".to_owned();
+        agent.tool_name = Some("worker_nested_depth_agent".to_owned());
+        agent.output_schema = json!({
+            "type":"object",
+            "required":["answer"],
+            "properties":{"answer":{"type":"string"}}
+        });
+        agent.runner = WorkerRunner::Agent {
+            instructions: "Attempt the nested worker call, then return typed JSON.".to_owned(),
+            model: None,
+        };
+        let outcome = runtime.upsert(agent, None).await.unwrap();
+        let mut invocation = request(&outcome.worker.worker_id, json!({}), "nested-depth-agent");
+        invocation.causal_depth = MAX_CAUSAL_DEPTH;
+
+        let completed = runtime.invoke(invocation).await.unwrap();
+
+        assert_eq!(completed.status, "completed", "{completed:?}");
+        assert_eq!(completed.output, Some(json!({"answer":"depth-blocked"})));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(
+            runtime
+                .store()
+                .runs(Some("nested-depth-target"), 10)
+                .unwrap()
+                .is_empty(),
+            "over-depth nested dispatch must fail before persistence"
+        );
+    }
+
+    struct PendingResponder;
+
+    #[async_trait]
+    impl ModelResponder for PendingResponder {
+        fn info(&self) -> ModelResponderInfo {
+            worker_test_responder_info()
+        }
+
+        async fn respond(
+            &self,
+            _request: ModelResponseRequest,
+        ) -> Result<ModelResponse, ModelResponseError> {
+            Ok(ModelResponse {
+                info: self.info(),
+                stream: Box::pin(stream::pending::<Result<StreamEvent, ModelResponseError>>())
+                    as ModelResponseStream,
+            })
+        }
+    }
+
+    struct PendingResponderFactory;
+
+    #[async_trait]
+    impl ModelResponderFactory for PendingResponderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+            _settings: &crate::domains::settings::ApiSettings,
+        ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+            Ok(Arc::new(PendingResponder))
+        }
+    }
+
+    #[tokio::test]
+    async fn disabling_agent_worker_aborts_its_spawned_child_session() {
+        let (runtime, _home) = test_runtime(Some(Arc::new(PendingResponderFactory)));
+        let mut bundle = command_bundle(Vec::new());
+        bundle.worker_id = Some("cancellable-agent".to_owned());
+        bundle.name = "Cancellable Agent".to_owned();
+        bundle.description = "Pending agent runner used to prove lifecycle cancellation".to_owned();
+        bundle.tool_name = Some("worker_cancellable_agent".to_owned());
+        bundle.runner = WorkerRunner::Agent {
+            instructions: "Wait until the invocation is stopped.".to_owned(),
+            model: None,
+        };
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let worker_id = outcome.worker.worker_id.clone();
+        let invoke_runtime = Arc::clone(&runtime);
+        let invoke_worker_id = worker_id.clone();
+        let invocation = tokio::spawn(async move {
+            invoke_runtime
+                .invoke(request(&invoke_worker_id, json!({}), "cancellable-agent"))
+                .await
+                .unwrap()
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while runtime.orchestrator.active_run_count() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("agent worker child session did not start");
+
+        runtime.set_enabled(&worker_id, false).await.unwrap();
+        let record = tokio::time::timeout(Duration::from_secs(5), invocation)
+            .await
+            .expect("disabled agent worker invocation did not terminate")
+            .unwrap();
+        assert_eq!(record.status, "failed", "{record:?}");
+        assert!(
+            record
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("disabled")),
+            "{record:?}"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while runtime.orchestrator.active_run_count() != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("agent worker child session outlived its disabled invocation");
+    }
+
     #[tokio::test]
     async fn resident_service_starts_lazily_and_handles_multiple_calls() {
-        let (runtime, _home) = test_runtime(None);
+        let (runtime, home) = test_runtime(None);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
-        let script = r#"import http.server,json,sys
+        let escaped_descendant = home.path().join("resident-descendant-escaped");
+        let script = r#"import http.server,json,subprocess,sys
+subprocess.Popen([sys.executable,'-c','import os,pathlib,sys,time; parent=os.getppid();\nwhile os.getppid()==parent: time.sleep(.01)\npathlib.Path(sys.argv[1]).write_text(\"escaped\")',sys.argv[2]])
+open('service-runtime-only.txt','w').write('runtime')
+sys.stderr.write('resident startup log\n'*200000); sys.stderr.flush()
 class H(http.server.BaseHTTPRequestHandler):
  def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
  def do_POST(self):
@@ -3664,6 +4373,7 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
                 "-c".to_owned(),
                 script.to_owned(),
                 port.to_string(),
+                escaped_descendant.display().to_string(),
             ],
             invoke_url: format!("http://127.0.0.1:{port}/invoke"),
             health_url: Some(format!("http://127.0.0.1:{port}/health")),
@@ -3689,9 +4399,25 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
             );
         }
         assert_eq!(runtime.residents.len(), 1);
+        assert!(
+            !home
+                .path()
+                .join("workspace/workers")
+                .join(&outcome.worker.worker_id)
+                .join("versions")
+                .join(&outcome.version)
+                .join("files/service-runtime-only.txt")
+                .exists(),
+            "resident service mutated its immutable canonical version"
+        );
 
         runtime.set_stop_all(true).await.unwrap();
         assert!(runtime.residents.is_empty());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            !escaped_descendant.exists(),
+            "resident descendant survived stop-all"
+        );
         runtime.set_stop_all(false).await.unwrap();
         let resumed = runtime
             .invoke(request(
@@ -3703,12 +4429,18 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
             .unwrap();
         assert_eq!(resumed.output.as_ref().unwrap()["index"], 2);
         assert_eq!(runtime.residents.len(), 1);
+        assert!(!escaped_descendant.exists());
 
         runtime
             .set_enabled(&outcome.worker.worker_id, false)
             .await
             .unwrap();
         assert!(runtime.residents.is_empty());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            !escaped_descendant.exists(),
+            "resident descendant survived disable"
+        );
         runtime
             .set_enabled(&outcome.worker.worker_id, true)
             .await
@@ -3723,8 +4455,77 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
             .unwrap();
         assert_eq!(enabled.output.as_ref().unwrap()["index"], 3);
         assert_eq!(runtime.residents.len(), 1);
+        assert!(!escaped_descendant.exists());
 
         runtime.shutdown().await;
+        assert!(runtime.residents.is_empty());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            !escaped_descendant.exists(),
+            "resident descendant survived runtime shutdown"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_resident_response_fails_bounded_and_disables_the_worker() {
+        let (runtime, _home) = test_runtime(None);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let script = format!(
+            r#"import http.server,sys
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'{{}}')
+ def do_POST(self):
+  self.send_response(200); self.end_headers(); self.wfile.write(b'x'*{})
+ def log_message(self,*args): pass
+http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()"#,
+            MAX_PROCESS_CAPTURE_BYTES + 1
+        );
+        let mut bundle = command_bundle(Vec::new());
+        bundle.worker_id = Some("oversized-resident".to_owned());
+        bundle.name = "Oversized Resident".to_owned();
+        bundle.description = "Resident response ceiling regression fixture".to_owned();
+        bundle.tool_name = Some("worker_oversized_resident".to_owned());
+        bundle.runner = WorkerRunner::Service {
+            command: vec![
+                "python3".to_owned(),
+                "-u".to_owned(),
+                "-c".to_owned(),
+                script,
+                port.to_string(),
+            ],
+            invoke_url: format!("http://127.0.0.1:{port}/invoke"),
+            health_url: Some(format!("http://127.0.0.1:{port}/health")),
+        };
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+        let record = runtime
+            .invoke(request(
+                &outcome.worker.worker_id,
+                json!({}),
+                "oversized-resident",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(record.status, "failed", "{record:?}");
+        assert!(
+            record
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("4194304-byte ceiling")),
+            "{record:?}"
+        );
+        assert_eq!(
+            runtime
+                .store()
+                .summary(&outcome.worker.worker_id)
+                .unwrap()
+                .unwrap()
+                .enabled,
+            false
+        );
         assert!(runtime.residents.is_empty());
     }
 
@@ -3772,9 +4573,8 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
             .child
             .as_mut()
             .expect("resident child")
-            .kill()
-            .await
-            .unwrap();
+            .terminate()
+            .await;
 
         runtime.supervise_residents().await;
 

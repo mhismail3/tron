@@ -21,9 +21,9 @@ use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
 use tron::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass, EngineError,
-    FunctionDefinition, FunctionId, Invocation, Provenance, RegisterFunction, TraceId,
-    VisibilityScope, WorkerDefinition, WorkerDisconnect, WorkerHello, WorkerId, WorkerKind,
-    WorkerProtocolMessage,
+    FunctionDefinition, FunctionId, FunctionQuery, Invocation, Provenance, RegisterFunction,
+    TraceId, VisibilityScope, WorkerDefinition, WorkerDisconnect, WorkerHello, WorkerId,
+    WorkerKind, WorkerProtocolMessage,
 };
 use tron::shared::server::context::ServerRuntimeContext;
 
@@ -847,9 +847,10 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
 }
 
 #[tokio::test]
-async fn session_create_reconstruct_and_worker_kernel_list_is_direct() {
+async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_connectivity() {
     let runtime = boot_server_with_autonomous_workers().await;
     let mut ws = connect(&runtime.url, &runtime.auth_path).await;
+    wait_for_connection_count(&runtime.server, 1).await;
     let working_directory = runtime._temp.path().join("workspace");
     std::fs::create_dir_all(&working_directory).unwrap();
 
@@ -897,6 +898,102 @@ async fn session_create_reconstruct_and_worker_kernel_list_is_direct() {
         "worker list missing: {workers}"
     );
     assert_eq!(workers["stopAll"], false);
+
+    let settings =
+        unwrap_invoke_value(invoke(&mut ws, "settings-get", "settings::get", json!({})).await);
+    assert_eq!(settings["autonomousWorkers"], true);
+
+    let upserted = unwrap_invoke_value(
+        invoke_with_context(
+            &mut ws,
+            "worker-upsert",
+            "worker_kernel::upsert",
+            json!({
+                "bundle": {
+                    "schemaVersion": "tron.worker_bundle.v1",
+                    "workerId": "baseline-echo",
+                    "name": "Baseline Echo",
+                    "description": "Echo typed input for the startup characterization fixture",
+                    "toolName": "worker_baseline_echo",
+                    "inputSchema": {"type":"object"},
+                    "outputSchema": {"type":"object"},
+                    "runner": {"kind":"command", "command":["sh", "-c", "cat"]},
+                    "triggers": [{"kind":"manual", "id":"manual"}],
+                    "provenance": [{"source":"test:worker-first-baseline"}]
+                }
+            }),
+            Some(json!({"sessionId": session_id})),
+        )
+        .await,
+    );
+    assert_eq!(
+        upserted.pointer("/worker/workerId"),
+        Some(&json!("baseline-echo"))
+    );
+
+    ws.send(Message::text(
+        json!({
+            "type": "poll",
+            "id": "worker-lifecycle-poll",
+            "topic": "worker.lifecycle",
+            "cursor": 0
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    let lifecycle = loop {
+        let response = read_json(&mut ws).await;
+        if response.get("id").and_then(Value::as_str) == Some("worker-lifecycle-poll") {
+            break response;
+        }
+    };
+    assert_eq!(lifecycle["ok"], true, "lifecycle poll failed: {lifecycle}");
+    assert!(
+        lifecycle
+            .pointer("/result/events")
+            .and_then(Value::as_array)
+            .is_some_and(|events| events.iter().any(|event| {
+                event
+                    .pointer("/event/data/worker/workerId")
+                    .and_then(Value::as_str)
+                    == Some("baseline-echo")
+            })),
+        "worker activation event missing: {lifecycle}"
+    );
+
+    let admin = ActorContext::new(
+        ActorId::new("baseline-characterization").unwrap(),
+        ActorKind::Admin,
+        AuthorityGrantId::new("transport-authenticated").unwrap(),
+    );
+    let functions = runtime
+        .server
+        .runtime_context()
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(admin),
+            include_internal: true,
+            ..FunctionQuery::default()
+        })
+        .await;
+    let model_tools = functions
+        .iter()
+        .filter(|function| function.metadata["modelPrimitive"] == true)
+        .filter_map(|function| function.metadata["modelPrimitiveName"].as_str())
+        .collect::<Vec<_>>();
+    assert!(model_tools.contains(&"worker_upsert"), "{model_tools:?}");
+    assert!(model_tools.contains(&"worker_list"), "{model_tools:?}");
+    assert!(
+        model_tools.contains(&"worker_baseline_echo"),
+        "{model_tools:?}"
+    );
+    assert!(
+        functions
+            .iter()
+            .all(|function| function.id.as_str() != "capability::execute"),
+        "removed wrapper resurfaced in the live provider catalog"
+    );
 
     runtime.server.shutdown().shutdown();
 }

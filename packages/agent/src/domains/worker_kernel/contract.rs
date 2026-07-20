@@ -93,7 +93,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         EffectClass::ExternalSideEffect,
         RiskLevel::Critical,
         json!({"type":"object","additionalProperties":false,"required":["proposalId","approvalSessionId","approvalMessageId"],"properties":{"proposalId":{"type":"string"},"approvalSessionId":{"type":"string"},"approvalMessageId":{"type":"string"}}}),
-        "Apply a tested core proposal only after verifying an explicit user-authored conversational approval.",
+        "Apply a tested core proposal only after verifying a later, unambiguous, non-negated user-authored conversational approval that names it.",
     )?);
     specs.push(spec(
         "worker_kernel::upsert",

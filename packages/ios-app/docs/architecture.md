@@ -197,13 +197,16 @@ persistent workers. It opens `WorkerConsoleSheet`, which provides:
 - detail overview with tool identity and provenance;
 - input schema plus typed JSON invocation;
 - trigger status and webhook rotation;
-- retained versions and rollback;
+- retained versions, rollback, and restoration of a retired worker from any
+  retained version (including its last active version);
 - recent runs with delivery-attempt counts, inbox, and audit history;
 - enable/disable, retirement, and confirmation-backed permanent purge.
 
 An empty console explicitly directs the user to create workers
-conversationally. Destructive purge requires confirmation. Webhook credentials
-are shown only from the mutation response that created or rotated them.
+conversationally. A retired worker does not show the invalid ordinary Enable
+action; its version rows become Restore actions that reactivate canonical
+server state. Destructive purge requires confirmation. Webhook credentials are
+shown only from the mutation response that created or rotated them.
 
 ## Chat Flow
 

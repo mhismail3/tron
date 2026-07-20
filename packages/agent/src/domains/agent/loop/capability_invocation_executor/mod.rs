@@ -30,8 +30,8 @@ use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TRIGGER_DEPTH,
+    RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
 };
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
 use crate::shared::protocol::content::CapabilityResultContent;
@@ -247,6 +247,10 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     pub provider_type: &'a str,
     pub trace_id: Option<&'a TraceId>,
     pub parent_invocation_id: Option<&'a InvocationId>,
+    /// Depth inherited from a parent worker invocation. Propagating this
+    /// engine-owned value prevents an agent-runner hop from restarting a
+    /// worker causal trace at zero.
+    pub worker_causal_depth: u32,
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -353,6 +357,7 @@ pub async fn execute_capability_invocation(
             ctx.provider_type,
             ctx.trace_id,
             ctx.parent_invocation_id,
+            ctx.worker_causal_depth,
             effective_args,
             &per_invocation_cancel,
         )
@@ -426,6 +431,7 @@ async fn execute_capability_primitive_via_engine(
     provider_type: &str,
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
+    worker_causal_depth: u32,
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
@@ -492,6 +498,10 @@ async fn execute_capability_primitive_via_engine(
                 model_primitive_name.to_owned(),
             )
             .with_runtime_metadata(RUNTIME_METADATA_TURN, turn.to_string())
+            .with_runtime_metadata(
+                RUNTIME_METADATA_TRIGGER_DEPTH,
+                worker_causal_depth.to_string(),
+            )
             .with_session_id(session_id.to_owned())
             .with_idempotency_key(idempotency_key);
     if let Some(run_id) = run_id {

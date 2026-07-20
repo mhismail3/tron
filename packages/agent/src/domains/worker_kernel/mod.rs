@@ -5,13 +5,10 @@
 //! and projected as a direct typed model tool by one `worker_upsert` call.
 //! Callers may omit a dependency's expected checksum; acquisition computes and
 //! seals it into the staged manifest and lock before the version is hashed.
-//! A model may pass a bounded staged `sourceDirectory`; the handler imports its
-//! UTF-8 tree directly into the candidate so source does not need to make a
-//! wasteful model-output round trip. Inline bundle files override imported
-//! paths, and symlinks or special files fail before candidate preparation.
-//! Filesystem bundles are canonical; the dedicated SQLite database is a
-//! rebuildable route/trigger indexes plus durable attempt, causal-trace,
-//! invocation, inbox, health, and audit ledgers.
+//! A bounded staged `sourceDirectory` imports a UTF-8 tree directly; inline
+//! files override it, while symlinks and special files fail before preparation.
+//! Filesystem bundles are canonical. SQLite holds rebuildable route/trigger
+//! indexes plus durable attempt, trace, invocation, inbox, health, and audit ledgers.
 //!
 //! ## Submodules
 //!
@@ -20,6 +17,7 @@
 //! | `contract` | Fixed direct worker-management contracts |
 //! | `handlers` | Model/client operation bindings |
 //! | `persistence` | Canonical bundles, snapshots, index reconstruction, and durable operational ledgers |
+//! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //!
@@ -34,6 +32,12 @@
 //! the unpublished candidate before rebuilding those indexes.
 //! Failure while registering an already-published direct tool disables it and
 //! records the failure rather than leaving an enabled but unreachable worker.
+//! Every canonical load verifies both `content.sha256` and the full version
+//! tree against its directory name. File and symlink targets participate in
+//! dependency and version hashes. Command, agent, and resident runners execute
+//! from disposable copies under `internal/run/`; worker writes therefore never
+//! mutate the canonical version, and an out-of-band mutation disables routing
+//! as an integrity failure before code executes.
 //! Local worker execution is deliberately not capability-authorized. Named
 //! secret values are injected only at runtime; known vault values are rejected
 //! from candidate bundles and invocation inputs, then redacted from outputs and
@@ -60,10 +64,9 @@
 //! entries, skips hidden/heavy child trees unless requested, and reports every
 //! truncation cause. An agent abort or server shutdown therefore cannot be held
 //! indefinitely by a home-directory search.
-//! A command that intentionally ignores typed stdin may close its pipe before
-//! the parent finishes writing; that broken pipe is tolerated only after a
-//! successful child exit, while other input errors and failed exits remain
-//! worker failures.
+//! Executable child I/O is concurrent and bounded. Unix child lifecycles use
+//! isolated process groups so cancellation kills background descendants too;
+//! detailed ceilings and fallback behavior belong to the `process` module.
 //! Command, smoke-test, and health-check working directories are always the
 //! bundle's `files/` directory. A dependency named `N` is acquired beneath
 //! `../dependencies/N`; its optional install command runs within that directory
@@ -78,6 +81,13 @@
 //! Unseen inbox attachment is invoked by the engine's internal runtime identity
 //! with session/trace provenance. It therefore crosses internal visibility as
 //! an engine projection and never requires or fabricates an agent grant.
+//! Agent-runner child sessions are coupled to their parent invocation by a
+//! drop guard, so timeout, disable, stop-all, or shutdown aborts the child. The
+//! inherited worker causal depth is propagated through that child and back onto
+//! every direct tool call; an agent hop cannot reset the depth-16 ceiling.
+//! Core proposal approval rejects negated or ambiguous messages. A failed
+//! approved cherry-pick is aborted and verified back at its original commit
+//! before the proposal remains in the tested state.
 
 use std::sync::Arc;
 
@@ -89,6 +99,7 @@ mod contract;
 mod core_proposals;
 mod handlers;
 mod persistence;
+mod process;
 mod runtime;
 mod types;
 

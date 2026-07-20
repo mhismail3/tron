@@ -12,6 +12,7 @@ use super::{
     persist_user_message_event, resume_prompt_session, run_agent, spawn_session_title_generation,
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+use crate::engine::RUNTIME_METADATA_TRIGGER_DEPTH;
 use crate::shared::protocol::events::{BaseEvent, error_event};
 use crate::shared::server::failure::FailureEnvelope;
 use crate::shared::server::failure::FailureOrigin;
@@ -340,6 +341,16 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         parent_invocation_id: engine_causality
             .as_ref()
             .and_then(|causality| causality.parent_invocation_id.clone()),
+        worker_causal_depth: engine_causality
+            .as_ref()
+            .and_then(|causality| {
+                causality
+                    .context
+                    .runtime_metadata
+                    .get(RUNTIME_METADATA_TRIGGER_DEPTH)
+            })
+            .and_then(|depth| depth.parse::<u32>().ok())
+            .unwrap_or(0),
         ..Default::default()
     };
 

@@ -103,6 +103,11 @@ pub struct RunContext {
     /// Parent engine invocation id for child capability/function invocations.
     #[serde(skip)]
     pub parent_invocation_id: Option<crate::engine::InvocationId>,
+    /// Worker-dispatch causal depth inherited by an agent-runner child. This
+    /// stays out of provider prompt snapshots but must be copied onto every
+    /// direct tool invocation so an agent hop cannot reset the depth ceiling.
+    #[serde(skip)]
+    pub worker_causal_depth: u32,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,

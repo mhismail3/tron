@@ -29,13 +29,42 @@ struct WorkerConsoleViewModelTests {
         #expect(repository.enabledMutations == [false])
         #expect(viewModel.selectedWorker?.enabled == false)
     }
+
+    @Test("A retired worker exposes every retained version as a restore action")
+    func retiredWorkerCanRestoreItsCurrentVersion() async throws {
+        let repository = MockWorkerKernelRepository()
+        repository.retired = true
+        repository.enabled = false
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.select("research", repository: repository)
+        let worker = try #require(viewModel.selectedWorker)
+        let version = try #require(viewModel.inspection?.versions.first)
+
+        #expect(WorkerVersionAction.resolve(worker: worker, version: version) == .restore)
+        #expect(WorkerVersionAction.restore.title == "Restore")
+
+        await viewModel.rollback(
+            to: worker.activeVersion,
+            repository: repository,
+            connectionState: .connected
+        )
+
+        #expect(repository.rollbackVersions == ["v1"])
+        #expect(viewModel.selectedWorker?.retired == false)
+        let restoredWorker = try #require(viewModel.selectedWorker)
+        #expect(WorkerVersionAction.resolve(worker: restoredWorker, version: version) == nil)
+    }
 }
 
 @MainActor
 private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var enabled = true
+    var retired = false
     var invokedWorkerIds: [String] = []
     var enabledMutations: [Bool] = []
+    var rollbackVersions: [String] = []
     var lastInput: [String: Any]?
 
     private var worker: WorkerSummaryDTO {
@@ -47,7 +76,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             runnerKind: "command",
             activeVersion: "v1",
             enabled: enabled,
-            retired: false,
+            retired: retired,
             health: enabled ? "healthy" : "disabled",
             triggerCount: 1,
             updatedAt: "2026-07-19T12:00:00Z"
@@ -121,7 +150,10 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         version: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerRollbackResultDTO {
-        WorkerRollbackResultDTO(worker: worker, webhooks: [])
+        rollbackVersions.append(version)
+        retired = false
+        enabled = true
+        return WorkerRollbackResultDTO(worker: worker, webhooks: [])
     }
 
     func retireWorker(

@@ -421,6 +421,18 @@ impl WorkerStore {
         prepared: PreparedWorker,
         write_pointer: impl FnOnce(&Path, &WorkerState) -> Result<(), String>,
     ) -> Result<UpsertOutcome, String> {
+        validate_content_version(&prepared.version)?;
+        let sealed = fs::read_to_string(prepared.staging_dir.join("content.sha256"))
+            .map_err(|error| format!("read finalized worker content hash: {error}"))?;
+        let actual = tree_version(&prepared.staging_dir)?;
+        if sealed.trim() != prepared.version || actual != prepared.version {
+            return Err(format!(
+                "worker candidate was not finalized consistently: expected {}, recorded {}, resolved {}",
+                prepared.version,
+                sealed.trim(),
+                actual
+            ));
+        }
         let worker_dir = self.root.join(&prepared.worker_id);
         let versions_dir = worker_dir.join("versions");
         fs::create_dir_all(&versions_dir)
@@ -717,17 +729,41 @@ impl WorkerStore {
         let state = self
             .read_state(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let (bundle, version_dir) =
+            self.load_verified_bundle(worker_id, &state.active_version, "active")?;
+        let summary = self.summary_from_state_bundle(&state, &bundle)?;
+        Ok(ActiveWorker {
+            summary,
+            bundle,
+            version_dir,
+        })
+    }
+
+    /// Load the active contract from the rebuildable index for pre-dispatch
+    /// schema validation. Execution always follows with `load_version`, which
+    /// verifies the canonical filesystem tree before running any code.
+    pub fn load_indexed_active(&self, worker_id: &str) -> Result<ActiveWorker, String> {
+        validate_identifier(worker_id, "workerId")?;
+        let summary = self
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        validate_content_version(&summary.active_version)?;
+        let manifest: String = self
+            .connection()?
+            .query_row(
+                "SELECT manifest_json FROM worker_versions WHERE worker_id=?1 AND version=?2",
+                params![worker_id, summary.active_version],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("load indexed worker manifest: {error}"))?;
+        let bundle: WorkerBundle = serde_json::from_str(&manifest)
+            .map_err(|error| format!("decode indexed worker manifest: {error}"))?;
+        validate_bundle(&bundle)?;
         let version_dir = self
             .root
             .join(worker_id)
             .join("versions")
-            .join(&state.active_version);
-        let bundle: WorkerBundle = serde_json::from_slice(
-            &fs::read(version_dir.join("manifest.json"))
-                .map_err(|error| format!("read active worker manifest: {error}"))?,
-        )
-        .map_err(|error| format!("decode active worker manifest: {error}"))?;
-        let summary = self.summary_from_state_bundle(&state, &bundle)?;
+            .join(&summary.active_version);
         Ok(ActiveWorker {
             summary,
             bundle,
@@ -739,12 +775,7 @@ impl WorkerStore {
         let mut state = self
             .read_state(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
-        let version_dir = self.root.join(worker_id).join("versions").join(version);
-        let bundle: WorkerBundle = serde_json::from_slice(
-            &fs::read(version_dir.join("manifest.json"))
-                .map_err(|error| format!("read worker version manifest: {error}"))?,
-        )
-        .map_err(|error| format!("decode worker version manifest: {error}"))?;
+        let (bundle, version_dir) = self.load_verified_bundle(worker_id, version, "worker")?;
         state.active_version = version.to_owned();
         let summary = self.summary_from_state_bundle(&state, &bundle)?;
         Ok(ActiveWorker {
@@ -752,6 +783,37 @@ impl WorkerStore {
             bundle,
             version_dir,
         })
+    }
+
+    fn load_verified_bundle(
+        &self,
+        worker_id: &str,
+        version: &str,
+        context: &str,
+    ) -> Result<(WorkerBundle, PathBuf), String> {
+        validate_identifier(worker_id, "workerId")?;
+        validate_content_version(version)?;
+        let version_dir = self.root.join(worker_id).join("versions").join(version);
+        let recorded = fs::read_to_string(version_dir.join("content.sha256"))
+            .map_err(|error| format!("read {context} worker content hash: {error}"))?;
+        if recorded.trim() != version {
+            return Err(format!(
+                "{context} worker version '{worker_id}@{version}' has a mismatched content.sha256"
+            ));
+        }
+        let actual = tree_version(&version_dir)?;
+        if actual != version {
+            return Err(format!(
+                "{context} worker version '{worker_id}@{version}' failed integrity verification: content resolves to {actual}"
+            ));
+        }
+        let bundle: WorkerBundle = serde_json::from_slice(
+            &fs::read(version_dir.join("manifest.json"))
+                .map_err(|error| format!("read {context} worker manifest: {error}"))?,
+        )
+        .map_err(|error| format!("decode {context} worker manifest: {error}"))?;
+        validate_bundle(&bundle)?;
+        Ok((bundle, version_dir))
     }
 
     fn summary_from_state_bundle(
@@ -928,23 +990,7 @@ impl WorkerStore {
         worker_id: &str,
         version: &str,
     ) -> Result<(WorkerSummary, Vec<WebhookCredential>), String> {
-        let manifest_path = self
-            .root
-            .join(worker_id)
-            .join("versions")
-            .join(version)
-            .join("manifest.json");
-        if !manifest_path.is_file() {
-            return Err(format!(
-                "worker version '{worker_id}@{version}' was not found"
-            ));
-        }
-        let bundle: WorkerBundle = serde_json::from_slice(
-            &fs::read(&manifest_path)
-                .map_err(|error| format!("read rollback worker manifest: {error}"))?,
-        )
-        .map_err(|error| format!("decode rollback worker manifest: {error}"))?;
-        validate_bundle(&bundle)?;
+        let bundle = self.load_version(worker_id, version)?.bundle;
         let prior = self
             .read_state(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
@@ -1099,6 +1145,7 @@ impl WorkerStore {
     }
 
     pub fn purge(&self, worker_id: &str) -> Result<bool, String> {
+        validate_identifier(worker_id, "workerId")?;
         let summary = self
             .summary(worker_id)?
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
@@ -1874,6 +1921,7 @@ impl WorkerStore {
     }
 
     fn read_state(&self, worker_id: &str) -> Result<Option<WorkerState>, String> {
+        validate_identifier(worker_id, "workerId")?;
         let path = self.root.join(worker_id).join("worker.json");
         if !path.exists() {
             return Ok(None);
@@ -2114,6 +2162,13 @@ fn validate_identifier(value: &str, field: &str) -> Result<(), String> {
         return Err(format!(
             "{field} must contain only ASCII letters, numbers, '-' or '_'"
         ));
+    }
+    Ok(())
+}
+
+fn validate_content_version(value: &str) -> Result<(), String> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("worker version must be a 64-character hexadecimal content hash".to_owned());
     }
     Ok(())
 }
@@ -2380,7 +2435,11 @@ fn tree_version(root: &Path) -> Result<String, String> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("hash worker tree: {error}"))?;
     files.retain(|entry| {
-        entry.file_type().is_file() && entry.file_name().to_string_lossy() != "content.sha256"
+        let is_root_hash = entry
+            .path()
+            .strip_prefix(root)
+            .is_ok_and(|relative| relative == Path::new("content.sha256"));
+        (entry.file_type().is_file() || entry.file_type().is_symlink()) && !is_root_hash
     });
     files.sort_by(|left, right| left.path().cmp(right.path()));
     let mut digest = Sha256::new();
@@ -2391,11 +2450,22 @@ fn tree_version(root: &Path) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
         digest.update(relative.to_string_lossy().as_bytes());
         digest.update([0]);
-        digest
-            .update(fs::read(entry.path()).map_err(|error| {
+        if entry.file_type().is_symlink() {
+            digest.update(
+                fs::read_link(entry.path())
+                    .map_err(|error| {
+                        format!("hash worker symlink {}: {error}", entry.path().display())
+                    })?
+                    .to_string_lossy()
+                    .as_bytes(),
+            );
+            digest.update([0xfe]);
+        } else {
+            digest.update(fs::read(entry.path()).map_err(|error| {
                 format!("hash worker file {}: {error}", entry.path().display())
             })?);
-        digest.update([0xff]);
+            digest.update([0xff]);
+        }
     }
     Ok(hex::encode(digest.finalize()))
 }
@@ -2505,7 +2575,13 @@ mod tests {
     fn prepare_and_publish_is_atomic_and_versioned() {
         let temp = tempfile::tempdir().unwrap();
         let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
-        let prepared = store.prepare(bundle(), None).unwrap();
+        let mut candidate = bundle();
+        candidate.files.insert(
+            "content.sha256".to_owned(),
+            "worker-owned content".to_owned(),
+        );
+        let mut prepared = store.prepare(candidate, None).unwrap();
+        store.finalize(&mut prepared).unwrap();
         let version = prepared.version.clone();
         let outcome = store.publish(prepared).unwrap();
 
@@ -2583,7 +2659,8 @@ mod tests {
     fn failed_candidate_can_be_abandoned_without_changing_active_version() {
         let temp = tempfile::tempdir().unwrap();
         let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
-        let first = store.prepare(bundle(), None).unwrap();
+        let mut first = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut first).unwrap();
         let active = first.version.clone();
         let _ = store.publish(first).unwrap();
         let mut next = bundle();
@@ -2683,7 +2760,8 @@ mod tests {
     fn semantic_overlap_updates_existing_worker_even_when_candidate_suggests_a_new_id() {
         let temp = tempfile::tempdir().unwrap();
         let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
-        let first = store.prepare(bundle(), None).unwrap();
+        let mut first = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut first).unwrap();
         let first = store.publish(first).unwrap();
 
         let mut overlapping = bundle();
@@ -2863,6 +2941,33 @@ mod tests {
     }
 
     #[test]
+    fn canonical_version_tampering_and_non_hash_paths_are_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut prepared = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut prepared).unwrap();
+        let outcome = store.publish(prepared).unwrap();
+        let version_dir = temp
+            .path()
+            .join("workspace/workers/recent-research/versions")
+            .join(&outcome.version);
+        fs::write(
+            version_dir.join("files/content.sha256"),
+            "tampered worker-owned content",
+        )
+        .unwrap();
+
+        let error = store.load_active("recent-research").unwrap_err();
+        assert!(error.contains("failed integrity verification"), "{error}");
+        let traversal = store
+            .rollback("recent-research", "../../worker.json")
+            .unwrap_err();
+        assert!(traversal.contains("content hash"), "{traversal}");
+        let worker_traversal = store.load_active("../recent-research").unwrap_err();
+        assert!(worker_traversal.contains("workerId"), "{worker_traversal}");
+    }
+
+    #[test]
     fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
         let temp = tempfile::tempdir().unwrap();
         let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
@@ -2950,7 +3055,8 @@ mod tests {
     fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
         let temp = tempfile::tempdir().unwrap();
         let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
-        let prepared = store.prepare(bundle(), None).unwrap();
+        let mut prepared = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut prepared).unwrap();
         let outcome = store.publish(prepared).unwrap();
         for (key, trigger) in [("background", "schedule"), ("manual", "manual")] {
             let (run, _) = store

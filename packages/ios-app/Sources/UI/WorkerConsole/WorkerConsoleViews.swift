@@ -1,5 +1,24 @@
 import SwiftUI
 
+enum WorkerVersionAction: Equatable {
+    case rollback
+    case restore
+
+    var title: String {
+        switch self {
+        case .rollback: "Rollback"
+        case .restore: "Restore"
+        }
+    }
+
+    static func resolve(worker: WorkerSummaryDTO, version: WorkerVersionDTO) -> Self? {
+        if worker.retired {
+            return .restore
+        }
+        return version.version == worker.activeVersion ? nil : .rollback
+    }
+}
+
 struct WorkerConsoleDashboardBand: View {
     let viewModel: WorkerConsoleViewModel
     let action: () -> Void
@@ -296,8 +315,8 @@ private struct WorkerDetailSheet: View {
                     Text(String(version.version.prefix(12)))
                         .font(.system(.caption, design: .monospaced))
                     Spacer()
-                    if version.version != worker.activeVersion {
-                        Button("Rollback") {
+                    if let action = WorkerVersionAction.resolve(worker: worker, version: version) {
+                        Button(action.title) {
                             Task {
                                 await viewModel.rollback(
                                     to: version.version,
@@ -306,6 +325,7 @@ private struct WorkerDetailSheet: View {
                                 )
                             }
                         }
+                        .disabled(viewModel.isMutating)
                     } else {
                         Text("active").foregroundStyle(.tronSuccess)
                     }
@@ -361,17 +381,23 @@ private struct WorkerDetailSheet: View {
     private func lifecycle(_ worker: WorkerSummaryDTO) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Lifecycle").font(.headline)
-            Button(worker.enabled ? "Disable and stop" : "Enable") {
-                Task {
-                    await viewModel.setEnabled(
-                        !worker.enabled,
-                        repository: repository,
-                        connectionState: connectionState
-                    )
+            if worker.retired {
+                Text("Restore any retained version above to reactivate this worker.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Purge permanently", role: .destructive) { confirmPurge = true }
+            } else {
+                Button(worker.enabled ? "Disable and stop" : "Enable") {
+                    Task {
+                        await viewModel.setEnabled(
+                            !worker.enabled,
+                            repository: repository,
+                            connectionState: connectionState
+                        )
+                    }
                 }
-            }
-            .buttonStyle(.bordered)
-            if !worker.retired {
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isMutating)
                 Button("Retire", role: .destructive) {
                     Task {
                         await viewModel.retire(
@@ -380,8 +406,7 @@ private struct WorkerDetailSheet: View {
                         )
                     }
                 }
-            } else {
-                Button("Purge permanently", role: .destructive) { confirmPurge = true }
+                .disabled(viewModel.isMutating)
             }
         }
     }

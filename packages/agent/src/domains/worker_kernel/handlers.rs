@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::Invocation;
-use crate::engine::RUNTIME_METADATA_WORKING_DIRECTORY;
+use crate::engine::{RUNTIME_METADATA_TRIGGER_DEPTH, RUNTIME_METADATA_WORKING_DIRECTORY};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
@@ -17,6 +17,7 @@ use super::contract::{
     DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS, DEFAULT_TEXT_SEARCH_WALK_ENTRIES,
     MAX_TEXT_SEARCH_TIMEOUT_SECONDS, MAX_TEXT_SEARCH_WALK_ENTRIES,
 };
+use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree, wait_with_bounded_output};
 use super::runtime::WorkerRuntime;
 use super::types::{InvokeRequest, WorkerBundle};
 
@@ -381,39 +382,41 @@ async fn process_run(invocation: &Invocation, deps: &Deps) -> Result<Value, Stri
         .and_then(Value::as_u64)
         .unwrap_or(300)
         .min(7_200);
-    let mut child = tokio::process::Command::new(program)
+    let mut process = tokio::process::Command::new(program);
+    process
         .args(arguments)
         .current_dir(&cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| format!("start process: {error}"))?;
-    if let Some(input) = invocation.payload.get("stdin")
-        && let Some(mut stdin) = child.stdin.take()
-    {
-        use tokio::io::AsyncWriteExt;
-        let bytes = input.as_str().map_or_else(
+        .stderr(Stdio::piped());
+    let child =
+        ProcessTree::spawn(&mut process).map_err(|error| format!("start process: {error}"))?;
+    let input = invocation.payload.get("stdin").map(|input| {
+        input.as_str().map_or_else(
             || serde_json::to_vec(input).unwrap_or_default(),
             |text| text.as_bytes().to_vec(),
-        );
-        stdin
-            .write_all(&bytes)
-            .await
-            .map_err(|error| error.to_string())?;
+        )
+    });
+    let output = wait_with_bounded_output(
+        child,
+        input,
+        Duration::from_secs(timeout),
+        format!("process timed out after {timeout} seconds"),
+        MAX_PROCESS_CAPTURE_BYTES,
+    )
+    .await
+    .map_err(|error| format!("wait for process: {error}"))?;
+    if let Some((kind, error)) = output.input_error
+        && kind != std::io::ErrorKind::BrokenPipe
+    {
+        return Err(format!("write process input: {error}"));
     }
-    let output = tokio::time::timeout(Duration::from_secs(timeout), child.wait_with_output())
-        .await
-        .map_err(|_| format!("process timed out after {timeout} seconds"))?
-        .map_err(|error| format!("wait for process: {error}"))?;
-    let max = 4_194_304;
-    let stdout = String::from_utf8_lossy(&output.stdout[..output.stdout.len().min(max)]);
-    let stderr = String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(max)]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     Ok(json!({
         "command":command,"cwd":cwd,"status":output.status.code(),"success":output.status.success(),
         "stdout":stdout,"stderr":stderr,
-        "stdoutTruncated":output.stdout.len()>max,"stderrTruncated":output.stderr.len()>max
+        "stdoutTruncated":output.stdout_truncated,"stderrTruncated":output.stderr_truncated
     }))
 }
 
@@ -430,7 +433,7 @@ async fn web_fetch(invocation: &Invocation, deps: &Deps) -> Result<Value, String
         .and_then(Value::as_u64)
         .unwrap_or(1_048_576)
         .min(4_194_304) as usize;
-    let response = reqwest::Client::builder()
+    let mut response = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|error| error.to_string())?
@@ -445,11 +448,24 @@ async fn web_fetch(invocation: &Invocation, deps: &Deps) -> Result<Value, String
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned);
-    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
-    let truncated = bytes.len() > max;
-    let content = String::from_utf8_lossy(&bytes[..bytes.len().min(max)]).into_owned();
+    let mut content = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(max as u64) as usize,
+    );
+    let mut total = 0_u64;
+    let mut truncated = false;
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        total = total.saturating_add(chunk.len() as u64);
+        let remaining = max.saturating_sub(content.len());
+        let retained = remaining.min(chunk.len());
+        content.extend_from_slice(&chunk[..retained]);
+        truncated |= retained < chunk.len();
+    }
+    let content = String::from_utf8_lossy(&content).into_owned();
     Ok(
-        json!({"url":final_url,"status":status.as_u16(),"contentType":content_type,"bytes":bytes.len(),"truncated":truncated,"content":content}),
+        json!({"url":final_url,"status":status.as_u16(),"contentType":content_type,"bytes":total,"truncated":truncated,"content":content}),
     )
 }
 
@@ -742,7 +758,7 @@ async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, St
                 causal_depth: invocation
                     .causal_context
                     .runtime_metadata
-                    .get("workerCausalDepth")
+                    .get(RUNTIME_METADATA_TRIGGER_DEPTH)
                     .and_then(|value| value.parse::<u32>().ok())
                     .unwrap_or(0),
                 trigger_kind: "manual".to_owned(),

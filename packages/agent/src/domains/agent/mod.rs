@@ -26,7 +26,9 @@
 //!    direct typed kernel tools plus a compact relevant-worker projection. It
 //!    never supplies the removed `capability::execute` wrapper.
 //! 6. Provider tool calls are written as session truth and invoked as child
-//!    trusted-local typed engine invocations.
+//!    trusted-local typed engine invocations. An agent-runner child also
+//!    inherits its parent worker's causal depth, and the executor copies that
+//!    depth onto nested direct tools so composition cannot reset loop limits.
 //! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;
 //!    transport code does not own agent behavior.
 //! 8. The backend emits structured `component` + `agent_event` logs across

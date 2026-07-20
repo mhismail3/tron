@@ -249,6 +249,7 @@ fn rust_worker_kernel_keeps_composition_root_thin() {
         "packages/agent/src/domains/worker_kernel/handlers.rs",
         "packages/agent/src/domains/worker_kernel/persistence/migration.rs",
         "packages/agent/src/domains/worker_kernel/persistence/mod.rs",
+        "packages/agent/src/domains/worker_kernel/process.rs",
         "packages/agent/src/domains/worker_kernel/runtime.rs",
         "packages/agent/src/domains/worker_kernel/persistence/snapshot.rs",
         "packages/agent/src/domains/worker_kernel/persistence/store.rs",

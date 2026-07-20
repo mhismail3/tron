@@ -60,6 +60,7 @@ fn execution_context<'a>(
         provider_type: "test-provider",
         trace_id: None,
         parent_invocation_id: None,
+        worker_causal_depth: 0,
     }
 }
 
@@ -164,6 +165,7 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
     let mut context = execution_context(&surface, &emitter, &cancel, &aborts, &host);
     context.trace_id = Some(&trace);
     context.parent_invocation_id = Some(&parent);
+    context.worker_causal_depth = 7;
     let call = CapabilityInvocationDraft::new(
         "direct-call",
         "direct_test",
@@ -179,6 +181,14 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
     assert!(invocation.causal_context.is_trusted_local());
     assert_eq!(invocation.causal_context.trace_id, trace);
     assert_eq!(invocation.causal_context.parent_invocation_id, Some(parent));
+    assert_eq!(
+        invocation
+            .causal_context
+            .runtime_metadata
+            .get(crate::engine::RUNTIME_METADATA_TRIGGER_DEPTH)
+            .map(String::as_str),
+        Some("7")
+    );
     assert!(
         invocation
             .causal_context

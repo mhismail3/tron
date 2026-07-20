@@ -882,6 +882,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             provider_type: provider_name,
             trace_id: run_context.engine_trace_id.as_ref(),
             parent_invocation_id: run_context.parent_invocation_id.as_ref(),
+            worker_causal_depth: run_context.worker_causal_depth,
         },
     )
     .await;

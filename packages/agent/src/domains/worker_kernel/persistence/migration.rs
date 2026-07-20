@@ -547,7 +547,11 @@ fn tree_version(root: &Path) -> Result<String, String> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     entries.retain(|entry| {
-        entry.file_type().is_file() && entry.file_name().to_string_lossy() != "content.sha256"
+        let is_root_hash = entry
+            .path()
+            .strip_prefix(root)
+            .is_ok_and(|relative| relative == Path::new("content.sha256"));
+        (entry.file_type().is_file() || entry.file_type().is_symlink()) && !is_root_hash
     });
     entries.sort_by(|left, right| left.path().cmp(right.path()));
     let mut digest = Sha256::new();
@@ -558,8 +562,18 @@ fn tree_version(root: &Path) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
         digest.update(relative.to_string_lossy().as_bytes());
         digest.update([0]);
-        digest.update(fs::read(entry.path()).map_err(|error| error.to_string())?);
-        digest.update([0xff]);
+        if entry.file_type().is_symlink() {
+            digest.update(
+                fs::read_link(entry.path())
+                    .map_err(|error| error.to_string())?
+                    .to_string_lossy()
+                    .as_bytes(),
+            );
+            digest.update([0xfe]);
+        } else {
+            digest.update(fs::read(entry.path()).map_err(|error| error.to_string())?);
+            digest.update([0xff]);
+        }
     }
     Ok(hex::encode(digest.finalize()))
 }

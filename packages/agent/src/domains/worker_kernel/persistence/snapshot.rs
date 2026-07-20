@@ -26,6 +26,12 @@ struct SnapshotFile {
     relative_path: String,
     sha256: String,
     bytes: u64,
+    #[serde(default = "default_snapshot_file_kind")]
+    kind: String,
+}
+
+fn default_snapshot_file_kind() -> String {
+    "file".to_owned()
 }
 
 pub(super) fn ensure_pre_worker_snapshot(
@@ -108,6 +114,12 @@ pub(super) fn verify_snapshot(snapshot: &Path) -> io::Result<()> {
         return Err(io::Error::other("unsupported worker state snapshot format"));
     }
     for file in &manifest.files {
+        if !matches!(file.kind.as_str(), "file" | "symlink") {
+            return Err(io::Error::other(format!(
+                "snapshot entry has unsupported kind '{}' for {}",
+                file.kind, file.relative_path
+            )));
+        }
         let relative = safe_snapshot_relative(&file.relative_path)?;
         let path = snapshot.join(relative);
         let bytes = fs::read(&path)?;
@@ -116,6 +128,20 @@ pub(super) fn verify_snapshot(snapshot: &Path) -> io::Result<()> {
                 "snapshot checksum mismatch for {}",
                 file.relative_path
             )));
+        }
+        if file.kind == "symlink" {
+            let target = String::from_utf8(bytes).map_err(|error| {
+                io::Error::other(format!(
+                    "snapshot symlink target is invalid for {}: {error}",
+                    file.relative_path
+                ))
+            })?;
+            if target.is_empty() || target.contains('\0') {
+                return Err(io::Error::other(format!(
+                    "snapshot symlink target is invalid for {}",
+                    file.relative_path
+                )));
+            }
         }
     }
     Ok(())
@@ -169,7 +195,12 @@ pub(super) fn restore_snapshot(snapshot: &Path, home: &Path) -> io::Result<PathB
             fs::create_dir_all(parent)?;
         }
         let temporary = target.with_extension(format!("restore-{}", uuid::Uuid::now_v7()));
-        fs::copy(source, &temporary)?;
+        if file.kind == "symlink" {
+            let link_target = String::from_utf8(fs::read(source)?).map_err(io::Error::other)?;
+            create_symlink(Path::new(&link_target), &temporary)?;
+        } else {
+            fs::copy(source, &temporary)?;
+        }
         fs::rename(temporary, target)?;
     }
     let worker_index = home
@@ -223,7 +254,7 @@ fn snapshot_database(
     connection
         .execute_batch(&format!("VACUUM INTO '{escaped}'"))
         .map_err(io::Error::other)?;
-    record_file(home, destination, &target, files)
+    record_file(home, destination, &target, "file", files)
 }
 
 fn snapshot_tree(
@@ -237,19 +268,31 @@ fn snapshot_tree(
     }
     for entry in WalkDir::new(source).follow_links(false) {
         let entry = entry.map_err(io::Error::other)?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
         let relative = entry
             .path()
             .strip_prefix(source_root)
             .map_err(io::Error::other)?;
         let target = destination.join(relative);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)?;
+        if entry.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), &target)?;
+            record_file(source_root, destination, &target, "file", files)?;
+        } else if entry.file_type().is_symlink() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let link_target = fs::read_link(entry.path())?;
+            let link_target = link_target.to_str().ok_or_else(|| {
+                io::Error::other(format!(
+                    "snapshot symlink target is not UTF-8: {}",
+                    entry.path().display()
+                ))
+            })?;
+            fs::write(&target, link_target.as_bytes())?;
+            record_file(source_root, destination, &target, "symlink", files)?;
         }
-        fs::copy(entry.path(), &target)?;
-        record_file(source_root, destination, &target, files)?;
     }
     Ok(())
 }
@@ -258,6 +301,7 @@ fn record_file(
     source_root: &Path,
     snapshot_root: &Path,
     target: &Path,
+    kind: &str,
     files: &mut Vec<SnapshotFile>,
 ) -> io::Result<()> {
     let bytes = fs::read(target)?;
@@ -269,8 +313,22 @@ fn record_file(
         relative_path: relative.display().to_string(),
         sha256: hex::encode(Sha256::digest(&bytes)),
         bytes: bytes.len() as u64,
+        kind: kind.to_owned(),
     });
     Ok(())
+}
+
+#[cfg(unix)]
+fn create_symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(unix))]
+fn create_symlink(_target: &Path, link: &Path) -> io::Result<()> {
+    Err(io::Error::other(format!(
+        "snapshot symlink restoration is unsupported on this platform: {}",
+        link.display()
+    )))
 }
 
 #[cfg(test)]
@@ -285,6 +343,9 @@ mod tests {
         fs::create_dir_all(home.join("workspace/workers/old")).unwrap();
         fs::write(home.join("profiles/user/profile.toml"), "[settings]\n").unwrap();
         fs::write(home.join("workspace/workers/old/state"), "before").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("state", home.join("workspace/workers/old/current-state"))
+            .unwrap();
         let snapshot = ensure_pre_worker_snapshot(home, "test-profile")
             .unwrap()
             .unwrap();
@@ -302,6 +363,10 @@ mod tests {
                 .iter()
                 .any(|step| step.contains("workers.sqlite"))
         );
+        #[cfg(unix)]
+        assert!(manifest.files.iter().any(|file| {
+            file.relative_path.ends_with("current-state") && file.kind == "symlink"
+        }));
 
         fs::write(home.join("workspace/workers/old/state"), "after").unwrap();
         let recovery = restore_snapshot(&snapshot, home).unwrap();
@@ -309,6 +374,17 @@ mod tests {
             fs::read_to_string(home.join("workspace/workers/old/state")).unwrap(),
             "before"
         );
+        #[cfg(unix)]
+        {
+            let link = home.join("workspace/workers/old/current-state");
+            assert!(
+                fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+            assert_eq!(fs::read_link(link).unwrap(), PathBuf::from("state"));
+        }
         assert_eq!(
             fs::read_to_string(recovery.join("workspace/workers/old/state")).unwrap(),
             "after"

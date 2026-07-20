@@ -153,6 +153,12 @@ the canonical filesystem pointer, so startup reconstruction returns any crash in
 that interval to the prior active version. If the pointer write reports an
 error, Tron removes the unpublished candidate before reconstruction, including
 its stale version index. Prior versions remain available for explicit rollback.
+Every canonical load recomputes the complete tree hash and checks the recorded
+`content.sha256`; a changed file or symlink target is an integrity failure.
+Runners receive disposable copies under `internal/run/`, so their ordinary
+working-directory writes cannot change the canonical version. A detected
+out-of-band mutation disables the worker and produces a durable failed run and
+inbox result before worker code executes.
 
 ## Runners
 
@@ -161,7 +167,9 @@ its stale version index. Prior versions remain available for explicit rollback.
 An agent worker combines immutable instructions with typed input and output. It
 creates a child session through the existing model loop, waits for terminal
 session truth, extracts the final assistant result, normalizes JSON, validates
-the output schema, and records the result.
+the output schema, and records the result. The child is aborted if its parent
+invocation is dropped by timeout, disable, stop-all, or shutdown. Worker causal
+depth survives the agent hop and is attached to every nested direct tool call.
 
 ### Command runner
 
@@ -173,7 +181,12 @@ process sandbox. A successful command may intentionally ignore its input; Tron
 does not turn the resulting closed stdin pipe into a false worker failure, but
 all other write errors and non-success child exits remain failures. From this
 working directory, a declared dependency named `N` is available at
-`../dependencies/N`.
+`../dependencies/N`. Stdin and both output pipes are handled concurrently.
+Tron drains all output while retaining at most 4 MiB from each pipe; oversized
+stdout fails the invocation instead of allocating without bound or deadlocking.
+On Unix the command and every descendant execute in a dedicated process group;
+timeout, disable, stop-all, autonomy shutdown, and server shutdown kill the
+whole group rather than leaving a background helper running.
 
 ### Resident-service runner
 
@@ -184,7 +197,9 @@ invocations. An unexpected process exit disables the worker immediately; three
 consecutive failed health probes do the same without treating a single
 transient probe as terminal. The runtime also terminates a service when the
 worker is disabled, retired, replaced, stop-all is engaged, autonomy is turned
-off, or Tron shuts down.
+off, or Tron shuts down. A resident runs from a service-lifetime disposable
+copy and its HTTP result has a 4-MiB hard ceiling. Its dedicated Unix process
+group is terminated as one unit, including shell- or service-spawned children.
 
 ## Dependency and Secret Isolation
 
@@ -193,7 +208,9 @@ Every dependency requires an exact revision string. A caller may supply an
 expected `sha256:<hex>` tree checksum or omit it so acquisition computes and
 seals the actual digest. Optional install commands run from the acquired
 dependency directory with worker-local Python, npm, Cargo, Ruby, and PATH roots
-under `dependency-runtime/`.
+under `dependency-runtime/`. File contents and symlink targets participate in
+the digest. HTTP dependencies stream directly to disk and fail beyond 128 MiB;
+the limit is enforced during transfer rather than after buffering the body.
 
 Secret bindings resolve logical names from:
 
@@ -405,9 +422,12 @@ Creation never modifies the running tree or binary.
 
 `core_proposal_apply` accepts a proposal id plus session and message ids. It
 loads that later persisted event and requires a user-authored message created
-after the proposal that explicitly names and approves/applies it. Only then is
-the proposal commit cherry-picked into the named repository. The approval
-message is recorded directly; no capability grant is minted.
+after the proposal that explicitly names and affirmatively approves/applies it.
+Messages containing negation or rejection language do not count as approval.
+Only then is the proposal commit cherry-picked into the named repository. A
+conflicting cherry-pick is aborted and the original live-tree commit is
+verified before the proposal remains `tested`. The approval message is recorded
+directly; no capability grant is minted.
 
 ## State Snapshot and Legacy Import
 
@@ -415,7 +435,9 @@ Before a profile first opens the worker schema, Tron creates a verified snapshot
 under `~/.tron/internal/snapshots/`. The manifest records format/schema,
 source home/profile, creation time, every relative path, byte count, SHA-256,
 and restoration instructions. It captures profiles, prior worker files, and a
-consistent `VACUUM INTO` copy of the primary SQLite database.
+consistent `VACUUM INTO` copy of the primary SQLite database. Symlink targets
+are checksum-covered snapshot entries and are restored as symlinks rather than
+silently omitted.
 
 Offline commands:
 
@@ -551,7 +573,8 @@ It exposes:
 - worker list, health, runner, active content version, provenance, and triggers;
 - JSON-schema-aware typed invocation;
 - runs with delivery-attempt counts, durable inbox, and audit history;
-- enable/disable, rollback, retirement, purge, webhook rotation, and stop-all;
+- enable/disable, rollback, retained-version restoration after retirement,
+  purge, webhook rotation, and stop-all;
 - live refresh from `worker.lifecycle` and `worker.invocations` cursors.
 
 Conversational creation remains the authoring interface; the client does not
@@ -576,6 +599,9 @@ the rebuild action installs the requested configuration's `iphoneos` artifact.
 
 Deterministic tests cover:
 
+- real authenticated WebSocket startup, session reconstruction, settings,
+  worker activation, lifecycle events, client connectivity, direct provider
+  tools, and continued absence of `capability::execute`;
 - atomic publication, failed candidates, immutable hashes, overlap, rollback,
   retirement, purge, and reconstruction;
 - command, agent, and resident-service runners;
@@ -595,7 +621,10 @@ Deterministic tests cover:
 - the real loopback HTTP webhook route, including token success/failure,
   durable dispatch, and remote-peer rejection;
 - remote auth, snapshot/restore, legacy import reporting, and isolated core
-  proposal approval;
+  proposal approval, including negation rejection and cherry-pick cleanup;
+- canonical tree tamper detection, disposable runner workspaces, bounded
+  concurrent process I/O, process-group termination of background descendants,
+  bounded resident responses, and symlink-preserving dependency/runtime copies;
 - iOS protocol, repository, view-model, settings, and build parity.
 
 The motivating replay lives at
