@@ -20,6 +20,7 @@
 //! | `persistence` | Canonical bundles, snapshots, index reconstruction, and durable operational ledgers |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
+//! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //! # Invariants
 //!
@@ -32,6 +33,16 @@
 //! the unpublished candidate before rebuilding those indexes.
 //! Failure while registering an already-published direct tool disables it and
 //! records the failure rather than leaving an enabled but unreachable worker.
+//! One typed core-primitive manifest owns the fixed provider names, groups, and
+//! stable order. Every provider request records the exact catalog revision,
+//! function revisions, selected worker versions, reasons, and surface hash.
+//! Provider calls pin the advertised function revision and immutable worker
+//! version; catalog preparation rejects drift and lets the next internal turn
+//! resolve a fresh surface. Session discovery promotions live in durable scoped
+//! engine state, so restart does not erase a worker the session already found.
+//! The authenticated `engine::surface_snapshot` read returns that same
+//! provider-neutral projection plus canonical profile worker summaries; it is
+//! not itself model vocabulary.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute
@@ -92,7 +103,9 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
+use crate::domains::registration::worker::{
+    DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
+};
 
 mod contract;
 mod core_proposals;
@@ -100,9 +113,13 @@ mod handlers;
 mod persistence;
 mod process;
 mod runtime;
+mod surface;
 mod types;
 
 pub(crate) use runtime::WorkerRuntime;
+#[cfg(test)]
+pub(crate) use surface::SurfaceToolSnapshot;
+pub(crate) use surface::{EngineSurfaceSnapshot, promote_worker_for_session, resolve_tool_surface};
 
 pub(crate) fn list_state_snapshots() -> Result<Vec<std::path::PathBuf>, String> {
     persistence::list_snapshots(&crate::shared::foundation::paths::tron_home())
@@ -120,6 +137,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["worker.lifecycle", "worker.invocati
 
 pub(crate) struct Registration {
     pub(crate) module: DomainWorkerModule,
+    pub(crate) engine_functions: Vec<DomainFunctionRegistration>,
     pub(crate) runtime: Arc<WorkerRuntime>,
 }
 
@@ -164,40 +182,17 @@ pub(crate) fn registration(
             .split_once("::")
             .map(|(_, operation)| operation)
             .unwrap_or_default();
-        let model_name = match operation {
-            "filesystem_read" => Some("filesystem_read"),
-            "filesystem_list" => Some("filesystem_list"),
-            "filesystem_search_text" => Some("filesystem_search_text"),
-            "filesystem_write" => Some("filesystem_write"),
-            "process_run" => Some("process_run"),
-            "web_fetch" => Some("web_fetch"),
-            "core_proposal_create" => Some("core_proposal_create"),
-            "core_proposal_list" => Some("core_proposal_list"),
-            "core_proposal_inspect" => Some("core_proposal_inspect"),
-            "core_proposal_apply" => Some("core_proposal_apply"),
-            "upsert" => Some("worker_upsert"),
-            "discover" => Some("worker_discover"),
-            "list" => Some("worker_list"),
-            "inspect" => Some("worker_inspect"),
-            "invoke" => Some("worker_invoke"),
-            "stop" => Some("worker_stop"),
-            "disable" => Some("worker_disable"),
-            "enable" => Some("worker_enable"),
-            "rollback" => Some("worker_rollback"),
-            "retire" => Some("worker_retire"),
-            "purge" => Some("worker_purge"),
-            "inbox" => Some("worker_inbox"),
-            "runs" => Some("worker_runs"),
-            "webhook_rotate" => Some("worker_webhook_rotate"),
-            "stop_all" => Some("worker_stop_all"),
-            _ => None,
-        };
-        if let Some(model_name) = model_name {
+        if let Some(descriptor) = contract::core_primitive_for_operation(operation) {
             let _ = metadata.insert("modelPrimitive".to_owned(), Value::Bool(autonomous));
             let _ = metadata.insert(
                 "modelPrimitiveName".to_owned(),
-                Value::String(model_name.to_owned()),
+                Value::String(descriptor.model_name.to_owned()),
             );
+            let _ = metadata.insert(
+                "modelPrimitiveGroup".to_owned(),
+                Value::String(descriptor.group.as_str().to_owned()),
+            );
+            let _ = metadata.insert("capabilityOrder".to_owned(), Value::from(descriptor.order));
             let _ = metadata.insert("contextPrimerLevel".to_owned(), json!("primitive"));
         }
         registration.definition.metadata = Value::Object(metadata);
@@ -222,16 +217,25 @@ pub(crate) fn registration(
                 .collect(),
         )
         .map_err(crate::engine::EngineError::HandlerFailed)?;
+    let (engine_functions, functions): (Vec<_>, Vec<_>) = functions
+        .into_iter()
+        .partition(|registration| registration.definition.id.namespace() == "engine");
     let module = crate::domains::registration::worker::domain_worker_module(
         "worker_kernel",
         STREAM_TOPICS,
         functions,
     )?;
-    Ok(Registration { module, runtime })
+    Ok(Registration {
+        module,
+        engine_functions,
+        runtime,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
@@ -246,5 +250,57 @@ mod tests {
             "worker_upsert"
         );
         assert_eq!(fixture["expectedOutcome"]["directTypedTool"], true);
+    }
+
+    #[test]
+    fn core_primitive_manifest_is_exact_unique_and_grouped() {
+        let descriptors = contract::core_primitives();
+        assert_eq!(descriptors.len(), 25);
+        assert_eq!(
+            descriptors
+                .iter()
+                .filter(|descriptor| descriptor.group == contract::CorePrimitiveGroup::Host)
+                .count(),
+            6
+        );
+        assert_eq!(
+            descriptors
+                .iter()
+                .filter(|descriptor| {
+                    descriptor.group == contract::CorePrimitiveGroup::WorkerControl
+                })
+                .count(),
+            15
+        );
+        assert_eq!(
+            descriptors
+                .iter()
+                .filter(|descriptor| {
+                    descriptor.group == contract::CorePrimitiveGroup::CoreChange
+                })
+                .count(),
+            4
+        );
+        assert_eq!(
+            descriptors
+                .iter()
+                .map(|descriptor| descriptor.operation_key)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            descriptors.len()
+        );
+        assert_eq!(
+            descriptors
+                .iter()
+                .map(|descriptor| descriptor.model_name)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            descriptors.len()
+        );
+        assert!(
+            descriptors
+                .windows(2)
+                .all(|pair| pair[0].order < pair[1].order)
+        );
     }
 }

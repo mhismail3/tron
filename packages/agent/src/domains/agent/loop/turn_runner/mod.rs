@@ -357,6 +357,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
         capability_count = primitive_surface.capabilities.len(),
         turn_stopping_capability_count = primitive_surface.turn_stopping_capabilities.len(),
+        catalog_revision = primitive_surface.snapshot.catalog_revision,
+        surface_hash = %primitive_surface.snapshot.surface_hash,
+        fixed_tool_count = primitive_surface.snapshot.fixed_tool_count,
+        projected_worker_count = primitive_surface.snapshot.projected_worker_count,
+        available_worker_count = primitive_surface.snapshot.available_worker_count,
         "provider primitive surface resolved"
     );
     let worker_inbox_context = primitive_surface::take_worker_inbox_context(
@@ -376,6 +381,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         server_origin,
         primitive_surface.capabilities.clone(),
     );
+    let surface_context = primitive_surface::surface_context_primer(&primitive_surface.snapshot);
+    let system_prompt = context.system_prompt.get_or_insert_with(String::new);
+    if !system_prompt.is_empty() {
+        system_prompt.push_str("\n\n");
+    }
+    system_prompt.push_str(&surface_context);
     if let Some(worker_inbox_context) = worker_inbox_context {
         let system_prompt = context.system_prompt.get_or_insert_with(String::new);
         if !system_prompt.is_empty() {

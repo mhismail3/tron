@@ -63,6 +63,52 @@ struct WorkerKernelClientTests {
         ])
     }
 
+    @Test("Engine surface introspection is typed and session scoped")
+    func engineSurfaceIntrospectionIsTypedAndSessionScoped() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "engine::surface_snapshot")
+            #expect((payload as? EngineSurfaceSnapshotRequestDTO)?.relevanceQuery == "research")
+            #expect(options.context?.sessionId == "session-1")
+            return EngineIntrospectionSnapshotDTO(
+                format: 1,
+                autonomousWorkers: true,
+                dispatchStopped: false,
+                surface: AgentToolSurfaceDTO(
+                    format: 1,
+                    catalogRevision: 42,
+                    surfaceHash: "abc123",
+                    fixedToolCount: 25,
+                    projectedWorkerCount: 1,
+                    availableWorkerCount: 3,
+                    tools: [
+                        EngineSurfaceToolDTO(
+                            modelName: "worker_research",
+                            functionId: "worker_kernel::dynamic_research",
+                            functionRevision: 2,
+                            ownerWorker: "worker_kernel",
+                            workerId: "research",
+                            workerVersion: "v2",
+                            primitiveGroup: nil,
+                            selectionReason: "relevance"
+                        )
+                    ]
+                ),
+                workers: [worker()]
+            )
+        }
+
+        let snapshot = try await client.engineSurfaceSnapshot(
+            sessionId: "session-1",
+            relevanceQuery: "research"
+        )
+
+        #expect(snapshot.surface.catalogRevision == 42)
+        #expect(snapshot.surface.tools.first?.selectionReason == "relevance")
+        #expect(snapshot.workers.first?.workerId == "research")
+    }
+
     @Test("Worker writes use direct kernel functions and explicit idempotency")
     func writesUseDirectKernelFunctions() async throws {
         let transport = connectedTransport()

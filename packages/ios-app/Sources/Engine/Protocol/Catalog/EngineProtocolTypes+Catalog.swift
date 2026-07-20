@@ -53,3 +53,38 @@ struct CatalogChangeDTO: Codable, Equatable, Sendable {
         case timestamp
     }
 }
+
+struct EngineSurfaceSnapshotRequestDTO: Codable, Equatable, Sendable {
+    let relevanceQuery: String?
+}
+
+struct EngineSurfaceToolDTO: Codable, Equatable, Identifiable, Sendable {
+    let modelName: String
+    let functionId: String
+    let functionRevision: UInt64
+    let ownerWorker: String
+    let workerId: String?
+    let workerVersion: String?
+    let primitiveGroup: String?
+    let selectionReason: String
+
+    var id: String { "\(functionId)@\(functionRevision)" }
+}
+
+struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
+    let format: UInt32
+    let catalogRevision: UInt64
+    let surfaceHash: String
+    let fixedToolCount: UInt64
+    let projectedWorkerCount: UInt64
+    let availableWorkerCount: UInt64
+    let tools: [EngineSurfaceToolDTO]
+}
+
+struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
+    let format: UInt32
+    let autonomousWorkers: Bool
+    let dispatchStopped: Bool
+    let surface: AgentToolSurfaceDTO
+    let workers: [WorkerSummaryDTO]
+}

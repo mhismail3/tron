@@ -19,6 +19,55 @@ async fn sync_invocation_succeeds_and_records_revisions() {
 }
 
 #[tokio::test]
+async fn invocation_rejects_a_function_surface_that_changed_after_advertisement() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let mut first = read_function("alpha::read", "w1");
+    first.metadata = json!({"workerVersion":"worker-v1"});
+    let advertised_revision = catalog
+        .register_function(first.clone(), Some(handler()), true)
+        .unwrap();
+
+    let mut second = first;
+    second.metadata = json!({"workerVersion":"worker-v2"});
+    let current_revision = catalog
+        .register_function(second, Some(handler()), true)
+        .unwrap();
+    let invocation = Invocation::new_sync(
+        fid("alpha::read"),
+        json!({"x": 1}),
+        causal()
+            .with_runtime_metadata(
+                crate::engine::RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
+                advertised_revision.0.to_string(),
+            )
+            .with_runtime_metadata(
+                crate::engine::RUNTIME_METADATA_EXPECTED_WORKER_VERSION,
+                "worker-v1",
+            ),
+    );
+
+    let result = catalog.invoke_sync(invocation).await;
+
+    assert!(matches!(
+        result.error,
+        Some(EngineError::StaleFunctionSurface {
+            expected_revision,
+            actual_revision,
+            ref expected_worker_version,
+            ref actual_worker_version,
+            ..
+        }) if expected_revision == advertised_revision.0
+            && actual_revision == current_revision.0
+            && expected_worker_version.as_deref() == Some("worker-v1")
+            && actual_worker_version.as_deref() == Some("worker-v2")
+    ));
+    assert_eq!(catalog.ledger_invocations().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn invocation_ledger_records_success_error_and_full_causality() {
     let mut catalog = LiveCatalog::new();
     catalog

@@ -3,31 +3,58 @@
 //! Providers see only direct typed kernel and persistent-worker functions.
 //! The removed `capability::execute` wrapper is never projected.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::sync::{OnceLock, RwLock};
+use std::collections::{BTreeMap, HashSet};
 
 use serde_json::Value;
 
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, CausalContext, ENGINE_INTERNAL_INVOKE_SCOPE,
-    EngineHostHandle, FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery, Invocation,
-    InvocationId, TraceId,
+    ActorId, ActorKind, CausalContext, ENGINE_INTERNAL_INVOKE_SCOPE, EngineHostHandle,
+    FunctionDefinition, FunctionId, Invocation, InvocationId, TraceId,
 };
 use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
-const MAX_RELEVANT_WORKERS: usize = 12;
+#[cfg(test)]
+pub(crate) async fn promote_worker_for_session(
+    host: &EngineHostHandle,
+    session_id: &str,
+    worker_id: &str,
+) {
+    crate::domains::worker_kernel::promote_worker_for_session(host, session_id, worker_id)
+        .await
+        .expect("promote worker for test session");
+}
 
-static SESSION_WORKER_PROMOTIONS: OnceLock<RwLock<BTreeMap<String, BTreeSet<String>>>> =
-    OnceLock::new();
+/// Compact provider-turn awareness of the exact live engine surface.
+pub(crate) fn surface_context_primer(
+    snapshot: &crate::domains::worker_kernel::EngineSurfaceSnapshot,
+) -> String {
+    let projected = snapshot
+        .tools
+        .iter()
+        .filter(|tool| tool.worker_id.is_some())
+        .map(|tool| match &tool.worker_version {
+            Some(version) => format!("{}@{}", tool.model_name, short_hash(version)),
+            None => tool.model_name.clone(),
+        })
+        .collect::<Vec<_>>();
+    let projected = if projected.is_empty() {
+        "none".to_owned()
+    } else {
+        projected.join(", ")
+    };
+    format!(
+        "Engine surface r{} · {} fixed tools · {}/{} workers projected · surface {} · projected: {}. Use worker_discover when the task needs an available worker not projected here.",
+        snapshot.catalog_revision,
+        snapshot.fixed_tool_count,
+        snapshot.projected_worker_count,
+        snapshot.available_worker_count,
+        short_hash(&snapshot.surface_hash),
+        projected,
+    )
+}
 
-pub(crate) fn promote_worker_for_session(session_id: &str, worker_id: &str) {
-    let promotions = SESSION_WORKER_PROMOTIONS.get_or_init(|| RwLock::new(BTreeMap::new()));
-    if let Ok(mut promotions) = promotions.write() {
-        let _ = promotions
-            .entry(session_id.to_owned())
-            .or_default()
-            .insert(worker_id.to_owned());
-    }
+fn short_hash(value: &str) -> &str {
+    value.get(..8).unwrap_or(value)
 }
 
 /// Atomically claims notable unseen background-worker results and formats a
@@ -108,6 +135,8 @@ pub struct ResolvedPrimitiveSurface {
     pub capabilities: Vec<ModelCapability>,
     pub targets_by_name: BTreeMap<String, PrimitiveExecutionTarget>,
     pub turn_stopping_capabilities: HashSet<String>,
+    /// Exact provider-neutral catalog evidence used to construct this surface.
+    pub snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot,
 }
 
 #[cfg(test)]
@@ -125,13 +154,26 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
     workspace_id: Option<&str>,
     relevance_query: Option<&str>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
-    let resolved =
-        resolve_primitive_targets(host, session_id, workspace_id, relevance_query).await?;
+    let resolved = crate::domains::worker_kernel::resolve_tool_surface(
+        host,
+        session_id,
+        workspace_id,
+        relevance_query,
+    )
+    .await?;
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
-    let mut turn_stopping_capabilities = resolved.turn_stopping_capabilities;
+    let mut turn_stopping_capabilities = HashSet::new();
 
-    for target in resolved.targets {
+    for resolved_function in resolved.functions {
+        let target = PrimitiveExecutionTarget {
+            model_capability_id: resolved_function.model_name,
+            function_id: resolved_function.definition.id.clone(),
+            stops_turn: resolved_function.stops_turn,
+            execution_mode: execution_mode(&resolved_function.definition),
+            trusted_local: resolved_function.trusted_local,
+            function: resolved_function.definition,
+        };
         let capability = model_capability_schema(&target);
         if target.stops_turn {
             let _ = turn_stopping_capabilities.insert(target.model_capability_id.clone());
@@ -144,193 +186,8 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
         capabilities,
         targets_by_name,
         turn_stopping_capabilities,
+        snapshot: resolved.snapshot,
     })
-}
-
-struct ResolvedPrimitiveTargets {
-    targets: Vec<PrimitiveExecutionTarget>,
-    turn_stopping_capabilities: HashSet<String>,
-}
-
-async fn resolve_primitive_targets(
-    host: &EngineHostHandle,
-    session_id: &str,
-    workspace_id: Option<&str>,
-    relevance_query: Option<&str>,
-) -> Result<ResolvedPrimitiveTargets, String> {
-    let actor_id =
-        ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?;
-    let mut actor =
-        ActorContext::new(actor_id, ActorKind::Agent).with_session_id(session_id.to_owned());
-    if let Some(workspace_id) = workspace_id {
-        actor = actor.with_workspace_id(workspace_id.to_owned());
-    }
-    let mut functions = host
-        .discover(&FunctionQuery {
-            actor: Some(actor),
-            health: Some(FunctionHealth::Healthy),
-            ..FunctionQuery::default()
-        })
-        .await;
-    let turn_stopping_capabilities = turn_stopping_primitive_names(&functions);
-    functions.sort_by_key(|function| {
-        (
-            function
-                .metadata
-                .get("capabilityOrder")
-                .and_then(Value::as_u64)
-                .unwrap_or(u64::MAX),
-            function.id.as_str().to_owned(),
-        )
-    });
-    let promoted = SESSION_WORKER_PROMOTIONS
-        .get()
-        .and_then(|promotions| promotions.read().ok())
-        .and_then(|promotions| promotions.get(session_id).cloned())
-        .unwrap_or_default();
-    let query_terms = relevance_query.map(relevance_terms).unwrap_or_default();
-    let mut dynamic = functions
-        .iter()
-        .filter(|function| metadata_bool(function, "workerDynamic").unwrap_or(false))
-        .map(|function| {
-            let worker_id = function
-                .metadata
-                .get("workerId")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let searchable = format!(
-                "{} {} {}",
-                function.description,
-                function
-                    .metadata
-                    .get("workerRouting")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-                function
-                    .metadata
-                    .get("workerProvenance")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-            )
-            .to_ascii_lowercase();
-            let relevance = query_terms
-                .iter()
-                .filter(|term| searchable.contains(term.as_str()))
-                .count();
-            let successes = function
-                .metadata
-                .pointer("/workerSuccessEvidence/completedRuns")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            (
-                promoted.contains(worker_id),
-                relevance,
-                successes,
-                function.id.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    dynamic.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| right.2.cmp(&left.2))
-            .then_with(|| left.3.as_str().cmp(right.3.as_str()))
-    });
-    let selected_dynamic = dynamic
-        .into_iter()
-        .filter(|(is_promoted, relevance, _, _)| {
-            *is_promoted || query_terms.is_empty() || *relevance > 0
-        })
-        .take(MAX_RELEVANT_WORKERS)
-        .map(|(_, _, _, id)| id)
-        .collect::<BTreeSet<_>>();
-
-    let mut seen_names = BTreeSet::new();
-    let mut targets = Vec::new();
-    for function in functions {
-        if function.id.namespace() == "rpc" || function.visibility.as_str() == "internal" {
-            continue;
-        }
-        if !is_provider_primitive(&function) || function.request_schema.is_none() {
-            continue;
-        }
-        if metadata_bool(&function, "workerDynamic").unwrap_or(false)
-            && !selected_dynamic.contains(&function.id)
-        {
-            continue;
-        }
-        let Some(model_capability_id) = model_capability_id(&function) else {
-            continue;
-        };
-        let trusted_local = function
-            .metadata
-            .get("modelPrimitive")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        if !trusted_local || !seen_names.insert(model_capability_id.clone()) {
-            continue;
-        }
-        targets.push(PrimitiveExecutionTarget {
-            stops_turn: metadata_bool(&function, "stopsTurn").unwrap_or(false),
-            execution_mode: execution_mode(&function),
-            model_capability_id,
-            function_id: function.id.clone(),
-            trusted_local,
-            function,
-        });
-    }
-    Ok(ResolvedPrimitiveTargets {
-        targets,
-        turn_stopping_capabilities,
-    })
-}
-
-fn relevance_terms(value: &str) -> BTreeSet<String> {
-    value
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .map(str::to_ascii_lowercase)
-        .filter(|term| term.len() > 2)
-        .collect()
-}
-
-fn is_provider_primitive(function: &FunctionDefinition) -> bool {
-    function
-        .metadata
-        .get("modelPrimitive")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn model_capability_id(function: &FunctionDefinition) -> Option<String> {
-    function
-        .metadata
-        .get("modelPrimitiveName")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn metadata_bool(function: &FunctionDefinition, key: &str) -> Option<bool> {
-    function.metadata.get(key).and_then(Value::as_bool)
-}
-
-fn turn_stopping_primitive_names(functions: &[FunctionDefinition]) -> HashSet<String> {
-    functions
-        .iter()
-        .filter(|function| function_stops_turn(function))
-        .filter_map(model_capability_id)
-        .collect()
-}
-
-fn function_stops_turn(function: &FunctionDefinition) -> bool {
-    metadata_bool(function, "stopsTurn").unwrap_or(false)
-        || function
-            .metadata
-            .get("lifecycle")
-            .and_then(|value| value.get("stopsTurn"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
 }
 
 fn execution_mode(function: &FunctionDefinition) -> ExecutionMode {
@@ -572,6 +429,27 @@ mod tests {
         assert!(surface.targets_by_name.contains_key("recent_research"));
         assert!(!surface.targets_by_name.contains_key("format_notes"));
         assert!(surface.targets_by_name["recent_research"].trusted_local);
+        assert_eq!(surface.snapshot.fixed_tool_count, 1);
+        assert_eq!(surface.snapshot.projected_worker_count, 1);
+        assert_eq!(surface.snapshot.available_worker_count, 2);
+        assert!(
+            surface
+                .snapshot
+                .tools
+                .iter()
+                .any(|tool| tool.model_name == "worker_upsert")
+        );
+        assert_eq!(
+            surface
+                .snapshot
+                .tools
+                .iter()
+                .find(|tool| tool.model_name == "recent_research")
+                .expect("relevant worker")
+                .selection_reason,
+            "relevance"
+        );
+        assert_eq!(surface.snapshot.surface_hash.len(), 64);
         let schema = surface
             .capabilities
             .iter()
@@ -615,7 +493,7 @@ mod tests {
         .expect("surface before promotion");
         assert!(!before.targets_by_name.contains_key("format_notes_promoted"));
 
-        promote_worker_for_session("promotion-session", "formatter-promoted");
+        promote_worker_for_session(&host, "promotion-session", "formatter-promoted").await;
         let after = resolve_provider_primitive_surface_for_query(
             &host,
             "promotion-session",
@@ -625,5 +503,97 @@ mod tests {
         .await
         .expect("surface after promotion");
         assert!(after.targets_by_name.contains_key("format_notes_promoted"));
+        assert_eq!(
+            after
+                .snapshot
+                .tools
+                .iter()
+                .find(|tool| tool.model_name == "format_notes_promoted")
+                .expect("promoted tool")
+                .selection_reason,
+            "session_promotion"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_discovery_promotion_survives_engine_restart() {
+        let directory = tempfile::tempdir().expect("temporary engine state");
+        let path = directory.path().join("engine.sqlite3");
+        {
+            let host = EngineHostHandle::open_sqlite(&path).expect("durable host");
+            host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
+                .expect("worker kernel");
+            register_worker_primitive(
+                &host,
+                "dynamic_durable_formatter",
+                "durable_formatter",
+                "Format prose notes into a clean document",
+                true,
+                "durable-formatter",
+                serde_json::json!({"keywords": ["format", "document"]}),
+            );
+            promote_worker_for_session(&host, "durable-session", "durable-formatter").await;
+        }
+
+        let reopened = EngineHostHandle::open_sqlite(&path).expect("reopened durable host");
+        reopened
+            .register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
+            .expect("reopened worker kernel");
+        register_worker_primitive(
+            &reopened,
+            "dynamic_durable_formatter",
+            "durable_formatter",
+            "Format prose notes into a clean document",
+            true,
+            "durable-formatter",
+            serde_json::json!({"keywords": ["format", "document"]}),
+        );
+
+        let surface = resolve_provider_primitive_surface_for_query(
+            &reopened,
+            "durable-session",
+            None,
+            Some("astronomy ephemeris"),
+        )
+        .await
+        .expect("surface after restart");
+        assert_eq!(
+            surface
+                .snapshot
+                .tools
+                .iter()
+                .find(|tool| tool.model_name == "durable_formatter")
+                .expect("durably promoted tool")
+                .selection_reason,
+            "session_promotion"
+        );
+    }
+
+    #[test]
+    fn surface_primer_is_compact_and_explains_hidden_workers() {
+        let primer =
+            surface_context_primer(&crate::domains::worker_kernel::EngineSurfaceSnapshot {
+                format: 1,
+                catalog_revision: 42,
+                surface_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    .to_owned(),
+                fixed_tool_count: 25,
+                projected_worker_count: 1,
+                available_worker_count: 7,
+                tools: vec![crate::domains::worker_kernel::SurfaceToolSnapshot {
+                    model_name: "worker_recent_research".to_owned(),
+                    function_id: "worker_kernel::dynamic_recent".to_owned(),
+                    function_revision: 2,
+                    owner_worker: "worker_kernel".to_owned(),
+                    worker_id: Some("recent".to_owned()),
+                    worker_version: Some("abcdef1234567890".to_owned()),
+                    primitive_group: None,
+                    selection_reason: "relevance".to_owned(),
+                }],
+            });
+        assert!(primer.contains("r42"));
+        assert!(primer.contains("1/7 workers"));
+        assert!(primer.contains("worker_recent_research@abcdef12"));
+        assert!(primer.contains("worker_discover"));
     }
 }

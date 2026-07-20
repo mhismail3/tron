@@ -600,6 +600,20 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
             "target": target,
             "reason": reason
         }),
+        EngineError::StaleFunctionSurface {
+            function_id,
+            expected_revision,
+            actual_revision,
+            expected_worker_version,
+            actual_worker_version,
+        } => json!({
+            "kind": "stale_function_surface",
+            "functionId": function_id,
+            "expectedRevision": expected_revision,
+            "actualRevision": actual_revision,
+            "expectedWorkerVersion": expected_worker_version,
+            "actualWorkerVersion": actual_worker_version,
+        }),
         EngineError::PolicyViolation(message) => {
             json!({"kind": "policy_violation", "message": message})
         }

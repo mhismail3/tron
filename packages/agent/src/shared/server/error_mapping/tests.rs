@@ -10,8 +10,8 @@ use crate::shared::server::failure::{
     ENGINE_DELIVERY_MODE_NOT_ALLOWED, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID,
     ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED,
     ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
-    ENGINE_STORED_INVOCATION_ERROR, ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory,
-    FailureOrigin, RUNTIME_CANCELLED,
+    ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
+    ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory, FailureOrigin, RUNTIME_CANCELLED,
 };
 
 fn assert_embedded_failure(
@@ -139,6 +139,17 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             },
             "INVALID_VISIBILITY_PROMOTION",
             FailureCategory::InvalidRequest,
+        ),
+        (
+            EngineError::StaleFunctionSurface {
+                function_id: "demo::run".to_owned(),
+                expected_revision: 1,
+                actual_revision: 2,
+                expected_worker_version: Some("v1".to_owned()),
+                actual_worker_version: Some("v2".to_owned()),
+            },
+            ENGINE_STALE_FUNCTION_SURFACE,
+            FailureCategory::Conflict,
         ),
         (
             EngineError::PolicyViolation("denied".to_owned()),

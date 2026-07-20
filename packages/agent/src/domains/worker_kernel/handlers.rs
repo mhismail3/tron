@@ -79,6 +79,7 @@ operation_bindings! {
         "runs" => |invocation, deps| { response(invocation, runs(invocation, deps).await) },
         "webhook_rotate" => |invocation, deps| { response(invocation, rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { response(invocation, stop_all(invocation, deps).await) },
+        "surface_snapshot" => |invocation, deps| { response(invocation, engine_surface_snapshot(invocation, deps).await) },
         "webhook_invoke" => |invocation, deps| { response(invocation, webhook(invocation, deps).await) },
     ];
 }
@@ -110,6 +111,19 @@ async fn core_proposal_create(invocation: &Invocation, deps: &Deps) -> Result<Va
             .await?,
     )
     .map_err(|error| error.to_string())
+}
+
+async fn engine_surface_snapshot(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    deps.runtime
+        .engine_surface_snapshot(
+            invocation.causal_context.session_id.as_deref(),
+            invocation.causal_context.workspace_id.as_deref(),
+            invocation
+                .payload
+                .get("relevanceQuery")
+                .and_then(Value::as_str),
+        )
+        .await
 }
 
 async fn core_proposal_list(_invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -532,10 +546,12 @@ async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
         .and_then(Value::as_str);
     let outcome = deps.runtime.upsert(bundle, predecessor).await?;
     if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
-        crate::domains::agent::r#loop::primitive_surface::promote_worker_for_session(
+        crate::domains::worker_kernel::promote_worker_for_session(
+            deps.runtime.host(),
             session_id,
             &outcome.worker.worker_id,
-        );
+        )
+        .await?;
     }
     let mut response = serde_json::to_value(outcome).map_err(|error| error.to_string())?;
     if let (Some(response), Some((file_count, bytes))) = (response.as_object_mut(), source_import) {
@@ -699,10 +715,12 @@ async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String>
     workers.truncate(limit);
     if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
         for (_, _, worker, _, _) in &workers {
-            crate::domains::agent::r#loop::primitive_surface::promote_worker_for_session(
+            crate::domains::worker_kernel::promote_worker_for_session(
+                deps.runtime.host(),
                 session_id,
                 &worker.worker_id,
-            );
+            )
+            .await?;
         }
     }
     Ok(json!({

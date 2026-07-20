@@ -44,6 +44,12 @@ The engine still uses generic words such as “capability invocation” in provi
 tool-call events and client rendering. Those names describe the model protocol;
 they do not imply the removed authorization or operation-catalog system.
 
+The model-facing fixed surface currently has 25 direct primitives grouped as
+six host operations, fifteen worker-control operations, and four core-change
+operations. A single typed manifest owns their provider names, groups, and
+stable order; registration, provider projection, introspection, and exact-set
+tests do not maintain parallel name lists.
+
 ## Autonomy Modes
 
 `autonomousWorkers` is a profile setting.
@@ -365,10 +371,27 @@ provenance, completed-run, and last-success summary. Those observations are
 therefore available to the model choosing among the relevant tools, rather than
 being hidden selection metadata.
 
-At each model turn Tron ranks dynamic workers by explicit session promotion,
-query overlap, recent successes, and identity, selecting at most 12. A
-`worker_discover` result promotes matching workers into that session's live
-tool surface without a restart. A newly upserted worker registers immediately.
+At each provider request boundary, the worker-kernel-owned resolver captures the
+catalog revision and ranks dynamic workers by explicit session promotion, query
+overlap, recent successes, and identity, selecting at most 12. It records the
+exact fixed functions, selected worker versions, selection reasons, and a stable
+surface hash. The model receives a compact revision/count/projected-worker
+primer in addition to native direct tool schemas. A `worker_discover` result
+promotes matching workers into that session's next internal turn without a
+restart; promotions are session-scoped durable engine state and survive server
+restarts. A newly upserted worker registers immediately.
+
+Each model-originated invocation carries the function revision and immutable
+worker version that were advertised, plus the catalog revision and surface hash
+as causal audit metadata. Catalog preparation rejects any changed contract with
+`ENGINE_STALE_FUNCTION_SURFACE`; it never sends old provider arguments through
+a newer schema. The resulting recoverable tool error advances the agent to a
+freshly resolved internal turn.
+
+Authenticated clients may call `engine::surface_snapshot` with optional session
+invocation context. The typed response returns the same provider-neutral surface
+evidence plus canonical profile worker summaries and stop/autonomy state. The
+operation is deliberately not projected as a model tool.
 
 ## Local Authority and Provenance
 
@@ -711,11 +734,12 @@ prove that accepted worker workflows remain uninterrupted.
 ## Source Owners
 
 - Worker kernel: `packages/agent/src/domains/worker_kernel/`
-- Provider tool selection: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
+- Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface.rs`
+- Provider schema adaptation: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
 - Trusted-local execution: `packages/agent/src/domains/agent/loop/capability_invocation_executor/`
 - Profile settings: `packages/agent/src/domains/settings/profile/types/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
-- iOS worker protocol: `packages/ios-app/Sources/Engine/Protocol/WorkerKernel/`
+- iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/Catalog/` and `WorkerKernel/`
 - iOS Worker Console: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
 
 Nearest `mod.rs` documentation and focused tests are the implementation-level

@@ -11,9 +11,9 @@ use crate::shared::server::failure::{
     ENGINE_DELIVERY_MODE_NOT_ALLOWED, ENGINE_DOMAIN_FAILURE, ENGINE_HANDLER_FAILED,
     ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE,
     ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
-    ENGINE_STORED_INVOCATION_ERROR, ENGINE_UNSUPPORTED_DELIVERY_MODE,
-    ENGINE_WORKER_TRANSPORT_FAILURE, FailureCategory, FailureEnvelope, FailureOrigin,
-    RUNTIME_CANCELLED,
+    ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
+    ENGINE_UNSUPPORTED_DELIVERY_MODE, ENGINE_WORKER_TRANSPORT_FAILURE, FailureCategory,
+    FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::Value;
 
@@ -212,6 +212,27 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             "functionId": function_id,
             "target": target,
             "reason": reason,
+        }))),
+        EngineError::StaleFunctionSurface {
+            function_id,
+            expected_revision,
+            actual_revision,
+            expected_worker_version,
+            actual_worker_version,
+        } => FailureEnvelope::new(
+            ENGINE_STALE_FUNCTION_SURFACE,
+            FailureCategory::Conflict,
+            error.to_string(),
+            true,
+            true,
+            FailureOrigin::Engine,
+        )
+        .with_details(Some(serde_json::json!({
+            "functionId": function_id,
+            "expectedRevision": expected_revision,
+            "actualRevision": actual_revision,
+            "expectedWorkerVersion": expected_worker_version,
+            "actualWorkerVersion": actual_worker_version,
         }))),
         EngineError::PolicyViolation(message) => FailureEnvelope::new(
             ENGINE_POLICY_VIOLATION,

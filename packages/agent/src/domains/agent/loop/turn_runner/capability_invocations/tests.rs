@@ -252,6 +252,7 @@ async fn phase_engine_surface_with_mode(
             capabilities: Vec::new(),
             targets_by_name,
             turn_stopping_capabilities: HashSet::new(),
+            snapshot: Default::default(),
         },
     )
 }

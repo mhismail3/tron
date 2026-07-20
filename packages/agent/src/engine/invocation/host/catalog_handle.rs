@@ -183,6 +183,23 @@ impl EngineHostHandle {
         self.inner.lock().await.catalog.discover_functions(query)
     }
 
+    /// Discover visible functions and capture the matching catalog revision
+    /// under one host lock.
+    ///
+    /// Provider surfaces use this instead of separate discovery/revision calls
+    /// so their audit snapshot identifies the exact catalog view from which
+    /// tool contracts were selected.
+    pub async fn discover_with_revision(
+        &self,
+        query: &FunctionQuery,
+    ) -> (CatalogRevision, Vec<FunctionDefinition>) {
+        let host = self.inner.lock().await;
+        (
+            host.catalog.revision(),
+            host.catalog.discover_functions(query),
+        )
+    }
+
     /// Inspect a visible function through the host boundary.
     pub async fn inspect_function(
         &self,

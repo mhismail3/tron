@@ -12,6 +12,7 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::invocation::model::{
     InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
+    RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION, RUNTIME_METADATA_EXPECTED_WORKER_VERSION,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::WorkerId;
@@ -96,7 +97,8 @@ impl LiveCatalog {
 
         invocation.causal_context.catalog_revision = self.revision;
 
-        if let Err(err) = validate_policy(&function, &invocation)
+        if let Err(err) = validate_advertised_surface(&function, &invocation)
+            .and_then(|_| validate_policy(&function, &invocation))
             .and_then(|_| self.validate_invocation_grant(&function, &invocation))
         {
             let result = InvocationResult::error(
@@ -474,4 +476,42 @@ impl LiveCatalog {
         }
         result
     }
+}
+
+fn validate_advertised_surface(
+    function: &FunctionDefinition,
+    invocation: &Invocation,
+) -> Result<()> {
+    let Some(expected_revision) = invocation
+        .causal_context
+        .runtime_metadata(RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION)
+    else {
+        return Ok(());
+    };
+    let expected_revision = expected_revision.parse::<u64>().map_err(|_| {
+        EngineError::PolicyViolation(format!(
+            "invalid runtime function revision pin for {}",
+            function.id
+        ))
+    })?;
+    let expected_worker_version = invocation
+        .causal_context
+        .runtime_metadata(RUNTIME_METADATA_EXPECTED_WORKER_VERSION)
+        .map(ToOwned::to_owned);
+    let actual_worker_version = function
+        .metadata
+        .get("workerVersion")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    if expected_revision == function.revision.0 && expected_worker_version == actual_worker_version
+    {
+        return Ok(());
+    }
+    Err(EngineError::StaleFunctionSurface {
+        function_id: function.id.to_string(),
+        expected_revision,
+        actual_revision: function.revision.0,
+        expected_worker_version,
+        actual_worker_version,
+    })
 }

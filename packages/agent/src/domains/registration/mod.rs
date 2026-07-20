@@ -66,6 +66,7 @@ impl DomainLifecycleActivation {
 
 struct DomainComposition {
     modules: Vec<DomainWorkerModule>,
+    engine_functions: Vec<DomainFunctionRegistration>,
     activation: DomainLifecycleActivation,
 }
 
@@ -75,6 +76,7 @@ pub(crate) fn register_domain_workers_for_context(
 ) -> EngineResult<DomainLifecycleActivation> {
     let DomainComposition {
         modules,
+        engine_functions,
         activation,
     } = domain_worker_modules(ctx)?;
     let handle = &ctx.engine_host;
@@ -88,6 +90,9 @@ pub(crate) fn register_domain_workers_for_context(
             )?;
         }
     }
+    for function in engine_functions {
+        handle.register_function_for_setup(function.definition, Some(function.handler), false)?;
+    }
     Ok(activation)
 }
 
@@ -98,6 +103,7 @@ pub(crate) async fn register_domain_workers_for_runtime_context(
 ) -> EngineResult<DomainLifecycleActivation> {
     let DomainComposition {
         modules,
+        engine_functions,
         activation,
     } = domain_worker_modules(ctx)?;
     let handle = &ctx.engine_host;
@@ -109,6 +115,11 @@ pub(crate) async fn register_domain_workers_for_runtime_context(
                 .await?;
         }
     }
+    for function in engine_functions {
+        handle
+            .register_function(function.definition, Some(function.handler), false)
+            .await?;
+    }
     Ok(activation)
 }
 
@@ -116,6 +127,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
     let deps = DomainRegistrationContext::from_context(ctx);
     let worker_kernel_registration = worker_kernel::registration(&deps)?;
     let worker_kernel_runtime = worker_kernel_registration.runtime.clone();
+    let engine_functions = worker_kernel_registration.engine_functions;
     let mut modules = vec![
         system::worker_module(&deps)?,
         worker_kernel_registration.module,
@@ -134,16 +146,41 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
     ];
     modules.extend(model::worker_modules(&deps)?);
     validate_domain_composition(&modules)?;
+    validate_engine_extension_functions(&engine_functions)?;
     for module in &modules {
         validate_domain_stream_topics(module)?;
     }
     Ok(DomainComposition {
         modules,
+        engine_functions,
         activation: DomainLifecycleActivation {
             worker_kernel: worker_kernel_runtime,
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         },
     })
+}
+
+fn validate_engine_extension_functions(
+    functions: &[DomainFunctionRegistration],
+) -> EngineResult<()> {
+    let mut function_ids = BTreeSet::new();
+    for function in functions {
+        if function.definition.id.namespace() != "engine"
+            || function.definition.owner_worker.as_str() != "engine"
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "engine extension {} must be owned by the system engine worker",
+                function.definition.id.as_str()
+            )));
+        }
+        if !function_ids.insert(function.definition.id.as_str()) {
+            return Err(EngineError::PolicyViolation(format!(
+                "duplicate engine extension function id {}",
+                function.definition.id.as_str()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_domain_composition(modules: &[DomainWorkerModule]) -> EngineResult<()> {
@@ -472,6 +509,52 @@ mod tests {
                 record.invocation_id == result.invocation_id && record.authority_grant_id.is_none()
             }),
             "trusted-local invocation must persist without a grant"
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_surface_snapshot_is_invocable_but_not_model_visible() {
+        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let result = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("engine::surface_snapshot").expect("surface function id"),
+                json!({"relevanceQuery":"persistent workers"}),
+                trusted_local_context("engine-surface-snapshot"),
+            ))
+            .await;
+        assert_eq!(
+            result.error, None,
+            "engine surface snapshot failed: {:?}",
+            result.error
+        );
+        let value = result.value.expect("surface snapshot value");
+        assert_eq!(value["format"], 1);
+        assert_eq!(value["autonomousWorkers"], true);
+        assert!(value["surface"]["catalogRevision"].is_u64());
+        assert_eq!(value["surface"]["fixedToolCount"], 25);
+        assert!(value["surface"]["surfaceHash"].is_string());
+        assert!(value["workers"].is_array());
+
+        let surface =
+            crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
+                &ctx.engine_host,
+                "engine-surface-snapshot",
+                None,
+            )
+            .await
+            .expect("provider surface");
+        assert!(
+            !surface
+                .targets_by_name
+                .contains_key("engine_surface_snapshot")
+        );
+        assert!(
+            surface
+                .snapshot
+                .tools
+                .iter()
+                .all(|tool| tool.function_id != "engine::surface_snapshot")
         );
     }
 

@@ -139,6 +139,23 @@ impl StoredEngineError {
                     "reason": reason,
                 }),
             },
+            EngineError::StaleFunctionSurface {
+                function_id,
+                expected_revision,
+                actual_revision,
+                expected_worker_version,
+                actual_worker_version,
+            } => Self {
+                kind: "stale_function_surface".to_owned(),
+                message: error.to_string(),
+                details: serde_json::json!({
+                    "functionId": function_id,
+                    "expectedRevision": expected_revision,
+                    "actualRevision": actual_revision,
+                    "expectedWorkerVersion": expected_worker_version,
+                    "actualWorkerVersion": actual_worker_version,
+                }),
+            },
             EngineError::PolicyViolation(message) => Self {
                 kind: "policy_violation".to_owned(),
                 message: error.to_string(),
@@ -235,6 +252,36 @@ impl StoredEngineError {
                     .unwrap_or(&self.message)
                     .to_owned(),
             );
+        }
+        if self.kind == "stale_function_surface" {
+            return EngineError::StaleFunctionSurface {
+                function_id: self
+                    .details
+                    .get("functionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("stored")
+                    .to_owned(),
+                expected_revision: self
+                    .details
+                    .get("expectedRevision")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                actual_revision: self
+                    .details
+                    .get("actualRevision")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                expected_worker_version: self
+                    .details
+                    .get("expectedWorkerVersion")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                actual_worker_version: self
+                    .details
+                    .get("actualWorkerVersion")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            };
         }
         if self.kind == "domain_failure" {
             let domain = self

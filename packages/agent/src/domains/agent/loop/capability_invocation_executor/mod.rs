@@ -29,8 +29,10 @@ use crate::domains::agent::r#loop::primitive_surface::{
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
-    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TRIGGER_DEPTH,
+    RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION, RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
+    RUNTIME_METADATA_EXPECTED_WORKER_VERSION, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
+    RUNTIME_METADATA_PROVIDER_INVOCATION_ID, RUNTIME_METADATA_PROVIDER_TYPE,
+    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_SURFACE_HASH, RUNTIME_METADATA_TRIGGER_DEPTH,
     RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
 };
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
@@ -358,6 +360,8 @@ pub async fn execute_capability_invocation(
             ctx.trace_id,
             ctx.parent_invocation_id,
             ctx.worker_causal_depth,
+            ctx.primitive_surface.snapshot.catalog_revision,
+            &ctx.primitive_surface.snapshot.surface_hash,
             effective_args,
             &per_invocation_cancel,
         )
@@ -432,6 +436,8 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     worker_causal_depth: u32,
+    advertised_catalog_revision: u64,
+    surface_hash: &str,
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
@@ -502,8 +508,28 @@ async fn execute_capability_primitive_via_engine(
                 RUNTIME_METADATA_TRIGGER_DEPTH,
                 worker_causal_depth.to_string(),
             )
+            .with_runtime_metadata(
+                RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
+                target.function.revision.0.to_string(),
+            )
+            .with_runtime_metadata(
+                RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION,
+                advertised_catalog_revision.to_string(),
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_SURFACE_HASH, surface_hash.to_owned())
             .with_session_id(session_id.to_owned())
             .with_idempotency_key(idempotency_key);
+    if let Some(worker_version) = target
+        .function
+        .metadata
+        .get("workerVersion")
+        .and_then(Value::as_str)
+    {
+        causal_context = causal_context.with_runtime_metadata(
+            RUNTIME_METADATA_EXPECTED_WORKER_VERSION,
+            worker_version.to_owned(),
+        );
+    }
     if let Some(run_id) = run_id {
         causal_context =
             causal_context.with_runtime_metadata(RUNTIME_METADATA_RUN_ID, run_id.to_owned());

@@ -20,8 +20,11 @@
 //! slice.
 //!
 //! Every `TronAgent` owns a required engine host for its full lifetime. Each
-//! turn borrows that host to resolve the live provider primitive surface and to
-//! execute provider-requested capability invocations through the same engine.
+//! turn borrows that host to adapt the worker-kernel-owned live tool surface
+//! into provider schemas and to execute provider-requested tool invocations
+//! through the same engine. The kernel resolver records the exact catalog
+//! revision and surface hash; the prompt receives a compact revision/count
+//! primer rather than another catalog-inspection workflow.
 //! Turn starts, ends, and failures are persisted before their matching live
 //! broadcast, and each surface shares the durable row sequence. User
 //! cancellation is terminalized by the active turn runner, which owns the

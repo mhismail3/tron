@@ -2,6 +2,17 @@ import Foundation
 
 /// Client for profile-global worker inspection, invocation, and lifecycle control.
 final class WorkerKernelClient: EngineDomainClient {
+    func engineSurfaceSnapshot(
+        sessionId: String?,
+        relevanceQuery: String? = nil
+    ) async throws -> EngineIntrospectionSnapshotDTO {
+        try await invokeRead(
+            "engine::surface_snapshot",
+            EngineSurfaceSnapshotRequestDTO(relevanceQuery: relevanceQuery),
+            context: optionalSessionInvocationContext(sessionId)
+        )
+    }
+
     func workers(includeRetired: Bool = true) async throws -> WorkerListResultDTO {
         try await invokeRead(
             "worker_kernel::list",

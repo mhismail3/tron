@@ -27,6 +27,9 @@ pub const ENGINE_STORED_INVOCATION_ERROR: &str = "ENGINE_STORED_INVOCATION_ERROR
 pub const ENGINE_INVALID_SCHEMA: &str = "ENGINE_INVALID_SCHEMA";
 /// Engine invocation payload violates a declared schema.
 pub const ENGINE_SCHEMA_VIOLATION: &str = "ENGINE_SCHEMA_VIOLATION";
+/// A model tried to invoke a function contract that changed after it was
+/// advertised. The next model turn receives a freshly resolved surface.
+pub const ENGINE_STALE_FUNCTION_SURFACE: &str = "ENGINE_STALE_FUNCTION_SURFACE";
 /// Engine policy rejected a request.
 pub const ENGINE_POLICY_VIOLATION: &str = "ENGINE_POLICY_VIOLATION";
 /// Engine function exists but cannot currently be routed.

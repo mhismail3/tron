@@ -36,6 +36,7 @@ fn empty_surface() -> ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name: BTreeMap::new(),
         turn_stopping_capabilities: HashSet::new(),
+        snapshot: Default::default(),
     }
 }
 
@@ -119,7 +120,7 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
     .await
     .unwrap();
     let function_id = FunctionId::new("worker_kernel::direct_test").unwrap();
-    let function = FunctionDefinition::new(
+    let mut function = FunctionDefinition::new(
         function_id.clone(),
         WorkerId::new("worker_kernel").unwrap(),
         "Direct typed test function",
@@ -135,15 +136,17 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
         "additionalProperties":false
     }));
     let captured = Arc::new(Mutex::new(None));
-    host.register_function(
-        function.clone(),
-        Some(Arc::new(CapturingDirectHandler {
-            captured: Arc::clone(&captured),
-        })),
-        false,
-    )
-    .await
-    .unwrap();
+    let revision = host
+        .register_function(
+            function.clone(),
+            Some(Arc::new(CapturingDirectHandler {
+                captured: Arc::clone(&captured),
+            })),
+            false,
+        )
+        .await
+        .unwrap();
+    function.revision = revision;
     let target = PrimitiveExecutionTarget {
         model_capability_id: "direct_test".to_owned(),
         function_id,
@@ -156,6 +159,11 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
         capabilities: Vec::new(),
         targets_by_name: BTreeMap::from([("direct_test".to_owned(), target)]),
         turn_stopping_capabilities: HashSet::new(),
+        snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot {
+            catalog_revision: 17,
+            surface_hash: "surface-hash-test".to_owned(),
+            ..Default::default()
+        },
     };
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
@@ -188,6 +196,24 @@ async fn direct_tool_uses_typed_payload_and_creates_no_authority_grant() {
             .get(crate::engine::RUNTIME_METADATA_TRIGGER_DEPTH)
             .map(String::as_str),
         Some("7")
+    );
+    assert_eq!(
+        invocation
+            .causal_context
+            .runtime_metadata(crate::engine::RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION),
+        Some("1")
+    );
+    assert_eq!(
+        invocation
+            .causal_context
+            .runtime_metadata(crate::engine::RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION),
+        Some("17")
+    );
+    assert_eq!(
+        invocation
+            .causal_context
+            .runtime_metadata(crate::engine::RUNTIME_METADATA_SURFACE_HASH),
+        Some("surface-hash-test")
     );
     assert!(
         invocation

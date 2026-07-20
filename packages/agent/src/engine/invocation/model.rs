@@ -31,6 +31,19 @@ pub const RUNTIME_METADATA_PROVIDER_TYPE: &str = "agent.providerType";
 pub const RUNTIME_METADATA_RUN_ID: &str = "agent.runId";
 /// Runtime metadata key carrying the model-facing primitive name.
 pub const RUNTIME_METADATA_MODEL_PRIMITIVE_NAME: &str = "agent.modelPrimitiveName";
+/// Runtime metadata key pinning a model tool call to the function revision
+/// advertised in the provider request that produced it.
+pub const RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION: &str = "agent.expectedFunctionRevision";
+/// Runtime metadata key pinning a projected worker call to the immutable worker
+/// version advertised in the provider request that produced it.
+pub const RUNTIME_METADATA_EXPECTED_WORKER_VERSION: &str = "agent.expectedWorkerVersion";
+/// Runtime metadata key recording the exact provider surface hash that exposed
+/// a model tool. This is audit evidence; the per-function revision/version
+/// pins are the routing guard.
+pub const RUNTIME_METADATA_SURFACE_HASH: &str = "agent.surfaceHash";
+/// Runtime metadata key recording the catalog revision observed when a model
+/// tool surface was resolved.
+pub const RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION: &str = "agent.advertisedCatalogRevision";
 /// Runtime metadata key carrying the current model turn number.
 pub const RUNTIME_METADATA_TURN: &str = "agent.turn";
 /// Runtime metadata key carrying the current trigger cascade depth.

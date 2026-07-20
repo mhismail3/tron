@@ -12,7 +12,7 @@ impl EngineHostHandle {
         if invocation.function_id.as_str() == INVOKE_FUNCTION {
             return self.invoke_delegated_unlocked(invocation).await;
         }
-        if invocation.function_id.namespace() == ENGINE_WORKER_ID {
+        if is_engine_meta_function(&invocation.function_id) {
             return self.inner.lock().await.invoke(invocation).await;
         }
         if is_host_dispatched_primitive_function(&invocation.function_id) {
@@ -371,4 +371,11 @@ impl EngineHostHandle {
             None,
         )
     }
+}
+
+fn is_engine_meta_function(function_id: &FunctionId) -> bool {
+    matches!(
+        function_id.as_str(),
+        DISCOVER_FUNCTION | INSPECT_FUNCTION | WATCH_FUNCTION | INVOKE_FUNCTION | PROMOTE_FUNCTION
+    )
 }

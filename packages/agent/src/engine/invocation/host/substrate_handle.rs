@@ -1,8 +1,41 @@
 //! Primitive substrate store methods exposed through `EngineHostHandle`.
 
 use super::*;
+use crate::engine::durability::state::{EngineStateEntry, EngineStateScope};
 
 impl EngineHostHandle {
+    /// Write one kernel-owned state entry without creating a nested primitive
+    /// invocation. Used for runtime overlays whose authoring operation is
+    /// already ledgered (for example `worker_discover`).
+    pub(crate) async fn write_engine_state(
+        &self,
+        scope: EngineStateScope,
+        namespace: impl Into<String>,
+        key: impl Into<String>,
+        value: Value,
+    ) -> Result<EngineStateEntry> {
+        let store = self.inner.lock().await.primitives.state.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("state store lock poisoned".to_owned()))?
+            .set(scope, namespace.into(), key.into(), value)
+    }
+
+    /// List kernel-owned state entries for a runtime overlay.
+    pub(crate) async fn list_engine_state(
+        &self,
+        scope: EngineStateScope,
+        namespace: &str,
+        key_prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<EngineStateEntry>> {
+        let store = self.inner.lock().await.primitives.state.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("state store lock poisoned".to_owned()))?
+            .list(scope, namespace, key_prefix, limit)
+    }
+
     /// Read durable engine rows for one session without invoking any functions.
     pub(crate) async fn replay_snapshot(
         &self,

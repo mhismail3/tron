@@ -121,6 +121,13 @@ Typed domain clients call exact engine function ids. Worker operations use
 `worker_kernel::*` directly; there is no operation wrapper or client-side
 capability grant construction.
 
+`WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
+non-model-facing `engine::surface_snapshot` read with optional session context.
+Strongly typed catalog DTOs expose its catalog revision, surface hash, fixed and
+projected counts, exact function/worker versions, selection reasons, and profile
+worker inventory. UI code does not reconstruct model visibility from raw
+catalog `[AnyCodable]` entries.
+
 Write calls carry `EngineIdempotencyKey`. User actions use distinct generated
 keys, while retrying the same accepted action retains its operation identity at
 the appropriate coordinator boundary.
@@ -148,6 +155,12 @@ worker metadata from the client. The server supplies internal causal context.
 The bundle remains `[String: AnyCodable]` because its JSON schemas, runner, and
 routing metadata are intentionally extensible. Stable operational fields are
 strongly typed.
+
+`Engine/Protocol/Catalog/EngineProtocolTypes+Catalog.swift` additionally owns
+`EngineIntrospectionSnapshotDTO`, `AgentToolSurfaceDTO`, and
+`EngineSurfaceToolDTO`. These are the authoritative client projection for the
+exact fixed/dynamic tool surface selected by the server; the existing raw
+catalog-watch DTO remains an invalidation/change-feed contract only.
 
 ### Client and repository
 

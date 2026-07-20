@@ -171,6 +171,36 @@ impl WorkerRuntime {
         &self.store
     }
 
+    pub(crate) fn host(&self) -> &EngineHostHandle {
+        &self.host
+    }
+
+    /// Return one coherent, authenticated-client projection of the live model
+    /// surface and canonical profile worker inventory.
+    pub(crate) async fn engine_surface_snapshot(
+        &self,
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+        relevance_query: Option<&str>,
+    ) -> Result<Value, String> {
+        let session_id = session_id.unwrap_or("engine-dashboard");
+        let surface = super::surface::resolve_tool_surface(
+            &self.host,
+            session_id,
+            workspace_id,
+            relevance_query,
+        )
+        .await?
+        .snapshot;
+        Ok(json!({
+            "format": 1,
+            "autonomousWorkers": self.autonomous_enabled(),
+            "dispatchStopped": self.store.stop_all()?,
+            "surface": surface,
+            "workers": self.store.list(true)?,
+        }))
+    }
+
     pub fn autonomous_enabled(&self) -> bool {
         self.profile_runtime.current().settings.autonomous_workers
     }

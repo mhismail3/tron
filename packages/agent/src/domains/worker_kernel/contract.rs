@@ -5,10 +5,211 @@ use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{EffectClass, IdempotencyContract, RiskLevel, VisibilityScope};
 
 const WORKER: &str = "worker_kernel";
+pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
 pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
+
+/// Stable model-facing primitive families.
+///
+/// This is deliberately narrower than the complete worker-kernel contract:
+/// internal webhook and inbox projection functions are kernel mechanics, not
+/// model vocabulary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum CorePrimitiveGroup {
+    Host,
+    WorkerControl,
+    CoreChange,
+}
+
+impl CorePrimitiveGroup {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::WorkerControl => "worker_control",
+            Self::CoreChange => "core_change",
+        }
+    }
+}
+
+/// One canonical model-facing primitive identity.
+///
+/// Contracts, handlers, provider projection, dashboard projection, and tests
+/// must derive identity and ordering from this manifest instead of maintaining
+/// parallel name maps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CorePrimitiveDescriptor {
+    pub(crate) operation_key: &'static str,
+    pub(crate) model_name: &'static str,
+    pub(crate) group: CorePrimitiveGroup,
+    pub(crate) order: u16,
+}
+
+const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
+    CorePrimitiveDescriptor {
+        operation_key: "filesystem_read",
+        model_name: "filesystem_read",
+        group: CorePrimitiveGroup::Host,
+        order: 10,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "filesystem_list",
+        model_name: "filesystem_list",
+        group: CorePrimitiveGroup::Host,
+        order: 20,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "filesystem_search_text",
+        model_name: "filesystem_search_text",
+        group: CorePrimitiveGroup::Host,
+        order: 30,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "filesystem_write",
+        model_name: "filesystem_write",
+        group: CorePrimitiveGroup::Host,
+        order: 40,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "process_run",
+        model_name: "process_run",
+        group: CorePrimitiveGroup::Host,
+        order: 50,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "web_fetch",
+        model_name: "web_fetch",
+        group: CorePrimitiveGroup::Host,
+        order: 60,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "upsert",
+        model_name: "worker_upsert",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 100,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "discover",
+        model_name: "worker_discover",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 110,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "list",
+        model_name: "worker_list",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 120,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "inspect",
+        model_name: "worker_inspect",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 130,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "invoke",
+        model_name: "worker_invoke",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 140,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "stop",
+        model_name: "worker_stop",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 150,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "disable",
+        model_name: "worker_disable",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 160,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "enable",
+        model_name: "worker_enable",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 170,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "rollback",
+        model_name: "worker_rollback",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 180,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "retire",
+        model_name: "worker_retire",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 190,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "purge",
+        model_name: "worker_purge",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 200,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "inbox",
+        model_name: "worker_inbox",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 210,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "runs",
+        model_name: "worker_runs",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 220,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "webhook_rotate",
+        model_name: "worker_webhook_rotate",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 230,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "stop_all",
+        model_name: "worker_stop_all",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 240,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "core_proposal_create",
+        model_name: "core_proposal_create",
+        group: CorePrimitiveGroup::CoreChange,
+        order: 300,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "core_proposal_list",
+        model_name: "core_proposal_list",
+        group: CorePrimitiveGroup::CoreChange,
+        order: 310,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "core_proposal_inspect",
+        model_name: "core_proposal_inspect",
+        group: CorePrimitiveGroup::CoreChange,
+        order: 320,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "core_proposal_apply",
+        model_name: "core_proposal_apply",
+        group: CorePrimitiveGroup::CoreChange,
+        order: 330,
+    },
+];
+
+pub(crate) const fn core_primitives() -> &'static [CorePrimitiveDescriptor] {
+    CORE_PRIMITIVES
+}
+
+pub(crate) fn core_primitive_for_operation(
+    operation_key: &str,
+) -> Option<&'static CorePrimitiveDescriptor> {
+    core_primitives()
+        .iter()
+        .find(|descriptor| descriptor.operation_key == operation_key)
+}
 
 pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
     let mut specs = Vec::new();
@@ -205,6 +406,53 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         json!({"type":"object","additionalProperties":false,"required":["stopped"],"properties":{"stopped":{"type":"boolean"}}}),
         "Stop or resume all persistent worker dispatch for the active profile.",
     )?);
+    specs.push(
+        CapabilityContract::new(
+            ENGINE_SURFACE_SNAPSHOT_FUNCTION,
+            "engine",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            None,
+        )
+        .domain_worker(WORKER)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "properties":{
+                "relevanceQuery":{"type":"string"}
+            }
+        }))
+        .response_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["format","autonomousWorkers","dispatchStopped","surface","workers"],
+            "properties":{
+                "format":{"type":"integer"},
+                "autonomousWorkers":{"type":"boolean"},
+                "dispatchStopped":{"type":"boolean"},
+                "surface":{
+                    "type":"object",
+                    "additionalProperties":false,
+                    "required":["format","catalogRevision","surfaceHash","fixedToolCount","projectedWorkerCount","availableWorkerCount","tools"],
+                    "properties":{
+                        "format":{"type":"integer"},
+                        "catalogRevision":{"type":"integer"},
+                        "surfaceHash":{"type":"string"},
+                        "fixedToolCount":{"type":"integer"},
+                        "projectedWorkerCount":{"type":"integer"},
+                        "availableWorkerCount":{"type":"integer"},
+                        "tools":{"type":"array"}
+                    }
+                },
+                "workers":{"type":"array"}
+            }
+        }))
+        .description(
+            "Return authoritative fixed-tool, selected-worker, and profile worker inventory for authenticated engine clients.",
+        )
+        .tags(vec!["kernel", "introspection", "workers", "surface"])
+        .build()?,
+    );
     specs.push(
         CapabilityContract::new(
             "worker_kernel::inbox_attach",
@@ -481,6 +729,28 @@ mod tests {
         BUNDLE_SCHEMA, SourceProvenance, WorkerBundle, WorkerDependency, WorkerRunner,
         WorkerTrigger,
     };
+
+    #[test]
+    fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
+        let specs = capabilities().expect("worker-kernel contracts");
+        let surface = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == ENGINE_SURFACE_SNAPSHOT_FUNCTION)
+            .expect("surface snapshot contract");
+        assert_eq!(surface.operation_key, "surface_snapshot");
+        assert_eq!(surface.effect_class, EffectClass::PureRead);
+        assert!(
+            core_primitives()
+                .iter()
+                .all(|descriptor| descriptor.model_name != "engine_surface_snapshot")
+        );
+        let schema = surface.response_schema.as_ref().expect("response schema");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            schema["properties"]["surface"]["additionalProperties"],
+            false
+        );
+    }
 
     #[test]
     fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {

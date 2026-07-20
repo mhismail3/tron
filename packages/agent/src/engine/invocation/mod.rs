@@ -28,6 +28,10 @@
 //!   explicit trusted-local runtime marker.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
+//! - Model-originated direct calls carry the advertised function revision and,
+//!   for projected workers, immutable worker version. Preparation rejects a
+//!   changed contract as a typed stale-surface conflict instead of silently
+//!   routing provider arguments into a newer schema.
 //! - Production timestamps remain wall-clock values; deterministic tests and
 //!   replay/import paths inject timestamps explicitly.
 

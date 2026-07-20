@@ -131,6 +131,24 @@ pub enum EngineError {
         reason: String,
     },
 
+    /// A caller attempted to execute a function contract older or newer than
+    /// the exact contract it was previously shown.
+    #[error(
+        "stale function surface for {function_id}: advertised revision {expected_revision}, current revision {actual_revision}"
+    )]
+    StaleFunctionSurface {
+        /// Function selected from the advertised surface.
+        function_id: String,
+        /// Revision shown to the caller.
+        expected_revision: u64,
+        /// Revision currently registered.
+        actual_revision: u64,
+        /// Immutable worker version shown to the caller, for projected workers.
+        expected_worker_version: Option<String>,
+        /// Immutable worker version currently registered, for projected workers.
+        actual_worker_version: Option<String>,
+    },
+
     /// A registration or invocation violates engine policy.
     #[error("policy violation: {0}")]
     PolicyViolation(String),
