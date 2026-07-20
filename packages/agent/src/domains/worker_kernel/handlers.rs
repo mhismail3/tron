@@ -66,6 +66,7 @@ operation_bindings! {
         "list" => |invocation, deps| { response(invocation, list(invocation, deps).await) },
         "inspect" => |invocation, deps| { response(invocation, inspect(invocation, deps).await) },
         "invoke" => |invocation, deps| { response(invocation, invoke_worker(invocation, deps).await) },
+        "stop" => |invocation, deps| { response(invocation, stop_worker(invocation, deps).await) },
         "disable" => |invocation, deps| { response(invocation, set_enabled(invocation, deps, false).await) },
         "enable" => |invocation, deps| { response(invocation, set_enabled(invocation, deps, true).await) },
         "rollback" => |invocation, deps| { response(invocation, rollback(invocation, deps).await) },
@@ -771,6 +772,12 @@ async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, St
 async fn set_enabled(invocation: &Invocation, deps: &Deps, enabled: bool) -> Result<Value, String> {
     deps.runtime
         .set_enabled(&required_string(&invocation.payload, "workerId")?, enabled)
+        .await
+}
+
+async fn stop_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    deps.runtime
+        .stop_worker(&required_string(&invocation.payload, "workerId")?)
         .await
 }
 

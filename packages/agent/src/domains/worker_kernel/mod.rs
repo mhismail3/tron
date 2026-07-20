@@ -20,7 +20,6 @@
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
 //! | `types` | Worker bundle and durable runtime DTOs |
-//!
 //! # Invariants
 //!
 //! Worker activation is atomic with respect to the canonical active pointer:
@@ -44,9 +43,9 @@
 //! errors so they never enter manifests, operational records, events, or logs.
 //! Every claimed delivery creates a numbered attempt. Interrupted attempts are
 //! terminalized before their invocation is requeued, making at-least-once
-//! redelivery and causal-loop suppression directly inspectable. An engine event
-//! beyond the causal ceiling is durably recorded as terminal suppression before
-//! its cursor advances. A matched event that cannot satisfy the worker input
+//! redelivery and causal-loop suppression directly inspectable. Engine events
+//! overlay payload keys declared by the input schema onto configured defaults;
+//! no framework envelope is injected. A projected event outside the typed
 //! schema is a terminal worker failure, not an endlessly retried delivery. A
 //! persistence failure retains the cursor for retry.
 //! The worker lifecycle observer always runs: edits to the
@@ -71,7 +70,7 @@
 //! bundle's `files/` directory. A dependency named `N` is acquired beneath
 //! `../dependencies/N`; its optional install command runs within that directory
 //! before validation commands, making the authoring layout deterministic.
-//! Direct-operation lifecycle events retain shape and reliability evidence but
+//! Direct-operation lifecycle events and audit retain shape and reliability evidence but
 //! redact credential fields and recognizable secret values before persistence
 //! or broadcast. One-time webhook credentials exist raw only in the active
 //! provider turn that requested them.
@@ -82,7 +81,7 @@
 //! with session/trace provenance. It therefore crosses internal visibility as
 //! an engine projection and never requires or fabricates an agent grant.
 //! Agent-runner child sessions are coupled to their parent invocation by a
-//! drop guard, so timeout, disable, stop-all, or shutdown aborts the child. The
+//! drop guard, so timeout, per-worker stop, disable, stop-all, or shutdown aborts the child. The
 //! inherited worker causal depth is propagated through that child and back onto
 //! every direct tool call; an agent hop cannot reset the depth-16 ceiling.
 //! Core proposal approval rejects negated or ambiguous messages. A failed
@@ -181,6 +180,7 @@ pub(crate) fn registration(
             "list" => Some("worker_list"),
             "inspect" => Some("worker_inspect"),
             "invoke" => Some("worker_invoke"),
+            "stop" => Some("worker_stop"),
             "disable" => Some("worker_disable"),
             "enable" => Some("worker_enable"),
             "rollback" => Some("worker_rollback"),

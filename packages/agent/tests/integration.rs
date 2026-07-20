@@ -984,6 +984,7 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
         .collect::<Vec<_>>();
     assert!(model_tools.contains(&"worker_upsert"), "{model_tools:?}");
     assert!(model_tools.contains(&"worker_list"), "{model_tools:?}");
+    assert!(model_tools.contains(&"worker_stop"), "{model_tools:?}");
     assert!(
         model_tools.contains(&"worker_baseline_echo"),
         "{model_tools:?}"

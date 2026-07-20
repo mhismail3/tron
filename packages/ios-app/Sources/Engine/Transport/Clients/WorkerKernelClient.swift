@@ -58,6 +58,17 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func stopWorker(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerSummaryDTO {
+        try await invokeWrite(
+            "worker_kernel::stop",
+            WorkerIdRequestDTO(workerId: workerId),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func rollbackWorker(
         workerId: String,
         version: String,

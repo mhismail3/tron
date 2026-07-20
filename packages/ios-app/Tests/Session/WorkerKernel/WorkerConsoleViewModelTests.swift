@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite("Worker Console View Model Tests")
 struct WorkerConsoleViewModelTests {
-    @Test("Refresh, inspect, typed invoke, and disable use the worker kernel repository")
+    @Test("Refresh, inspect, typed invoke, stop, and disable use the worker kernel repository")
     func operationalFlowUsesWorkerKernelRepository() async {
         let repository = MockWorkerKernelRepository()
         let viewModel = WorkerConsoleViewModel()
@@ -24,6 +24,10 @@ struct WorkerConsoleViewModelTests {
         #expect(repository.invokedWorkerIds == ["research"])
         #expect(repository.lastInput?["query"] as? String == "Tron")
         #expect(viewModel.invocationResult?.contains("accepted") == true)
+
+        await viewModel.stop(repository: repository, connectionState: .connected)
+        #expect(repository.stoppedWorkerIds == ["research"])
+        #expect(viewModel.selectedWorker?.enabled == true)
 
         await viewModel.setEnabled(false, repository: repository, connectionState: .connected)
         #expect(repository.enabledMutations == [false])
@@ -63,6 +67,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var enabled = true
     var retired = false
     var invokedWorkerIds: [String] = []
+    var stoppedWorkerIds: [String] = []
     var enabledMutations: [Bool] = []
     var rollbackVersions: [String] = []
     var lastInput: [String: Any]?
@@ -142,6 +147,14 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     ) async throws -> WorkerSummaryDTO {
         self.enabled = enabled
         enabledMutations.append(enabled)
+        return worker
+    }
+
+    func stopWorker(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerSummaryDTO {
+        stoppedWorkerIds.append(workerId)
         return worker
     }
 

@@ -325,6 +325,10 @@ protocol WorkerKernelRepository: AnyObject {
         workerId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerSummaryDTO
+    func stopWorker(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerSummaryDTO
     func rollbackWorker(
         workerId: String,
         version: String,

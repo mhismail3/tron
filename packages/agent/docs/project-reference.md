@@ -233,7 +233,9 @@ All invocation sources enter the same durable queue:
 - manual invocation, including a model calling the worker's direct tool;
 - interval schedules;
 - engine stream events whose payload recursively contains the configured JSON
-  filter;
+  filter; configured input supplies defaults and matching top-level payload
+  keys declared by the worker input schema override them, with no framework
+  envelope;
 - `POST /engine/workers/webhooks/<worker-id>/<trigger-id>` from loopback with
   `X-Tron-Worker-Token` or `Authorization: Bearer` and optional
   `X-Tron-Idempotency-Key`.
@@ -272,9 +274,9 @@ that ceiling records a durable terminal-suppression trace and audit entry, then
 advances its cursor so an impossible event cannot jam the trigger. Event cursors
 otherwise advance only after matching invocations are durably queued; a failure
 to persist either an invocation or suppression retains the cursor for retry. If
-the configured engine-event materialization itself violates the worker input
-schema or secret-isolation contract, Tron disables the worker, its route, and
-its triggers, records the inbox failure, and advances past that terminal event.
+the typed engine-event projection itself violates the worker input schema or
+secret-isolation contract, Tron disables the worker, its route, and its
+triggers, records the inbox failure, and advances past that terminal event.
 
 Successful and failed results enter the durable inbox and emit
 `worker.invocations`. Notable unseen background results are atomically attached
@@ -292,6 +294,9 @@ does not silently repair or roll it back.
 
 Operator controls are:
 
+- stop — cancel the worker's current invocations and resident process while
+  preserving its enabled route, triggers, health, and ability to accept later
+  work; the action is retained in worker audit and lifecycle streams;
 - disable/enable — immediate route and trigger removal/restoration plus
   active-work stop (webhooks restore only when a token hash exists);
 - rollback — activate a retained version and rotate any restored webhook token;
@@ -334,6 +339,7 @@ for private authoring examples.
 | `worker_list` | `worker_kernel::list` |
 | `worker_inspect` | `worker_kernel::inspect` |
 | `worker_invoke` | `worker_kernel::invoke` |
+| `worker_stop` | `worker_kernel::stop` |
 | `worker_disable` / `worker_enable` | `worker_kernel::disable` / `enable` |
 | `worker_rollback` | `worker_kernel::rollback` |
 | `worker_retire` / `worker_purge` | `worker_kernel::retire` / `purge` |
@@ -539,8 +545,8 @@ final drain of that retained batch.
 
 Worker live topics are:
 
-- `worker.lifecycle` — activation, enablement, disablement, rollback,
-  retirement, failure, and related state;
+- `worker.lifecycle` — activation, per-worker stop, enablement, disablement,
+  rollback, retirement, purge, profile stop/resume, failure, and related state;
 - `worker.invocations` — started/completed/failed invocation summaries.
 
 The session log has **24 typed event variants**:
@@ -573,8 +579,9 @@ It exposes:
 - worker list, health, runner, active content version, provenance, and triggers;
 - JSON-schema-aware typed invocation;
 - runs with delivery-attempt counts, durable inbox, and audit history;
-- enable/disable, rollback, retained-version restoration after retirement,
-  purge, webhook rotation, and stop-all;
+- stop current work without disabling future dispatch, enable/disable, rollback,
+  retained-version restoration after retirement, purge, webhook rotation, and
+  stop-all;
 - live refresh from `worker.lifecycle` and `worker.invocations` cursors.
 
 Conversational creation remains the authoring interface; the client does not

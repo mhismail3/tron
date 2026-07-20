@@ -50,8 +50,9 @@ evidence.
 The Rust server owns model execution, authenticated transport, durable session
 truth, worker dispatch, and worker storage. The iOS app is a thin client with a
 Worker Console for health, versions, triggers, typed invocation, runs, inbox,
-rollback, retirement, and stop controls. The Mac app packages and supervises
-the server and owns pairing; it is not a second engine client.
+rollback, retirement, per-worker stop/disable, and profile stop-all controls.
+The Mac app packages and supervises the server and owns pairing; it is not a
+second engine client.
 
 Worker bundles live under:
 

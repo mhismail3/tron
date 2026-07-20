@@ -306,6 +306,13 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func stopWorker(
+        workerId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerSummaryDTO {
+        try await client.stopWorker(workerId: workerId, idempotencyKey: idempotencyKey)
+    }
+
     func rollbackWorker(
         workerId: String,
         version: String,

@@ -110,6 +110,19 @@ final class WorkerConsoleViewModel {
         }
     }
 
+    func stop(
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard let worker = selectedWorker, worker.enabled, !worker.retired else { return }
+        await mutate(repository: repository, connectionState: connectionState) {
+            _ = try await repository.stopWorker(
+                workerId: worker.workerId,
+                idempotencyKey: .userAction("worker.stop")
+            )
+        }
+    }
+
     func invoke(
         repository: any WorkerKernelRepository,
         connectionState: ConnectionState

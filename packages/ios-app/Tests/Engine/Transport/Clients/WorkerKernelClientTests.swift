@@ -97,6 +97,8 @@ struct WorkerKernelClientTests {
                 )
             case "worker_kernel::disable":
                 return worker(enabled: false)
+            case "worker_kernel::stop":
+                return worker(enabled: true)
             case "worker_kernel::stop_all":
                 #expect((payload as? WorkerStopAllRequestDTO)?.stopped == true)
                 return WorkerStopAllResultDTO(stopped: true)
@@ -110,11 +112,13 @@ struct WorkerKernelClientTests {
             input: AnyCodable(["query": "Tron"]),
             idempotencyKey: key
         )
+        _ = try await client.stopWorker(workerId: "research", idempotencyKey: key)
         _ = try await client.setWorkerEnabled(false, workerId: "research", idempotencyKey: key)
         _ = try await client.setWorkersStopped(true, idempotencyKey: key)
 
         #expect(functions == [
             "worker_kernel::invoke",
+            "worker_kernel::stop",
             "worker_kernel::disable",
             "worker_kernel::stop_all",
         ])

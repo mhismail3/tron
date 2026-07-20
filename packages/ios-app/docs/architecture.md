@@ -142,8 +142,8 @@ worker metadata from the client. The server supplies internal causal context.
   idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
   count, and timestamps;
 - `WorkerInboxItemDTO` for durable visible results and failures;
-- request/response DTOs for invocation, rollback, stop-all, purge, and webhook
-  token rotation.
+- request/response DTOs for invocation, per-worker stop, rollback, stop-all,
+  purge, and webhook token rotation.
 
 The bundle remains `[String: AnyCodable]` because its JSON schemas, runner, and
 routing metadata are intentionally extensible. Stable operational fields are
@@ -156,7 +156,7 @@ strongly typed.
 - list and inspect;
 - runs and inbox;
 - typed invoke;
-- enable/disable;
+- stop current work while preserving enabled routing, plus enable/disable;
 - rollback;
 - retire and purge;
 - stop/resume all;
@@ -200,7 +200,8 @@ persistent workers. It opens `WorkerConsoleSheet`, which provides:
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
 - recent runs with delivery-attempt counts, inbox, and audit history;
-- enable/disable, retirement, and confirmation-backed permanent purge.
+- stop current work without disabling the worker, enable/disable, retirement,
+  and confirmation-backed permanent purge.
 
 An empty console explicitly directs the user to create workers
 conversationally. A retired worker does not show the invalid ordinary Enable

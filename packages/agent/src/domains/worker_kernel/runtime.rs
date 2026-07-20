@@ -106,6 +106,7 @@ pub struct WorkerRuntime {
     resident_users: DashMap<String, Arc<AtomicUsize>>,
     resident_supervisions: DashSet<String>,
     stopped: AtomicBool,
+    shutting_down: AtomicBool,
     kernel_primitives: StdRwLock<Vec<KernelPrimitiveRegistration>>,
     kernel_visibility: AtomicBool,
     http: reqwest::Client,
@@ -152,6 +153,7 @@ impl WorkerRuntime {
             resident_users: DashMap::new(),
             resident_supervisions: DashSet::new(),
             stopped: AtomicBool::new(stopped),
+            shutting_down: AtomicBool::new(false),
             kernel_primitives: StdRwLock::new(Vec::new()),
             kernel_visibility: AtomicBool::new(kernel_visibility),
             http: reqwest::Client::builder()
@@ -233,6 +235,8 @@ impl WorkerRuntime {
     }
 
     pub async fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        self.execution_stop.lock().await.cancel();
         self.stop_residents(None).await;
     }
 
@@ -614,7 +618,7 @@ impl WorkerRuntime {
         let profile_permit = tokio::select! {
             permit = profile_permit => permit,
             () = global_stop.cancelled() => return Err("worker dispatch stopped while queued".to_owned()),
-            () = worker_stop.cancelled() => return Err("worker was disabled while queued".to_owned()),
+            () = worker_stop.cancelled() => return Err(self.worker_cancelled_error(&queued.worker_id, true)),
         }
             .map_err(|_| "worker profile concurrency gate is closed".to_owned())?;
         let worker_limit = self
@@ -625,7 +629,7 @@ impl WorkerRuntime {
         let worker_permit = tokio::select! {
             permit = worker_limit.acquire_owned() => permit,
             () = global_stop.cancelled() => return Err("worker dispatch stopped while queued".to_owned()),
-            () = worker_stop.cancelled() => return Err("worker was disabled while queued".to_owned()),
+            () = worker_stop.cancelled() => return Err(self.worker_cancelled_error(&queued.worker_id, true)),
         }
             .map_err(|_| "worker concurrency gate is closed".to_owned())?;
         let _permits = (profile_permit, worker_permit);
@@ -659,8 +663,11 @@ impl WorkerRuntime {
                 .map_err(|_| format!("worker invocation exceeded {MAX_INVOCATION_SECONDS} seconds"))
                 .and_then(|result| result),
             () = global_stop.cancelled() => Err("worker invocation stopped by profile stop-all".to_owned()),
-            () = worker_stop.cancelled() => Err("worker invocation stopped because the worker was disabled".to_owned()),
+            () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false)),
         };
+        if self.shutting_down.load(Ordering::SeqCst) && global_stop.is_cancelled() {
+            return Err("worker invocation interrupted by runtime shutdown".to_owned());
+        }
         let was_stopped = global_stop.is_cancelled() || worker_stop.is_cancelled();
 
         let worker_function =
@@ -1136,7 +1143,48 @@ impl WorkerRuntime {
             self.unregister_dynamic_tool(worker_id).await;
             self.stop_residents(Some(worker_id)).await;
         }
-        Ok(serde_json::to_value(worker).map_err(|error| error.to_string())?)
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":if enabled { "enabled" } else { "disabled" },
+                "worker":&worker,
+                "version":&worker.active_version,
+            }),
+            None,
+        )
+        .await;
+        serde_json::to_value(worker).map_err(|error| error.to_string())
+    }
+
+    /// Cancel this worker's current execution generation without changing its
+    /// durable enabled state, route, or triggers. Active invocations retain a
+    /// clone of the cancelled token; resetting the map entry after resident
+    /// shutdown lets later work dispatch immediately.
+    pub async fn stop_worker(self: &Arc<Self>, worker_id: &str) -> Result<Value, String> {
+        let worker = self
+            .store
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        self.store
+            .record_stopped(worker_id, &worker.active_version)?;
+        self.cancel_worker(worker_id);
+        self.stop_residents(Some(worker_id)).await;
+        if worker.enabled && !worker.retired {
+            self.reset_worker_stop(worker_id);
+        }
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":"stopped",
+                "workerId":worker_id,
+                "version":worker.active_version,
+                "enabled":worker.enabled,
+                "retired":worker.retired,
+            }),
+            None,
+        )
+        .await;
+        serde_json::to_value(worker).map_err(|error| error.to_string())
     }
 
     pub async fn rollback(
@@ -1154,22 +1202,51 @@ impl WorkerRuntime {
                 .handle_tool_activation_failure(worker_id, version, "rollback", &error)
                 .await);
         }
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":"rolled_back",
+                "worker":&worker,
+                "version":version,
+            }),
+            None,
+        )
+        .await;
         Ok(json!({"worker":worker,"webhooks":webhooks}))
     }
 
     pub async fn retire(self: &Arc<Self>, worker_id: &str) -> Result<Value, String> {
+        let worker = self.store.retire(worker_id)?;
         self.cancel_worker(worker_id);
         self.stop_residents(Some(worker_id)).await;
         self.unregister_dynamic_tool(worker_id).await;
-        let worker = self.store.retire(worker_id)?;
-        Ok(serde_json::to_value(worker).map_err(|error| error.to_string())?)
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":"retired",
+                "worker":&worker,
+                "version":&worker.active_version,
+            }),
+            None,
+        )
+        .await;
+        serde_json::to_value(worker).map_err(|error| error.to_string())
     }
 
     pub async fn purge(self: &Arc<Self>, worker_id: &str) -> Result<bool, String> {
         self.cancel_worker(worker_id);
         self.stop_residents(Some(worker_id)).await;
         self.unregister_dynamic_tool(worker_id).await;
-        self.store.purge(worker_id)
+        let purged = self.store.purge(worker_id)?;
+        if purged {
+            self.publish_event(
+                "worker.lifecycle",
+                json!({"action":"purged","workerId":worker_id}),
+                None,
+            )
+            .await;
+        }
+        Ok(purged)
     }
 
     pub async fn set_stop_all(&self, stopped: bool) -> Result<(), String> {
@@ -1181,6 +1258,15 @@ impl WorkerRuntime {
         } else if self.autonomous_enabled() {
             *self.execution_stop.lock().await = CancellationToken::new();
         }
+        self.publish_event(
+            "worker.lifecycle",
+            json!({
+                "action":if stopped { "stop_all" } else { "resumed_all" },
+                "stopped":stopped,
+            }),
+            None,
+        )
+        .await;
         Ok(())
     }
 
@@ -1199,6 +1285,23 @@ impl WorkerRuntime {
         let _ = self
             .worker_stops
             .insert(worker_id.to_owned(), CancellationToken::new());
+    }
+
+    fn worker_cancelled_error(&self, worker_id: &str, queued: bool) -> String {
+        let remains_enabled = self
+            .store
+            .summary(worker_id)
+            .ok()
+            .flatten()
+            .is_some_and(|worker| worker.enabled && !worker.retired);
+        match (remains_enabled, queued) {
+            (true, true) => "worker was stopped while queued".to_owned(),
+            (true, false) => "worker invocation stopped by per-worker stop".to_owned(),
+            (false, true) => "worker was disabled while queued".to_owned(),
+            (false, false) => {
+                "worker invocation stopped because the worker was disabled".to_owned()
+            }
+        }
     }
 
     async fn apply_autonomy_state(self: &Arc<Self>, enabled: bool) -> Result<(), String> {
@@ -1557,13 +1660,11 @@ impl WorkerRuntime {
                 if !json_subset_matches(&filter, &event.payload) {
                     continue;
                 }
-                let mut merged = input.clone();
-                if let Some(object) = merged.as_object_mut() {
-                    let _ = object.insert(
-                        "event".to_owned(),
-                        serde_json::to_value(&event).unwrap_or(Value::Null),
-                    );
-                }
+                let merged = materialize_engine_event_input(
+                    &input,
+                    &event.payload,
+                    &active.bundle.input_schema,
+                );
                 let event_cursor = event.cursor.0;
                 let event_worker = worker_id.clone();
                 let event_trigger = id.clone();
@@ -2317,6 +2418,26 @@ fn json_subset_matches(filter: &Value, candidate: &Value) -> bool {
     }
 }
 
+/// Project an engine event into the worker's ordinary typed input without a
+/// framework envelope. Configured input provides defaults; only event payload
+/// keys explicitly declared by the top-level input schema may override them.
+fn materialize_engine_event_input(configured: &Value, payload: &Value, schema: &Value) -> Value {
+    let mut materialized = configured.clone();
+    let (Some(materialized), Some(payload), Some(properties)) = (
+        materialized.as_object_mut(),
+        payload.as_object(),
+        schema.get("properties").and_then(Value::as_object),
+    ) else {
+        return materialized;
+    };
+    for key in properties.keys() {
+        if let Some(value) = payload.get(key) {
+            let _ = materialized.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(materialized.clone())
+}
+
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
     if !source.exists() {
         return Ok(());
@@ -2581,11 +2702,14 @@ print(json.dumps({
         let source_url = fixture["sourceUrl"].as_str().unwrap();
         let home = tempfile::tempdir().unwrap();
         let runtime = test_runtime_at(home.path(), None);
+        let mut bundle = last30days_bundle(source_url);
+        for trigger in &mut bundle.triggers {
+            if let WorkerTrigger::Schedule { every_seconds, .. } = trigger {
+                *every_seconds = 1;
+            }
+        }
 
-        let outcome = runtime
-            .upsert(last30days_bundle(source_url), None)
-            .await
-            .unwrap();
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
         assert!(outcome.created);
         assert_eq!(outcome.worker.worker_id, "last30days-research");
         assert_eq!(outcome.worker.tool_name, "worker_last30days_research");
@@ -2632,6 +2756,60 @@ print(json.dumps({
                 .contains("worker autonomy")
         );
 
+        let webhook_credential = &outcome.webhooks[0];
+        let webhook_input = runtime
+            .store()
+            .verify_webhook(
+                &outcome.worker.worker_id,
+                &webhook_credential.trigger_id,
+                &webhook_credential.token,
+            )
+            .unwrap();
+        let webhook = runtime
+            .invoke(InvokeRequest {
+                worker_id: outcome.worker.worker_id.clone(),
+                input: webhook_input,
+                idempotency_key: "webhook:local-research:last30days-replay".to_owned(),
+                trace_id: "trace-last30days-webhook".to_owned(),
+                causal_depth: 0,
+                trigger_kind: "webhook".to_owned(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(webhook.status, "completed");
+
+        runtime
+            .publish_event(
+                "research.requested",
+                json!({"windowDays":30,"requestId":"same-worker-proof"}),
+                Some(TraceId::new("trace-last30days-event").unwrap()),
+            )
+            .await;
+        let mut event_runs = JoinSet::new();
+        runtime.dispatch_events(&mut event_runs).await;
+        while event_runs.join_next().await.is_some() {}
+
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        let mut schedule_runs = JoinSet::new();
+        runtime.dispatch_schedules(&mut schedule_runs).await;
+        while schedule_runs.join_next().await.is_some() {}
+        let trigger_kinds = runtime
+            .store()
+            .runs(Some(&outcome.worker.worker_id), 10)
+            .unwrap()
+            .into_iter()
+            .map(|run| run.trigger_kind)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            trigger_kinds,
+            BTreeSet::from([
+                "engine_event".to_owned(),
+                "manual".to_owned(),
+                "schedule".to_owned(),
+                "webhook".to_owned(),
+            ])
+        );
+
         let version_dir = home
             .path()
             .join("workspace/workers/last30days-research/versions")
@@ -2671,7 +2849,7 @@ print(json.dumps({
                 .runs(Some("last30days-research"), 10)
                 .unwrap()
                 .len(),
-            2
+            5
         );
     }
 
@@ -3150,20 +3328,20 @@ print(json.dumps({
     }
 
     #[tokio::test]
-    async fn invalid_engine_event_materialization_disables_worker_instead_of_jamming_cursor() {
+    async fn invalid_engine_event_projection_disables_worker_instead_of_jamming_cursor() {
         let (runtime, _home) = test_runtime(None);
         let mut bundle = command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]);
         bundle.worker_id = Some("invalid-event-materialization".to_owned());
         bundle.name = "Invalid Event Materialization".to_owned();
         bundle.description =
-            "Engine-event fixture whose schema intentionally rejects the injected event envelope"
+            "Engine-event fixture whose projected input intentionally lacks a required field"
                 .to_owned();
         bundle.tool_name = Some("worker_invalid_event_materialization".to_owned());
         bundle.input_schema = json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["kind"],
-            "properties":{"kind":{"type":"string"}}
+            "required":["kind","requiredValue"],
+            "properties":{"kind":{"type":"string"},"requiredValue":{"type":"integer"}}
         });
         bundle.triggers = vec![WorkerTrigger::EngineEvent {
             id: "invalid-event".to_owned(),
@@ -3392,6 +3570,201 @@ print(json.dumps({
         let enabled = runtime.store().inspect(&worker_id).unwrap();
         assert_eq!(enabled["route"]["enabled"], true);
         assert_eq!(enabled["triggers"][0]["enabled"], true);
+    }
+
+    #[tokio::test]
+    async fn stopping_one_worker_cancels_current_work_without_disabling_future_dispatch() {
+        let (runtime, home) = test_runtime(None);
+        let child_started = home.path().join("stop-descendant-started");
+        let child_survived = home.path().join("stop-descendant-survived");
+        let mut bundle = command_bundle(vec![
+            "python3".to_owned(),
+            "-c".to_owned(),
+            "import json,pathlib,subprocess,sys,time; request=json.load(sys.stdin); block=request.get('block',False); subprocess.Popen([sys.executable,'-c','import pathlib,sys,time; time.sleep(.4); pathlib.Path(sys.argv[1]).write_text(\"survived\")',sys.argv[2]]) if block else None; pathlib.Path(sys.argv[1]).write_text('started') if block else None; time.sleep(30) if block else None; print(json.dumps(request))".to_owned(),
+            child_started.display().to_string(),
+            child_survived.display().to_string(),
+        ]);
+        bundle.triggers = vec![WorkerTrigger::Manual {
+            id: "manual".to_owned(),
+        }];
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let worker_id = outcome.worker.worker_id;
+        let invoking = {
+            let runtime = Arc::clone(&runtime);
+            let worker_id = worker_id.clone();
+            tokio::spawn(async move {
+                runtime
+                    .invoke(request(&worker_id, json!({"block":true}), "stop-running"))
+                    .await
+            })
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        while tokio::time::Instant::now() < deadline {
+            if child_started.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(child_started.exists(), "worker descendant never started");
+
+        let stopped = runtime.stop_worker(&worker_id).await.unwrap();
+        assert_eq!(stopped["enabled"], true);
+        assert_eq!(stopped["retired"], false);
+        let result = invoking.await.unwrap().unwrap();
+        assert_eq!(result.status, "failed");
+        assert!(result.error.unwrap().contains("per-worker stop"));
+        let inspection = runtime.store().inspect(&worker_id).unwrap();
+        assert_eq!(inspection["worker"]["enabled"], true);
+        assert_eq!(inspection["worker"]["health"], "healthy");
+        assert_eq!(inspection["route"]["enabled"], true);
+        assert_eq!(inspection["triggers"][0]["enabled"], true);
+        assert!(
+            inspection["audit"]
+                .as_array()
+                .is_some_and(|audit| { audit.iter().any(|entry| entry["action"] == "stopped") })
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !child_survived.exists(),
+            "worker descendant survived per-worker stop"
+        );
+
+        let resumed = runtime
+            .invoke(request(
+                &worker_id,
+                json!({"block":false,"value":"after-stop"}),
+                "after-stop",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resumed.status, "completed");
+        assert_eq!(
+            resumed.output,
+            Some(json!({"block":false,"value":"after-stop"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_process_trees_and_restart_redelivers_the_interrupted_attempt() {
+        let (runtime, home) = test_runtime(None);
+        let child_started = home.path().join("shutdown-descendant-started");
+        let child_survived = home.path().join("shutdown-descendant-survived");
+        let bundle = command_bundle(vec![
+            "python3".to_owned(),
+            "-c".to_owned(),
+            "import json,pathlib,subprocess,sys,time; started=pathlib.Path(sys.argv[1]); survived=pathlib.Path(sys.argv[2]); print(json.dumps({})) if started.exists() else (subprocess.Popen([sys.executable,'-c','import pathlib,sys,time; time.sleep(.4); pathlib.Path(sys.argv[1]).write_text(\"survived\")',str(survived)]),started.write_text('started'),time.sleep(30))".to_owned(),
+            child_started.display().to_string(),
+            child_survived.display().to_string(),
+        ]);
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+        let worker_id = outcome.worker.worker_id;
+        let invoking = {
+            let runtime = Arc::clone(&runtime);
+            let worker_id = worker_id.clone();
+            tokio::spawn(async move {
+                runtime
+                    .invoke(request(&worker_id, json!({}), "shutdown-running"))
+                    .await
+            })
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        while tokio::time::Instant::now() < deadline {
+            if child_started.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(child_started.exists(), "worker descendant never started");
+
+        runtime.shutdown().await;
+        let error = invoking.await.unwrap().unwrap_err();
+        assert!(error.contains("runtime shutdown"));
+        let interrupted = runtime
+            .store()
+            .runs(Some(&worker_id), 10)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(interrupted.status, "running");
+        assert_eq!(interrupted.attempt_count, 1);
+        let summary = runtime.store().summary(&worker_id).unwrap().unwrap();
+        assert!(summary.enabled);
+        assert_eq!(summary.health, "healthy");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !child_survived.exists(),
+            "worker descendant survived runtime shutdown"
+        );
+
+        let restarted = test_runtime_at(home.path(), None);
+        let recovered = restarted
+            .invoke(request(&worker_id, json!({}), "shutdown-running"))
+            .await
+            .unwrap();
+        assert_eq!(recovered.status, "completed");
+        assert_eq!(recovered.attempt_count, 2);
+        let attempts = restarted
+            .store()
+            .attempts(&recovered.invocation_id)
+            .unwrap();
+        assert_eq!(attempts[0]["status"], "interrupted");
+        assert_eq!(attempts[1]["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn every_worker_console_lifecycle_mutation_emits_live_refresh_evidence() {
+        let (runtime, _home) = test_runtime(None);
+        let outcome = runtime
+            .upsert(
+                command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+                None,
+            )
+            .await
+            .unwrap();
+        let worker_id = outcome.worker.worker_id;
+        let version = outcome.version;
+
+        runtime.set_enabled(&worker_id, false).await.unwrap();
+        runtime.set_enabled(&worker_id, true).await.unwrap();
+        runtime.stop_worker(&worker_id).await.unwrap();
+        runtime.rollback(&worker_id, &version).await.unwrap();
+        runtime.retire(&worker_id).await.unwrap();
+        runtime.purge(&worker_id).await.unwrap();
+        runtime.set_stop_all(true).await.unwrap();
+        runtime.set_stop_all(false).await.unwrap();
+
+        let events = runtime
+            .host
+            .poll_stream_topic(
+                "worker.lifecycle",
+                StreamCursor(0),
+                100,
+                &StreamActorScope::admin(),
+            )
+            .await
+            .unwrap();
+        let actions = events
+            .events
+            .iter()
+            .filter_map(|event| event.payload["action"].as_str())
+            .collect::<BTreeSet<_>>();
+        for expected in [
+            "activated",
+            "disabled",
+            "enabled",
+            "stopped",
+            "rolled_back",
+            "retired",
+            "purged",
+            "stop_all",
+            "resumed_all",
+        ] {
+            assert!(
+                actions.contains(expected),
+                "missing {expected}: {actions:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -4686,5 +5059,24 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
             &json!({"kind":"different"}),
             &json!({"kind":"message"}),
         ));
+    }
+
+    #[test]
+    fn engine_event_projection_overlays_only_typed_payload_fields_without_an_envelope() {
+        let materialized = materialize_engine_event_input(
+            &json!({"topic":"configured","asOf":"2026-07-20"}),
+            &json!({"topic":"from-event","ready":true,"requestId":"ignored"}),
+            &json!({
+                "type":"object",
+                "additionalProperties":false,
+                "properties":{"topic":{"type":"string"},"asOf":{"type":"string"}}
+            }),
+        );
+        assert_eq!(
+            materialized,
+            json!({"topic":"from-event","asOf":"2026-07-20"})
+        );
+        assert!(materialized.get("event").is_none());
+        assert!(materialized.get("requestId").is_none());
     }
 }

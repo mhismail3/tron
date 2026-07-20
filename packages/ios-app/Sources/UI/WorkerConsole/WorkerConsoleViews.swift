@@ -387,7 +387,19 @@ private struct WorkerDetailSheet: View {
                     .foregroundStyle(.secondary)
                 Button("Purge permanently", role: .destructive) { confirmPurge = true }
             } else {
-                Button(worker.enabled ? "Disable and stop" : "Enable") {
+                if worker.enabled {
+                    Button("Stop current work") {
+                        Task {
+                            await viewModel.stop(
+                                repository: repository,
+                                connectionState: connectionState
+                            )
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isMutating)
+                }
+                Button(worker.enabled ? "Disable" : "Enable") {
                     Task {
                         await viewModel.setEnabled(
                             !worker.enabled,

@@ -381,6 +381,7 @@ mod tests {
             "worker_kernel::list",
             "worker_kernel::inspect",
             "worker_kernel::invoke",
+            "worker_kernel::stop",
             "worker_kernel::disable",
             "worker_kernel::rollback",
             "worker_kernel::stop_all",

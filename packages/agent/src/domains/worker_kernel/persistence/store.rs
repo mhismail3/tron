@@ -985,6 +985,17 @@ impl WorkerStore {
         Ok(())
     }
 
+    pub fn record_stopped(&self, worker_id: &str, version: &str) -> Result<(), String> {
+        validate_identifier(worker_id, "workerId")?;
+        validate_content_version(version)?;
+        insert_audit(
+            &self.connection()?,
+            worker_id,
+            "stopped",
+            &json!({"activeVersion":version,"enabledStatePreserved":true}),
+        )
+    }
+
     pub fn rollback(
         &self,
         worker_id: &str,
