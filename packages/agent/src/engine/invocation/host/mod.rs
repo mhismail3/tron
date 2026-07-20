@@ -42,8 +42,7 @@ use crate::engine::durability::queue::{
 };
 use crate::engine::durability::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
-    EngineResourceTypeDefinition, EngineResourceVersion, LinkResources, ListResources,
-    RegisterResourceType, UpdateResource,
+    EngineResourceVersion, LinkResources, ListResources, UpdateResource,
 };
 use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,

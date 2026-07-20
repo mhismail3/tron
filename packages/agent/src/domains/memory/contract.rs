@@ -64,7 +64,7 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "List redacted memory records in the current scope.",
         )
         .request_schema(list_schema())
-        .response_schema(list_response_schema())
+        .response_schema(list_response_schema("records"))
         .build()?,
         read_contract(
             INSPECT_FUNCTION,
@@ -129,7 +129,7 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "List redacted memory query evidence in the current scope.",
         )
         .request_schema(list_schema())
-        .response_schema(list_response_schema())
+        .response_schema(list_response_schema("queries"))
         .build()?,
         read_contract(
             INSPECT_QUERY_FUNCTION,
@@ -143,7 +143,7 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "List redacted memory decision evidence in the current scope.",
         )
         .request_schema(list_schema())
-        .response_schema(list_response_schema())
+        .response_schema(list_response_schema("decisions"))
         .build()?,
         read_contract(
             INSPECT_DECISION_FUNCTION,
@@ -412,10 +412,10 @@ fn record_response_schema(status: &'static str) -> serde_json::Value {
     })
 }
 
-fn list_response_schema() -> serde_json::Value {
+fn list_response_schema(field: &'static str) -> serde_json::Value {
     json!({
         "type": "object",
-        "required": ["schemaVersion", "records", "redacted"],
+        "required": ["schemaVersion", field, "redacted"],
         "additionalProperties": true
     })
 }

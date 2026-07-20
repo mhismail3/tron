@@ -1,9 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceScope, FunctionId, Invocation, InvocationResult,
-    RUNTIME_METADATA_WORKING_DIRECTORY, RiskLevel, StreamActorScope, StreamCursor, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
+    FunctionId, Invocation, InvocationResult, StreamActorScope, StreamCursor, TraceId,
     VisibilityScope, WorkerId,
 };
 use crate::shared::protocol::memory::MEMORY_SCHEMA_VERSION;
@@ -1134,87 +1133,35 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
     )
     .await;
 
-    let query_list_grant = derive_execute_grant(
+    let query_list = invoke_read(
         &ctx,
-        "private-authority-evidence-query-list",
-        "memory_query_list",
-        query_resource_id,
-        decision_resource_id,
-    )
-    .await;
-    let query_list = invoke_read_with_context(
-        &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({"operation": "memory_query_list"}),
-        agent_context("memory-private-authority-query-list", query_list_grant)
-            .with_scope("capability.execute")
-            .with_scope(super::READ_SCOPE),
+        super::LIST_QUERIES_FUNCTION,
+        json!({}),
+        "memory-private-authority-query-list",
     )
     .await
     .expect("query list");
-    let query_inspect = invoke_read_with_context(
+    let query_inspect = invoke_read(
         &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({
-            "operation": "memory_query_inspect",
-            "queryResourceId": query_resource_id
-        }),
-        agent_context(
-            "memory-private-authority-query-inspect",
-            derive_execute_grant(
-                &ctx,
-                "private-authority-evidence-query-inspect",
-                "memory_query_inspect",
-                query_resource_id,
-                decision_resource_id,
-            )
-            .await,
-        )
-        .with_scope("capability.execute")
-        .with_scope(super::READ_SCOPE),
+        super::INSPECT_QUERY_FUNCTION,
+        json!({"queryResourceId": query_resource_id}),
+        "memory-private-authority-query-inspect",
     )
     .await
     .expect("query inspect");
-    let decision_list = invoke_read_with_context(
+    let decision_list = invoke_read(
         &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({"operation": "memory_decision_list"}),
-        agent_context(
-            "memory-private-authority-decision-list",
-            derive_execute_grant(
-                &ctx,
-                "private-authority-evidence-decision-list",
-                "memory_decision_list",
-                query_resource_id,
-                decision_resource_id,
-            )
-            .await,
-        )
-        .with_scope("capability.execute")
-        .with_scope(super::READ_SCOPE),
+        super::LIST_DECISIONS_FUNCTION,
+        json!({}),
+        "memory-private-authority-decision-list",
     )
     .await
     .expect("decision list");
-    let decision_inspect = invoke_read_with_context(
+    let decision_inspect = invoke_read(
         &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({
-            "operation": "memory_decision_inspect",
-            "decisionResourceId": decision_resource_id
-        }),
-        agent_context(
-            "memory-private-authority-decision-inspect",
-            derive_execute_grant(
-                &ctx,
-                "private-authority-evidence-decision-inspect",
-                "memory_decision_inspect",
-                query_resource_id,
-                decision_resource_id,
-            )
-            .await,
-        )
-        .with_scope("capability.execute")
-        .with_scope(super::READ_SCOPE),
+        super::INSPECT_DECISION_FUNCTION,
+        json!({"decisionResourceId": decision_resource_id}),
+        "memory-private-authority-decision-inspect",
     )
     .await
     .expect("decision inspect");
@@ -1228,19 +1175,19 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
         assert_authority_evidence_scrubbed(label, value);
     }
     assert_eq!(
-        query_list["details"]["memory"]["queries"][0]["record"]["intent"]["proof"],
+        query_list["queries"][0]["record"]["intent"]["proof"],
         "safe-query-proof"
     );
     assert_eq!(
-        query_inspect["details"]["memory"]["versions"][0]["record"]["filters"]["scope"],
+        query_inspect["versions"][0]["record"]["filters"]["scope"],
         "current_session"
     );
     assert_eq!(
-        decision_list["details"]["memory"]["decisions"][0]["record"]["sourceRefs"][0]["id"],
+        decision_list["decisions"][0]["record"]["sourceRefs"][0]["id"],
         "safe-decision-source"
     );
     assert_eq!(
-        decision_inspect["details"]["memory"]["versions"][0]["record"]["retentionEvidence"]["proof"],
+        decision_inspect["versions"][0]["record"]["retentionEvidence"]["proof"],
         "safe-retention-proof"
     );
 }
@@ -1298,214 +1245,6 @@ async fn retention_policy_evidence_rejects_hard_delete_and_automatic_retention()
             .is_some_and(|error| error.to_string().contains("automatic retention")),
         "automatic retention must fail closed: {:?}",
         rejected_auto.error
-    );
-}
-
-#[tokio::test]
-async fn execute_can_read_only_inspect_query_and_decision_evidence() {
-    let ctx = make_test_context();
-    configure_active(&ctx, "memory-execute-evidence-configure").await;
-    let query = invoke_write(
-        &ctx,
-        super::RECORD_QUERY_FUNCTION,
-        json!({
-            "queryId": "execute-query",
-            "queryKind": "episodic_trace_query",
-            "intent": {"kind": "trace_refs_only"},
-            "occurredAt": "2026-06-26T00:02:00Z"
-        }),
-        "memory-execute-evidence-query",
-    )
-    .await;
-    let decision = invoke_write(
-        &ctx,
-        super::RECORD_DECISION_FUNCTION,
-        json!({
-            "decisionId": "execute-decision",
-            "decisionKind": "reject",
-            "reasonCodes": ["retrieval_engine_absent"],
-            "occurredAt": "2026-06-26T00:02:01Z"
-        }),
-        "memory-execute-evidence-decision",
-    )
-    .await;
-    let query_resource_id = query["queryResourceId"].as_str().expect("query id");
-    let decision_resource_id = decision["decisionResourceId"]
-        .as_str()
-        .expect("decision id");
-    let query_list_grant = derive_execute_grant(
-        &ctx,
-        "memory-execute-query-list",
-        "memory_query_list",
-        query_resource_id,
-        decision_resource_id,
-    )
-    .await;
-
-    let query_list = invoke_read_with_context(
-        &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({"operation": "memory_query_list"}),
-        agent_context("memory-execute-query-list", query_list_grant)
-            .with_scope("capability.execute")
-            .with_scope(super::READ_SCOPE),
-    )
-    .await
-    .expect("execute query list");
-    assert_eq!(
-        query_list["details"]["primitiveOperation"],
-        "memory_query_list"
-    );
-    assert_eq!(
-        query_list["details"]["memory"]["queries"][0]["record"]["lifecycle"]["retrievalExecuted"],
-        false
-    );
-    assert_provider_visible_memory_surface_redacted("query_list", &query_list);
-    assert_list_resource_projection_redacted(
-        "query_list",
-        &query_list["details"]["memory"]["queries"][0]["resource"],
-    );
-
-    let decision_inspect = invoke_read_with_context(
-        &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({
-            "operation": "memory_decision_inspect",
-            "decisionResourceId": decision_resource_id
-        }),
-        agent_context(
-            "memory-execute-decision-inspect",
-            derive_execute_grant(
-                &ctx,
-                "memory-execute-decision-inspect",
-                "memory_decision_inspect",
-                query_resource_id,
-                decision_resource_id,
-            )
-            .await,
-        )
-        .with_scope("capability.execute")
-        .with_scope(super::READ_SCOPE),
-    )
-    .await
-    .expect("execute decision inspect");
-    assert_eq!(
-        decision_inspect["details"]["primitiveOperation"],
-        "memory_decision_inspect"
-    );
-    assert_eq!(
-        decision_inspect["details"]["memory"]["versions"][0]["record"]["redaction"]["memoryBodyStored"],
-        false
-    );
-    assert_provider_visible_memory_surface_redacted("decision_inspect", &decision_inspect);
-
-    let query_inspect = invoke_read_with_context(
-        &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({
-            "operation": "memory_query_inspect",
-            "queryResourceId": query_resource_id
-        }),
-        agent_context(
-            "memory-execute-query-inspect",
-            derive_execute_grant(
-                &ctx,
-                "memory-execute-query-inspect",
-                "memory_query_inspect",
-                query_resource_id,
-                decision_resource_id,
-            )
-            .await,
-        )
-        .with_scope("capability.execute")
-        .with_scope(super::READ_SCOPE),
-    )
-    .await
-    .expect("execute query inspect");
-    assert_eq!(
-        query_inspect["details"]["primitiveOperation"],
-        "memory_query_inspect"
-    );
-    assert_provider_visible_memory_surface_redacted("query_inspect", &query_inspect);
-
-    let decision_list = invoke_read_with_context(
-        &ctx,
-        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
-        json!({"operation": "memory_decision_list"}),
-        agent_context(
-            "memory-execute-decision-list",
-            derive_execute_grant(
-                &ctx,
-                "memory-execute-decision-list",
-                "memory_decision_list",
-                query_resource_id,
-                decision_resource_id,
-            )
-            .await,
-        )
-        .with_scope("capability.execute")
-        .with_scope(super::READ_SCOPE),
-    )
-    .await
-    .expect("execute decision list");
-    assert_eq!(
-        decision_list["details"]["primitiveOperation"],
-        "memory_decision_list"
-    );
-    assert_provider_visible_memory_surface_redacted("decision_list", &decision_list);
-    assert_list_resource_projection_redacted(
-        "decision_list",
-        &decision_list["details"]["memory"]["decisions"][0]["resource"],
-    );
-}
-
-fn assert_provider_visible_memory_surface_redacted(label: &str, value: &Value) {
-    let rendered = serde_json::to_string(value).expect("serialize provider-visible memory result");
-    for forbidden in [
-        "authorityGrantId",
-        "allowedAuthorityScopes",
-        "createdByInvocationId",
-        "engine-transport",
-        "memory-execute-memory-execute-grant",
-        "agent:memory-session",
-        "memory-execute-query-list",
-        "memory-execute-query-inspect",
-        "memory-execute-decision-list",
-        "memory-execute-decision-inspect",
-    ] {
-        assert!(
-            !rendered.contains(forbidden),
-            "{label} leaked forbidden provider-visible memory material `{forbidden}`: {rendered}"
-        );
-    }
-}
-
-fn assert_list_resource_projection_redacted(label: &str, resource: &Value) {
-    assert_eq!(resource["scope"]["rawIdIncluded"], false, "{label}");
-    assert_eq!(
-        resource["redaction"]["ownerActorIdIncluded"], false,
-        "{label}"
-    );
-    assert_eq!(resource["redaction"]["traceIdIncluded"], false, "{label}");
-    assert_eq!(
-        resource["redaction"]["invocationIdIncluded"], false,
-        "{label}"
-    );
-    assert!(
-        resource.get("ownerActorId").is_none(),
-        "{label} leaked raw owner actor id"
-    );
-    assert!(
-        resource.get("traceId").is_none(),
-        "{label} leaked raw trace id"
-    );
-    assert!(
-        resource.get("createdByInvocationId").is_none(),
-        "{label} leaked raw invocation id"
-    );
-    assert!(
-        !resource["policy"].is_object() || resource["policy"].get("authority").is_none(),
-        "{label} leaked raw authority policy metadata: {resource}"
     );
 }
 
@@ -1764,74 +1503,6 @@ fn client_context(trace_id: &str) -> CausalContext {
     )
     .with_session_id("memory-session")
     .with_workspace_id("memory-workspace")
-}
-
-async fn derive_execute_grant(
-    ctx: &ServerRuntimeContext,
-    suffix: &str,
-    operation: &str,
-    query_resource_id: &str,
-    decision_resource_id: &str,
-) -> AuthorityGrantId {
-    let max_risk = match crate::domains::capability::operation_risk(operation) {
-        Some("low" | "medium") => RiskLevel::Medium,
-        Some("high" | "critical") => RiskLevel::High,
-        other => panic!("unsupported operation risk for {operation}: {other:?}"),
-    };
-    let grant = ctx
-        .engine_host
-        .derive_authority_grant(DeriveGrant {
-            grant_id: Some(AuthorityGrantId::new(format!("memory-execute-{suffix}")).unwrap()),
-            parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
-            subject_actor_id: Some(ActorId::new("agent:memory-session").unwrap()),
-            subject_worker_id: None,
-            subject_invocation_id: None,
-            allowed_capabilities: vec![
-                crate::domains::capability::contract::EXECUTE_FUNCTION_ID.to_owned(),
-            ],
-            allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
-            allowed_authority_scopes: vec![
-                "capability.execute".to_owned(),
-                super::READ_SCOPE.to_owned(),
-                "resource.read".to_owned(),
-            ],
-            allowed_resource_kinds: vec![
-                super::MEMORY_QUERY_KIND.to_owned(),
-                super::MEMORY_DECISION_KIND.to_owned(),
-            ],
-            resource_selectors: vec![
-                "kind:memory_query".to_owned(),
-                "kind:memory_decision".to_owned(),
-                format!("resource:{query_resource_id}"),
-                format!("resource:{decision_resource_id}"),
-            ],
-            file_roots: vec!["/tmp".to_owned()],
-            network_policy: "none".to_owned(),
-            max_risk,
-            budget: json!({"class": "memory_query_decision_test"}),
-            expires_at: None,
-            can_delegate: false,
-            provenance: json!({
-                "source": "memory_query_decision_test",
-                "operation": operation
-            }),
-            trace_id: TraceId::new(format!("trace-{suffix}")).unwrap(),
-        })
-        .await
-        .expect("derive memory execute grant");
-    grant.grant_id
-}
-
-fn agent_context(trace_id: &str, grant_id: AuthorityGrantId) -> CausalContext {
-    CausalContext::new(
-        ActorId::new("agent:memory-session").unwrap(),
-        ActorKind::Agent,
-        grant_id,
-        TraceId::new(trace_id).unwrap(),
-    )
-    .with_session_id("memory-session")
-    .with_workspace_id("memory-workspace")
-    .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp")
 }
 
 fn workspace_context(trace_id: &str) -> CausalContext {

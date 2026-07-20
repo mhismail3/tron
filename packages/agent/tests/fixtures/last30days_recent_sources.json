@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Durable worker dispatch reaches restart recovery",
+    "url": "https://example.test/tron/durable-dispatch",
+    "publishedAt": "2026-07-16",
+    "summary": "At-least-once dispatch persists work before execution and requeues interrupted attempts."
+  },
+  {
+    "title": "Typed worker tools activate without a new session",
+    "url": "https://example.test/tron/dynamic-tools",
+    "publishedAt": "2026-07-08",
+    "summary": "Activated worker schemas become direct model tools immediately."
+  },
+  {
+    "title": "Worker bundles become filesystem-owned state",
+    "url": "https://example.test/tron/worker-bundles",
+    "publishedAt": "2026-06-24",
+    "summary": "Immutable bundles keep source, dependencies, provenance, and tests human-inspectable."
+  },
+  {
+    "title": "Proposal-only module lifecycle introduced",
+    "url": "https://example.test/tron/old-proposals",
+    "publishedAt": "2026-05-01",
+    "summary": "Historical proposal machinery required a later authority-mediated transition."
+  }
+]

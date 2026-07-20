@@ -1,9 +1,9 @@
 //! Resource primitive worker contracts and handlers.
 //!
-//! `resource::*` is the canonical capability surface for durable engine
-//! resources. Higher-level modules such as artifacts, goals, claims, evidence,
-//! decisions, generated UI, harness docs, and module package records should
-//! compose these functions instead of creating separate persistence planes.
+//! `resource::*` is the neutral typed surface for durable engine state. The
+//! fixed reliability wrappers cover only materialized files and patch records;
+//! artifact curation, goals, claims, evidence, and decisions are worker-owned
+//! behavior built over generic resources.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -26,22 +26,16 @@ use crate::engine::{
 };
 use crate::engine::{EngineResource, EngineResourceInspection, EngineResourceVersion};
 
-mod artifact;
 mod common;
 mod input;
 mod materialized_file;
 mod registrations;
 mod schemas;
 
-use artifact::{
-    artifact_compose_response, artifact_merge_response, artifact_search_response,
-    artifact_split_response, goal_working_set_response,
-};
 use common::{
-    create_and_attach_resource, create_typed_resource, ensure_inspected_kind,
-    lifecycle_resource_by_id, lifecycle_wrapper_resource, optional_resource_scope_filter,
+    ensure_inspected_kind, lifecycle_wrapper_resource, optional_resource_scope_filter,
     resource_kind_for_version, resource_ref_from_resource, resource_ref_from_version,
-    update_wrapper_resource, wrapper_create_response, wrapper_version_response,
+    wrapper_version_response,
 };
 use input::{
     locations, optional_string_array, optional_worker_id, resource_scope_from_payload,
@@ -57,21 +51,6 @@ pub(crate) const UPDATE_FUNCTION: &str = "resource::update";
 pub(crate) const LINK_FUNCTION: &str = "resource::link";
 pub(crate) const INSPECT_FUNCTION: &str = "resource::inspect";
 pub(crate) const LIST_FUNCTION: &str = "resource::list";
-pub(crate) const ARTIFACT_CREATE_FUNCTION: &str = "artifact::create";
-pub(crate) const ARTIFACT_UPDATE_FUNCTION: &str = "artifact::update";
-pub(crate) const ARTIFACT_PROMOTE_FUNCTION: &str = "artifact::promote";
-pub(crate) const ARTIFACT_DISCARD_FUNCTION: &str = "artifact::discard";
-pub(crate) const ARTIFACT_INSPECT_FUNCTION: &str = "artifact::inspect";
-pub(crate) const ARTIFACT_SPLIT_FUNCTION: &str = "artifact::split";
-pub(crate) const ARTIFACT_COMPOSE_FUNCTION: &str = "artifact::compose";
-pub(crate) const ARTIFACT_MERGE_FUNCTION: &str = "artifact::merge";
-pub(crate) const ARTIFACT_SEARCH_FUNCTION: &str = "artifact::search";
-pub(crate) const GOAL_CREATE_FUNCTION: &str = "goal::create";
-pub(crate) const GOAL_COMPLETE_FUNCTION: &str = "goal::complete";
-pub(crate) const GOAL_WORKING_SET_FUNCTION: &str = "goal::working_set";
-pub(crate) const CLAIM_ATTACH_FUNCTION: &str = "claim::attach";
-pub(crate) const EVIDENCE_ATTACH_FUNCTION: &str = "evidence::attach";
-pub(crate) const DECISION_CREATE_FUNCTION: &str = "decision::create";
 pub(crate) const MATERIALIZED_FILE_CREATE_FUNCTION: &str = "materialized_file::create";
 pub(crate) const MATERIALIZED_FILE_READ_FUNCTION: &str = "materialized_file::read";
 pub(crate) const MATERIALIZED_FILE_UPDATE_FUNCTION: &str = "materialized_file::update";
@@ -82,7 +61,6 @@ pub(crate) const MATERIALIZED_FILE_HASH_VERIFY_FUNCTION: &str = "materialized_fi
 pub(crate) const PATCH_PROPOSE_FUNCTION: &str = "patch::propose";
 pub(crate) const PATCH_APPLY_FUNCTION: &str = "patch::apply";
 pub(crate) const PATCH_MERGE_FUNCTION: &str = "patch::merge";
-pub(crate) const ARTIFACT_MATERIALIZE_FUNCTION: &str = "artifact::materialize";
 
 pub(super) fn registrations(
     stores: &PrimitiveStores,
@@ -374,142 +352,6 @@ impl InProcessFunctionHandler for ResourcePrimitiveHandler {
                 };
                 Ok(json!({ "resources": store.list(filter)? }))
             }
-            ARTIFACT_CREATE_FUNCTION => {
-                wrapper_create_response(&mut store, &invocation, "artifact", None, "created")
-            }
-            ARTIFACT_UPDATE_FUNCTION => {
-                let version = update_wrapper_resource(&mut store, &invocation, None)?;
-                wrapper_version_response(&mut store, version, "updated")
-            }
-            ARTIFACT_PROMOTE_FUNCTION => {
-                let version =
-                    lifecycle_wrapper_resource(&mut store, &invocation, "artifact", "promoted")?;
-                wrapper_version_response(&mut store, version, "promoted")
-            }
-            ARTIFACT_DISCARD_FUNCTION => {
-                let version =
-                    lifecycle_wrapper_resource(&mut store, &invocation, "artifact", "discarded")?;
-                wrapper_version_response(&mut store, version, "discarded")
-            }
-            ARTIFACT_INSPECT_FUNCTION => {
-                let resource_id = required_str(&invocation.payload, "resourceId")?;
-                let inspection = store.inspect(resource_id)?;
-                ensure_inspected_kind(&inspection, "artifact")?;
-                Ok(json!({ "inspection": inspection }))
-            }
-            ARTIFACT_SPLIT_FUNCTION => artifact_split_response(&mut store, &invocation),
-            ARTIFACT_COMPOSE_FUNCTION => artifact_compose_response(&mut store, &invocation),
-            ARTIFACT_MERGE_FUNCTION => artifact_merge_response(&mut store, &invocation),
-            ARTIFACT_SEARCH_FUNCTION => artifact_search_response(&mut store, &invocation),
-            ARTIFACT_MATERIALIZE_FUNCTION => artifact_materialize_response(&mut store, &invocation),
-            GOAL_CREATE_FUNCTION => {
-                wrapper_create_response(&mut store, &invocation, "goal", None, "created")
-            }
-            GOAL_COMPLETE_FUNCTION => {
-                let goal_id = required_string_owned(&invocation.payload, "goalResourceId")?;
-                let agent_result_id =
-                    required_string_owned(&invocation.payload, "agentResultResourceId")?;
-                let promoted_resource_ids =
-                    string_array(&invocation.payload, "promotedResourceIds")?;
-                if promoted_resource_ids.is_empty() {
-                    return Err(EngineError::PolicyViolation(
-                        "goal::complete requires at least one promoted resource".to_owned(),
-                    ));
-                }
-                let decision_payload =
-                    invocation.payload.get("decision").cloned().ok_or_else(|| {
-                        EngineError::PolicyViolation(
-                            "goal::complete requires decision payload".to_owned(),
-                        )
-                    })?;
-                let decision = create_typed_resource(
-                    &mut store,
-                    &invocation,
-                    "decision",
-                    Some("final"),
-                    Some(decision_payload),
-                )?;
-                let goal_version = lifecycle_resource_by_id(
-                    &mut store,
-                    &invocation,
-                    &goal_id,
-                    "goal",
-                    "completed",
-                )?;
-                let link = store.link(LinkResources {
-                    source_resource_id: goal_id.clone(),
-                    target_resource_id: decision.resource_id.clone(),
-                    relation: "decided_by".to_owned(),
-                    metadata: invocation
-                        .payload
-                        .get("metadata")
-                        .cloned()
-                        .unwrap_or_else(|| json!({})),
-                    trace_id: invocation.causal_context.trace_id.clone(),
-                    invocation_id: Some(invocation.id.clone()),
-                })?;
-                let agent_link = store.link(LinkResources {
-                    source_resource_id: goal_id.clone(),
-                    target_resource_id: agent_result_id,
-                    relation: "produced".to_owned(),
-                    metadata: json!({"role": "agent_result"}),
-                    trace_id: invocation.causal_context.trace_id.clone(),
-                    invocation_id: Some(invocation.id.clone()),
-                })?;
-                let mut promoted_links = Vec::new();
-                for resource_id in promoted_resource_ids {
-                    promoted_links.push(store.link(LinkResources {
-                        source_resource_id: goal_id.clone(),
-                        target_resource_id: resource_id,
-                        relation: "promoted_output".to_owned(),
-                        metadata: json!({}),
-                        trace_id: invocation.causal_context.trace_id.clone(),
-                        invocation_id: Some(invocation.id.clone()),
-                    })?);
-                }
-                let goal_ref = resource_ref_from_version(&goal_version, "goal", "completed");
-                let decision_ref = resource_ref_from_resource(&decision, "decision");
-                Ok(json!({
-                    "goalVersion": goal_version,
-                    "decision": decision,
-                    "link": link,
-                    "agentResultLink": agent_link,
-                    "promotedLinks": promoted_links,
-                    "resourceRefs": [goal_ref, decision_ref],
-                }))
-            }
-            GOAL_WORKING_SET_FUNCTION => goal_working_set_response(&mut store, &invocation),
-            CLAIM_ATTACH_FUNCTION => {
-                let (resource, link) =
-                    create_and_attach_resource(&mut store, &invocation, "claim", "claims_about")?;
-                let resource_ref = resource_ref_from_resource(&resource, "claim");
-                Ok(json!({
-                    "resource": resource,
-                    "link": link,
-                    "resourceRefs": [resource_ref]
-                }))
-            }
-            EVIDENCE_ATTACH_FUNCTION => {
-                let (resource, link) = create_and_attach_resource(
-                    &mut store,
-                    &invocation,
-                    "evidence",
-                    "evidence_for",
-                )?;
-                let resource_ref = resource_ref_from_resource(&resource, "evidence");
-                Ok(json!({
-                    "resource": resource,
-                    "link": link,
-                    "resourceRefs": [resource_ref]
-                }))
-            }
-            DECISION_CREATE_FUNCTION => wrapper_create_response(
-                &mut store,
-                &invocation,
-                "decision",
-                Some("final"),
-                "decision",
-            ),
             MATERIALIZED_FILE_CREATE_FUNCTION => {
                 materialized_file_create_response(&mut store, &invocation)
             }

@@ -422,99 +422,69 @@ fn convert_tools_v2_empty_tools() {
 // ── generate_capability_instruction_text ──────────────────────────────
 
 #[test]
-fn clarification_includes_model_primitive_names() {
+fn direct_guidance_includes_model_primitive_names() {
     let capabilities = vec![make_tool_with_required(
-        "execute",
-        "Execute inspected capabilities",
-        vec!["mode"],
+        "worker_list",
+        "List persistent workers",
+        vec!["includeDisabled"],
     )];
     let result = generate_capability_instruction_text(&capabilities);
 
-    assert!(result.contains("execute"));
-    assert!(result.contains("Execute inspected capabilities"));
-    assert!(result.contains("required params: mode"));
+    assert!(result.contains("worker_list"));
+    assert!(result.contains("List persistent workers"));
+    assert!(result.contains("required params: includeDisabled"));
 }
 
 #[test]
-fn clarification_includes_tron_identity() {
+fn direct_guidance_includes_tron_identity() {
     let result = generate_capability_instruction_text(&[]);
     assert!(result.contains("TRON"));
     assert!(result.contains("AI coding assistant"));
 }
 
 #[test]
-fn clarification_uses_catalog_owned_operation_contracts() {
+fn direct_guidance_describes_worker_first_execution() {
     let result = generate_capability_instruction_text(&[]);
 
     for required in [
-        "Use only `capability::execute`",
-        "Never guess operation names",
-        "`catalog_search`",
-        "`catalog_inspect`",
-        "`kind: \"function\"`",
-        "`id: \"execute::<operation>\"`",
-        "canonical inspect schema",
-        "exact required fields, effect, risk, preflight",
+        "Available Direct Tools",
+        "capability::execute",
+        "Follow each tool's JSON schema exactly",
+        "worker_discover",
+        "worker_upsert",
+        "becomes callable immediately",
+        "reliability evidence",
+        "not permission ceremony",
+        "Core source changes must remain isolated proposals",
+        "explicit user approval",
     ] {
         assert!(
             result.contains(required),
-            "schema-led guidance missing {required:?}"
+            "worker-first guidance missing {required:?}"
         );
     }
 }
 
 #[test]
-fn clarification_derives_operation_index_from_canonical_contract() {
-    let result = generate_capability_instruction_text(&[]);
-
-    for operation in crate::domains::capability::supported_operation_names() {
-        assert!(
-            result.contains(*operation),
-            "canonical execute operation missing from generated index: {operation}"
-        );
-    }
-}
-
-#[test]
-fn clarification_includes_generic_execution_invariants() {
-    let result = generate_capability_instruction_text(&[]);
-
-    for required in [
-        "Every non-read-only schema structurally requires a stable, caller-supplied `idempotencyKey`",
-        "exact refs and selectors",
-        "Normal task invocation must not enter a capability replacement workflow unless the user explicitly requests replacement",
-        "If a call is invalid or unsupported, recover by catalog inspection",
-        "do not retry guessed variants",
-        "Provider-safe outputs are the model-first evidence path",
-    ] {
-        assert!(
-            result.contains(required),
-            "generic execution guidance missing {required:?}"
-        );
-    }
-}
-
-#[test]
-fn clarification_omits_duplicate_operation_policy() {
+fn direct_guidance_omits_operation_catalog_ceremony() {
     let result = generate_capability_instruction_text(&[]);
 
     assert!(
-        result.len() < 10_000,
-        "provider guidance should stay concise and schema-led"
-    );
-    assert_eq!(
-        result.matches("idempotencyKey").count(),
-        1,
-        "idempotency policy must not be duplicated per operation"
+        result.len() < 4_000,
+        "provider guidance should stay concise"
     );
     for stale_guidance in [
-        "Set `operation` to exactly one of",
-        "Mutating filesystem package operations",
-        "all web research record operations",
+        "Use only",
+        "catalog_search",
+        "catalog_inspect",
+        "Set operation to exactly one of",
+        "idempotencyKey",
+        "allowedCapabilities",
+        "authority grant",
     ] {
         assert!(
             !result.contains(stale_guidance),
-            "stale operation guidance remains: {stale_guidance:?}"
+            "stale authority guidance remains: {stale_guidance:?}"
         );
     }
 }

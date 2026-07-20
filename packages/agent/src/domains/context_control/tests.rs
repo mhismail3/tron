@@ -1357,7 +1357,7 @@ async fn derive_grant(
             subject_actor_id: None,
             subject_worker_id: None,
             subject_invocation_id: None,
-            allowed_capabilities: vec!["capability::execute".to_owned()],
+            allowed_capabilities: vec!["context_control::test".to_owned()],
             allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
             allowed_authority_scopes: scopes.iter().map(|scope| (*scope).to_owned()).collect(),
             allowed_resource_kinds: resource_kinds
@@ -1406,7 +1406,7 @@ fn invocation(
     payload["operation"] = json!(operation);
     Invocation {
         id: InvocationId::new(format!("invocation-{key}")).unwrap(),
-        function_id: FunctionId::new("capability::execute").unwrap(),
+        function_id: FunctionId::new("context_control::test").unwrap(),
         payload,
         causal_context: context,
         delivery_mode: crate::engine::DeliveryMode::Sync,

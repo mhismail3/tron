@@ -13,10 +13,9 @@
 //!
 //! # Context Injection
 //!
-//! Primitive context parts (agent soul, agent-owned state, environment, and the
-//! single `execute` primitive guidance) are compiled into the Responses
-//! `instructions` field. The `input` array carries only conversation and
-//! capability-result items.
+//! Context parts (agent instruction, agent-owned state, environment, and direct
+//! typed-tool guidance) are compiled into the Responses `instructions` field.
+//! The `input` array carries only conversation and provider tool-result items.
 
 use async_trait::async_trait;
 use base64::Engine as _;

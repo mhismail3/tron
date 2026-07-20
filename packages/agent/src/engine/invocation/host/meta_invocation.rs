@@ -155,11 +155,13 @@ impl EngineHost {
 
         invocation.causal_context.catalog_revision = self.catalog.revision();
         policy::validate_invocation(&function, invocation)?;
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .authorize_invocation(&function, invocation)?;
+        if !invocation.causal_context.is_trusted_local() {
+            self.primitives
+                .grants
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+                .authorize_invocation(&function, invocation)?;
+        }
         if let Some(schema) = &function.request_schema {
             schema::validate_payload(&function.id, "request", schema, &invocation.payload)?;
         }
@@ -171,6 +173,9 @@ impl EngineHost {
         function: &FunctionDefinition,
         invocation: &Invocation,
     ) -> Result<()> {
+        if invocation.causal_context.is_trusted_local() {
+            return Ok(());
+        }
         self.primitives
             .grants
             .lock()

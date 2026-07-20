@@ -18,24 +18,14 @@
 //! containment for file roots. Raw string-prefix checks are not authority.
 //! INVARIANT: when `remainingInvocations` is present, invocation execution
 //! consumes one durable grant budget unit before the handler runs.
-//! INVARIANT: model-facing `capability::execute` inner operations are mapped
-//! back to their package authority scopes and durable resource kinds before
-//! grant checks run, so the single provider primitive does not bypass package
-//! scope, resource-kind, or selector policy.
-//! INVARIANT: capability governance operations, including shadow-trial records,
-//! must advertise the same exact scopes and kind selectors that authorization
-//! enforces; cockpit preflight metadata is not a separate permission model.
-//! INVARIANT: optional inner-operation resource links such as
-//! `mediaResourceId`, `importHistoryResourceId`, and
-//! `updateDiagnosticResourceId` broaden grant checks only when their
-//! parser-significant fields are non-empty strings; explicit nulls and empty
-//! strings are treated as absent for grant-scope expansion.
+//! INVARIANT: trusted-local invocations bypass grant lookup before this module;
+//! durable grants protect authenticated non-local engine boundaries only.
+//! INVARIANT: resource identifiers are discovered generically from typed
+//! payload fields rather than an operation-name or product-domain allow-list.
 //! INVARIANT: a child grant may carry empty resource-kind and selector lists
 //! when its capability needs no resource authority. Empty lists mean no
 //! resource access; the engine never invents a placeholder kind or wildcard.
-//! INVARIANT: pathless execute operations do not require working-directory
-//! metadata. When metadata or a relative path is present, authorization
-//! normalizes it and enforces canonical file-root containment before dispatch.
+//! INVARIANT: paths are canonicalized before file-root containment checks.
 //! INVARIANT: test-only bootstrap ids never seed production stores. Opening a
 //! durable store revokes obsolete engine-bootstrap roots and every descendant
 //! so an upgrade cannot retain retired wildcard authority.

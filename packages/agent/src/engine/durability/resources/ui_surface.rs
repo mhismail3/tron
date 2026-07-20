@@ -1,7 +1,7 @@
 //! Validation for runtime UI surface resources.
 
 use chrono::DateTime;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::types::UI_SURFACE_SCHEMA_VERSION;
 use crate::engine::kernel::errors::{EngineError, Result};
@@ -14,31 +14,6 @@ const UI_MAX_TABLE_ROWS: usize = 200;
 const UI_MAX_TEXT_BYTES: usize = 16 * 1024;
 const UI_MAX_ACTIONS: usize = 50;
 const UI_MAX_PAYLOAD_BYTES: usize = 64 * 1024;
-
-pub(crate) fn ui_surface_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": [
-            "surfaceId",
-            "title",
-            "purpose",
-            "schemaVersion",
-            "layout",
-            "actions",
-            "expiresAt"
-        ],
-        "additionalProperties": false,
-        "properties": {
-            "surfaceId": {"type": "string"},
-            "title": {"type": "string"},
-            "purpose": {"type": "string"},
-            "schemaVersion": {"type": "integer"},
-            "layout": {"type": "object"},
-            "actions": {"type": "array", "items": {"type": "object"}, "maxItems": UI_MAX_ACTIONS},
-            "expiresAt": {"type": "string"}
-        }
-    })
-}
 
 /// Validate the bounded runtime `ui_surface` payload contract.
 pub(crate) fn validate_ui_surface_payload(payload: &Value) -> Result<()> {

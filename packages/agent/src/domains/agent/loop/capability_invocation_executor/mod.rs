@@ -1,36 +1,11 @@
-//! Model capability executor for the primitive `execute` surface.
+//! Direct model-tool executor for the worker-first surface.
 //!
-//! Each model-launched primitive call first derives a non-delegable child grant
-//! from `agent-capability-runtime` with the current canonical working directory
-//! as its only file root, `networkPolicy none`, no namespace authority, and the
-//! exact target function and operation being invoked. The derived grant id and
-//! its bounded risk and operation authority scopes, not the bootstrap runtime
-//! grant alone, are then
-//! placed in the engine causal context for `capability::execute` so downstream
-//! capability dispatch can revalidate the exact operation claim and canonical
-//! static scopes, base resource custody, and network policy before downstream
-//! domains enforce goal, prompt-artifact, program-execution, resource,
-//! filesystem, and Git contracts without wildcard selectors.
-//! Catalog discovery calls are intentionally narrower than generic execute
-//! calls: `catalog_search` and `catalog_inspect` derive only the execute wrapper
-//! authority plus a `catalog_discovery` selector and no session-state
-//! primitives, because discovery must not carry write authority it cannot use.
-//! Diagnostic read calls such as `trace_list`, and governance projections such
-//! as `capability_binding_cockpit_overview`, follow the same exact-target grant
-//! rule: they can inspect trusted engine projections without inheriting
-//! scratch-state read/write delegation. Scratch-state authority is explicit and
-//! isolated to the `state_get`, `state_set`, and `state_list` execute
-//! operations; non-state operations never receive implicit state capabilities.
-//! Unsupported operation names receive only a rejection-only child grant with
-//! `capability::execute`, no resource selectors, and `networkPolicy none`. That
-//! grant exists solely so unsupported-operation handling can return structured
-//! recovery guidance and persist a redacted failed trace; its operation claim
-//! cannot authorize any supported domain behavior.
-//! The runtime-owned per-invocation abort registry is required for every model
-//! capability execution. Its registered child token is carried through the
-//! regular engine handler boundary so targeted and parent aborts stop that
-//! handler without bypassing engine lease, durable outcome, compensation, or
-//! capability-trace cleanup.
+//! Accepted local agent calls enter the engine as trusted-local observations;
+//! this path does not derive, mint, inspect, or consume capability grants. The
+//! engine still records actor, session, trace, parent, provider call, working
+//! directory, and deterministic idempotency metadata. Direct kernel functions
+//! and active workers own their request/response schemas and reliability
+//! contracts at registration.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -50,7 +25,6 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
-use crate::domains::capability::{is_supported_operation, validate_operation_payload};
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -62,17 +36,14 @@ use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, failure_result};
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
-    CAPABILITY_ENGINE_RESULT_MISSING, CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID,
-    ENGINE_POLICY_VIOLATION, FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    CAPABILITY_ENGINE_RESULT_MISSING, CAPABILITY_PRIMITIVE_NOT_FOUND, ENGINE_POLICY_VIOLATION,
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, instrument};
 
-mod grant;
-use grant::{derive_capability_runtime_grant, model_capability_invocation_idempotency_key};
-#[cfg(test)]
-use grant::{sha256_hex, stable_capability_invocation_material};
+use sha2::{Digest, Sha256};
 
 fn duration_ceil_ms(d: Duration) -> u64 {
     let micros = d.as_micros();
@@ -93,25 +64,36 @@ fn traced_base(
     )
 }
 
-fn operation_name_from_value(value: &Value) -> Option<String> {
-    value
-        .get("operation")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|operation| !operation.is_empty())
-        .filter(|operation| is_supported_operation(operation))
-        .map(ToOwned::to_owned)
+fn direct_tool_idempotency_key(
+    run_id: Option<&str>,
+    session_id: &str,
+    turn: i64,
+    invocation_id: &str,
+    model_primitive_name: &str,
+    workspace_id: Option<&str>,
+    arguments: &Value,
+) -> String {
+    let material = serde_json::to_vec(&json!({
+        "runId": run_id,
+        "sessionId": session_id,
+        "turn": turn,
+        "providerInvocationId": invocation_id,
+        "modelPrimitiveName": model_primitive_name,
+        "workspaceId": workspace_id,
+        "arguments": arguments,
+    }))
+    .unwrap_or_default();
+    format!("model-tool:{}", hex::encode(Sha256::digest(material)))
 }
 
 fn primitive_capability_identity(
     model_primitive_name: &str,
-    arguments: &Value,
+    _arguments: &Value,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> CapabilityEventIdentity {
     CapabilityEventIdentity {
         model_primitive_name: Some(model_primitive_name.to_owned()),
-        operation_name: operation_name_from_value(arguments),
         trace_id: trace_id.map(|id| id.as_str().to_owned()),
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
         ..CapabilityEventIdentity::default()
@@ -128,8 +110,6 @@ fn capability_identity_from_result(
     };
     CapabilityEventIdentity {
         model_primitive_name: Some(model_primitive_name.to_owned()),
-        operation_name: operation_name_from_value(details)
-            .or_else(|| base_identity.operation_name.clone()),
         trace_id: details
             .get("traceId")
             .and_then(Value::as_str)
@@ -414,24 +394,6 @@ async fn execute_capability_primitive_via_engine(
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
-    let is_supported_execute_operation = model_primitive_name == "execute"
-        && effective_args
-            .get("operation")
-            .and_then(Value::as_str)
-            .is_some_and(is_supported_operation);
-    if is_supported_execute_operation
-        && let Err(error) = validate_operation_payload(&effective_args)
-    {
-        return capability_failure_result(
-            error.to_failure(FailureOrigin::Capability),
-            model_primitive_name,
-            invocation_id,
-            session_id,
-            inherited_trace_id,
-            parent_invocation_id,
-            None,
-        );
-    }
     let working_directory =
         match crate::shared::foundation::paths::normalize_working_directory(working_directory) {
             Ok(path) => path.display().to_string(),
@@ -455,13 +417,12 @@ async fn execute_capability_primitive_via_engine(
                 );
             }
         };
-    let idempotency_key = model_capability_invocation_idempotency_key(
+    let idempotency_key = direct_tool_idempotency_key(
         run_id,
         session_id,
         turn,
         invocation_id,
         model_primitive_name,
-        &working_directory,
         workspace_id,
         &effective_args,
     );
@@ -483,58 +444,21 @@ async fn execute_capability_primitive_via_engine(
         .cloned()
         .unwrap_or_else(TraceId::generate);
     let function_id = target.function_id.clone();
-    let runtime_grant = match derive_capability_runtime_grant(
-        engine_host,
-        &actor_id,
-        &function_id,
-        &target.function.required_authority.scopes,
-        session_id,
-        workspace_id,
-        &working_directory,
-        &trace_id,
-        invocation_id,
-        model_primitive_name,
-        turn,
-        run_id,
-        &effective_args,
-    )
-    .await
-    {
-        Ok(grant_id) => grant_id,
-        Err(failure) => {
-            return capability_failure_result(
-                failure,
-                model_primitive_name,
-                invocation_id,
-                session_id,
-                Some(&trace_id),
-                parent_invocation_id,
-                None,
-            );
-        }
-    };
-    let mut causal_context = with_agent_working_directory_metadata(
-        CausalContext::new(
-            actor_id,
-            ActorKind::Agent,
-            runtime_grant.grant_id,
-            trace_id.clone(),
-        ),
-        &working_directory,
-    )
-    .with_scope("capability.execute")
-    .with_runtime_metadata(
-        RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-        invocation_id.to_owned(),
-    )
-    .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, provider_type.to_owned())
-    .with_runtime_metadata(
-        RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
-        model_primitive_name.to_owned(),
-    )
-    .with_runtime_metadata(RUNTIME_METADATA_TURN, turn.to_string())
-    .with_session_id(session_id.to_owned())
-    .with_idempotency_key(idempotency_key);
+    let base_context = CausalContext::trusted_local(actor_id, ActorKind::Agent, trace_id.clone());
+    let mut causal_context =
+        with_agent_working_directory_metadata(base_context, &working_directory)
+            .with_runtime_metadata(
+                RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+                invocation_id.to_owned(),
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, provider_type.to_owned())
+            .with_runtime_metadata(
+                RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
+                model_primitive_name.to_owned(),
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_TURN, turn.to_string())
+            .with_session_id(session_id.to_owned())
+            .with_idempotency_key(idempotency_key);
     if let Some(run_id) = run_id {
         causal_context =
             causal_context.with_runtime_metadata(RUNTIME_METADATA_RUN_ID, run_id.to_owned());
@@ -544,16 +468,6 @@ async fn execute_capability_primitive_via_engine(
     }
     if let Some(parent) = parent_invocation_id {
         causal_context = causal_context.with_parent_invocation(parent.clone());
-    }
-    for scope in &runtime_grant.authority_scopes {
-        if !causal_context.has_scope(scope) {
-            causal_context = causal_context.with_scope(scope.clone());
-        }
-    }
-    for scope in &target.function.required_authority.scopes {
-        if !causal_context.has_scope(scope) {
-            causal_context = causal_context.with_scope(scope.clone());
-        }
     }
     let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
     let result = engine_host
@@ -616,36 +530,17 @@ async fn execute_capability_primitive_via_engine(
             Some(json!({ "primitiveTargetId": function_id.to_string() })),
         );
     };
-    let mut capability_result = match serde_json::from_value(value) {
-        Ok(result) => result,
-        Err(error) => {
-            let mut failure = FailureEnvelope::new(
-                CAPABILITY_RESULT_INVALID,
-                FailureCategory::Parse,
-                format!(
-                    "Engine capability invocation returned invalid capability result for {function_id}"
-                ),
-                false,
-                false,
-                FailureOrigin::Capability,
-            );
-            failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
-            failure.references.invocation_id = result_invocation_id
-                .as_ref()
-                .map(|id| id.as_str().to_owned());
-            return capability_failure_result(
-                failure,
-                model_primitive_name,
-                invocation_id,
-                session_id,
-                result_trace_id.as_ref(),
-                parent_invocation_id,
-                Some(json!({
-                    "primitiveTargetId": function_id.to_string(),
-                    "serdeError": error.to_string(),
-                })),
-            );
-        }
+    // Worker outputs are typed domain values, never an implicit capability
+    // envelope. Always preserve the exact value as details and serialize it for
+    // the provider result channel; otherwise a worker whose schema happens to
+    // contain `content` or `details` would be misinterpreted by the engine.
+    let mut capability_result = CapabilityResult {
+        content: crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(
+            serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
+        ),
+        details: Some(value),
+        is_error: None,
+        stop_turn: None,
     };
     attach_engine_outcome(&mut capability_result, replayed_from.as_ref());
     capability_result

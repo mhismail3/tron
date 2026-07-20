@@ -300,10 +300,21 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    let primitive_surface = match primitive_surface::resolve_provider_primitive_surface(
+    let relevance_query = context_manager
+        .messages_slice()
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            crate::shared::protocol::messages::Message::User { content, .. } => {
+                serde_json::to_string(content).ok()
+            }
+            _ => None,
+        });
+    let primitive_surface = match primitive_surface::resolve_provider_primitive_surface_for_query(
         engine_host,
         session_id,
         workspace_id,
+        relevance_query.as_deref(),
     )
     .await
     {
@@ -348,13 +359,30 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn_stopping_capability_count = primitive_surface.turn_stopping_capabilities.len(),
         "provider primitive surface resolved"
     );
+    let worker_inbox_context = primitive_surface::take_worker_inbox_context(
+        engine_host,
+        &primitive_surface,
+        session_id,
+        turn,
+        relevance_query.as_deref(),
+        run_context.engine_trace_id.as_ref(),
+        run_context.parent_invocation_id.as_ref(),
+    )
+    .await;
     // 3. Build context (base from CM, external fields from RunContext/params)
-    let context = build_turn_context(
+    let mut context = build_turn_context(
         context_manager,
         run_context,
         server_origin,
         primitive_surface.capabilities.clone(),
     );
+    if let Some(worker_inbox_context) = worker_inbox_context {
+        let system_prompt = context.system_prompt.get_or_insert_with(String::new);
+        if !system_prompt.is_empty() {
+            system_prompt.push_str("\n\n");
+        }
+        system_prompt.push_str(&worker_inbox_context);
+    }
 
     // 4. Build and durably persist the provider request audit before the model
     // stream opens. Provider selection, provider-native options, retry

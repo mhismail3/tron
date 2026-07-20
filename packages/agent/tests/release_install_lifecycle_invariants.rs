@@ -1094,11 +1094,12 @@ fn runtime_command_help_has_one_shared_owner() {
         .collect::<Vec<_>>()
         .join(" ");
     assert_eq!(
-        dispatcher_commands, "status start stop restart uninstall logs errors rollback login auth",
+        dispatcher_commands,
+        "status start stop restart uninstall logs errors rollback login auth state",
         "runtime dispatcher inventory drifted"
     );
     let expected_help_commands =
-        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate"
+        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate|state"
             .split('|')
             .collect::<Vec<_>>();
     assert_eq!(

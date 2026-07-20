@@ -33,9 +33,9 @@ extension CapabilityInvocationDisplayModel {
             rows.append(CapabilityDisplayRow(label: label, value: value))
         }
 
-        if let targetArguments = targetArguments(from: arguments) {
-            appendPayloadRows(targetArguments, into: &rows)
-        } else {
+        let payload = targetArguments(from: arguments) ?? arguments
+        appendPayloadRows(payload, into: &rows)
+        if rows.isEmpty {
             append("Payload", payloadSummary ?? query)
         }
         append("Operation", target)
@@ -57,7 +57,7 @@ extension CapabilityInvocationDisplayModel {
             guard let value = value?.nilIfEmpty else { return }
             rows.append(CapabilityDisplayRow(label: label, value: value))
         }
-        append("Command", firstString(["command", "cmd", "shellCommand"], in: payload))
+        append("Command", commandString(["command", "cmd", "shellCommand"], in: payload))
         append("Execution mode", firstString(["executionMode", "mode"], in: payload))
         append("Query", firstString(["query", "q", "searchQuery", "pattern", "glob", "name"], in: payload))
         append("URL", firstString(["url", "apiUrl", "endpoint"], in: payload))
@@ -252,6 +252,24 @@ extension CapabilityInvocationDisplayModel {
         for key in keys {
             if let value = object[key], let string = simpleDisplayValue(value)?.nilIfEmpty {
                 return string
+            }
+        }
+        return nil
+    }
+
+    static func commandString(_ keys: [String], in object: [String: Any]) -> String? {
+        for key in keys {
+            if let string = object[key] as? String, let value = string.nilIfEmpty {
+                return value
+            }
+            if let components = object[key] as? [String], !components.isEmpty {
+                return components.joined(separator: " ")
+            }
+            if let components = object[key] as? [Any] {
+                let strings = components.compactMap { $0 as? String }
+                if strings.count == components.count, !strings.isEmpty {
+                    return strings.joined(separator: " ")
+                }
             }
         }
         return nil

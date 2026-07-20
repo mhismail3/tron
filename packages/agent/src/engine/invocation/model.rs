@@ -37,6 +37,12 @@ pub const RUNTIME_METADATA_TURN: &str = "agent.turn";
 pub const RUNTIME_METADATA_TRIGGER_DEPTH: &str = "engine.triggerDepth";
 /// Runtime metadata key carrying the JSON trigger-id path for loop detection.
 pub const RUNTIME_METADATA_TRIGGER_PATH: &str = "engine.triggerPath";
+/// Runtime-owned marker for an accepted local agent or worker invocation.
+///
+/// This is deliberately not an authority grant. The host uses it to bypass the
+/// legacy grant lookup and budget path while retaining actor and causal
+/// observations during the worker-first POC.
+pub const RUNTIME_METADATA_TRUSTED_LOCAL: &str = "engine.trustedLocal";
 
 /// Causal context carried by every invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +101,30 @@ impl CausalContext {
             idempotency_key: None,
             runtime_metadata: BTreeMap::new(),
         }
+    }
+
+    /// Create a trusted-local causal context that is not backed by an authority
+    /// grant. The placeholder id remains only because legacy durable invocation
+    /// rows still carry that column; it is never resolved or consumed.
+    #[must_use]
+    pub fn trusted_local(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
+        Self::new(
+            actor_id,
+            actor_kind,
+            AuthorityGrantId::new("trusted-local-observation")
+                .expect("trusted-local observation id is valid"),
+            trace_id,
+        )
+        .with_runtime_metadata(RUNTIME_METADATA_TRUSTED_LOCAL, "true")
+    }
+
+    /// Whether the engine admitted this invocation through the trusted-local
+    /// worker-first path.
+    #[must_use]
+    pub fn is_trusted_local(&self) -> bool {
+        self.runtime_metadata
+            .get(RUNTIME_METADATA_TRUSTED_LOCAL)
+            .is_some_and(|value| value == "true")
     }
 
     /// Add an authority scope.

@@ -1,8 +1,6 @@
 //! Primitive store backends and host handle wiring.
 //!
-//! Registered resource types are durable substrate. Feature composition can
-//! provide source-owned resources through the generic reconciliation helper,
-//! which preserves version history while making canonical payloads current.
+//! Registered resource types are durable substrate owned by the fixed kernel.
 
 use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
@@ -24,9 +22,9 @@ use crate::engine::durability::queue::{
     SqliteEngineQueueStore,
 };
 use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
-    EngineResourceTypeDefinition, EngineResourceVersion, InMemoryEngineResourceStore,
-    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
+    EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
+    RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
     builtin_resource_type_definitions,
 };
 use crate::engine::durability::state::{
@@ -440,56 +438,6 @@ impl ResourceStoreBackend {
         }
     }
 
-    pub(in crate::engine) fn reconcile_source_resources(
-        &mut self,
-        resources: Vec<CreateResource>,
-    ) -> Result<()> {
-        for mut resource in resources {
-            let Some(resource_id) = resource.resource_id.clone() else {
-                continue;
-            };
-            let Some(inspection) = self.inspect(&resource_id)? else {
-                self.create(resource)?;
-                continue;
-            };
-            let Some(canonical_payload) = resource.initial_payload.take() else {
-                continue;
-            };
-            let current_version_id =
-                inspection
-                    .resource
-                    .current_version_id
-                    .clone()
-                    .ok_or_else(|| {
-                        EngineError::HandlerFailed(format!(
-                            "source-owned resource {resource_id} has no current version"
-                        ))
-                    })?;
-            let current = inspection
-                .versions
-                .iter()
-                .find(|version| version.version_id == current_version_id)
-                .ok_or_else(|| {
-                    EngineError::HandlerFailed(format!(
-                        "source-owned resource {resource_id} current version is missing"
-                    ))
-                })?;
-            if current.payload != canonical_payload {
-                self.update(UpdateResource {
-                    resource_id,
-                    expected_current_version_id: Some(current_version_id),
-                    lifecycle: resource.lifecycle,
-                    payload: canonical_payload,
-                    state: None,
-                    locations: resource.locations,
-                    trace_id: resource.trace_id,
-                    invocation_id: None,
-                })?;
-            }
-        }
-        Ok(())
-    }
-
     pub(in crate::engine) fn update(
         &mut self,
         request: UpdateResource,
@@ -507,20 +455,6 @@ impl ResourceStoreBackend {
         match self {
             Self::InMemory(store) => store.link(request),
             Self::Sqlite(store) => store.link(request),
-        }
-    }
-
-    pub(in crate::engine) fn list_links_for_source(
-        &self,
-        source_resource_id: &str,
-        relation: &str,
-        limit: usize,
-    ) -> Result<Vec<EngineResourceLink>> {
-        match self {
-            Self::InMemory(store) => {
-                store.list_links_for_source(source_resource_id, relation, limit)
-            }
-            Self::Sqlite(store) => store.list_links_for_source(source_resource_id, relation, limit),
         }
     }
 

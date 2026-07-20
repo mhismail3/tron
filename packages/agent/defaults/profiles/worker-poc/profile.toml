@@ -1,0 +1,11 @@
+# Dedicated permissive worker-first proof-of-concept profile.
+
+version = "3"
+name = "worker-poc"
+managed = true
+profileClass = "normal"
+inherits = ["default"]
+authProfile = "default"
+
+[settings]
+autonomousWorkers = true

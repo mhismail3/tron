@@ -89,9 +89,6 @@ pub const ASSISTANT_PERSIST_FAILED: &str = "ASSISTANT_PERSIST_FAILED";
 pub const CAPABILITY_PRIMITIVE_NOT_FOUND: &str = "CAPABILITY_PRIMITIVE_NOT_FOUND";
 /// Engine invocation completed without a capability result payload.
 pub const CAPABILITY_ENGINE_RESULT_MISSING: &str = "CAPABILITY_ENGINE_RESULT_MISSING";
-/// Engine invocation returned a payload that is not a valid capability result.
-pub const CAPABILITY_RESULT_INVALID: &str = "CAPABILITY_RESULT_INVALID";
-
 /// Stable public failure category.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

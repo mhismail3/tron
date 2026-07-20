@@ -59,12 +59,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) description: Option<&'static str>,
     /// Search/discovery tags.
     pub(crate) tags: Vec<&'static str>,
-    /// Compact usage examples rendered by inspect/search/primer surfaces.
-    pub(crate) examples: Vec<Value>,
-    /// Capability lifecycle metadata consumed by the runner, registry, and
-    /// generated clients. This is the contract-native replacement for any
-    /// hardcoded interactive-tool lists.
-    pub(crate) lifecycle: Option<Value>,
     /// Optional presentation metadata for chip/sheet summaries. Renderers may
     /// use hints such as `themeColor`, but capability identity always comes
     /// from the contract.
@@ -105,8 +99,6 @@ impl CapabilityContract {
             stream_topics: Vec::new(),
             description: None,
             tags: Vec::new(),
-            examples: Vec::new(),
-            lifecycle: None,
             presentation_hints: None,
         }
     }
@@ -162,18 +154,6 @@ impl CapabilityContract {
     /// Attach search/discovery tags.
     pub(crate) fn tags(mut self, tags: Vec<&'static str>) -> Self {
         self.tags = tags;
-        self
-    }
-
-    /// Attach compact usage examples.
-    pub(crate) fn examples(mut self, examples: Vec<Value>) -> Self {
-        self.examples = examples;
-        self
-    }
-
-    /// Attach lifecycle metadata.
-    pub(crate) fn lifecycle(mut self, lifecycle: Value) -> Self {
-        self.lifecycle = Some(lifecycle);
         self
     }
 
@@ -235,8 +215,6 @@ impl CapabilityContract {
             stream_topics: self.stream_topics,
             description: self.description,
             tags: self.tags,
-            examples: self.examples,
-            lifecycle: self.lifecycle,
             presentation_hints: self.presentation_hints,
         })
     }
@@ -281,17 +259,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         definition.revision.0,
         spec.operation_key.as_str()
     );
-    let context_primer_level = if spec.function_id.as_str() == "capability::execute" {
-        "primitive"
-    } else {
-        "transport"
-    };
-    let stops_turn = spec
-        .lifecycle
-        .as_ref()
-        .and_then(|value| value.get("stopsTurn"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let context_primer_level = "transport";
     let presentation_hints = presentation_hints_for_capability(spec);
     definition.metadata = json!({
         "operationKey": spec.operation_key.as_str(),
@@ -306,14 +274,12 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
             "workerKind": "in_process",
             "deliveryModes": definition.allowed_delivery_modes.iter().map(|mode| mode.as_str()).collect::<Vec<_>>()
         },
-        "examples": spec.examples,
         "domainAuthorityScope": spec.authority_scope,
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "domainModule": spec.domain_module,
         "outputContract": spec.output_contract,
         "streamTopics": spec.stream_topics,
-        "lifecycle": spec.lifecycle,
-        "stopsTurn": stops_turn,
+        "stopsTurn": false,
         "presentationHints": presentation_hints,
     });
     definition

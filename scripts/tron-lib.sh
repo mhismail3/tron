@@ -82,6 +82,7 @@ show_runtime_command_help() {
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
     echo "  login           Authenticate with a provider (--provider <name>, --label <name>)"
     echo "  auth rotate     Rotate the WebSocket bearer token (forces iOS re-pair)"
+    echo "  state           List or restore verified worker-first migration snapshots"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
     echo ""
@@ -150,6 +151,7 @@ dispatch_runtime_command() {
         rollback)  cmd_rollback "$@" ;;
         login)     cmd_login "$@" ;;
         auth)      cmd_auth "$@" ;;
+        state)     cmd_state "$@" ;;
         *)
             print_error "Unknown command: $command"
             cmd_help

@@ -6,8 +6,8 @@
 //!
 //! - [`app`] owns binary/server bootstrap, health, metrics, onboarding, and shutdown.
 //! - [`transport`] owns `/engine` and `/engine/workers` protocol framing.
-//! - [`engine`] owns the live capability fabric and primitive workers.
-//! - [`domains`] owns every Tron worker, contract, handler, operation, and service.
+//! - [`engine`] owns the typed function fabric and durable generic substrates.
+//! - [`domains`] owns the trusted-local worker kernel and retained product services.
 //! - [`platform`] owns OS/vendor integrations and sidecars.
 //! - [`shared`] owns foundation types, protocol DTOs, and cross-cutting helpers.
 

@@ -39,7 +39,6 @@ pub(crate) trait DeviceTokenStore: Send + Sync + fmt::Debug {
         &self,
         record: DeviceTokenRecord,
     ) -> Result<Option<DeviceTokenRecord>, CapabilityError>;
-    fn get(&self, token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError>;
     fn remove(&self, token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError>;
 }
 
@@ -54,10 +53,6 @@ impl DeviceTokenStore for DisabledDeviceTokenStore {
         Err(CapabilityError::NotAvailable {
             message: "APNs token custody is disabled in this runtime".to_owned(),
         })
-    }
-
-    fn get(&self, _token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError> {
-        Ok(None)
     }
 
     fn remove(&self, _token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError> {
@@ -136,11 +131,6 @@ impl DeviceTokenStore for FileDeviceTokenStore {
         Ok(previous)
     }
 
-    fn get(&self, token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError> {
-        let _guard = self.lock.lock().map_err(lock_error)?;
-        Ok(self.read_records()?.get(token_hash).cloned())
-    }
-
     fn remove(&self, token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError> {
         let _guard = self.lock.lock().map_err(lock_error)?;
         let mut records = self.read_records()?;
@@ -176,15 +166,6 @@ impl DeviceTokenStore for MemoryDeviceTokenStore {
             .lock()
             .map_err(lock_error)?
             .insert(record.token_hash.clone(), record))
-    }
-
-    fn get(&self, token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError> {
-        Ok(self
-            .records
-            .lock()
-            .map_err(lock_error)?
-            .get(token_hash)
-            .cloned())
     }
 
     fn remove(&self, token_hash: &str) -> Result<Option<DeviceTokenRecord>, CapabilityError> {
@@ -253,7 +234,12 @@ mod tests {
 
         assert!(store.upsert(inserted.clone()).expect("insert").is_none());
         assert_eq!(
-            store.get(&inserted.token_hash).expect("get").unwrap().token,
+            store
+                .read_records()
+                .expect("read inserted")
+                .get(&inserted.token_hash)
+                .expect("inserted token")
+                .token,
             "aabb"
         );
         assert!(
@@ -263,10 +249,10 @@ mod tests {
                 .is_some()
         );
         assert!(
-            store
-                .get(&inserted.token_hash)
-                .expect("get removed")
-                .is_none()
+            !store
+                .read_records()
+                .expect("read removed")
+                .contains_key(&inserted.token_hash)
         );
 
         let source = fs::read_to_string(path).expect("stored JSON");

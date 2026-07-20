@@ -4,7 +4,7 @@
 //! limited to accepting prompts, reporting runtime status, and aborting active
 //! work. Hidden functions serialize those prompts into the provider loop; the
 //! model-facing capability surface after that loop starts is the single
-//! `capability::execute` primitive.
+//! direct typed kernel and worker tools.
 //! Worker composition carries the optional model responder factory directly;
 //! prompt validation reports `NotAvailable` when that runtime owner is absent.
 //!
@@ -23,7 +23,7 @@
 //! 5. The turn runner builds provider input from session state and supplies one
 //!    model-facing tool named `execute`.
 //! 6. Provider tool calls are written as session truth and invoked as child
-//!    `capability::execute` engine invocations.
+//!    trusted-local typed engine invocations.
 //! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;
 //!    transport code does not own agent behavior.
 //! 8. The backend emits structured `component` + `agent_event` logs across

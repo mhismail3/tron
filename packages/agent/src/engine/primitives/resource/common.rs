@@ -10,18 +10,6 @@ pub(super) fn optional_resource_scope_filter(
     resource_scope_from_payload(invocation, false).map(Some)
 }
 
-pub(super) fn create_wrapper_resource(
-    store: &mut super::ResourceStoreBackend,
-    invocation: &Invocation,
-    kind: &str,
-    lifecycle: Option<&str>,
-) -> Result<EngineResource> {
-    let payload = invocation.payload.get("payload").cloned().ok_or_else(|| {
-        EngineError::PolicyViolation(format!("{} requires payload", invocation.function_id))
-    })?;
-    create_typed_resource(store, invocation, kind, lifecycle, Some(payload))
-}
-
 pub(super) fn create_typed_resource(
     store: &mut super::ResourceStoreBackend,
     invocation: &Invocation,
@@ -45,27 +33,6 @@ pub(super) fn create_typed_resource(
             .cloned()
             .unwrap_or_else(|| json!({})),
         initial_payload: payload,
-        locations: locations(&invocation.payload)?,
-        trace_id: invocation.causal_context.trace_id.clone(),
-        invocation_id: Some(invocation.id.clone()),
-    })
-}
-
-pub(super) fn update_wrapper_resource(
-    store: &mut super::ResourceStoreBackend,
-    invocation: &Invocation,
-    lifecycle: Option<&str>,
-) -> Result<EngineResourceVersion> {
-    store.update(UpdateResource {
-        resource_id: required_string_owned(&invocation.payload, "resourceId")?,
-        expected_current_version_id: optional_string(
-            invocation.payload.get("expectedCurrentVersionId"),
-        )?,
-        lifecycle: lifecycle.map(str::to_owned),
-        payload: invocation.payload.get("payload").cloned().ok_or_else(|| {
-            EngineError::PolicyViolation(format!("{} requires payload", invocation.function_id))
-        })?,
-        state: None,
         locations: locations(&invocation.payload)?,
         trace_id: invocation.causal_context.trace_id.clone(),
         invocation_id: Some(invocation.id.clone()),
@@ -119,31 +86,6 @@ pub(super) fn lifecycle_resource_by_id(
     })
 }
 
-pub(super) fn create_and_attach_resource(
-    store: &mut super::ResourceStoreBackend,
-    invocation: &Invocation,
-    kind: &str,
-    default_relation: &str,
-) -> Result<(EngineResource, crate::engine::EngineResourceLink)> {
-    let resource = create_wrapper_resource(store, invocation, kind, None)?;
-    let target_resource_id = required_string_owned(&invocation.payload, "targetResourceId")?;
-    let relation = optional_string(invocation.payload.get("relation"))?
-        .unwrap_or_else(|| default_relation.to_owned());
-    let link = store.link(LinkResources {
-        source_resource_id: resource.resource_id.clone(),
-        target_resource_id,
-        relation,
-        metadata: invocation
-            .payload
-            .get("metadata")
-            .cloned()
-            .unwrap_or_else(|| json!({})),
-        trace_id: invocation.causal_context.trace_id.clone(),
-        invocation_id: Some(invocation.id.clone()),
-    })?;
-    Ok((resource, link))
-}
-
 pub(super) fn ensure_inspected_kind(
     inspection: &Option<EngineResourceInspection>,
     expected: &str,
@@ -186,20 +128,6 @@ pub(super) fn current_payload(inspection: &EngineResourceInspection) -> Result<V
                 inspection.resource.resource_id
             ))
         })
-}
-
-pub(super) fn wrapper_create_response(
-    store: &mut super::ResourceStoreBackend,
-    invocation: &Invocation,
-    kind: &str,
-    lifecycle: Option<&str>,
-    role: &str,
-) -> Result<Value> {
-    let resource = create_wrapper_resource(store, invocation, kind, lifecycle)?;
-    Ok(json!({
-        "resource": resource,
-        "resourceRefs": [resource_ref_from_resource(&resource, role)],
-    }))
 }
 
 pub(super) fn wrapper_version_response(

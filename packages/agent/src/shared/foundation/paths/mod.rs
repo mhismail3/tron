@@ -39,6 +39,8 @@ pub mod dirs {
     pub const DB: &str = "database";
     /// Ephemeral runtime lock files. Ordinary startup may create this directory.
     pub const RUN: &str = "run";
+    /// Recoverable snapshots taken before worker-kernel schema conversion.
+    pub const SNAPSHOTS: &str = "snapshots";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
     /// Local speech-to-text sidecar runtime, venv, and model cache.
@@ -201,6 +203,16 @@ pub fn workspace_dir() -> PathBuf {
 /// `~/.tron/internal/database/`
 pub fn db_dir() -> PathBuf {
     internal_dir().join(dirs::DB)
+}
+
+/// `~/.tron/internal/snapshots/`
+pub fn snapshots_dir() -> PathBuf {
+    internal_dir().join(dirs::SNAPSHOTS)
+}
+
+/// Worker-kernel SQLite operational index.
+pub fn worker_database_path() -> PathBuf {
+    db_dir().join("workers.sqlite")
 }
 
 /// `~/.tron/internal/run/`

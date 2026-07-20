@@ -126,18 +126,16 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "logs domain observability lifecycle missing `{required}`"
         );
     }
-    let log_ops = read_repo_file("packages/agent/src/domains/capability/operations/logs.rs");
+    let log_ops = read_repo_file("packages/agent/src/domains/logs/mod.rs");
     for required in [
-        "optional_u64(&invocation.payload, \"limit\")?",
-        ".clamp(1, 500)",
-        "log_recent requires trusted current session context",
-        "LogSessionFilter::SessionAndGlobal(&session_id)",
+        "if params.limit > MAX_RECENT_LIMIT",
+        "LogSessionFilter::OnlySession",
+        ".unwrap_or(LogSessionFilter::All)",
         "list_recent_logs",
-        "\"primitiveOperation\": \"log_recent\"",
     ] {
         assert!(
             log_ops.contains(required),
-            "execute log_recent evidence missing `{required}`"
+            "direct logs::recent evidence missing `{required}`"
         );
     }
     let log_store =
@@ -245,19 +243,6 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
         );
     }
 
-    let replay_op = read_repo_file("packages/agent/src/domains/capability/operations/replay.rs");
-    for required in [
-        "replay_manifest requires a current session",
-        "ReplayDeps::new(",
-        "deps.event_store.clone()",
-        "deps.engine_host.clone()",
-        "\"primitiveOperation\": \"replay_manifest\"",
-    ] {
-        assert!(
-            replay_op.contains(required),
-            "execute replay_manifest evidence missing `{required}`"
-        );
-    }
     let replay = read_repo_file("packages/agent/src/domains/session/replay/mod.rs");
     assert_contains_in_order(
         "replay manifest read-only lifecycle",
@@ -290,16 +275,18 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "replay manifest durable evidence missing `{required}`"
         );
     }
-    let primitive_trace_tests = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
+    let worker_store = read_repo_file("packages/agent/src/domains/worker_kernel/store.rs");
     for required in [
-        "execute_replay_manifest_is_read_only_and_does_not_create_trace_record",
-        "replay_manifest must not mutate trace records",
-        "execute_log_recent_exposes_bounded_session_trace_logs",
-        "sessionless log_recent must fail closed",
+        "CREATE TABLE IF NOT EXISTS worker_invocations",
+        "CREATE TABLE IF NOT EXISTS worker_inbox",
+        "fn recover_interrupted(&self)",
+        "UPDATE worker_invocations SET status='queued'",
+        "INSERT INTO worker_inbox",
+        "index_reconstruction_recovers_canonical_bundle_and_interrupted_queue",
     ] {
         assert!(
-            primitive_trace_tests.contains(required),
-            "observability/replay regression test missing `{required}`"
+            worker_store.contains(required),
+            "worker observability/recovery evidence missing `{required}`"
         );
     }
 

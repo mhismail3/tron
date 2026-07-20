@@ -141,6 +141,7 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
     managed_default!("profiles/normal/profile.toml", true),
     managed_default!("profiles/chat/profile.toml", true),
     managed_default!("profiles/local/profile.toml", true),
+    managed_default!("profiles/worker-poc/profile.toml", true),
     managed_default!("profiles/user/profile.toml", false),
 ];
 
@@ -229,6 +230,7 @@ fn managed_default_is_source_owned(relative_path: &str) -> bool {
         || relative_path.starts_with("profiles/normal/")
         || relative_path.starts_with("profiles/chat/")
         || relative_path.starts_with("profiles/local/")
+        || relative_path.starts_with("profiles/worker-poc/")
 }
 
 fn managed_default_content_differs(path: &Path, expected: &str) -> io::Result<bool> {

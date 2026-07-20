@@ -75,13 +75,13 @@ impl ModelResponder for TokenUsageResponder {
     }
 }
 
-struct PrimitiveExecuteLoopResponder {
+struct DirectWorkerListLoopResponder {
     calls: Arc<AtomicUsize>,
     observed_result: Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
-impl ModelResponder for PrimitiveExecuteLoopResponder {
+impl ModelResponder for DirectWorkerListLoopResponder {
     fn info(&self) -> ModelResponderInfo {
         test_responder_info()
     }
@@ -98,21 +98,23 @@ impl ModelResponder for PrimitiveExecuteLoopResponder {
             .iter()
             .map(|capability| capability.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(capability_names, ["execute"]);
+        assert!(
+            capability_names.contains(&"worker_list"),
+            "{capability_names:?}"
+        );
+        assert!(
+            !capability_names.contains(&"execute"),
+            "{capability_names:?}"
+        );
 
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
-            let mut arguments = serde_json::Map::new();
-            let _ = arguments.insert("operation".into(), serde_json::json!("observe"));
-            let _ = arguments.insert(
-                "input".into(),
-                serde_json::json!("primitive loop observed through execute"),
-            );
+            let arguments = serde_json::Map::new();
             let events = vec![
                 Ok(StreamEvent::Start),
                 Ok(StreamEvent::CapabilityInvocationDraftStart {
                     invocation_id: "tc-primitive-observe".into(),
-                    name: "execute".into(),
+                    name: "worker_list".into(),
                 }),
                 Ok(StreamEvent::CapabilityInvocationDraftDelta {
                     invocation_id: "tc-primitive-observe".into(),
@@ -122,7 +124,7 @@ impl ModelResponder for PrimitiveExecuteLoopResponder {
                     capability_invocation:
                         crate::shared::protocol::messages::CapabilityInvocationDraft::new(
                             "tc-primitive-observe",
-                            "execute",
+                            "worker_list",
                             arguments,
                         ),
                 }),
@@ -164,21 +166,18 @@ impl ModelResponder for PrimitiveExecuteLoopResponder {
                 },
                 _ => None,
             })
-            .expect("execute result should be in second provider context");
-        assert!(
-            observed.contains("primitive loop observed through execute"),
-            "{observed}"
-        );
+            .expect("worker_list result should be in second provider context");
+        assert!(observed.contains("workers"), "{observed}");
         *self.observed_result.lock() = Some(observed);
 
         let events = vec![
             Ok(StreamEvent::Start),
             Ok(StreamEvent::TextDelta {
-                delta: "continued after execute".into(),
+                delta: "continued after direct worker tool".into(),
             }),
             Ok(StreamEvent::Done {
                 message: AssistantMessage {
-                    content: vec![AssistantContent::text("continued after execute")],
+                    content: vec![AssistantContent::text("continued after direct worker tool")],
                     token_usage: None,
                 },
                 stop_reason: "end_turn".into(),
@@ -276,17 +275,17 @@ async fn text_only_run_succeeds_without_frozen_capabilities() {
 }
 
 #[tokio::test]
-async fn primitive_loop_calls_execute_observes_result_and_continues() {
+async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues() {
     let calls = Arc::new(AtomicUsize::new(0));
     let observed_result = Arc::new(Mutex::new(None));
-    let ctx = crate::shared::server::test_support::make_test_context();
+    let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 2,
             ..AgentConfig::default()
         },
         make_primitive_loop_deps(
-            PrimitiveExecuteLoopResponder {
+            DirectWorkerListLoopResponder {
                 calls: calls.clone(),
                 observed_result: observed_result.clone(),
             },
@@ -296,7 +295,7 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
     );
     let result = agent
         .run(
-            "call execute and continue",
+            "list workers and continue",
             crate::domains::agent::r#loop::types::RunContext {
                 run_id: Some("primitive-loop-run".into()),
                 ..Default::default()
@@ -315,12 +314,12 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
         observed_result
             .lock()
             .as_ref()
-            .is_some_and(|text| text.contains("primitive loop observed through execute"))
+            .is_some_and(|text| text.contains("workers"))
     );
 
     let persisted_messages =
         serde_json::to_string(&agent.context_manager().get_messages()).expect("messages");
-    assert!(persisted_messages.contains("continued after execute"));
+    assert!(persisted_messages.contains("continued after direct worker tool"));
 }
 
 #[tokio::test]

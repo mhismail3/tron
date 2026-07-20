@@ -9,22 +9,14 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
     let definitions = builtin_resource_type_definitions();
     for required in [
         "artifact",
-        "goal",
         "decision",
         "claim",
         "evidence",
-        "ui_surface",
         "materialized_file",
         "patch_proposal",
-        "execution_output",
-        "agent_result",
-        "schedule",
-        "schedule_run",
-        "media_artifact",
-        "import_preview",
-        "prompt_artifact",
-        "repository_tree_snapshot",
-        "update_diagnostic_record",
+        "memory_record",
+        "device_registration",
+        "context_control_snapshot",
     ] {
         assert!(
             definitions
@@ -33,21 +25,19 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
             "built-in resource kind `{required}` must stay registered"
         );
     }
+    for removed in ["media_artifact", "notification", "notification_delivery"] {
+        assert!(
+            definitions
+                .iter()
+                .all(|definition| definition.kind != removed),
+            "superseded fixed-plane resource kind `{removed}` must stay deleted"
+        );
+    }
     let decision = definitions
         .iter()
         .find(|definition| definition.kind == "decision")
         .unwrap();
-    for relation in [
-        "decides",
-        "promotes",
-        "discards",
-        "supports",
-        "supported_by",
-        "contradicted_by",
-        "derived_from",
-        "supersedes",
-        "evidence_for",
-    ] {
+    for relation in ["decides", "supports", "derived_from", "supersedes"] {
         assert!(
             decision
                 .allowed_link_relations
@@ -67,22 +57,22 @@ fn resource_kernel_rejects_invalid_payload_stale_cas_and_unsupported_links() {
 
     let invalid = store
         .create(CreateResource {
-            resource_id: Some("goal-invalid".to_owned()),
-            kind: "goal".to_owned(),
+            resource_id: Some("artifact-invalid".to_owned()),
+            kind: "artifact".to_owned(),
             schema_id: None,
             scope: EngineResourceScope::Workspace("workspace-1".to_owned()),
             owner_worker_id: wid("resource"),
             owner_actor_id: actor("actor"),
-            lifecycle: Some("open".to_owned()),
+            lifecycle: Some("draft".to_owned()),
             policy: json!({}),
-            initial_payload: Some(json!({"successCriteria": ["missing intent"]})),
+            initial_payload: Some(json!({"title": "missing body"})),
             locations: Vec::new(),
             trace_id: trace("resource-kernel-invalid"),
             invocation_id: None,
         })
         .unwrap_err();
     assert!(matches!(invalid, EngineError::SchemaViolation { .. }));
-    assert!(store.inspect("goal-invalid").unwrap().is_none());
+    assert!(store.inspect("artifact-invalid").unwrap().is_none());
 
     let resource = store
         .create(CreateResource {

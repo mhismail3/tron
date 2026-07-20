@@ -333,8 +333,8 @@ mod tests {
     }
 
     #[test]
-    fn capability_execute_invoke_remains_public_client_actor() {
-        let envelope = build_invoke("capability::execute");
+    fn worker_kernel_invoke_remains_public_client_actor() {
+        let envelope = build_invoke("worker_kernel::invoke");
 
         assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
         assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
@@ -346,7 +346,7 @@ mod tests {
             correlation_id: "request-1".to_owned(),
             public_method: "invoke".to_owned(),
             params_payload: json!({
-                "functionId": "capability::execute",
+                "functionId": "worker_kernel::invoke",
                 "payload": {"operation": "observe", "input": {"text": "read file"}}
             }),
             context: EngineTransportContext::default(),

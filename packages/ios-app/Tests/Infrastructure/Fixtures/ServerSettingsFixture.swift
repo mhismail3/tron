@@ -18,6 +18,7 @@ enum ServerSettingsFixture {
     private static func defaultObject() throws -> [String: Any] {
         let json = """
         {
+            "autonomousWorkers": false,
             "server": {
                 "defaultModel": "claude-sonnet-4-6",
                 "transcription": {

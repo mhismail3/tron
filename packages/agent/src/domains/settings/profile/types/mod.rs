@@ -45,6 +45,8 @@ pub struct TronSettings {
     pub version: String,
     /// Application name.
     pub name: String,
+    /// Enables the trusted-local, self-authoring worker runtime for this profile.
+    pub autonomous_workers: bool,
     /// API provider settings (Anthropic, `OpenAI`, Google).
     pub api: ApiSettings,
     /// Retry configuration for API calls.
@@ -68,6 +70,7 @@ impl Default for TronSettings {
         Self {
             version: "0.1.0".to_string(),
             name: "tron".to_string(),
+            autonomous_workers: false,
             api: ApiSettings::default(),
             retry: RetrySettings::default(),
             context: ContextSettings::default(),
@@ -165,6 +168,7 @@ mod tests {
         let back: TronSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.version, defaults.version);
         assert_eq!(back.name, defaults.name);
+        assert_eq!(back.autonomous_workers, defaults.autonomous_workers);
         assert_eq!(
             back.server.heartbeat_interval_ms,
             defaults.server.heartbeat_interval_ms
@@ -183,6 +187,7 @@ mod tests {
         // Root fields are camelCase
         assert!(json.get("version").is_some());
         assert!(json.get("api").is_some());
+        assert_eq!(json["autonomousWorkers"], false);
         assert_eq!(json["server"]["transcription"]["enabled"], false);
 
         assert!(json.get("models").is_none());

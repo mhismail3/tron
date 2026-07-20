@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tracing::warn;
 
-use crate::domains::agent::context::soul::AGENT_SOUL;
+use crate::domains::agent::context::soul::{AGENT_SOUL, AUTONOMOUS_WORKER_SOUL};
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::shared::server::failure::FailureEnvelope;
 
@@ -54,7 +54,14 @@ pub(super) async fn build_prompt_agent(
         model: model.to_owned(),
         working_directory: Some(working_dir.to_owned()),
         server_origin: Some(server_origin),
-        system_prompt: Some(AGENT_SOUL.to_owned()),
+        system_prompt: Some(
+            if settings.autonomous_workers {
+                AUTONOMOUS_WORKER_SOUL
+            } else {
+                AGENT_SOUL
+            }
+            .to_owned(),
+        ),
         enable_thinking: true,
         max_turns: settings.agent.max_turns,
         compaction: crate::domains::agent::context::types::CompactionConfig {

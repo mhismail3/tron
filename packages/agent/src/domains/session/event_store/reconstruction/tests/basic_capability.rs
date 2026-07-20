@@ -454,11 +454,8 @@ fn reconstructed_capability_history_remains_provider_neutral() {
                 "content": [{
                     "type": "capability_invocation",
                     "id": "toolu_01capability",
-                    "name": "execute",
-                    "arguments": {
-                        "operation": "file_read",
-                        "path": "/tmp/example.txt"
-                    }
+                    "name": "worker_list",
+                    "arguments": {"includeRetired": false}
                 }],
                 "turn": 1
             }),
@@ -469,17 +466,17 @@ fn reconstructed_capability_history_remains_provider_neutral() {
                 "invocationId": "toolu_01capability",
                 "content": "example contents",
                 "isError": false,
-                "modelPrimitiveName": "execute",
-                "contractId": "capability::execute",
-                "implementationId": "primitive.execute",
-                "functionId": "capability::execute",
+                "modelPrimitiveName": "worker_list",
+                "contractId": "worker_kernel::list",
+                "implementationId": "worker.kernel.list",
+                "functionId": "worker_kernel::list",
                 "pluginId": null,
-                "workerId": "capability",
+                "workerId": "worker-kernel",
                 "schemaDigest": "sha256:read",
                 "catalogRevision": 7,
                 "trustTier": "host_primitive",
-                "riskLevel": "high",
-                "effectClass": "external_side_effect",
+                "riskLevel": "low",
+                "effectClass": "pure_read",
                 "traceId": "trace-read",
                 "rootInvocationId": "root-read",
                 "bindingDecisionId": null
@@ -494,8 +491,8 @@ fn reconstructed_capability_history_remains_provider_neutral() {
     assert_eq!(msgs[0].role, "user");
     assert_eq!(msgs[1].role, "assistant");
     assert_eq!(msgs[1].content[0]["type"], "capability_invocation");
-    assert_eq!(msgs[1].content[0]["name"], "execute");
-    assert_eq!(msgs[1].content[0]["arguments"]["operation"], "file_read");
+    assert_eq!(msgs[1].content[0]["name"], "worker_list");
+    assert_eq!(msgs[1].content[0]["arguments"]["includeRetired"], false);
     assert_eq!(msgs[2].role, "capabilityResult");
     assert_eq!(msgs[2].invocation_id.as_deref(), Some("toolu_01capability"));
     assert_eq!(msgs[2].content, "example contents");

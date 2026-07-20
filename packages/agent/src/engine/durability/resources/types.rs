@@ -13,18 +13,7 @@ pub const UI_SURFACE_KIND: &str = "ui_surface";
 pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
 /// Runtime UI surface schema version rendered by the client shell.
 pub const UI_SURFACE_SCHEMA_VERSION: u64 = 1;
-/// Built-in catalog discovery report resource kind.
-pub const CATALOG_DISCOVERY_REPORT_KIND: &str = "catalog_discovery_report";
-/// Built-in catalog discovery report resource schema id.
-pub const CATALOG_DISCOVERY_REPORT_SCHEMA_ID: &str = "tron.resource.catalog_discovery_report.v1";
-/// Built-in approval request resource kind.
-pub const APPROVAL_REQUEST_KIND: &str = "approval_request";
-/// Built-in approval request resource schema id.
-pub const APPROVAL_REQUEST_SCHEMA_ID: &str = "tron.resource.approval_request.v1";
-/// Built-in approval decision resource kind.
-pub const APPROVAL_DECISION_KIND: &str = "approval_decision";
-/// Built-in approval decision resource schema id.
-pub const APPROVAL_DECISION_SCHEMA_ID: &str = "tron.resource.approval_decision.v1";
+
 /// Built-in memory engine descriptor resource kind.
 pub const MEMORY_ENGINE_KIND: &str = "memory_engine";
 /// Built-in memory engine descriptor resource schema id.
@@ -53,210 +42,16 @@ pub const MEMORY_DECISION_SCHEMA_ID: &str = "tron.resource.memory_decision.v1";
 pub const MEMORY_EVAL_RUN_KIND: &str = "memory_eval_run";
 /// Built-in memory eval-run resource schema id.
 pub const MEMORY_EVAL_RUN_SCHEMA_ID: &str = "tron.resource.memory_eval_run.v1";
-/// Built-in memory migration/export/import envelope resource kind.
+/// Built-in memory migration envelope resource kind.
 pub const MEMORY_MIGRATION_ENVELOPE_KIND: &str = "memory_migration_envelope";
-/// Built-in memory migration/export/import envelope resource schema id.
+/// Built-in memory migration envelope resource schema id.
 pub const MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID: &str = "tron.resource.memory_migration_envelope.v1";
-/// Built-in durable process job resource kind.
-pub const JOB_PROCESS_KIND: &str = "job_process";
-/// Built-in durable process job resource schema id.
-pub const JOB_PROCESS_SCHEMA_ID: &str = "tron.resource.job_process.v1";
-/// Built-in user question resource kind.
-pub const USER_QUESTION_KIND: &str = "user_question";
-/// Built-in user question resource schema id.
-pub const USER_QUESTION_SCHEMA_ID: &str = "tron.resource.user_question.v1";
-/// Built-in goal answer resource kind.
-pub const GOAL_ANSWER_KIND: &str = "goal_answer";
-/// Built-in goal answer resource schema id.
-pub const GOAL_ANSWER_SCHEMA_ID: &str = "tron.resource.goal_answer.v1";
-/// Built-in Git index mutation evidence resource kind.
-pub const GIT_INDEX_CHANGE_KIND: &str = "git_index_change";
-/// Built-in Git index mutation evidence resource schema id.
-pub const GIT_INDEX_CHANGE_SCHEMA_ID: &str = "tron.resource.git_index_change.v1";
-/// Built-in Git commit evidence resource kind.
-pub const GIT_COMMIT_KIND: &str = "git_commit";
-/// Built-in Git commit evidence resource schema id.
-pub const GIT_COMMIT_SCHEMA_ID: &str = "tron.resource.git_commit.v1";
-/// Built-in Git branch-start evidence resource kind.
-pub const GIT_BRANCH_START_KIND: &str = "git_branch_start";
-/// Built-in Git branch-start evidence resource schema id.
-pub const GIT_BRANCH_START_SCHEMA_ID: &str = "tron.resource.git_branch_start.v1";
-/// Built-in web source/fetch provenance resource kind.
-pub const WEB_SOURCE_KIND: &str = "web_source";
-/// Built-in web source/fetch provenance resource schema id.
-pub const WEB_SOURCE_SCHEMA_ID: &str = "tron.resource.web_source.v1";
-/// Built-in web robots policy evidence resource kind.
-pub const WEB_ROBOTS_POLICY_KIND: &str = "web_robots_policy";
-/// Built-in web robots policy evidence resource schema id.
-pub const WEB_ROBOTS_POLICY_SCHEMA_ID: &str = "tron.resource.web_robots_policy.v1";
-/// Built-in external tool-source proposal resource kind.
-pub const TOOL_SOURCE_PROPOSAL_KIND: &str = "tool_source_proposal";
-/// Built-in external tool-source proposal resource schema id.
-pub const TOOL_SOURCE_PROPOSAL_SCHEMA_ID: &str = "tron.resource.tool_source_proposal.v1";
-/// Built-in external tool-source conformance/preflight report resource kind.
-pub const TOOL_SOURCE_CONFORMANCE_REPORT_KIND: &str = "tool_source_conformance_report";
-/// Built-in external tool-source conformance/preflight report resource schema id.
-pub const TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID: &str =
-    "tron.resource.tool_source_conformance_report.v1";
-/// Built-in inert subagent task lifecycle resource kind.
-pub const SUBAGENT_TASK_KIND: &str = "subagent_task";
-/// Built-in inert subagent task lifecycle resource schema id.
-pub const SUBAGENT_TASK_SCHEMA_ID: &str = "tron.resource.subagent_task.v1";
-/// Built-in inert procedural state record resource kind.
-pub const PROCEDURAL_RECORD_KIND: &str = "procedural_record";
-/// Built-in inert procedural state record resource schema id.
-pub const PROCEDURAL_RECORD_SCHEMA_ID: &str = "tron.resource.procedural_record.v1";
-/// Built-in metadata-only procedural activation review request resource kind.
-pub const PROCEDURAL_ACTIVATION_REQUEST_KIND: &str = "procedural_activation_request";
-/// Built-in metadata-only procedural activation review request resource schema id.
-pub const PROCEDURAL_ACTIVATION_REQUEST_SCHEMA_ID: &str =
-    "tron.resource.procedural_activation_request.v1";
-/// Built-in metadata-only procedural activation decision resource kind.
-pub const PROCEDURAL_ACTIVATION_DECISION_KIND: &str = "procedural_activation_decision";
-/// Built-in metadata-only procedural activation decision resource schema id.
-pub const PROCEDURAL_ACTIVATION_DECISION_SCHEMA_ID: &str =
-    "tron.resource.procedural_activation_decision.v1";
-/// Built-in durable schedule resource kind.
-pub const SCHEDULE_KIND: &str = "schedule";
-/// Built-in durable schedule resource schema id.
-pub const SCHEDULE_SCHEMA_ID: &str = "tron.resource.schedule.v1";
-/// Built-in durable schedule run resource kind.
-pub const SCHEDULE_RUN_KIND: &str = "schedule_run";
-/// Built-in durable schedule run resource schema id.
-pub const SCHEDULE_RUN_SCHEMA_ID: &str = "tron.resource.schedule_run.v1";
+
 /// Built-in APNs-capable device registration resource kind.
 pub const DEVICE_REGISTRATION_KIND: &str = "device_registration";
 /// Built-in APNs-capable device registration resource schema id.
 pub const DEVICE_REGISTRATION_SCHEMA_ID: &str = "tron.resource.device_registration.v1";
-/// Built-in server-owned notification inbox resource kind.
-pub const NOTIFICATION_KIND: &str = "notification";
-/// Built-in server-owned notification inbox resource schema id.
-pub const NOTIFICATION_SCHEMA_ID: &str = "tron.resource.notification.v1";
-/// Built-in notification delivery evidence resource kind.
-pub const NOTIFICATION_DELIVERY_KIND: &str = "notification_delivery";
-/// Built-in notification delivery evidence resource schema id.
-pub const NOTIFICATION_DELIVERY_SCHEMA_ID: &str = "tron.resource.notification_delivery.v1";
-/// Built-in durable media/voice-note artifact resource kind.
-pub const MEDIA_ARTIFACT_KIND: &str = "media_artifact";
-/// Built-in durable media/voice-note artifact resource schema id.
-pub const MEDIA_ARTIFACT_SCHEMA_ID: &str = "tron.resource.media_artifact.v1";
-/// Built-in import/session-resource graph lineage resource kind.
-pub const IMPORT_HISTORY_RECORD_KIND: &str = "import_history_record";
-/// Built-in import/session-resource graph lineage resource schema id.
-pub const IMPORT_HISTORY_RECORD_SCHEMA_ID: &str = "tron.resource.import_history_record.v1";
-/// Built-in content-free import preview resource kind.
-pub const IMPORT_PREVIEW_KIND: &str = "import_preview";
-/// Built-in content-free import preview resource schema id.
-pub const IMPORT_PREVIEW_SCHEMA_ID: &str = "tron.resource.import_preview.v1";
-/// Built-in content-free program execution record resource kind.
-pub const PROGRAM_EXECUTION_KIND: &str = "program_execution_record";
-/// Built-in content-free program execution record resource schema id.
-pub const PROGRAM_EXECUTION_SCHEMA_ID: &str = "tron.resource.program_execution_record.v1";
-/// Built-in prompt artifact metadata resource kind.
-pub const PROMPT_ARTIFACT_KIND: &str = "prompt_artifact";
-/// Built-in prompt artifact metadata resource schema id.
-pub const PROMPT_ARTIFACT_SCHEMA_ID: &str = "tron.resource.prompt_artifact.v1";
-/// Built-in content-free repository tree snapshot resource kind.
-pub const REPOSITORY_TREE_SNAPSHOT_KIND: &str = "repository_tree_snapshot";
-/// Built-in content-free repository tree snapshot resource schema id.
-pub const REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID: &str = "tron.resource.repository_tree_snapshot.v1";
-/// Built-in system update diagnostic metadata resource kind.
-pub const UPDATE_DIAGNOSTIC_RECORD_KIND: &str = "update_diagnostic_record";
-/// Built-in system update diagnostic metadata resource schema id.
-pub const UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID: &str = "tron.resource.update_diagnostic_record.v1";
-/// Built-in module authoring proposal resource kind.
-pub const MODULE_PROPOSAL_KIND: &str = "module_proposal";
-/// Built-in module authoring proposal resource schema id.
-pub const MODULE_PROPOSAL_SCHEMA_ID: &str = "tron.resource.module_proposal.v1";
-/// Built-in module validation report resource kind.
-pub const MODULE_VALIDATION_REPORT_KIND: &str = "module_validation_report";
-/// Built-in module validation report resource schema id.
-pub const MODULE_VALIDATION_REPORT_SCHEMA_ID: &str = "tron.resource.module_validation_report.v1";
-/// Built-in metadata-only module install review request resource kind.
-pub const MODULE_INSTALL_REQUEST_KIND: &str = "module_install_request";
-/// Built-in metadata-only module install review request resource schema id.
-pub const MODULE_INSTALL_REQUEST_SCHEMA_ID: &str = "tron.resource.module_install_request.v1";
-/// Built-in metadata-only module install decision resource kind.
-pub const MODULE_INSTALL_DECISION_KIND: &str = "module_install_decision";
-/// Built-in metadata-only module install decision resource schema id.
-pub const MODULE_INSTALL_DECISION_SCHEMA_ID: &str = "tron.resource.module_install_decision.v1";
-/// Built-in metadata-only module dependency request resource kind.
-pub const MODULE_DEPENDENCY_REQUEST_KIND: &str = "module_dependency_request";
-/// Built-in metadata-only module dependency request resource schema id.
-pub const MODULE_DEPENDENCY_REQUEST_SCHEMA_ID: &str = "tron.resource.module_dependency_request.v1";
-/// Built-in metadata-only module dependency decision resource kind.
-pub const MODULE_DEPENDENCY_DECISION_KIND: &str = "module_dependency_decision";
-/// Built-in metadata-only module dependency decision resource schema id.
-pub const MODULE_DEPENDENCY_DECISION_SCHEMA_ID: &str =
-    "tron.resource.module_dependency_decision.v1";
-/// Built-in metadata-only module dependency policy resource kind.
-pub const MODULE_DEPENDENCY_POLICY_KIND: &str = "module_dependency_policy";
-/// Built-in metadata-only module dependency policy resource schema id.
-pub const MODULE_DEPENDENCY_POLICY_SCHEMA_ID: &str = "tron.resource.module_dependency_policy.v1";
-/// Built-in metadata-only capability binding request resource kind.
-pub const CAPABILITY_BINDING_REQUEST_KIND: &str = "capability_binding_request";
-/// Built-in metadata-only capability binding request resource schema id.
-pub const CAPABILITY_BINDING_REQUEST_SCHEMA_ID: &str =
-    "tron.resource.capability_binding_request.v1";
-/// Built-in metadata-only capability binding decision resource kind.
-pub const CAPABILITY_BINDING_DECISION_KIND: &str = "capability_binding_decision";
-/// Built-in metadata-only capability binding decision resource schema id.
-pub const CAPABILITY_BINDING_DECISION_SCHEMA_ID: &str =
-    "tron.resource.capability_binding_decision.v1";
-/// Built-in metadata-only capability binding policy resource kind.
-pub const CAPABILITY_BINDING_POLICY_KIND: &str = "capability_binding_policy";
-/// Built-in metadata-only capability binding policy resource schema id.
-pub const CAPABILITY_BINDING_POLICY_SCHEMA_ID: &str = "tron.resource.capability_binding_policy.v1";
-/// Built-in metadata-only capability shadow trial request resource kind.
-pub const CAPABILITY_SHADOW_TRIAL_REQUEST_KIND: &str = "capability_shadow_trial_request";
-/// Built-in metadata-only capability shadow trial request resource schema id.
-pub const CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID: &str =
-    "tron.resource.capability_shadow_trial_request.v1";
-/// Built-in metadata-only capability shadow trial decision resource kind.
-pub const CAPABILITY_SHADOW_TRIAL_DECISION_KIND: &str = "capability_shadow_trial_decision";
-/// Built-in metadata-only capability shadow trial decision resource schema id.
-pub const CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID: &str =
-    "tron.resource.capability_shadow_trial_decision.v1";
-/// Built-in metadata-only capability shadow trial run resource kind.
-pub const CAPABILITY_SHADOW_TRIAL_RUN_KIND: &str = "capability_shadow_trial_run";
-/// Built-in metadata-only capability shadow trial run resource schema id.
-pub const CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID: &str =
-    "tron.resource.capability_shadow_trial_run.v1";
-/// Built-in metadata-only capability shadow trial evidence resource kind.
-pub const CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND: &str = "capability_shadow_trial_evidence";
-/// Built-in metadata-only capability shadow trial evidence resource schema id.
-pub const CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID: &str =
-    "tron.resource.capability_shadow_trial_evidence.v1";
-/// Built-in governed capability replacement candidate resource kind.
-pub const CAPABILITY_REPLACEMENT_CANDIDATE_KIND: &str = "capability_replacement_candidate";
-/// Built-in governed capability replacement candidate resource schema id.
-pub const CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID: &str =
-    "tron.resource.capability_replacement_candidate.v1";
-/// Built-in governed capability route binding resource kind.
-pub const CAPABILITY_ROUTE_BINDING_KIND: &str = "capability_route_binding";
-/// Built-in governed capability route binding resource schema id.
-pub const CAPABILITY_ROUTE_BINDING_SCHEMA_ID: &str = "tron.resource.capability_route_binding.v1";
-/// Built-in governed capability route activation resource kind.
-pub const CAPABILITY_ROUTE_ACTIVATION_KIND: &str = "capability_route_activation";
-/// Built-in governed capability route activation resource schema id.
-pub const CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID: &str =
-    "tron.resource.capability_route_activation.v1";
-/// Built-in governed capability route event resource kind.
-pub const CAPABILITY_ROUTE_EVENT_KIND: &str = "capability_route_event";
-/// Built-in governed capability route event resource schema id.
-pub const CAPABILITY_ROUTE_EVENT_SCHEMA_ID: &str = "tron.resource.capability_route_event.v1";
-/// Built-in governed capability route rollback resource kind.
-pub const CAPABILITY_ROUTE_ROLLBACK_KIND: &str = "capability_route_rollback";
-/// Built-in governed capability route rollback resource schema id.
-pub const CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID: &str = "tron.resource.capability_route_rollback.v1";
-/// Built-in metadata-only module lifecycle state resource kind.
-pub const MODULE_LIFECYCLE_STATE_KIND: &str = "module_lifecycle_state";
-/// Built-in metadata-only module lifecycle state resource schema id.
-pub const MODULE_LIFECYCLE_STATE_SCHEMA_ID: &str = "tron.resource.module_lifecycle_state.v1";
-/// Built-in supervised module runtime state resource kind.
-pub const MODULE_RUNTIME_STATE_KIND: &str = "module_runtime_state";
-/// Built-in supervised module runtime state resource schema id.
-pub const MODULE_RUNTIME_STATE_SCHEMA_ID: &str = "tron.resource.module_runtime_state.v1";
+
 /// Built-in context-control snapshot resource kind.
 pub const CONTEXT_CONTROL_SNAPSHOT_KIND: &str = "context_control_snapshot";
 /// Built-in context-control snapshot resource schema id.
@@ -269,30 +64,18 @@ pub const CONTEXT_CONTROL_ACTION_SCHEMA_ID: &str = "tron.resource.context_contro
 pub const CONTEXT_CONTROL_EPOCH_KIND: &str = "context_control_epoch";
 /// Built-in context-control epoch resource schema id.
 pub const CONTEXT_CONTROL_EPOCH_SCHEMA_ID: &str = "tron.resource.context_control_epoch.v1";
-/// Built-in context-policy survivor resource kind.
+/// Built-in context survivor resource kind.
 pub const CONTEXT_SURVIVOR_KIND: &str = "context_survivor";
-/// Built-in context-policy survivor resource schema id.
+/// Built-in context survivor resource schema id.
 pub const CONTEXT_SURVIVOR_SCHEMA_ID: &str = "tron.resource.context_survivor.v1";
-/// Built-in context-policy exclusion resource kind.
+/// Built-in context exclusion resource kind.
 pub const CONTEXT_EXCLUSION_KIND: &str = "context_exclusion";
-/// Built-in context-policy exclusion resource schema id.
+/// Built-in context exclusion resource schema id.
 pub const CONTEXT_EXCLUSION_SCHEMA_ID: &str = "tron.resource.context_exclusion.v1";
-/// Built-in context-policy snapshot resource kind.
+/// Built-in context policy snapshot resource kind.
 pub const CONTEXT_POLICY_SNAPSHOT_KIND: &str = "context_policy_snapshot";
-/// Built-in context-policy snapshot resource schema id.
+/// Built-in context policy snapshot resource schema id.
 pub const CONTEXT_POLICY_SNAPSHOT_SCHEMA_ID: &str = "tron.resource.context_policy_snapshot.v1";
-/// Built-in metadata-only web research request resource kind.
-pub const WEB_RESEARCH_REQUEST_KIND: &str = "web_research_request";
-/// Built-in metadata-only web research request resource schema id.
-pub const WEB_RESEARCH_REQUEST_SCHEMA_ID: &str = "tron.resource.web_research_request.v1";
-/// Built-in metadata-only web research review resource kind.
-pub const WEB_RESEARCH_REVIEW_KIND: &str = "web_research_review";
-/// Built-in metadata-only web research review resource schema id.
-pub const WEB_RESEARCH_REVIEW_SCHEMA_ID: &str = "tron.resource.web_research_review.v1";
-/// Built-in bounded web research source/citation artifact resource kind.
-pub const WEB_RESEARCH_SOURCE_KIND: &str = "web_research_source";
-/// Built-in bounded web research source/citation artifact resource schema id.
-pub const WEB_RESEARCH_SOURCE_SCHEMA_ID: &str = "tron.resource.web_research_source.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

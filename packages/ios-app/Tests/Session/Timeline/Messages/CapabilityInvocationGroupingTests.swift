@@ -5,7 +5,7 @@ final class CapabilityInvocationGroupingTests: XCTestCase {
     func testSingleCapabilityInvocationStaysUngrouped() {
         let messages = [
             textMessage("Before"),
-            capabilityMessage(id: "call-1", operation: "trace_list"),
+            capabilityMessage(id: "call-1", operation: "worker_list"),
             textMessage("After")
         ]
 
@@ -22,9 +22,9 @@ final class CapabilityInvocationGroupingTests: XCTestCase {
     func testAdjacentCapabilityInvocationsCollapseIntoOneGroup() {
         let messages = [
             textMessage("Before"),
-            capabilityMessage(id: "call-1", operation: "module_list"),
-            capabilityMessage(id: "call-2", operation: "module_lifecycle_list", status: .running),
-            capabilityMessage(id: "call-3", operation: "module_runtime_list", status: .error),
+            capabilityMessage(id: "call-1", operation: "worker_discover"),
+            capabilityMessage(id: "call-2", operation: "worker_inspect", status: .running),
+            capabilityMessage(id: "call-3", operation: "worker_inbox", status: .error),
             textMessage("After")
         ]
 
@@ -42,11 +42,11 @@ final class CapabilityInvocationGroupingTests: XCTestCase {
 
     func testTextAndThinkingSplitCapabilityGroups() {
         let messages = [
-            capabilityMessage(id: "call-1", operation: "module_list"),
-            capabilityMessage(id: "call-2", operation: "module_runtime_list"),
+            capabilityMessage(id: "call-1", operation: "worker_list"),
+            capabilityMessage(id: "call-2", operation: "worker_runs"),
             thinkingMessage("Inspecting the results"),
-            capabilityMessage(id: "call-3", operation: "trace_list"),
-            capabilityMessage(id: "call-4", operation: "log_recent")
+            capabilityMessage(id: "call-3", operation: "worker_inspect"),
+            capabilityMessage(id: "call-4", operation: "worker_inbox")
         ]
 
         let items = CapabilityInvocationGrouping.renderItems(from: messages)
@@ -68,8 +68,8 @@ final class CapabilityInvocationGroupingTests: XCTestCase {
 
     func testCompletedGroupReportsFailuresWithoutStayingActive() {
         let data = CapabilityInvocationGroupData(invocations: [
-            invocation(id: "call-1", operation: "trace_list", status: .success),
-            invocation(id: "call-2", operation: "capability_binding_request_list", status: .error)
+            invocation(id: "call-1", operation: "worker_list", status: .success),
+            invocation(id: "call-2", operation: "worker_invoke", status: .error)
         ])
 
         XCTAssertEqual(data.title, "Used 2 capabilities")

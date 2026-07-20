@@ -6,14 +6,13 @@ use std::time::{Duration, Instant};
 
 use crate::shared::server::context::ServerRuntimeContext;
 use axum::Router;
-use axum::extract::ConnectInfo;
 use axum::extract::Request as AxumRequest;
-use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
@@ -136,6 +135,10 @@ impl TronServer {
                 get(engine_worker_upgrade_handler)
                     .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
             )
+            .route(
+                "/engine/workers/webhooks/{worker_id}/{trigger_id}",
+                post(worker_webhook_handler),
+            )
             .route("/health/deep", get(deep_health_handler))
             .with_state(state)
             // Outermost layers execute first on request, last on response.
@@ -206,6 +209,94 @@ impl TronServer {
     pub fn engine_clients(&self) -> &Arc<EngineClientRegistry> {
         &self.engine_clients
     }
+}
+
+async fn worker_webhook_handler(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path((worker_id, trigger_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(input): Json<serde_json::Value>,
+) -> Response {
+    if !peer.ip().is_loopback() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error":"worker webhooks accept loopback requests only"})),
+        )
+            .into_response();
+    }
+    let token = headers
+        .get("x-tron-worker-token")
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| {
+            headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+        });
+    let Some(token) = token else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"missing worker webhook token"})),
+        )
+            .into_response();
+    };
+    let idempotency_key = headers
+        .get("x-tron-idempotency-key")
+        .or_else(|| headers.get("idempotency-key"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("worker-webhook:{}", uuid::Uuid::now_v7()));
+    let context = crate::engine::CausalContext::trusted_local(
+        match crate::engine::ActorId::new("worker:webhook") {
+            Ok(id) => id,
+            Err(error) => return internal_webhook_error(error.to_string()),
+        },
+        crate::engine::ActorKind::System,
+        crate::engine::TraceId::generate(),
+    )
+    .with_idempotency_key(idempotency_key.clone());
+    let function_id = match crate::engine::FunctionId::new("worker_kernel::webhook_invoke") {
+        Ok(id) => id,
+        Err(error) => return internal_webhook_error(error.to_string()),
+    };
+    let outcome = state
+        .runtime_context
+        .engine_host
+        .invoke(crate::engine::Invocation::new_sync(
+            function_id,
+            serde_json::json!({
+                "workerId":worker_id,
+                "triggerId":trigger_id,
+                "token":token,
+                "input":input,
+                "idempotencyKey":idempotency_key,
+            }),
+            context,
+        ))
+        .await;
+    if let Some(error) = outcome.error {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error":error.to_string()})),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(outcome.value.unwrap_or_default()),
+    )
+        .into_response()
+}
+
+fn internal_webhook_error(error: String) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({"error":error})),
+    )
+        .into_response()
 }
 
 /// GET /engine — public engine client WebSocket protocol.

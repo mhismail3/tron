@@ -153,82 +153,81 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
     private static var fixtureInvocationGroup: CapabilityInvocationGroupData {
         CapabilityInvocationGroupData(invocations: [
             CapabilityInvocationData(
-                id: "cap-group-catalog-search",
+                id: "cap-group-worker-discover",
                 status: .success,
                 arguments: #"""
                 {
-                  "operation": "catalog_search",
-                  "text": "catalog inspect operations contracts read-only"
+                  "query": "recent research worker",
+                  "limit": 5
                 }
                 """#,
-                result: "Catalog search returned 3 visible operations.",
+                result: "Worker discovery returned 3 relevant persistent workers.",
                 durationMs: 46,
                 identity: CapabilityIdentity(
-                    modelPrimitiveName: "execute",
-                    operationName: "catalog_search",
-                    traceId: "trace-catalog"
+                    modelPrimitiveName: "worker_discover",
+                    operationName: "worker_discover",
+                    traceId: "trace-worker-discover"
                 )
             ),
             CapabilityInvocationData(
-                id: "cap-group-cockpit",
+                id: "cap-group-worker-list",
                 status: .success,
                 arguments: #"""
                 {
-                  "networkPolicy": "none",
-                  "operation": "capability_binding_cockpit_overview"
+                  "includeRetired": true
                 }
                 """#,
-                result: "Capability cockpit overview returned 189 operations.",
+                result: "Worker list returned 4 persistent workers.",
                 durationMs: 38,
                 identity: CapabilityIdentity(
-                    modelPrimitiveName: "execute",
-                    operationName: "capability_binding_cockpit_overview",
-                    traceId: "trace-cockpit"
+                    modelPrimitiveName: "worker_list",
+                    operationName: "worker_list",
+                    traceId: "trace-worker-list"
                 )
             ),
             CapabilityInvocationData(
-                id: "cap-group-git-status",
+                id: "cap-group-process-run",
                 status: .success,
                 arguments: #"""
                 {
-                  "operation": "git_status",
-                  "maxStatusBytes": 20000
+                  "command": ["git", "status", "--short"],
+                  "timeoutSeconds": 30
                 }
                 """#,
                 result: "Git status is clean.",
                 durationMs: 78,
                 identity: CapabilityIdentity(
-                    modelPrimitiveName: "execute",
-                    operationName: "git_status",
-                    traceId: "trace-git-status"
+                    modelPrimitiveName: "process_run",
+                    operationName: "process_run",
+                    traceId: "trace-process-run"
                 )
             ),
             CapabilityInvocationData(
-                id: "cap-group-binding-request",
+                id: "cap-group-worker-invoke",
                 status: .error,
                 arguments: #"""
                 {
-                  "operation": "capability_binding_request_list",
-                  "limit": 100
+                  "workerId": "recent-research",
+                  "input": {}
                 }
                 """#,
-                result: "authority grant requires explicit capability binding request selector",
+                result: "worker input schema requires property topic",
                 details: [
-                    "error": "authority grant requires explicit capability binding request selector",
+                    "error": "worker input schema requires property topic",
                     "category": "invalid_request",
                     "recoverable": true,
-                    "code": "ENGINE_POLICY_VIOLATION"
+                    "code": "ENGINE_SCHEMA_VIOLATION"
                 ],
                 durationMs: 12,
                 identity: CapabilityIdentity(
-                    modelPrimitiveName: "execute",
-                    operationName: "capability_binding_request_list",
-                    traceId: "trace-binding-request"
+                    modelPrimitiveName: "worker_invoke",
+                    operationName: "worker_invoke",
+                    traceId: "trace-worker-invoke"
                 ),
                 errorClassification: CapabilityErrorClassification(
-                    code: "ENGINE_POLICY_VIOLATION",
+                    code: "ENGINE_SCHEMA_VIOLATION",
                     category: "invalid_request",
-                    message: "authority grant requires explicit capability binding request selector",
+                    message: "worker input schema requires property topic",
                     recoverable: true
                 )
             )

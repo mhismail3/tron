@@ -11,6 +11,7 @@ struct ServerSettingsTests {
         {
             "version": "0.1.0",
             "name": "tron",
+            "autonomousWorkers": true,
             "api": { "anthropic": { "authUrl": "https://example.invalid" } },
             "retry": { "maxRetries": 3 },
             "agent": { "maxTurns": 250 },
@@ -35,6 +36,7 @@ struct ServerSettingsTests {
 
         let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
         #expect(settings.defaultModel == "claude-opus-4-6")
+        #expect(settings.autonomousWorkers == true)
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.tailscaleIp == "100.64.0.7")
         #expect(settings.transcriptionEnabled == true)
@@ -46,6 +48,7 @@ struct ServerSettingsTests {
     func fixtureServerPayloadDefaults() throws {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         #expect(settings.defaultModel == "claude-sonnet-4-6")
+        #expect(settings.autonomousWorkers == false)
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.tailscaleIp == nil)
         #expect(settings.transcriptionEnabled == false)
@@ -128,6 +131,7 @@ struct ServerSettingsTests {
     @Test("ServerSettingsUpdate encodes primitive structure")
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
+        update.autonomousWorkers = true
         update.server = .init(
             defaultModel: "claude-opus-4-6",
             transcription: .init(enabled: true)
@@ -135,6 +139,8 @@ struct ServerSettingsTests {
 
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        #expect(json["autonomousWorkers"] as? Bool == true)
 
         let server = json["server"] as? [String: Any]
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")

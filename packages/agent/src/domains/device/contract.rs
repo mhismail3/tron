@@ -2,7 +2,6 @@
 
 use serde_json::json;
 
-use crate::domains::notifications::contract::EVENT_FAMILIES;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{
@@ -12,16 +11,16 @@ use crate::engine::{
 
 pub(crate) const WORKER: &str = "device";
 pub(crate) const DEVICE_LIFECYCLE_TOPIC: &str = "device.lifecycle";
-pub(crate) const READ_SCOPE: &str = "device.read";
 pub(crate) const WRITE_SCOPE: &str = "device.write";
-pub(crate) const RESOURCE_READ_SCOPE: &str = "resource.read";
 pub(crate) const RESOURCE_WRITE_SCOPE: &str = "resource.write";
 pub(crate) const SCHEMA_VERSION: &str = "tron.device.registration.v1";
+pub(crate) const EVENT_FAMILIES: &[&str] =
+    &["worker_result", "worker_failure", "question", "system"];
 
 pub(crate) const STREAM_TOPICS: &[&str] = &[DEVICE_LIFECYCLE_TOPIC];
 
 /// iOS invokes this transport-only function after APNs issues a token. It is
-/// deliberately not exposed as a `capability::execute` operation.
+/// deliberately not exposed as a model-facing direct tool.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new(

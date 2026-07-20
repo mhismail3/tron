@@ -299,8 +299,10 @@ fn trusted_agent_internal_child_context(
     let mut context = invocation.causal_context.clone();
     context.actor_id = crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id");
     context.actor_kind = crate::engine::ActorKind::System;
-    context.authority_grant_id =
-        crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id");
+    if !context.is_trusted_local() {
+        context.authority_grant_id =
+            crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id");
+    }
     context.parent_invocation_id = Some(invocation.id.clone());
     if !context
         .authority_scopes

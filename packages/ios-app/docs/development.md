@@ -344,38 +344,16 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/SessionListExpansionAccessibilityTests
 ```
 
-For Dashboard capability visibility or `WorkerLifecycleRepository` protocol
-changes, run the focused cockpit state/view-model set:
+For Worker Console protocol, repository, state, or Settings parity changes, run
+the focused worker-first set:
 
 ```bash
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/AgentCockpitIssueStateTests \
-  -only-testing:TronMobileTests/AgentCockpitStateTests \
-  -only-testing:TronMobileTests/AgentCockpitDiscoveryStateTests \
-  -only-testing:TronMobileTests/AgentCockpitPresentationTests \
-  -only-testing:TronMobileTests/AgentCockpitViewModelTests
-```
-
-For Dashboard presentation/model changes, run the dedicated source/model
-contracts and the single progressive-disclosure visual route. Issue aggregation
-has its own equally small state suite:
-
-```bash
-xcodebuild test -scheme Tron \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/DashboardPresentationTests \
-  -only-testing:TronMobileTests/AgentCockpitStateTests \
-  -only-testing:TronMobileTests/AgentCockpitDiscoveryStateTests \
-  -only-testing:TronMobileTests/AgentCockpitPresentationTests
-
-xcodebuild test -scheme Tron \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/AgentCockpitIssueStateTests
-
-xcodebuild test -scheme 'Tron UI Validation' \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -only-testing:TronMobileUITests/DashboardHitTargetUITests/testEngineCockpitProgressiveDisclosurePath
+  -only-testing:TronMobileTests/WorkerKernelDTOTests \
+  -only-testing:TronMobileTests/WorkerKernelClientTests \
+  -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
+  -only-testing:TronMobileTests/SettingsParityTests
 ```
 
 For the main Settings destination copy or the Engine/Providers sheet hierarchy,
@@ -456,7 +434,7 @@ Tests/
 │   └── Transport/     # Clients, Retry, WebSocket, and DeepLinks tests mirror Sources
 ├── Session/           # Chat, timeline, attachment, and parsing tests
 │   ├── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
-│   └── WorkerLifecycle/ # State, discovery, presentation, and shared cockpit fixtures
+│   └── WorkerKernel/    # Worker Console state and repository fixtures
 ├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards

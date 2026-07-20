@@ -102,13 +102,32 @@ fn engine_facade_is_the_only_cross_module_engine_api() {
 
 #[test]
 fn domain_workers_expose_contracts_not_services() {
-    let module_dependencies =
-        read_repo_file("packages/agent/src/domains/module_dependencies/mod.rs");
-    assert!(
-        !module_dependencies.contains("pub(crate) mod contract")
-            && !module_dependencies.contains("pub(crate) use crate::engine"),
-        "module-dependency contracts and engine identifiers must stay domain-private"
-    );
+    let worker_kernel = read_repo_file("packages/agent/src/domains/worker_kernel/mod.rs");
+    for required in [
+        "mod contract;",
+        "mod core_proposals;",
+        "mod migration;",
+        "mod runtime;",
+        "mod snapshot;",
+        "mod store;",
+        "mod types;",
+    ] {
+        assert!(
+            worker_kernel.contains(required),
+            "worker-kernel concern must stay privately owned: {required}"
+        );
+    }
+    for removed in [
+        "packages/agent/src/domains/module_dependencies",
+        "packages/agent/src/domains/module_lifecycle",
+        "packages/agent/src/domains/capability_binding",
+        "packages/agent/src/domains/worker_lifecycle",
+    ] {
+        assert!(
+            !repo_path(removed).exists(),
+            "superseded modularity plane must stay deleted: {removed}"
+        );
+    }
 
     let allowed_prefixes = [
         "packages/agent/src/domains/",

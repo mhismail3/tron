@@ -113,7 +113,9 @@ fn build_request_compiles_primitive_context_into_instructions() {
     assert!(instructions.contains("Remember the source-owned contract."));
     assert!(instructions.contains("Server: localhost:9847"));
     assert!(instructions.contains("Current working directory: /workspace"));
-    assert!(instructions.contains("Use only `capability::execute`"));
+    assert!(instructions.contains("Available Direct Tools"));
+    assert!(instructions.contains("There is no `capability::execute` wrapper"));
+    assert!(instructions.contains("worker_upsert"));
     assert!(instructions.contains("execute"));
 
     assert_eq!(request.input.len(), 1);

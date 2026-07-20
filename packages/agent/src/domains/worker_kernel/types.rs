@@ -1,0 +1,298 @@
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+pub(super) const BUNDLE_SCHEMA: &str = "tron.worker_bundle.v1";
+pub(super) const MAX_CAUSAL_DEPTH: u32 = 16;
+pub(super) const MAX_PROFILE_CONCURRENCY: usize = 32;
+pub(super) const MAX_WORKER_CONCURRENCY: usize = 8;
+pub(super) const MAX_INVOCATION_SECONDS: u64 = 7_200;
+
+fn default_bundle_schema() -> String {
+    BUNDLE_SCHEMA.to_owned()
+}
+
+fn object_schema() -> Value {
+    serde_json::json!({"type": "object"})
+}
+
+/// Complete, portable source contract accepted by the atomic worker upsert.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerBundle {
+    #[serde(default = "default_bundle_schema")]
+    pub schema_version: String,
+    #[serde(default)]
+    pub worker_id: Option<String>,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    #[serde(default = "object_schema")]
+    pub input_schema: Value,
+    #[serde(default = "object_schema")]
+    pub output_schema: Value,
+    pub runner: WorkerRunner,
+    #[serde(default)]
+    pub files: BTreeMap<String, String>,
+    #[serde(default)]
+    pub dependencies: Vec<WorkerDependency>,
+    #[serde(default)]
+    pub triggers: Vec<WorkerTrigger>,
+    #[serde(default)]
+    pub secret_bindings: Vec<WorkerSecretBinding>,
+    #[serde(default)]
+    pub smoke_tests: Vec<WorkerCommand>,
+    #[serde(default)]
+    pub provenance: Vec<SourceProvenance>,
+    #[serde(default)]
+    pub routing: WorkerRouting,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum WorkerRunner {
+    Agent {
+        instructions: String,
+        #[serde(default)]
+        model: Option<String>,
+    },
+    Command {
+        command: Vec<String>,
+    },
+    Service {
+        command: Vec<String>,
+        invoke_url: String,
+        #[serde(default)]
+        health_url: Option<String>,
+    },
+}
+
+impl WorkerRunner {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Agent { .. } => "agent",
+            Self::Command { .. } => "command",
+            Self::Service { .. } => "service",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerDependency {
+    pub name: String,
+    pub source: String,
+    pub version: String,
+    /// Required `sha256:<hex>` digest of the fetched file or source tree.
+    pub checksum: String,
+    #[serde(default)]
+    pub install: Option<WorkerCommand>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerCommand {
+    pub command: Vec<String>,
+    #[serde(default = "default_command_timeout")]
+    pub timeout_seconds: u64,
+}
+
+fn default_command_timeout() -> u64 {
+    300
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum WorkerTrigger {
+    Manual {
+        id: String,
+    },
+    Schedule {
+        id: String,
+        every_seconds: u64,
+        #[serde(default = "empty_object")]
+        input: Value,
+    },
+    EngineEvent {
+        id: String,
+        topic: String,
+        /// Recursive JSON subset that the stream event payload must match.
+        #[serde(default = "empty_object")]
+        filter: Value,
+        #[serde(default = "empty_object")]
+        input: Value,
+    },
+    Webhook {
+        id: String,
+        #[serde(default = "empty_object")]
+        input: Value,
+    },
+}
+
+impl WorkerTrigger {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Manual { id }
+            | Self::Schedule { id, .. }
+            | Self::EngineEvent { id, .. }
+            | Self::Webhook { id, .. } => id,
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Manual { .. } => "manual",
+            Self::Schedule { .. } => "schedule",
+            Self::EngineEvent { .. } => "engine_event",
+            Self::Webhook { .. } => "webhook",
+        }
+    }
+}
+
+fn empty_object() -> Value {
+    serde_json::json!({})
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceProvenance {
+    pub source: String,
+    #[serde(default)]
+    pub revision: Option<String>,
+    #[serde(default)]
+    pub checksum: Option<String>,
+}
+
+/// Logical vault binding. Bare strings remain the concise optional form;
+/// object form can declare a binding mandatory for execution.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WorkerSecretBinding {
+    Optional(String),
+    Configured {
+        name: String,
+        #[serde(default)]
+        required: bool,
+    },
+}
+
+impl WorkerSecretBinding {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Optional(name) | Self::Configured { name, .. } => name,
+        }
+    }
+
+    pub fn required(&self) -> bool {
+        matches!(self, Self::Configured { required: true, .. })
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerRouting {
+    #[serde(default)]
+    pub intents: Vec<String>,
+    #[serde(default)]
+    pub examples: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerState {
+    pub worker_id: String,
+    pub active_version: String,
+    pub enabled: bool,
+    pub retired: bool,
+    #[serde(default = "default_worker_health")]
+    pub health: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    pub updated_at: String,
+}
+
+fn default_worker_health() -> String {
+    "healthy".to_owned()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerSummary {
+    pub worker_id: String,
+    pub name: String,
+    pub description: String,
+    pub tool_name: String,
+    pub runner_kind: String,
+    pub active_version: String,
+    pub enabled: bool,
+    pub retired: bool,
+    pub health: String,
+    pub trigger_count: u64,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ActiveWorker {
+    pub summary: WorkerSummary,
+    pub bundle: WorkerBundle,
+    pub version_dir: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedWorker {
+    pub worker_id: String,
+    pub version: String,
+    pub tool_name: String,
+    pub bundle: WorkerBundle,
+    pub staging_dir: std::path::PathBuf,
+    pub prior_state: Option<WorkerState>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvocationRecord {
+    pub invocation_id: String,
+    pub worker_id: String,
+    pub worker_version: String,
+    pub status: String,
+    pub input: Value,
+    pub output: Option<Value>,
+    pub error: Option<String>,
+    pub idempotency_key: String,
+    pub trace_id: String,
+    pub causal_depth: u32,
+    pub trigger_kind: String,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InvokeRequest {
+    pub worker_id: String,
+    pub input: Value,
+    pub idempotency_key: String,
+    pub trace_id: String,
+    pub causal_depth: u32,
+    pub trigger_kind: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookCredential {
+    pub trigger_id: String,
+    pub path: String,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertOutcome {
+    pub worker: WorkerSummary,
+    pub version: String,
+    pub created: bool,
+    pub replaced_worker_id: Option<String>,
+    pub webhooks: Vec<WebhookCredential>,
+}

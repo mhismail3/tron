@@ -92,9 +92,9 @@ extension SourceGuardTests {
         for path in chatSources {
             let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
             #expect(!source.contains("AgentStatusCapsuleView"))
-            #expect(!source.contains("AgentCockpitViewModel()"))
-            #expect(!source.contains("showEngineCockpit"))
-            #expect(!source.contains("agentCockpit.refresh"))
+            #expect(!source.contains("WorkerConsoleViewModel()"))
+            #expect(!source.contains("showWorkerConsole"))
+            #expect(!source.contains("workerConsole.refresh"))
             #expect(!source.contains("case agentCockpit"))
         }
 
@@ -107,12 +107,12 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         #expect(!serverSettings.contains("ConnectionSettingsDiagnosticsSheet"))
-        #expect(!serverSettings.contains("AgentCockpitSheet("))
+        #expect(!serverSettings.contains("WorkerConsoleSheet("))
         #expect(!serverSettings.contains(#"Image(systemName: "chevron.right")"#))
         #expect(!engineSettings.contains(#"Image(systemName: "chevron.right")"#))
     }
 
-    @Test("Dashboard is the single high-signal cockpit surface")
+    @Test("Dashboard is the single high-signal worker-console surface")
     func testDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()
         let sidebar = try String(
@@ -123,17 +123,17 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Theme/TronColors.swift"),
             encoding: .utf8
         )
-        #expect(sidebar.contains("EngineCockpitDashboardBand("))
-        #expect(sidebar.contains("AgentCockpitSheet("))
+        #expect(sidebar.contains("WorkerConsoleDashboardBand("))
+        #expect(sidebar.contains("WorkerConsoleSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
-        #expect(sidebar.contains("cockpitRefreshKey"))
+        #expect(sidebar.contains("workerConsoleRefreshKey"))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
-        #expect(sidebar.contains(".task(id: cockpitRefreshKey)"))
+        #expect(sidebar.contains(".task(id: workerConsoleRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
         #expect(theme.contains(".glassEffect(\n                        .regular.tint(color.opacity(glassOpacity)).interactive(),\n                        in: shape\n                    )\n                    .contentShape(shape)"))
-        #expect(sidebar.components(separatedBy: ".task(id: cockpitRefreshKey)").count == 2)
-        #expect(sidebar.components(separatedBy: "AgentCockpitSheet(").count == 2)
+        #expect(sidebar.components(separatedBy: ".task(id: workerConsoleRefreshKey)").count == 2)
+        #expect(sidebar.components(separatedBy: "WorkerConsoleSheet(").count == 2)
         #expect(!sidebar.contains("Dash" + "board" + "V2"))
 
         let retiredLegacyHomePaths = [

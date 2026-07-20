@@ -133,7 +133,7 @@ struct GeneratedUIDTOTests {
         let surface = try #require(inspected.surface)
         let resourceRef = try #require(inspected.resourceRef)
 
-        #expect(resourceRef.kind == WorkerLifecycleResourceKind.uiSurface.rawValue)
+        #expect(resourceRef.kind == "ui_surface")
         #expect(resourceRef.resourceId == "res-ui")
         #expect(surface.layout.type == "Table")
         let firstRow = surface.layout.props?.array("rows")?.first as? [Any]

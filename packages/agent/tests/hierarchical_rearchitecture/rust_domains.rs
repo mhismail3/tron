@@ -242,48 +242,43 @@ fn rust_model_domain_uses_routing_and_protocol_owners() {
 }
 
 #[test]
-fn rust_capability_execute_operations_are_decomposed() {
+fn rust_worker_kernel_keeps_composition_root_thin() {
     let required = [
-        "packages/agent/src/domains/capability/operations/catalog/mod.rs",
-        "packages/agent/src/domains/capability/operations/filesystem.rs",
-        "packages/agent/src/domains/capability/operations/logs.rs",
-        "packages/agent/src/domains/capability/operations/process.rs",
-        "packages/agent/src/domains/capability/operations/state.rs",
-        "packages/agent/src/domains/capability/operations/trace.rs",
+        "packages/agent/src/domains/worker_kernel/contract.rs",
+        "packages/agent/src/domains/worker_kernel/core_proposals.rs",
+        "packages/agent/src/domains/worker_kernel/handlers.rs",
+        "packages/agent/src/domains/worker_kernel/migration.rs",
+        "packages/agent/src/domains/worker_kernel/runtime.rs",
+        "packages/agent/src/domains/worker_kernel/snapshot.rs",
+        "packages/agent/src/domains/worker_kernel/store.rs",
+        "packages/agent/src/domains/worker_kernel/types.rs",
     ];
     let missing: Vec<_> = required
         .iter()
         .copied()
         .filter(|path| !repo_path(path).exists())
         .collect();
-    let root = repo_path("packages/agent/src/domains/capability/operations/mod.rs");
-    let root_source = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let root = repo_path("packages/agent/src/domains/worker_kernel/mod.rs");
+    let root_source = read_repo_file("packages/agent/src/domains/worker_kernel/mod.rs");
 
     assert!(
         missing.is_empty(),
-        "capability::execute operations must be decomposed by primitive concern: {missing:#?}"
+        "worker kernel must be decomposed by durable concern: {missing:#?}"
     );
     assert!(
-        source_line_count(&root) <= 500,
-        "capability operations root should be dispatch/audit glue only after HRA-5"
+        source_line_count(&root) <= 250,
+        "worker-kernel root should remain composition and documentation glue"
     );
     for banned in [
-        "async fn file_read",
-        "async fn file_write",
-        "async fn filesystem_read",
-        "async fn filesystem_write",
-        "async fn filesystem_apply_patch",
-        "async fn process_run",
-        "fn trace_list",
-        "fn trace_get",
-        "async fn log_recent",
-        "async fn catalog_search",
-        "async fn catalog_inspect",
-        "async fn catalog_conformance",
+        "fn upsert(",
+        "fn dispatch(",
+        "fn run_command(",
+        "fn snapshot_state(",
+        "fn create_core_proposal(",
     ] {
         assert!(
             !root_source.contains(banned),
-            "capability operations root must not retain primitive body `{banned}`"
+            "worker-kernel root must not retain concern body `{banned}`"
         );
     }
 }

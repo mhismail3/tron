@@ -10,7 +10,6 @@
 //! - Capability results → byte-preserved `function_call_output` items
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
-use crate::domains::capability::operation_list_text;
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
@@ -60,7 +59,7 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
 ///
 /// The primitive branch always exports concrete function entries. Hosted
 /// tool-search/deferred loading is intentionally ignored so provider requests
-/// match the single checked-in `execute` surface.
+/// match the live direct kernel and worker surface.
 #[must_use]
 pub fn convert_tools_v2(capabilities: &[ModelCapability]) -> Vec<ResponsesToolEntry> {
     capabilities
@@ -103,7 +102,7 @@ pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Va
     }
 }
 
-/// Generate provider instruction text for the single `execute` primitive.
+/// Generate provider instruction text for the live direct-tool surface.
 ///
 /// Since `OpenAI` Codex has its own built-in system instructions that reference
 /// capabilities we don't use (shell, `apply_patch`, etc.), this text clarifies
@@ -136,30 +135,20 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         "[TRON CONTEXT]\n\
         You are Tron, an AI coding assistant running in Tron's primitive loop.\n\
         \n\
-        ## Available Primitive\n\
-        Use only `capability::execute` (the model-facing `execute` tool):\n\
+        ## Available Direct Tools\n\
+        Call the typed tools listed below directly. There is no `capability::execute` wrapper:\n\
         \n\
         {tool_list}\n\
         \n\
-        ## Schema-Led Execution\n\
-        Canonical operation index (generated from engine contracts; discovery only): {operation_list}.\n\
-        1. Use one operation per call and put its fields at the top level. Do not invoke from the \
-        index alone.\n\
-        2. Never guess operation names. Run `catalog_search`, then `catalog_inspect` with \
-        `kind: \"function\"` and the exact `id: \"execute::<operation>\"` before invoking the selected operation.\n\
-        3. The canonical inspect schema owns the exact required fields, effect, risk, preflight, \
-        and output contract. Every non-read-only schema structurally requires a stable, \
-        caller-supplied `idempotencyKey`.\n\
-        4. Use exact refs and selectors returned by catalog and operation outputs; do not infer \
-        alternate names, wildcard selectors, or resource identifiers.\n\
-        5. Normal task invocation must not enter a capability replacement workflow unless the user \
-        explicitly requests replacement.\n\
-        6. If a call is invalid or unsupported, recover by catalog inspection: run `catalog_search`, \
-        inspect the exact `execute::<operation>` contract, and do not retry guessed variants.\n\
-        7. Provider-safe outputs are the model-first evidence path. Continue and answer from those \
-        projections instead of bypassing them for raw internal state.",
+        ## Typed Execution\n\
+        1. Follow each tool's JSON schema exactly and use returned ids and versions verbatim.\n\
+        2. Use `worker_discover` when a relevant persistent worker is not in the live set.\n\
+        3. Use `worker_upsert` once with a complete bundle when durable adaptation is useful; a \
+        successful worker becomes callable immediately.\n\
+        4. Treat failures, health, provenance, hashes, and inbox records as reliability evidence, \
+        not permission ceremony.\n\
+        5. Core source changes must remain isolated proposals until a later explicit user approval.",
         tool_list = tool_descriptions.join("\n"),
-        operation_list = operation_list_text(),
     )
 }
 

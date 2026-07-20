@@ -7,7 +7,6 @@ use crate::shared::server::errors::CapabilityError;
 
 use super::DEVICE_REGISTRATION_SCHEMA_ID;
 use super::contract::SCHEMA_VERSION;
-use super::projection::{device_summary, inspected_device};
 use super::support::*;
 use super::validation::*;
 use super::{DEVICE_REGISTRATION_KIND, Deps};
@@ -376,99 +375,6 @@ pub(crate) async fn unregister_device_value_at(
         "deviceRegistrationVersionId": version.version_id,
         "apnsTokenRedacted": true,
         "resourceRefs": [version_ref(&inspection.resource, &version, "device_registration")]
-    }))
-}
-
-pub(crate) async fn list_devices_value(
-    deps: &Deps,
-    invocation: &Invocation,
-    payload: &Value,
-) -> Result<Value, CapabilityError> {
-    let grant = inspect_read_grant(deps, invocation, "device_list").await?;
-    require_kind_selector(&grant, "device_list")?;
-    let scope = resource_scope(invocation)?;
-    let limit = optional_u64(payload, "limit")?
-        .map(|value| value as usize)
-        .unwrap_or(LIST_LIMIT_DEFAULT)
-        .clamp(1, LIST_LIMIT_MAX);
-    let include_unregistered = optional_bool(payload, "includeUnregistered")?.unwrap_or(false);
-    let state = optional_string(payload, "state")?;
-    if let Some(state) = state.as_deref()
-        && !matches!(state, "active" | "unregistered")
-    {
-        return Err(invalid("state must be active or unregistered"));
-    }
-    let lifecycle = match (include_unregistered, state) {
-        (_, Some(state)) => Some(state),
-        (false, None) => Some("active".to_owned()),
-        (true, None) => None,
-    };
-    let resources = deps
-        .engine_host
-        .list_resources(ListResources {
-            kind: Some(DEVICE_REGISTRATION_KIND.to_owned()),
-            scope: Some(scope.clone()),
-            lifecycle,
-            limit: limit.saturating_add(1),
-        })
-        .await
-        .map_err(engine_error)?;
-    let truncated = resources.len() > limit;
-    let mut devices = Vec::new();
-    for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
-            .inspect_resource(&resource.resource_id)
-            .await
-            .map_err(engine_error)?
-        else {
-            continue;
-        };
-        ensure_device_registration(&inspection, "device_list")?;
-        ensure_scope(&inspection, &scope, "device_list")?;
-        let (version, payload) = current_payload(&inspection, "device_list")?;
-        devices.push(device_summary(&inspection.resource, version, payload));
-    }
-    Ok(json!({
-        "schemaVersion": SCHEMA_VERSION,
-        "operation": "device_list",
-        "scope": scope_ref(&scope),
-        "devices": devices,
-        "limits": {
-            "requestedLimit": limit,
-            "returned": devices.len(),
-            "truncated": truncated,
-            "includeUnregistered": include_unregistered
-        },
-        "apnsTokenReturned": false
-    }))
-}
-
-pub(crate) async fn inspect_device_value(
-    deps: &Deps,
-    invocation: &Invocation,
-    payload: &Value,
-) -> Result<Value, CapabilityError> {
-    let grant = inspect_read_grant(deps, invocation, "device_inspect").await?;
-    require_kind_selector(&grant, "device_inspect")?;
-    let resource_id = required_string(payload, "deviceRegistrationResourceId")?;
-    validate_device_resource_id(&resource_id)?;
-    let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
-        .inspect_resource(&resource_id)
-        .await
-        .map_err(engine_error)?
-        .ok_or_else(|| invalid(format!("missing device registration {resource_id}")))?;
-    ensure_device_registration(&inspection, "device_inspect")?;
-    ensure_scope(&inspection, &scope, "device_inspect")?;
-    let (version, payload) = current_payload(&inspection, "device_inspect")?;
-    Ok(json!({
-        "schemaVersion": SCHEMA_VERSION,
-        "operation": "device_inspect",
-        "scope": scope_ref(&scope),
-        "device": inspected_device(&inspection.resource, version, payload),
-        "apnsTokenReturned": false
     }))
 }
 

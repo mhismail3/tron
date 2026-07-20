@@ -58,6 +58,20 @@ You should never need to run `scripts/tron deploy` or any production
 deployment command — those are manual-only and reserved for the maintainer.
 Use `tron dev` for everything.
 
+The worker-first schema takes one automatic checksummed state snapshot before
+opening an existing profile. Inspect or recover it only through the offline
+runtime owner:
+
+```bash
+scripts/tron state snapshots
+scripts/tron stop
+scripts/tron state restore /absolute/path/to/snapshot
+```
+
+Restore refuses to run while the primary database lock is held, verifies every
+snapshot checksum, preserves the replaced state in a timestamped recovery
+directory, and rebuilds the disposable worker index from filesystem bundles.
+
 ### iOS
 
 ```bash
@@ -141,7 +155,7 @@ client job only on a successfully path-filtered pull request.
 We follow [Conventional Commits](https://www.conventionalcommits.org/) loosely:
 
 ```
-feat(capability): add bounded workspace search
+feat(worker): add bounded recent-research runner
 fix(events): preserve session ownership during reconstruction
 docs(storage): clarify resource cleanup ownership
 ci: fail closed when path detection fails

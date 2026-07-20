@@ -62,67 +62,34 @@ fn execution_waves_stop_after_a_context_boundary_result() {
 }
 
 #[test]
-fn primitive_identity_canonicalizes_only_supported_operation_payloads() {
-    let mut args = Map::new();
-    args.insert("operationName".to_owned(), json!("file_read"));
+fn direct_tool_identity_uses_the_tool_name_without_interpreting_payload_fields() {
+    let args = Map::from_iter([("operation".to_owned(), json!("worker_owned_field"))]);
 
-    let identity = primitive_identity_json("execute", &args, None, None);
+    let identity = primitive_identity_json("worker_list", &args, None, None);
 
+    assert_eq!(identity["modelPrimitiveName"], "worker_list");
     assert!(identity.get("operationName").is_none());
-    assert_eq!(identity["requestedOperationName"], "file_read");
-}
-
-#[test]
-fn primitive_identity_exposes_valid_execute_operation() {
-    let mut args = Map::new();
-    args.insert("operation".to_owned(), json!("log_recent"));
-
-    let identity = primitive_identity_json("execute", &args, None, None);
-
-    assert_eq!(identity["operationName"], "log_recent");
     assert!(identity.get("requestedOperationName").is_none());
 }
 
 #[test]
-fn provider_operation_identity_preserves_unsupported_request() {
-    let mut args = Map::new();
-    args.insert(
-        "operation".to_owned(),
-        json!("capability_shadow_trial_request_list"),
-    );
-
-    assert_eq!(
-        provider_operation_name_from_map(&args),
-        "capability_shadow_trial_request_list"
-    );
-}
-
-#[test]
-fn provider_operation_identity_normalizes_malformed_requests() {
-    for args in [
-        Map::new(),
-        Map::from_iter([("operation".to_owned(), json!(42))]),
-        Map::from_iter([("operation".to_owned(), json!("   "))]),
-    ] {
-        assert_eq!(provider_operation_name_from_map(&args), "unknown");
-    }
-}
-
-#[test]
-fn result_identity_does_not_promote_unsupported_operation_details() {
-    let base_identity = primitive_identity_json("execute", &Map::new(), None, None);
+fn result_identity_keeps_trace_and_presentation_evidence_without_operation_routing() {
+    let base_identity = primitive_identity_json("worker_list", &Map::new(), None, None);
     let result = make_exec_result_with_details(
-        CapabilityResultBody::Text("failed".into()),
+        CapabilityResultBody::Text("complete".into()),
         Some(json!({
-            "operation": "file_read",
-            "traceId": "trace_1"
+            "operation": "worker_owned_field",
+            "traceId": "trace_1",
+            "presentationHints": {"themeColor": "#10B981"}
         })),
     );
 
-    let identity = result_identity_json("execute", base_identity, &result);
+    let identity = result_identity_json("worker_list", base_identity, &result);
 
-    assert!(identity.get("operationName").is_none());
+    assert_eq!(identity["modelPrimitiveName"], "worker_list");
     assert_eq!(identity["traceId"], "trace_1");
+    assert_eq!(identity["themeColor"], "#10B981");
+    assert!(identity.get("operationName").is_none());
 }
 
 #[test]
@@ -192,21 +159,14 @@ impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         let label = trace_id;
-        let stops_turn = label == "stop";
-        serde_json::to_value(CapabilityResult {
-            content: CapabilityResultBody::Text(format!("done-{label}")),
-            details: Some(json!({
-                "operation": "log_recent",
-                "themeColor": "#10B981",
-                "presentationHints": {
-                    "chipTitle": format!("Log {label}"),
-                    "themeColor": "#10B981"
-                }
-            })),
-            is_error: Some(false),
-            stop_turn: stops_turn.then_some(true),
-        })
-        .map_err(|error| crate::engine::EngineError::HandlerFailed(error.to_string()))
+        Ok(json!({
+            "result": format!("done-{label}"),
+            "themeColor": "#10B981",
+            "presentationHints": {
+                "chipTitle": format!("Direct {label}"),
+                "themeColor": "#10B981"
+            }
+        }))
     }
 }
 
@@ -256,6 +216,7 @@ async fn phase_engine_surface_with_mode(
             function,
             stops_turn: false,
             execution_mode,
+            trusted_local: false,
         },
     );
     (
@@ -323,10 +284,8 @@ fn persisted_rows(store: &EventStore, sid: &str, event_type: &str) -> Vec<EventR
         .collect()
 }
 
-async fn assert_provider_result_identity_survives_reconstruction(
-    arguments: Map<String, Value>,
-    expected_operation: &str,
-) {
+#[tokio::test]
+async fn direct_tool_provider_result_is_stable_after_reconstruction() {
     let h = phase_persistence_harness().await;
     let (engine_host, surface) = phase_engine_surface().await;
     let tempdir = tempfile::tempdir().expect("working directory");
@@ -338,7 +297,8 @@ async fn assert_provider_result_identity_survives_reconstruction(
     .to_string();
     let mut context_manager = context_manager_for_workdir(&working_directory);
     let cancel = CancellationToken::new();
-    let invocation_id = format!("call-{expected_operation}");
+    let invocation_id = "call-direct-result".to_owned();
+    let arguments = Map::from_iter([("filter".to_owned(), json!("recent"))]);
     let stream_result = stream_result_with_invocations(vec![CapabilityInvocationDraft::new(
         invocation_id.clone(),
         "execute",
@@ -375,7 +335,7 @@ async fn assert_provider_result_identity_survives_reconstruction(
         sequence_counter: Some(&h.counter),
         invocation_abort_registry: h.invocation_abort_registry.as_ref(),
         engine_host: &engine_host,
-        run_id: Some("run-operation-identity"),
+        run_id: Some("run-direct-result"),
         provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
@@ -396,17 +356,19 @@ async fn assert_provider_result_identity_survives_reconstruction(
         })
         .expect("live provider result");
     assert_eq!(
-        serde_json::from_str::<Value>(&live_content).expect("provider envelope")["operation"],
-        expected_operation
+        serde_json::from_str::<Value>(&live_content).expect("typed provider value")["result"],
+        "done-unknown"
     );
 
     let completed = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
     assert_eq!(completed.len(), 1);
     let completed_payload: Value =
         serde_json::from_str(&completed[0].payload).expect("completed event payload");
-    let persisted_content = completed_payload["modelContextContent"]
-        .as_str()
-        .expect("persisted model context content");
+    let persisted_content = completed_payload
+        .get("modelContextContent")
+        .or_else(|| completed_payload.get("content"))
+        .and_then(Value::as_str)
+        .expect("persisted provider content");
     assert_eq!(persisted_content.as_bytes(), live_content.as_bytes());
 
     let reconstructed =
@@ -428,32 +390,6 @@ async fn assert_provider_result_identity_survives_reconstruction(
         })
         .expect("reconstructed provider result");
     assert_eq!(reconstructed_content.as_bytes(), live_content.as_bytes());
-}
-
-#[tokio::test]
-async fn unsupported_operation_provider_result_is_stable_after_reconstruction() {
-    let mut arguments = Map::new();
-    arguments.insert(
-        "operation".to_owned(),
-        json!("capability_shadow_trial_request_list"),
-    );
-
-    assert_provider_result_identity_survives_reconstruction(
-        arguments,
-        "capability_shadow_trial_request_list",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn malformed_operation_provider_results_are_stable_after_reconstruction() {
-    for arguments in [
-        Map::new(),
-        Map::from_iter([("operation".to_owned(), json!(42))]),
-        Map::from_iter([("operation".to_owned(), json!("   "))]),
-    ] {
-        assert_provider_result_identity_survives_reconstruction(arguments, "unknown").await;
-    }
 }
 
 #[tokio::test]
@@ -610,7 +546,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     assert_eq!(started.0, "execute");
     assert_eq!(started.1.as_ref().unwrap()["traceId"], "slow");
     assert_eq!(started.2.model_primitive_name.as_deref(), Some("execute"));
-    assert_eq!(started.2.operation_name.as_deref(), Some("log_recent"));
+    assert_eq!(started.2.operation_name, None);
 
     let completed = lifecycle
         .iter()
@@ -625,7 +561,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         })
         .expect("fast completed event");
     assert_eq!(completed.0.as_ref().unwrap().is_error, Some(false));
-    assert_eq!(completed.1.operation_name.as_deref(), Some("log_recent"));
+    assert_eq!(completed.1.operation_name, None);
     assert_eq!(completed.1.theme_color.as_deref(), Some("#10B981"));
 }
 
@@ -693,9 +629,17 @@ async fn parent_cancellation_during_capability_wave_marks_active_turn_interrupte
 #[tokio::test]
 async fn context_boundary_terminalizes_later_started_invocations_without_executing_them() {
     let h = phase_persistence_harness().await;
-    let (engine_host, surface) =
+    let (engine_host, mut surface) =
         phase_engine_surface_with_mode(ExecutionMode::Serialized("capability-execute".to_owned()))
             .await;
+    surface
+        .targets_by_name
+        .get_mut("execute")
+        .expect("direct test target")
+        .stops_turn = true;
+    surface
+        .turn_stopping_capabilities
+        .insert("execute".to_owned());
     let tempdir = tempfile::tempdir().expect("working directory");
     let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
     let mut context_manager = context_manager_for_workdir(working_directory);

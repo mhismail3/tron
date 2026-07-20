@@ -265,6 +265,9 @@ impl LiveCatalog {
         function: &FunctionDefinition,
         invocation: &Invocation,
     ) -> Result<()> {
+        if invocation.causal_context.is_trusted_local() {
+            return Ok(());
+        }
         self.grants
             .lock()
             .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
@@ -277,6 +280,9 @@ impl LiveCatalog {
         function: &FunctionDefinition,
         invocation: &Invocation,
     ) -> Result<()> {
+        if invocation.causal_context.is_trusted_local() {
+            return Ok(());
+        }
         self.grants
             .lock()
             .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?

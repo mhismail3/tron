@@ -3,7 +3,7 @@
 //! Context control owns durable `context_control_snapshot`,
 //! `context_control_action`, `context_control_epoch`, `context_survivor`,
 //! `context_exclusion`, and `context_policy_snapshot` resources. It exposes a
-//! narrow first-party UI surface plus model-facing `capability::execute`
+//! narrow first-party UI surface plus direct typed context-control tools
 //! operations for provider-safe context inspection, compaction, clearing, action
 //! audit lookup, and server-owned policy refs that future context summarizers
 //! must preserve or omit.

@@ -1,10 +1,8 @@
 //! Capability invocation phase for one agent turn.
 //!
-//! This module persists provider-requested primitive executions, dispatches
-//! child `capability::execute` invocations, and writes the provider-facing
-//! capability result message. The capability domain owns the bounded,
-//! schema-validated model envelope so raw execution details stay available to
-//! audit/UI persistence without entering provider context.
+//! This module persists provider-requested direct-tool executions, dispatches
+//! trusted-local kernel or worker functions, and writes the provider-facing
+//! result message. Each registered function owns its typed schema.
 //! A committed context boundary is also an execution-wave boundary: later
 //! serialized waves from the same provider response are not started after a
 //! capability result requests the active turn to stop. Because start rows are
@@ -33,7 +31,6 @@ use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::Invo
 use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
-use crate::domains::capability::{is_supported_operation, provider_result_text};
 use crate::domains::session::event_store::EventType;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
@@ -75,25 +72,15 @@ struct ExecutedCapabilityInvocation {
 
 fn primitive_identity_json(
     model_primitive_name: &str,
-    arguments: &serde_json::Map<String, Value>,
+    _arguments: &serde_json::Map<String, Value>,
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
 ) -> Value {
-    let mut identity = json!({
+    json!({
         "modelPrimitiveName": model_primitive_name,
         "traceId": trace_id.map(|id| id.as_str()),
         "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
-    });
-    if let Some(operation) = validated_operation_name_from_map(arguments)
-        && let Some(object) = identity.as_object_mut()
-    {
-        object.insert("operationName".to_owned(), json!(operation));
-    } else if let Some(requested) = requested_operation_name_from_map(arguments)
-        && let Some(object) = identity.as_object_mut()
-    {
-        object.insert("requestedOperationName".to_owned(), json!(requested));
-    }
-    identity
+    })
 }
 
 fn result_identity_json(
@@ -103,19 +90,9 @@ fn result_identity_json(
 ) -> Value {
     let mut identity = base_identity.as_object().cloned().unwrap_or_default();
     if let Some(details) = result.result.details.as_ref() {
-        for key in ["operationName", "operation", "traceId", "rootInvocationId"] {
+        for key in ["traceId", "rootInvocationId"] {
             if let Some(value) = details.get(key) {
-                let identity_key = if key == "operation" {
-                    "operationName"
-                } else {
-                    key
-                };
-                if identity_key == "operationName"
-                    && !value.as_str().is_some_and(is_supported_operation)
-                {
-                    continue;
-                }
-                identity.insert(identity_key.to_owned(), value.clone());
+                identity.insert(key.to_owned(), value.clone());
             }
         }
         if let Some(value) = details.get("themeColor") {
@@ -132,31 +109,22 @@ fn result_identity_json(
     Value::Object(identity)
 }
 
-fn validated_operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> Option<String> {
-    arguments
-        .get("operation")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|operation| !operation.is_empty())
-        .filter(|operation| is_supported_operation(operation))
-        .map(ToOwned::to_owned)
-}
-
-fn requested_operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> Option<String> {
-    ["operationName", "operation"].iter().find_map(|key| {
-        arguments
-            .get(*key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|operation| !operation.is_empty())
-            .map(ToOwned::to_owned)
-    })
-}
-
-fn provider_operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> String {
-    validated_operation_name_from_map(arguments)
-        .or_else(|| requested_operation_name_from_map(arguments))
-        .unwrap_or_else(|| "unknown".to_owned())
+fn provider_result_text(
+    result: &crate::shared::protocol::model_capabilities::CapabilityResult,
+) -> String {
+    match &result.content {
+        crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
+            text.clone()
+        }
+        crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                CapabilityResultContent::Text { text } => Some(text.as_str()),
+                CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
 }
 
 pub(super) async fn execute_capability_invocation_phase(
@@ -354,10 +322,6 @@ pub(super) async fn execute_capability_invocation_phase(
                     };
                 let working_dir = working_dir.as_str();
                 async move {
-                    let operation =
-                        provider_operation_name_from_map(&capability_invocation.arguments);
-                    let requested_operation =
-                        requested_operation_name_from_map(&capability_invocation.arguments);
                     info!(
                         component = "agent.capability",
                         agent_event = "capability_invocation_execute_started",
@@ -367,8 +331,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         turn = params.turn,
                         invocation_id = %capability_invocation.id,
                         primitive_name = %capability_invocation.name,
-                        operation = %operation,
-                        requested_operation = requested_operation.as_deref().unwrap_or("none"),
+                        direct_tool = %capability_invocation.name,
                         "capability invocation execution started"
                     );
                     let result = capability_invocation_executor::execute_capability_invocation(
@@ -378,7 +341,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         &capability_ctx,
                     )
                     .await;
-                    let provider_text = provider_result_text(&operation, &result.result);
+                    let provider_text = provider_result_text(&result.result);
                     info!(
                         component = "agent.capability",
                         agent_event = "capability_invocation_execute_completed",
@@ -388,7 +351,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         turn = params.turn,
                         invocation_id = %capability_invocation.id,
                         primitive_name = %capability_invocation.name,
-                        operation = %operation,
+                        direct_tool = %capability_invocation.name,
                         duration_ms = result.duration_ms,
                         is_error = result.result.is_error.unwrap_or(false),
                         stops_turn = result.stops_turn,

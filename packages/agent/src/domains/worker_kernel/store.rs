@@ -1,0 +1,2013 @@
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
+
+use rand::RngCore;
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+
+use super::snapshot::ensure_pre_worker_snapshot;
+use super::types::{
+    ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, PreparedWorker, UpsertOutcome,
+    WebhookCredential, WorkerBundle, WorkerState, WorkerSummary, WorkerTrigger,
+};
+
+#[derive(Clone)]
+pub struct WorkerStore {
+    home: PathBuf,
+    root: PathBuf,
+    database: PathBuf,
+}
+
+impl WorkerStore {
+    pub fn open(home: PathBuf, source_profile: &str) -> Result<Self, String> {
+        ensure_pre_worker_snapshot(&home, source_profile)
+            .map_err(|error| format!("create pre-worker state snapshot: {error}"))?;
+        let root = home.join("workspace").join("workers");
+        let database = home
+            .join("internal")
+            .join("database")
+            .join("workers.sqlite");
+        fs::create_dir_all(&root).map_err(|error| format!("create worker root: {error}"))?;
+        if let Some(parent) = database.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create worker database directory: {error}"))?;
+        }
+        let store = Self {
+            home,
+            root,
+            database,
+        };
+        store.initialize()?;
+        Ok(store)
+    }
+
+    #[cfg(test)]
+    pub fn open_without_snapshot(home: PathBuf) -> Result<Self, String> {
+        let root = home.join("workspace").join("workers");
+        let database = home
+            .join("internal")
+            .join("database")
+            .join("workers.sqlite");
+        fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        if let Some(parent) = database.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let store = Self {
+            home,
+            root,
+            database,
+        };
+        store.initialize()?;
+        Ok(store)
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
+    fn connection(&self) -> Result<Connection, String> {
+        let connection = Connection::open(&self.database)
+            .map_err(|error| format!("open worker database: {error}"))?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(|error| format!("configure worker database timeout: {error}"))?;
+        let _ = connection.pragma_update(None, "journal_mode", "WAL");
+        let _ = connection.pragma_update(None, "foreign_keys", "ON");
+        Ok(connection)
+    }
+
+    fn initialize(&self) -> Result<(), String> {
+        self.connection()?
+            .execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS worker_schema (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                );
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+                INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                    VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+
+                CREATE TABLE IF NOT EXISTS workers (
+                    worker_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    tool_name TEXT NOT NULL UNIQUE,
+                    runner_kind TEXT NOT NULL,
+                    active_version TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    retired INTEGER NOT NULL,
+                    health TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS worker_versions (
+                    worker_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    manifest_json TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(worker_id, version),
+                    FOREIGN KEY(worker_id) REFERENCES workers(worker_id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS worker_triggers (
+                    worker_id TEXT NOT NULL,
+                    trigger_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    config_json TEXT NOT NULL,
+                    token_hash TEXT,
+                    next_run_at TEXT,
+                    stream_cursor INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY(worker_id, trigger_id),
+                    FOREIGN KEY(worker_id) REFERENCES workers(worker_id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS worker_invocations (
+                    invocation_id TEXT PRIMARY KEY,
+                    worker_id TEXT NOT NULL,
+                    worker_version TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    input_json TEXT NOT NULL,
+                    output_json TEXT,
+                    error TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    causal_depth INTEGER NOT NULL,
+                    trigger_kind TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    UNIQUE(worker_id, idempotency_key)
+                );
+                CREATE INDEX IF NOT EXISTS worker_invocations_status
+                    ON worker_invocations(status, created_at);
+                CREATE TABLE IF NOT EXISTS worker_inbox (
+                    inbox_id TEXT PRIMARY KEY,
+                    invocation_id TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    seen INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS worker_inbox_worker
+                    ON worker_inbox(worker_id, seen, created_at DESC);
+                CREATE TABLE IF NOT EXISTS worker_audit (
+                    audit_id TEXT PRIMARY KEY,
+                    worker_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    details_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS worker_audit_worker
+                    ON worker_audit(worker_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS worker_runtime_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                INSERT OR IGNORE INTO worker_runtime_settings(key, value)
+                    VALUES ('stop_all', 'false');
+                ",
+            )
+            .map_err(|error| format!("initialize worker database: {error}"))?;
+        super::migration::rebuild_indexes(&self.root, &self.database)?;
+        super::migration::import_legacy_candidates(&self.home, &self.root)?;
+        self.recover_interrupted()
+    }
+
+    fn recover_interrupted(&self) -> Result<(), String> {
+        self.connection()?
+            .execute(
+                "UPDATE worker_invocations SET status='queued', started_at=NULL
+                 WHERE status='running'",
+                [],
+            )
+            .map_err(|error| format!("recover interrupted worker invocations: {error}"))?;
+        Ok(())
+    }
+
+    pub fn prepare(
+        &self,
+        mut bundle: WorkerBundle,
+        predecessor: Option<&str>,
+    ) -> Result<PreparedWorker, String> {
+        validate_bundle(&bundle)?;
+        let worker_id = if let Some(predecessor) = predecessor {
+            predecessor.to_owned()
+        } else if let Some(explicit_worker_id) = bundle.worker_id.clone() {
+            explicit_worker_id
+        } else {
+            self.closest_overlap(&bundle)?
+                .unwrap_or_else(|| slug(&bundle.name))
+        };
+        validate_identifier(&worker_id, "workerId")?;
+        bundle.worker_id = Some(worker_id.clone());
+        let requested_tool = self
+            .summary(&worker_id)?
+            .map(|existing| existing.tool_name)
+            .or_else(|| bundle.tool_name.clone())
+            .unwrap_or_else(|| format!("worker_{}", slug(&bundle.name)));
+        let tool_name = normalize_tool_name(&requested_tool)?;
+        bundle.tool_name = Some(tool_name.clone());
+
+        let staging_dir =
+            self.root
+                .join(".staging")
+                .join(format!("{}-{}", worker_id, uuid::Uuid::now_v7()));
+        fs::create_dir_all(staging_dir.join("files"))
+            .map_err(|error| format!("create worker staging directory: {error}"))?;
+        fs::write(
+            staging_dir.join("manifest.json"),
+            serde_json::to_vec_pretty(&bundle)
+                .map_err(|error| format!("encode worker manifest: {error}"))?,
+        )
+        .map_err(|error| format!("write worker manifest: {error}"))?;
+        for (relative, contents) in &bundle.files {
+            let relative = safe_relative_path(relative)?;
+            let target = staging_dir.join("files").join(relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("create worker file directory: {error}"))?;
+            }
+            fs::write(&target, contents)
+                .map_err(|error| format!("write worker file {}: {error}", target.display()))?;
+        }
+        fs::write(
+            staging_dir.join("dependencies.lock.json"),
+            serde_json::to_vec_pretty(&bundle.dependencies)
+                .map_err(|error| format!("encode dependency lock: {error}"))?,
+        )
+        .map_err(|error| format!("write dependency lock: {error}"))?;
+        fs::write(
+            staging_dir.join("provenance.json"),
+            serde_json::to_vec_pretty(&bundle.provenance)
+                .map_err(|error| format!("encode provenance: {error}"))?,
+        )
+        .map_err(|error| format!("write provenance: {error}"))?;
+        let version = tree_version(&staging_dir)?;
+
+        Ok(PreparedWorker {
+            prior_state: self.read_state(&worker_id)?,
+            worker_id,
+            version,
+            tool_name,
+            bundle,
+            staging_dir,
+        })
+    }
+
+    pub fn abandon(&self, prepared: &PreparedWorker) {
+        let _ = fs::remove_dir_all(&prepared.staging_dir);
+    }
+
+    /// Seal the exact staged tree after dependency acquisition and smoke tests.
+    /// The resulting full SHA-256 is the immutable content-version directory.
+    pub fn finalize(&self, prepared: &mut PreparedWorker) -> Result<(), String> {
+        prepared.version = tree_version(&prepared.staging_dir)?;
+        fs::write(
+            prepared.staging_dir.join("content.sha256"),
+            format!("{}\n", prepared.version),
+        )
+        .map_err(|error| format!("write worker content hash: {error}"))
+    }
+
+    pub fn publish(&self, prepared: PreparedWorker) -> Result<UpsertOutcome, String> {
+        let worker_dir = self.root.join(&prepared.worker_id);
+        let versions_dir = worker_dir.join("versions");
+        fs::create_dir_all(&versions_dir)
+            .map_err(|error| format!("create worker versions directory: {error}"))?;
+        let version_dir = versions_dir.join(&prepared.version);
+        let created_version = !version_dir.exists();
+        if created_version {
+            fs::rename(&prepared.staging_dir, &version_dir)
+                .map_err(|error| format!("publish worker version: {error}"))?;
+        } else {
+            let _ = fs::remove_dir_all(&prepared.staging_dir);
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let state = WorkerState {
+            worker_id: prepared.worker_id.clone(),
+            active_version: prepared.version.clone(),
+            enabled: true,
+            retired: false,
+            health: "healthy".to_owned(),
+            failure: None,
+            updated_at: now.clone(),
+        };
+        let state_path = worker_dir.join("worker.json");
+
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("start worker publish transaction: {error}"))?;
+        let created = transaction
+            .query_row(
+                "SELECT 1 FROM workers WHERE worker_id=?1",
+                [&prepared.worker_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|error| format!("inspect prior worker: {error}"))?
+            .is_none();
+        transaction
+            .execute(
+                "INSERT INTO workers(worker_id,name,description,tool_name,runner_kind,active_version,enabled,retired,health,created_at,updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,1,0,'healthy',?7,?7)
+                 ON CONFLICT(worker_id) DO UPDATE SET
+                    name=excluded.name, description=excluded.description,
+                    tool_name=excluded.tool_name, runner_kind=excluded.runner_kind,
+                    active_version=excluded.active_version, enabled=1, retired=0,
+                    health='healthy', updated_at=excluded.updated_at",
+                params![
+                    prepared.worker_id,
+                    prepared.bundle.name,
+                    prepared.bundle.description,
+                    prepared.tool_name,
+                    prepared.bundle.runner.kind(),
+                    prepared.version,
+                    now,
+                ],
+            )
+            .map_err(|error| format!("upsert worker index: {error}"))?;
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO worker_versions(worker_id,version,manifest_json,content_hash,created_at)
+                 VALUES (?1,?2,?3,?2,?4)",
+                params![
+                    prepared.worker_id,
+                    prepared.version,
+                    serde_json::to_string(&prepared.bundle).map_err(|error| error.to_string())?,
+                    now,
+                ],
+            )
+            .map_err(|error| format!("insert worker version: {error}"))?;
+        let mut webhooks = Vec::new();
+        replace_active_triggers(
+            &transaction,
+            &prepared.worker_id,
+            &prepared.bundle.triggers,
+            true,
+            &mut webhooks,
+        )?;
+        insert_audit(
+            &transaction,
+            &prepared.worker_id,
+            if created { "created" } else { "updated" },
+            &json!({
+                "version": prepared.version,
+                "runner": prepared.bundle.runner.kind(),
+                "contentHash": prepared.version,
+                "provenance": prepared.bundle.provenance,
+            }),
+        )?;
+        // INVARIANT: the filesystem pointer is the publication linearization
+        // point. Commit the rebuildable indexes first so a crash can leave the
+        // database ahead of the canonical pointer, never the pointer ahead of
+        // its durable indexes. Startup reconstruction resolves the former back
+        // to the prior pointer.
+        transaction
+            .commit()
+            .map_err(|error| format!("commit worker publish: {error}"))?;
+        if let Err(error) = write_json_atomic(&state_path, &state) {
+            if created_version {
+                let _ = fs::remove_dir_all(&version_dir);
+            }
+            let recovery = super::migration::rebuild_indexes(&self.root, &self.database);
+            return Err(match recovery {
+                Ok(()) => format!(
+                    "publish canonical worker pointer: {error}; restored indexes from filesystem state"
+                ),
+                Err(recovery_error) => format!(
+                    "publish canonical worker pointer: {error}; index recovery also failed: {recovery_error}"
+                ),
+            });
+        }
+
+        let worker = self
+            .summary(&prepared.worker_id)?
+            .ok_or_else(|| "published worker is missing from index".to_owned())?;
+        Ok(UpsertOutcome {
+            worker,
+            version: prepared.version,
+            created,
+            replaced_worker_id: prepared.prior_state.map(|state| state.worker_id),
+            webhooks,
+        })
+    }
+
+    pub fn list(&self, include_retired: bool) -> Result<Vec<WorkerSummary>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT w.worker_id,w.name,w.description,w.tool_name,w.runner_kind,w.active_version,
+                        w.enabled,w.retired,w.health,w.updated_at,
+                        (SELECT COUNT(*) FROM worker_triggers t WHERE t.worker_id=w.worker_id AND t.enabled=1)
+                 FROM workers w WHERE (?1=1 OR w.retired=0) ORDER BY w.updated_at DESC",
+            )
+            .map_err(|error| format!("prepare worker list: {error}"))?;
+        let rows = statement
+            .query_map([i64::from(include_retired)], row_summary)
+            .map_err(|error| format!("query worker list: {error}"))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| format!("decode worker list: {error}"))
+    }
+
+    pub fn summary(&self, worker_id: &str) -> Result<Option<WorkerSummary>, String> {
+        self.connection()?
+            .query_row(
+                "SELECT w.worker_id,w.name,w.description,w.tool_name,w.runner_kind,w.active_version,
+                        w.enabled,w.retired,w.health,w.updated_at,
+                        (SELECT COUNT(*) FROM worker_triggers t WHERE t.worker_id=w.worker_id AND t.enabled=1)
+                 FROM workers w WHERE w.worker_id=?1",
+                [worker_id],
+                row_summary,
+            )
+            .optional()
+            .map_err(|error| format!("load worker summary: {error}"))
+    }
+
+    pub fn inspect(&self, worker_id: &str) -> Result<Value, String> {
+        let active = self.load_active(worker_id)?;
+        let connection = self.connection()?;
+        let versions = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT version,content_hash,created_at FROM worker_versions
+                     WHERE worker_id=?1 ORDER BY created_at DESC",
+                )
+                .map_err(|error| error.to_string())?;
+            statement
+                .query_map([worker_id], |row| {
+                    Ok(json!({
+                        "version": row.get::<_, String>(0)?,
+                        "contentHash": row.get::<_, String>(1)?,
+                        "createdAt": row.get::<_, String>(2)?,
+                    }))
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| error.to_string())?
+        };
+        let triggers = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT trigger_id,kind,config_json,token_hash,next_run_at,stream_cursor,enabled
+                     FROM worker_triggers WHERE worker_id=?1 ORDER BY trigger_id",
+                )
+                .map_err(|error| error.to_string())?;
+            statement
+                .query_map([worker_id], |row| {
+                    let config: String = row.get(2)?;
+                    Ok(json!({
+                        "triggerId": row.get::<_, String>(0)?,
+                        "kind": row.get::<_, String>(1)?,
+                        "configuration": serde_json::from_str::<Value>(&config).unwrap_or(Value::Null),
+                        "tokenConfigured": row.get::<_, Option<String>>(3)?.is_some(),
+                        "nextRunAt": row.get::<_, Option<String>>(4)?,
+                        "streamCursor": row.get::<_, i64>(5)?,
+                        "enabled": row.get::<_, i64>(6)? != 0,
+                    }))
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| error.to_string())?
+        };
+        let audit = self.audit(Some(worker_id), 100)?;
+        Ok(json!({
+            "worker": active.summary,
+            "bundle": active.bundle,
+            "versions": versions,
+            "triggers": triggers,
+            "audit": audit,
+            "versionDirectory": active.version_dir,
+        }))
+    }
+
+    pub fn load_active(&self, worker_id: &str) -> Result<ActiveWorker, String> {
+        let summary = self
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let version_dir = self
+            .root
+            .join(worker_id)
+            .join("versions")
+            .join(&summary.active_version);
+        let bundle: WorkerBundle = serde_json::from_slice(
+            &fs::read(version_dir.join("manifest.json"))
+                .map_err(|error| format!("read active worker manifest: {error}"))?,
+        )
+        .map_err(|error| format!("decode active worker manifest: {error}"))?;
+        Ok(ActiveWorker {
+            summary,
+            bundle,
+            version_dir,
+        })
+    }
+
+    pub fn load_version(&self, worker_id: &str, version: &str) -> Result<ActiveWorker, String> {
+        let mut summary = self
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let version_dir = self.root.join(worker_id).join("versions").join(version);
+        let bundle: WorkerBundle = serde_json::from_slice(
+            &fs::read(version_dir.join("manifest.json"))
+                .map_err(|error| format!("read worker version manifest: {error}"))?,
+        )
+        .map_err(|error| format!("decode worker version manifest: {error}"))?;
+        summary.active_version = version.to_owned();
+        Ok(ActiveWorker {
+            summary,
+            bundle,
+            version_dir,
+        })
+    }
+
+    pub fn set_enabled(&self, worker_id: &str, enabled: bool) -> Result<WorkerSummary, String> {
+        let prior = self
+            .read_state(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        if enabled && prior.retired {
+            return Err("a retired worker must be rolled back before it can be enabled".to_owned());
+        }
+        let mut state = prior.clone();
+        state.enabled = enabled;
+        state.health = if enabled { "healthy" } else { "disabled" }.to_owned();
+        state.failure = None;
+        state.updated_at = chrono::Utc::now().to_rfc3339();
+        let state_path = self.root.join(worker_id).join("worker.json");
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        write_json_atomic(&state_path, &state)?;
+        let result = (|| -> Result<(), String> {
+            let changed = transaction
+                .execute(
+                    "UPDATE workers SET enabled=?2,health=?3,updated_at=?4 WHERE worker_id=?1",
+                    params![
+                        worker_id,
+                        i64::from(enabled),
+                        if enabled { "healthy" } else { "disabled" },
+                        state.updated_at,
+                    ],
+                )
+                .map_err(|error| format!("update worker enablement: {error}"))?;
+            if changed == 0 {
+                return Err(format!("worker '{worker_id}' was not found"));
+            }
+            insert_audit(
+                &transaction,
+                worker_id,
+                if enabled { "enabled" } else { "disabled" },
+                &json!({"activeVersion":state.active_version}),
+            )?;
+            transaction.commit().map_err(|error| error.to_string())
+        })();
+        if let Err(error) = result {
+            let _ = write_json_atomic(&state_path, &prior);
+            return Err(error);
+        }
+        self.summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))
+    }
+
+    pub fn mark_failed(&self, worker_id: &str, error: &str) -> Result<(), String> {
+        let prior = self
+            .read_state(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let mut state = prior.clone();
+        state.enabled = false;
+        state.health = "failed".to_owned();
+        state.failure = Some(error.to_owned());
+        state.updated_at = chrono::Utc::now().to_rfc3339();
+        let state_path = self.root.join(worker_id).join("worker.json");
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|db_error| db_error.to_string())?;
+        write_json_atomic(&state_path, &state)?;
+        let result = (|| -> Result<(), String> {
+            let changed = transaction
+                .execute(
+                    "UPDATE workers SET enabled=0,health='failed',updated_at=?2 WHERE worker_id=?1",
+                    params![worker_id, state.updated_at],
+                )
+                .map_err(|db_error| format!("mark worker failed after {error}: {db_error}"))?;
+            if changed == 0 {
+                return Err(format!("worker '{worker_id}' was not found"));
+            }
+            insert_audit(
+                &transaction,
+                worker_id,
+                "failed",
+                &json!({"error":error,"activeVersion":state.active_version}),
+            )?;
+            transaction
+                .commit()
+                .map_err(|db_error| db_error.to_string())
+        })();
+        if let Err(db_error) = result {
+            let _ = write_json_atomic(&state_path, &prior);
+            return Err(db_error);
+        }
+        Ok(())
+    }
+
+    pub fn rollback(
+        &self,
+        worker_id: &str,
+        version: &str,
+    ) -> Result<(WorkerSummary, Vec<WebhookCredential>), String> {
+        let manifest_path = self
+            .root
+            .join(worker_id)
+            .join("versions")
+            .join(version)
+            .join("manifest.json");
+        if !manifest_path.is_file() {
+            return Err(format!(
+                "worker version '{worker_id}@{version}' was not found"
+            ));
+        }
+        let bundle: WorkerBundle = serde_json::from_slice(
+            &fs::read(&manifest_path)
+                .map_err(|error| format!("read rollback worker manifest: {error}"))?,
+        )
+        .map_err(|error| format!("decode rollback worker manifest: {error}"))?;
+        validate_bundle(&bundle)?;
+        let prior = self
+            .read_state(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let mut state = prior.clone();
+        state.active_version = version.to_owned();
+        state.enabled = true;
+        state.retired = false;
+        state.health = "healthy".to_owned();
+        state.failure = None;
+        state.updated_at = chrono::Utc::now().to_rfc3339();
+        let state_path = self.root.join(worker_id).join("worker.json");
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let mut credentials = Vec::new();
+        write_json_atomic(&state_path, &state)?;
+        let result = (|| -> Result<(), String> {
+            let changed = transaction
+                .execute(
+                    "UPDATE workers SET name=?2,description=?3,tool_name=?4,runner_kind=?5,
+                        active_version=?6,enabled=1,retired=0,health='healthy',updated_at=?7
+                     WHERE worker_id=?1",
+                    params![
+                        worker_id,
+                        bundle.name,
+                        bundle.description,
+                        bundle.tool_name,
+                        bundle.runner.kind(),
+                        version,
+                        state.updated_at,
+                    ],
+                )
+                .map_err(|error| format!("rollback worker: {error}"))?;
+            if changed == 0 {
+                return Err(format!("worker '{worker_id}' was not found"));
+            }
+            replace_active_triggers(
+                &transaction,
+                worker_id,
+                &bundle.triggers,
+                true,
+                &mut credentials,
+            )?;
+            insert_audit(
+                &transaction,
+                worker_id,
+                "rolled_back",
+                &json!({
+                    "fromVersion":prior.active_version,
+                    "toVersion":version,
+                    "newWebhookCredentialsRequireInspection":credentials.iter().map(|item| &item.trigger_id).collect::<Vec<_>>(),
+                }),
+            )?;
+            transaction.commit().map_err(|error| error.to_string())
+        })();
+        if let Err(error) = result {
+            let _ = write_json_atomic(&state_path, &prior);
+            return Err(error);
+        }
+        let summary = self
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        Ok((summary, credentials))
+    }
+
+    pub fn retire(&self, worker_id: &str) -> Result<WorkerSummary, String> {
+        let prior = self
+            .read_state(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let mut state = prior.clone();
+        state.enabled = false;
+        state.retired = true;
+        state.health = "retired".to_owned();
+        state.failure = None;
+        state.updated_at = chrono::Utc::now().to_rfc3339();
+        let state_path = self.root.join(worker_id).join("worker.json");
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        write_json_atomic(&state_path, &state)?;
+        let result = (|| -> Result<(), String> {
+            let changed = transaction
+                .execute(
+                    "UPDATE workers SET enabled=0,retired=1,health='retired',updated_at=?2 WHERE worker_id=?1",
+                    params![worker_id, state.updated_at],
+                )
+                .map_err(|error| format!("retire worker: {error}"))?;
+            if changed == 0 {
+                return Err(format!("worker '{worker_id}' was not found"));
+            }
+            transaction
+                .execute(
+                    "UPDATE worker_triggers SET enabled=0 WHERE worker_id=?1",
+                    [worker_id],
+                )
+                .map_err(|error| format!("retire worker triggers: {error}"))?;
+            insert_audit(
+                &transaction,
+                worker_id,
+                "retired",
+                &json!({"activeVersion":state.active_version}),
+            )?;
+            transaction.commit().map_err(|error| error.to_string())
+        })();
+        if let Err(error) = result {
+            let _ = write_json_atomic(&state_path, &prior);
+            return Err(error);
+        }
+        self.summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))
+    }
+
+    pub fn purge(&self, worker_id: &str) -> Result<bool, String> {
+        let summary = self
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        if !summary.retired {
+            return Err("a worker must be retired before permanent purge".to_owned());
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let worker_dir = self.root.join(worker_id);
+        let purging_root = self.root.join(".purging");
+        fs::create_dir_all(&purging_root).map_err(|error| error.to_string())?;
+        let staged = purging_root.join(format!("{worker_id}-{}", uuid::Uuid::now_v7()));
+        fs::rename(&worker_dir, &staged)
+            .map_err(|error| format!("stage worker bundle for purge: {error}"))?;
+        let result = (|| -> Result<usize, String> {
+            transaction
+                .execute("DELETE FROM worker_inbox WHERE worker_id=?1", [worker_id])
+                .map_err(|error| format!("purge worker inbox: {error}"))?;
+            transaction
+                .execute(
+                    "DELETE FROM worker_invocations WHERE worker_id=?1",
+                    [worker_id],
+                )
+                .map_err(|error| format!("purge worker runs: {error}"))?;
+            let changed = transaction
+                .execute("DELETE FROM workers WHERE worker_id=?1", [worker_id])
+                .map_err(|error| format!("purge worker index: {error}"))?;
+            insert_audit(
+                &transaction,
+                worker_id,
+                "purged",
+                &json!({"lastActiveVersion":summary.active_version}),
+            )?;
+            transaction.commit().map_err(|error| error.to_string())?;
+            Ok(changed)
+        })();
+        let changed = match result {
+            Ok(changed) => changed,
+            Err(error) => {
+                let _ = fs::rename(&staged, &worker_dir);
+                return Err(error);
+            }
+        };
+        if let Err(error) = fs::remove_dir_all(&staged) {
+            return Err(format!(
+                "worker was purged from the active index but its staged bundle could not be erased at {}: {error}",
+                staged.display()
+            ));
+        }
+        Ok(changed > 0)
+    }
+
+    pub fn set_stop_all(&self, stopped: bool) -> Result<(), String> {
+        self.connection()?
+            .execute(
+                "UPDATE worker_runtime_settings SET value=?1 WHERE key='stop_all'",
+                [if stopped { "true" } else { "false" }],
+            )
+            .map_err(|error| format!("update worker stop-all: {error}"))?;
+        Ok(())
+    }
+
+    pub fn stop_all(&self) -> Result<bool, String> {
+        self.connection()?
+            .query_row(
+                "SELECT value FROM worker_runtime_settings WHERE key='stop_all'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|value| value == "true")
+            .map_err(|error| format!("read worker stop-all: {error}"))
+    }
+
+    pub fn begin_invocation(
+        &self,
+        worker_id: &str,
+        worker_version: &str,
+        input: &Value,
+        idempotency_key: &str,
+        trace_id: &str,
+        causal_depth: u32,
+        trigger_kind: &str,
+    ) -> Result<(InvocationRecord, bool), String> {
+        if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
+            return Ok((existing, true));
+        }
+        let invocation_id = format!("worker_run_{}", uuid::Uuid::now_v7());
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let insert = self.connection()?.execute(
+                "INSERT INTO worker_invocations(invocation_id,worker_id,worker_version,status,input_json,idempotency_key,trace_id,causal_depth,trigger_kind,created_at)
+                 VALUES (?1,?2,?3,'queued',?4,?5,?6,?7,?8,?9)",
+                params![
+                    invocation_id,
+                    worker_id,
+                    worker_version,
+                    serde_json::to_string(input).map_err(|error| error.to_string())?,
+                    idempotency_key,
+                    trace_id,
+                    causal_depth,
+                    trigger_kind,
+                    created_at,
+                ],
+            );
+        if let Err(error) = insert {
+            if let Some(existing) = self.invocation_by_key(worker_id, idempotency_key)? {
+                return Ok((existing, true));
+            }
+            return Err(format!("queue worker invocation: {error}"));
+        }
+        let record = self
+            .invocation(&invocation_id)?
+            .ok_or_else(|| "queued worker invocation disappeared".to_owned())?;
+        Ok((record, false))
+    }
+
+    pub fn claim_running(&self, invocation_id: &str) -> Result<bool, String> {
+        let changed = self
+            .connection()?
+            .execute(
+                "UPDATE worker_invocations SET status='running',started_at=?2
+                 WHERE invocation_id=?1 AND status='queued'",
+                params![invocation_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .map_err(|error| format!("mark worker invocation running: {error}"))?;
+        Ok(changed == 1)
+    }
+
+    pub fn complete_invocation(
+        &self,
+        invocation_id: &str,
+        worker_id: &str,
+        result: Result<&Value, &str>,
+    ) -> Result<InvocationRecord, String> {
+        let (status, output, error, severity, inbox_result) = match result {
+            Ok(output) => (
+                "completed",
+                Some(serde_json::to_string(output).map_err(|error| error.to_string())?),
+                None,
+                "info",
+                json!({"status":"completed","output":output}),
+            ),
+            Err(error) => (
+                "failed",
+                None,
+                Some(error.to_owned()),
+                "error",
+                json!({"status":"failed","error":error}),
+            ),
+        };
+        let mut connection = self.connection()?;
+        let tx = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        tx.execute(
+            "UPDATE worker_invocations SET status=?2,output_json=?3,error=?4,completed_at=?5 WHERE invocation_id=?1",
+            params![invocation_id,status,output,error,chrono::Utc::now().to_rfc3339()],
+        )
+        .map_err(|error| format!("complete worker invocation: {error}"))?;
+        tx.execute(
+            "INSERT INTO worker_inbox(inbox_id,invocation_id,worker_id,severity,result_json,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                format!("worker_inbox_{}", uuid::Uuid::now_v7()),
+                invocation_id,
+                worker_id,
+                severity,
+                serde_json::to_string(&inbox_result).map_err(|error| error.to_string())?,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|error| format!("record worker inbox result: {error}"))?;
+        tx.commit().map_err(|error| error.to_string())?;
+        self.invocation(invocation_id)?
+            .ok_or_else(|| "completed worker invocation disappeared".to_owned())
+    }
+
+    pub fn invocation(&self, invocation_id: &str) -> Result<Option<InvocationRecord>, String> {
+        self.connection()?
+            .query_row(
+                invocation_select("WHERE invocation_id=?1").as_str(),
+                [invocation_id],
+                row_invocation,
+            )
+            .optional()
+            .map_err(|error| format!("load worker invocation: {error}"))
+    }
+
+    pub fn queued_invocations(&self, limit: u32) -> Result<Vec<InvocationRecord>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(&format!(
+                "{} JOIN workers w ON w.worker_id=worker_invocations.worker_id
+                     WHERE worker_invocations.status='queued' AND w.enabled=1 AND w.retired=0
+                     ORDER BY worker_invocations.created_at LIMIT ?1",
+                invocation_select_base()
+            ))
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([limit.min(1_000)], row_invocation)
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn runs(
+        &self,
+        worker_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<InvocationRecord>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(&format!(
+                "{} WHERE (?1 IS NULL OR worker_id=?1) ORDER BY created_at DESC LIMIT ?2",
+                invocation_select_base()
+            ))
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map(params![worker_id, limit.min(500)], row_invocation)
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn success_evidence(&self, worker_id: &str) -> Result<Value, String> {
+        self.connection()?
+            .query_row(
+                "SELECT COUNT(*),MAX(completed_at) FROM worker_invocations
+                 WHERE worker_id=?1 AND status='completed'",
+                [worker_id],
+                |row| {
+                    Ok(json!({
+                        "completedRuns": row.get::<_, u64>(0)?,
+                        "lastCompletedAt": row.get::<_, Option<String>>(1)?,
+                    }))
+                },
+            )
+            .map_err(|error| format!("load worker success evidence: {error}"))
+    }
+
+    fn invocation_by_key(
+        &self,
+        worker_id: &str,
+        key: &str,
+    ) -> Result<Option<InvocationRecord>, String> {
+        self.connection()?
+            .query_row(
+                invocation_select("WHERE worker_id=?1 AND idempotency_key=?2").as_str(),
+                params![worker_id, key],
+                row_invocation,
+            )
+            .optional()
+            .map_err(|error| format!("load idempotent worker invocation: {error}"))
+    }
+
+    pub fn inbox(&self, worker_id: Option<&str>, limit: u32) -> Result<Vec<Value>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT inbox_id,invocation_id,worker_id,severity,result_json,seen,created_at
+                 FROM worker_inbox WHERE (?1 IS NULL OR worker_id=?1)
+                 ORDER BY created_at DESC LIMIT ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map(params![worker_id, limit.min(500)], |row| {
+                let result: String = row.get(4)?;
+                Ok(json!({
+                    "inboxId": row.get::<_, String>(0)?,
+                    "invocationId": row.get::<_, String>(1)?,
+                    "workerId": row.get::<_, String>(2)?,
+                    "severity": row.get::<_, String>(3)?,
+                    "result": serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
+                    "seen": row.get::<_, i64>(5)? != 0,
+                    "createdAt": row.get::<_, String>(6)?,
+                }))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    /// Claim notable unseen background results for transient prompt attachment.
+    /// Errors are always notable; successful manual calls are already visible
+    /// to their caller and are intentionally omitted.
+    pub fn take_notable_unseen(
+        &self,
+        relevance_query: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Value>, String> {
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let query_terms = relevance_query.map(terms).unwrap_or_default();
+        let candidates = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
+                            i.created_at,r.trigger_kind,w.name,w.description
+                     FROM worker_inbox i
+                     JOIN worker_invocations r ON r.invocation_id=i.invocation_id
+                     JOIN workers w ON w.worker_id=i.worker_id
+                     WHERE i.seen=0 AND (i.severity!='info' OR r.trigger_kind!='manual')
+                     ORDER BY i.created_at DESC LIMIT 200",
+                )
+                .map_err(|error| error.to_string())?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| error.to_string())?
+        };
+        let mut selected = Vec::new();
+        for (
+            inbox_id,
+            invocation_id,
+            worker_id,
+            severity,
+            result,
+            created_at,
+            trigger,
+            name,
+            description,
+        ) in candidates
+        {
+            let worker_terms = terms(&format!("{name} {description}"));
+            let relevant = severity == "error"
+                || query_terms.is_empty()
+                || !query_terms.is_disjoint(&worker_terms);
+            if !relevant {
+                continue;
+            }
+            selected.push(json!({
+                "inboxId":inbox_id,
+                "invocationId":invocation_id,
+                "workerId":worker_id,
+                "workerName":name,
+                "severity":severity,
+                "triggerKind":trigger,
+                "result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
+                "seen":false,
+                "createdAt":created_at,
+            }));
+            if selected.len() >= limit.min(32) as usize {
+                break;
+            }
+        }
+        for item in &selected {
+            transaction
+                .execute(
+                    "UPDATE worker_inbox SET seen=1 WHERE inbox_id=?1 AND seen=0",
+                    [item["inboxId"].as_str().unwrap_or_default()],
+                )
+                .map_err(|error| format!("mark worker inbox attachment seen: {error}"))?;
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(selected)
+    }
+
+    pub fn audit(&self, worker_id: Option<&str>, limit: u32) -> Result<Vec<Value>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT audit_id,worker_id,action,details_json,created_at
+                 FROM worker_audit WHERE (?1 IS NULL OR worker_id=?1)
+                 ORDER BY created_at DESC LIMIT ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map(params![worker_id, limit.min(500)], |row| {
+                let details: String = row.get(3)?;
+                Ok(json!({
+                    "auditId": row.get::<_, String>(0)?,
+                    "workerId": row.get::<_, String>(1)?,
+                    "action": row.get::<_, String>(2)?,
+                    "details": serde_json::from_str::<Value>(&details).unwrap_or(Value::Null),
+                    "createdAt": row.get::<_, String>(4)?,
+                }))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn due_schedules(&self) -> Result<Vec<(String, WorkerTrigger, String)>, String> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT t.worker_id,t.config_json,t.next_run_at FROM worker_triggers t
+                 JOIN workers w ON w.worker_id=t.worker_id
+                 WHERE t.kind='schedule' AND t.enabled=1 AND w.enabled=1 AND w.retired=0
+                   AND t.next_run_at<=?1",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([now], |row| {
+                let config: String = row.get(1)?;
+                let trigger = serde_json::from_str(&config).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+                Ok((row.get(0)?, trigger, row.get(2)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn advance_schedule(
+        &self,
+        worker_id: &str,
+        trigger_id: &str,
+        every_seconds: u64,
+    ) -> Result<(), String> {
+        let connection = self.connection()?;
+        let prior = connection
+            .query_row(
+                "SELECT next_run_at FROM worker_triggers WHERE worker_id=?1 AND trigger_id=?2",
+                params![worker_id, trigger_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| format!("read worker schedule cursor: {error}"))?;
+        let interval = chrono::Duration::seconds(
+            i64::try_from(every_seconds).map_err(|_| "schedule interval is too large")?,
+        );
+        let mut next = chrono::DateTime::parse_from_rfc3339(&prior)
+            .map_err(|error| format!("decode worker schedule cursor: {error}"))?
+            .with_timezone(&chrono::Utc)
+            + interval;
+        while next <= chrono::Utc::now() {
+            next += interval;
+        }
+        connection
+            .execute(
+                "UPDATE worker_triggers SET next_run_at=?3 WHERE worker_id=?1 AND trigger_id=?2",
+                params![worker_id, trigger_id, next.to_rfc3339()],
+            )
+            .map_err(|error| format!("advance worker schedule: {error}"))?;
+        Ok(())
+    }
+
+    pub fn event_triggers(&self) -> Result<Vec<(String, WorkerTrigger, i64)>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT t.worker_id,t.config_json,t.stream_cursor FROM worker_triggers t
+                 JOIN workers w ON w.worker_id=t.worker_id
+                 WHERE t.kind='engine_event' AND t.enabled=1 AND w.enabled=1 AND w.retired=0",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([], |row| {
+                let config: String = row.get(1)?;
+                let trigger = serde_json::from_str(&config).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+                Ok((row.get(0)?, trigger, row.get(2)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn update_stream_cursor(
+        &self,
+        worker_id: &str,
+        trigger_id: &str,
+        cursor: i64,
+    ) -> Result<(), String> {
+        self.connection()?
+            .execute(
+                "UPDATE worker_triggers SET stream_cursor=?3 WHERE worker_id=?1 AND trigger_id=?2",
+                params![worker_id, trigger_id, cursor],
+            )
+            .map_err(|error| format!("advance worker event cursor: {error}"))?;
+        Ok(())
+    }
+
+    pub fn verify_webhook(
+        &self,
+        worker_id: &str,
+        trigger_id: &str,
+        token: &str,
+    ) -> Result<Value, String> {
+        let row = self
+            .connection()?
+            .query_row(
+                "SELECT t.config_json,t.token_hash FROM worker_triggers t
+                 JOIN workers w ON w.worker_id=t.worker_id
+                 WHERE t.worker_id=?1 AND t.trigger_id=?2 AND t.kind='webhook'
+                   AND t.enabled=1 AND w.enabled=1 AND w.retired=0",
+                params![worker_id, trigger_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("load worker webhook: {error}"))?
+            .ok_or_else(|| "worker webhook was not found or is disabled".to_owned())?;
+        if hash_secret(token) != row.1 {
+            return Err("worker webhook token is invalid".to_owned());
+        }
+        let trigger: WorkerTrigger =
+            serde_json::from_str(&row.0).map_err(|error| error.to_string())?;
+        match trigger {
+            WorkerTrigger::Webhook { input, .. } => Ok(input),
+            _ => Err("stored trigger is not a webhook".to_owned()),
+        }
+    }
+
+    pub fn rotate_webhook(
+        &self,
+        worker_id: &str,
+        trigger_id: &str,
+    ) -> Result<WebhookCredential, String> {
+        let token = generate_token();
+        let changed = self
+            .connection()?
+            .execute(
+                "UPDATE worker_triggers SET token_hash=?3,enabled=1
+                 WHERE worker_id=?1 AND trigger_id=?2 AND kind='webhook'",
+                params![worker_id, trigger_id, hash_secret(&token)],
+            )
+            .map_err(|error| format!("rotate worker webhook token: {error}"))?;
+        if changed == 0 {
+            return Err("worker webhook was not found".to_owned());
+        }
+        Ok(WebhookCredential {
+            trigger_id: trigger_id.to_owned(),
+            path: format!("/engine/workers/webhooks/{worker_id}/{trigger_id}"),
+            token,
+        })
+    }
+
+    fn read_state(&self, worker_id: &str) -> Result<Option<WorkerState>, String> {
+        let path = self.root.join(worker_id).join("worker.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+            .map(Some)
+            .map_err(|error| format!("decode worker state: {error}"))
+    }
+
+    fn closest_overlap(&self, bundle: &WorkerBundle) -> Result<Option<String>, String> {
+        let target = terms(&format!("{} {}", bundle.name, bundle.description));
+        let mut best: Option<(f64, String)> = None;
+        for worker in self.list(false)? {
+            let candidate = terms(&format!("{} {}", worker.name, worker.description));
+            let union = target.union(&candidate).count();
+            if union == 0 {
+                continue;
+            }
+            let score = target.intersection(&candidate).count() as f64 / union as f64;
+            if score >= 0.72 && best.as_ref().is_none_or(|current| score > current.0) {
+                best = Some((score, worker.worker_id));
+            }
+        }
+        Ok(best.map(|(_, worker_id)| worker_id))
+    }
+}
+
+pub(super) fn validate_bundle(bundle: &WorkerBundle) -> Result<(), String> {
+    if bundle.schema_version != BUNDLE_SCHEMA {
+        return Err(format!(
+            "unsupported worker bundle schema '{}'",
+            bundle.schema_version
+        ));
+    }
+    if bundle.name.trim().is_empty() || bundle.description.trim().is_empty() {
+        return Err("worker name and description are required".to_owned());
+    }
+    validate_object_schema(&bundle.input_schema, "inputSchema")?;
+    validate_object_schema(&bundle.output_schema, "outputSchema")?;
+    let mut trigger_ids = BTreeSet::new();
+    for trigger in &bundle.triggers {
+        validate_identifier(trigger.id(), "trigger id")?;
+        if !trigger_ids.insert(trigger.id()) {
+            return Err(format!("duplicate trigger id '{}'", trigger.id()));
+        }
+        match trigger {
+            WorkerTrigger::Schedule { every_seconds, .. } if *every_seconds == 0 => {
+                return Err("schedule everySeconds must be greater than zero".to_owned());
+            }
+            WorkerTrigger::EngineEvent { topic, .. } if topic.trim().is_empty() => {
+                return Err("engine event topic must not be empty".to_owned());
+            }
+            WorkerTrigger::EngineEvent { filter, .. } if !filter.is_object() => {
+                return Err("engine event filter must be a JSON object".to_owned());
+            }
+            _ => {}
+        }
+    }
+    let mut secrets = BTreeSet::new();
+    for binding in &bundle.secret_bindings {
+        validate_identifier(binding.name(), "secret binding")?;
+        if !secrets.insert(binding.name()) {
+            return Err(format!("duplicate secret binding '{}'", binding.name()));
+        }
+    }
+    for relative in bundle.files.keys() {
+        let _ = safe_relative_path(relative)?;
+    }
+    match &bundle.runner {
+        super::types::WorkerRunner::Agent { instructions, .. } => {
+            if instructions.trim().is_empty() {
+                return Err("agent runner instructions must not be empty".to_owned());
+            }
+        }
+        super::types::WorkerRunner::Command { command }
+        | super::types::WorkerRunner::Service { command, .. } => validate_command(command)?,
+    }
+    for dependency in &bundle.dependencies {
+        validate_identifier(&dependency.name, "dependency name")?;
+        if dependency.name.trim().is_empty()
+            || dependency.source.trim().is_empty()
+            || dependency.version.trim().is_empty()
+        {
+            return Err("dependencies require name, source, and exact version".to_owned());
+        }
+        if dependency.version.eq_ignore_ascii_case("latest")
+            || dependency
+                .version
+                .chars()
+                .any(|character| matches!(character, '*' | '^' | '~' | '<' | '>'))
+        {
+            return Err(format!(
+                "dependency '{}' must lock an exact version or revision",
+                dependency.name
+            ));
+        }
+        let checksum = dependency.checksum.strip_prefix("sha256:").ok_or_else(|| {
+            format!(
+                "dependency '{}' requires a sha256 checksum",
+                dependency.name
+            )
+        })?;
+        if checksum.len() != 64
+            || !checksum
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        {
+            return Err(format!(
+                "dependency '{}' checksum must be sha256 followed by 64 hex characters",
+                dependency.name
+            ));
+        }
+        if let Some(install) = &dependency.install {
+            validate_command(&install.command)?;
+        }
+    }
+    for test in &bundle.smoke_tests {
+        validate_command(&test.command)?;
+    }
+    Ok(())
+}
+
+fn validate_object_schema(schema: &Value, field: &'static str) -> Result<(), String> {
+    if !schema.is_object() || schema.get("type").and_then(Value::as_str) != Some("object") {
+        return Err(format!("{field} must be a JSON object schema"));
+    }
+    let function_id = crate::engine::FunctionId::new("worker_kernel::bundle_schema")
+        .map_err(|error| error.to_string())?;
+    crate::engine::validate_engine_schema_definition(&function_id, field, schema)
+        .map_err(|error| format!("invalid {field}: {error}"))
+}
+
+fn validate_command(command: &[String]) -> Result<(), String> {
+    if command.is_empty() || command[0].trim().is_empty() {
+        return Err("worker command must contain a program".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_identifier(value: &str, field: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 96
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err(format!(
+            "{field} must contain only ASCII letters, numbers, '-' or '_'"
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_tool_name(value: &str) -> Result<String, String> {
+    let value = value.replace('-', "_");
+    validate_identifier(&value, "toolName")?;
+    if !value.starts_with("worker_") {
+        return Err("toolName must begin with 'worker_'".to_owned());
+    }
+    Ok(value)
+}
+
+fn safe_relative_path(value: &str) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    if path.is_absolute() || value.is_empty() {
+        return Err(format!("worker file path '{value}' must be relative"));
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(format!("worker file path '{value}' escapes its bundle"));
+    }
+    Ok(path.to_path_buf())
+}
+
+fn slug(value: &str) -> String {
+    let mut result = String::new();
+    let mut separator = false;
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            if separator && !result.is_empty() {
+                result.push('-');
+            }
+            result.push(character.to_ascii_lowercase());
+            separator = false;
+        } else {
+            separator = true;
+        }
+    }
+    if result.is_empty() {
+        format!("worker-{}", &uuid::Uuid::now_v7().to_string()[..8])
+    } else {
+        result.truncate(80);
+        result
+    }
+}
+
+fn terms(value: &str) -> HashSet<String> {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .map(str::to_ascii_lowercase)
+        .filter(|term| term.len() > 2)
+        .collect()
+}
+
+fn write_json_atomic(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::now_v7()));
+    fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("write {}: {error}", temporary.display()))?;
+    fs::rename(&temporary, path).map_err(|error| format!("activate {}: {error}", path.display()))
+}
+
+fn replace_active_triggers(
+    connection: &Connection,
+    worker_id: &str,
+    triggers: &[WorkerTrigger],
+    enabled: bool,
+    new_webhooks: &mut Vec<WebhookCredential>,
+) -> Result<(), String> {
+    let prior = {
+        let mut statement = connection
+            .prepare(
+                "SELECT trigger_id,kind,token_hash,next_run_at,stream_cursor
+                 FROM worker_triggers WHERE worker_id=?1",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([worker_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    (
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ),
+                ))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()
+            .map_err(|error| error.to_string())?
+    };
+    connection
+        .execute(
+            "DELETE FROM worker_triggers WHERE worker_id=?1",
+            [worker_id],
+        )
+        .map_err(|error| format!("replace worker triggers: {error}"))?;
+    for trigger in triggers {
+        let matching = prior
+            .get(trigger.id())
+            .filter(|(kind, _, _, _)| kind == trigger.kind());
+        let mut token_hash = matching.and_then(|(_, token, _, _)| token.clone());
+        if matches!(trigger, WorkerTrigger::Webhook { .. }) && token_hash.is_none() {
+            let token = generate_token();
+            token_hash = Some(hash_secret(&token));
+            new_webhooks.push(WebhookCredential {
+                trigger_id: trigger.id().to_owned(),
+                path: format!("/engine/workers/webhooks/{worker_id}/{}", trigger.id()),
+                token,
+            });
+        }
+        let next_run_at = match trigger {
+            WorkerTrigger::Schedule { every_seconds, .. } => matching
+                .and_then(|(_, _, next, _)| next.clone())
+                .or_else(|| {
+                    Some(
+                        (chrono::Utc::now()
+                            + chrono::Duration::seconds(
+                                i64::try_from(*every_seconds).unwrap_or(i64::MAX),
+                            ))
+                        .to_rfc3339(),
+                    )
+                }),
+            _ => None,
+        };
+        let stream_cursor = if matches!(trigger, WorkerTrigger::EngineEvent { .. }) {
+            matching.map_or(0, |(_, _, _, cursor)| *cursor)
+        } else {
+            0
+        };
+        connection
+            .execute(
+                "INSERT INTO worker_triggers(worker_id,trigger_id,kind,config_json,token_hash,next_run_at,stream_cursor,enabled)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    worker_id,
+                    trigger.id(),
+                    trigger.kind(),
+                    serde_json::to_string(trigger).map_err(|error| error.to_string())?,
+                    token_hash,
+                    next_run_at,
+                    stream_cursor,
+                    i64::from(enabled),
+                ],
+            )
+            .map_err(|error| format!("insert worker trigger '{}': {error}", trigger.id()))?;
+    }
+    Ok(())
+}
+
+fn insert_audit(
+    connection: &Connection,
+    worker_id: &str,
+    action: &str,
+    details: &Value,
+) -> Result<(), String> {
+    connection
+        .execute(
+            "INSERT INTO worker_audit(audit_id,worker_id,action,details_json,created_at)
+             VALUES (?1,?2,?3,?4,?5)",
+            params![
+                format!("worker_audit_{}", uuid::Uuid::now_v7()),
+                worker_id,
+                action,
+                serde_json::to_string(details).map_err(|error| error.to_string())?,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|error| format!("record worker audit action '{action}': {error}"))?;
+    Ok(())
+}
+
+fn tree_version(root: &Path) -> Result<String, String> {
+    let mut files = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("hash worker tree: {error}"))?;
+    files.retain(|entry| {
+        entry.file_type().is_file() && entry.file_name().to_string_lossy() != "content.sha256"
+    });
+    files.sort_by(|left, right| left.path().cmp(right.path()));
+    let mut digest = Sha256::new();
+    for entry in files {
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?;
+        digest.update(relative.to_string_lossy().as_bytes());
+        digest.update([0]);
+        digest
+            .update(fs::read(entry.path()).map_err(|error| {
+                format!("hash worker file {}: {error}", entry.path().display())
+            })?);
+        digest.update([0xff]);
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn row_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerSummary> {
+    Ok(WorkerSummary {
+        worker_id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        tool_name: row.get(3)?,
+        runner_kind: row.get(4)?,
+        active_version: row.get(5)?,
+        enabled: row.get::<_, i64>(6)? != 0,
+        retired: row.get::<_, i64>(7)? != 0,
+        health: row.get(8)?,
+        updated_at: row.get(9)?,
+        trigger_count: row.get(10)?,
+    })
+}
+
+fn invocation_select(condition: &str) -> String {
+    format!("{} {condition}", invocation_select_base())
+}
+
+fn invocation_select_base() -> &'static str {
+    "SELECT worker_invocations.invocation_id,worker_invocations.worker_id,
+            worker_invocations.worker_version,worker_invocations.status,
+            worker_invocations.input_json,worker_invocations.output_json,
+            worker_invocations.error,worker_invocations.idempotency_key,
+            worker_invocations.trace_id,worker_invocations.causal_depth,
+            worker_invocations.trigger_kind,worker_invocations.created_at,
+            worker_invocations.started_at,worker_invocations.completed_at
+     FROM worker_invocations"
+}
+
+fn row_invocation(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvocationRecord> {
+    let input: String = row.get(4)?;
+    let output: Option<String> = row.get(5)?;
+    Ok(InvocationRecord {
+        invocation_id: row.get(0)?,
+        worker_id: row.get(1)?,
+        worker_version: row.get(2)?,
+        status: row.get(3)?,
+        input: serde_json::from_str(&input).unwrap_or(Value::Null),
+        output: output.and_then(|value| serde_json::from_str(&value).ok()),
+        error: row.get(6)?,
+        idempotency_key: row.get(7)?,
+        trace_id: row.get(8)?,
+        causal_depth: row.get(9)?,
+        trigger_kind: row.get(10)?,
+        created_at: row.get(11)?,
+        started_at: row.get(12)?,
+        completed_at: row.get(13)?,
+    })
+}
+
+fn generate_token() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    format!("trwh_{}", hex::encode(bytes))
+}
+
+fn hash_secret(value: &str) -> String {
+    hex::encode(Sha256::digest(value.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::worker_kernel::types::{WorkerRunner, WorkerTrigger};
+
+    fn bundle() -> WorkerBundle {
+        WorkerBundle {
+            schema_version: BUNDLE_SCHEMA.to_owned(),
+            worker_id: None,
+            name: "Recent Research".to_owned(),
+            description: "Research a topic across recent sources".to_owned(),
+            tool_name: None,
+            input_schema: json!({"type":"object","properties":{"topic":{"type":"string"}}}),
+            output_schema: json!({"type":"object"}),
+            runner: WorkerRunner::Command {
+                command: vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()],
+            },
+            files: Default::default(),
+            dependencies: Vec::new(),
+            triggers: vec![WorkerTrigger::Webhook {
+                id: "research".to_owned(),
+                input: json!({}),
+            }],
+            secret_bindings: Vec::new(),
+            smoke_tests: Vec::new(),
+            provenance: Vec::new(),
+            routing: Default::default(),
+        }
+    }
+
+    #[test]
+    fn prepare_and_publish_is_atomic_and_versioned() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let prepared = store.prepare(bundle(), None).unwrap();
+        let version = prepared.version.clone();
+        let outcome = store.publish(prepared).unwrap();
+
+        assert!(outcome.created);
+        assert_eq!(outcome.worker.active_version, version);
+        assert_eq!(outcome.webhooks.len(), 1);
+        assert!(store.load_active("recent-research").is_ok());
+    }
+
+    #[test]
+    fn failed_candidate_can_be_abandoned_without_changing_active_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let first = store.prepare(bundle(), None).unwrap();
+        let active = first.version.clone();
+        let _ = store.publish(first).unwrap();
+        let mut next = bundle();
+        next.description.push_str(" with citations");
+        let candidate = store.prepare(next, Some("recent-research")).unwrap();
+        store.abandon(&candidate);
+
+        assert_eq!(
+            store
+                .summary("recent-research")
+                .unwrap()
+                .unwrap()
+                .active_version,
+            active
+        );
+    }
+
+    #[test]
+    fn crash_after_index_commit_before_pointer_keeps_prior_version_canonical() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut first = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut first).unwrap();
+        let first_version = first.version.clone();
+        store.publish(first).unwrap();
+        let prior_state = store.read_state("recent-research").unwrap().unwrap();
+
+        let mut updated = bundle();
+        updated.description.push_str(" with crash-safe publication");
+        let mut second = store.prepare(updated, Some("recent-research")).unwrap();
+        store.finalize(&mut second).unwrap();
+        let second_version = second.version.clone();
+        store.publish(second).unwrap();
+        assert_ne!(first_version, second_version);
+
+        // Model a process death after the SQLite transaction commits but
+        // before the atomic filesystem-pointer rename linearizes activation.
+        write_json_atomic(
+            &temp
+                .path()
+                .join("workspace/workers/recent-research/worker.json"),
+            &prior_state,
+        )
+        .unwrap();
+        drop(store);
+
+        let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        assert_eq!(
+            reopened
+                .summary("recent-research")
+                .unwrap()
+                .unwrap()
+                .active_version,
+            first_version
+        );
+        assert_eq!(
+            reopened.inspect("recent-research").unwrap()["versions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn traversal_in_worker_files_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut invalid = bundle();
+        invalid
+            .files
+            .insert("../escape".to_owned(), "no".to_owned());
+        assert!(store.prepare(invalid, None).is_err());
+    }
+
+    #[test]
+    fn versions_are_immutable_rollback_restores_triggers_and_purge_leaves_audit() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut first = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut first).unwrap();
+        let first_version = first.version.clone();
+        let first_outcome = store.publish(first).unwrap();
+        let first_token = first_outcome.webhooks[0].token.clone();
+
+        let mut updated_bundle = bundle();
+        updated_bundle.description.push_str(" with citations");
+        updated_bundle.triggers = vec![WorkerTrigger::Schedule {
+            id: "daily".to_owned(),
+            every_seconds: 86_400,
+            input: json!({"topic":"workers"}),
+        }];
+        let mut second = store
+            .prepare(updated_bundle, Some("recent-research"))
+            .unwrap();
+        store.finalize(&mut second).unwrap();
+        let second_version = second.version.clone();
+        store.publish(second).unwrap();
+        assert_ne!(first_version, second_version);
+
+        let (rolled_back, credentials) = store.rollback("recent-research", &first_version).unwrap();
+        assert_eq!(rolled_back.active_version, first_version);
+        assert_eq!(credentials.len(), 1);
+        assert_ne!(credentials[0].token, first_token);
+        let inspection = store.inspect("recent-research").unwrap();
+        assert_eq!(inspection["triggers"][0]["kind"], "webhook");
+        assert_eq!(inspection["versions"].as_array().unwrap().len(), 2);
+
+        let retired = store.retire("recent-research").unwrap();
+        assert!(retired.retired);
+        let retired_inspection = store.inspect("recent-research").unwrap();
+        assert!(
+            !retired_inspection["triggers"][0]["enabled"]
+                .as_bool()
+                .unwrap_or(true)
+        );
+        assert!(store.purge("recent-research").unwrap());
+        assert!(store.summary("recent-research").unwrap().is_none());
+        assert!(
+            store
+                .audit(Some("recent-research"), 20)
+                .unwrap()
+                .iter()
+                .any(|item| item["action"] == "purged")
+        );
+    }
+
+    #[test]
+    fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let mut prepared = store.prepare(bundle(), None).unwrap();
+        store.finalize(&mut prepared).unwrap();
+        let outcome = store.publish(prepared).unwrap();
+        let (queued, _) = store
+            .begin_invocation(
+                &outcome.worker.worker_id,
+                &outcome.version,
+                &json!({"topic":"recovery"}),
+                "recovery-key",
+                "trace-recovery",
+                0,
+                "schedule",
+            )
+            .unwrap();
+        assert!(store.claim_running(&queued.invocation_id).unwrap());
+        store
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM worker_triggers", [])
+            .unwrap();
+        store
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM worker_versions", [])
+            .unwrap();
+        store
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM workers", [])
+            .unwrap();
+        drop(store);
+
+        let reopened = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        assert!(reopened.load_active("recent-research").is_ok());
+        assert_eq!(
+            reopened
+                .invocation(&queued.invocation_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            "queued"
+        );
+        assert_eq!(
+            reopened.inspect("recent-research").unwrap()["versions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+        let prepared = store.prepare(bundle(), None).unwrap();
+        let outcome = store.publish(prepared).unwrap();
+        for (key, trigger) in [("background", "schedule"), ("manual", "manual")] {
+            let (run, _) = store
+                .begin_invocation(
+                    &outcome.worker.worker_id,
+                    &outcome.version,
+                    &json!({}),
+                    key,
+                    &format!("trace-{key}"),
+                    0,
+                    trigger,
+                )
+                .unwrap();
+            assert!(store.claim_running(&run.invocation_id).unwrap());
+            store
+                .complete_invocation(
+                    &run.invocation_id,
+                    &outcome.worker.worker_id,
+                    Ok(&json!({"ok":true})),
+                )
+                .unwrap();
+        }
+        let first = store
+            .take_notable_unseen(Some("recent research"), 10)
+            .unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0]["triggerKind"], "schedule");
+        assert!(
+            store
+                .take_notable_unseen(Some("recent research"), 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .inbox(Some(&outcome.worker.worker_id), 10)
+                .unwrap()
+                .iter()
+                .filter(|item| item["seen"] == false)
+                .count(),
+            1
+        );
+    }
+}

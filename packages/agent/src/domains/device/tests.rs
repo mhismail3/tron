@@ -1,16 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use super::contract::{
-    DEVICE_LIFECYCLE_TOPIC, READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE,
-};
-use super::service::{
-    inspect_device_value, list_devices_value, register_device_value_at, unregister_device_value_at,
-};
+use super::contract::{DEVICE_LIFECYCLE_TOPIC, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
+use super::service::{register_device_value_at, unregister_device_value_at};
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, InvocationId,
+    StreamActorScope, StreamCursor, TraceId, VisibilityScope,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -46,46 +42,9 @@ async fn register_records_hash_only_token_and_redacted_projection() {
         payload["notificationPolicy"]["eventFamilies"]
             .as_array()
             .expect("event families")
-            .contains(&json!("agent_attention"))
+            .contains(&json!("worker_result"))
     );
     assert_no_token_fragments("stored device resource", &inspection, APNS_TOKEN);
-    let token_hash = payload["apns"]["tokenHash"].as_str().unwrap().to_owned();
-
-    let listed = fixture
-        .list("token-redaction-list", json!({"limit": 10}))
-        .await;
-    assert_no_token_fragments("device list projection", &listed, APNS_TOKEN);
-    let list_fingerprint = &listed["devices"][0]["apns"]["tokenFingerprint"];
-    assert_eq!(list_fingerprint["redacted"], json!(true));
-    assert_eq!(list_fingerprint["rawPreviewReturned"], json!(false));
-    assert!(list_fingerprint.get("preview").is_none());
-    assert_no_token_fragments(
-        "device list token fingerprint",
-        list_fingerprint,
-        APNS_TOKEN,
-    );
-
-    let inspected = fixture.inspect("inspect-key", resource_id).await;
-    let projection = serde_json::to_string(&inspected).unwrap();
-    assert_eq!(inspected["apnsTokenReturned"], json!(false));
-    assert!(projection.contains("tokenFingerprint"));
-    assert!(!projection.contains(APNS_TOKEN));
-    assert!(!projection.contains(&token_hash));
-    assert_no_token_fragments("device inspect projection", &inspected, APNS_TOKEN);
-    let inspect_fingerprint = &inspected["device"]["payload"]["apns"]["tokenFingerprint"];
-    assert_eq!(inspect_fingerprint["redacted"], json!(true));
-    assert_eq!(inspect_fingerprint["rawPreviewReturned"], json!(false));
-    assert!(inspect_fingerprint.get("preview").is_none());
-    assert_no_token_fragments(
-        "device inspect token fingerprint",
-        inspect_fingerprint,
-        APNS_TOKEN,
-    );
-    assert_eq!(
-        inspected["device"]["projection"]["fullTokenHashReturned"],
-        json!(false)
-    );
-
     let lifecycle_events = fixture.device_lifecycle_events().await;
     assert_no_token_fragments(
         "device lifecycle stream events",
@@ -163,10 +122,19 @@ async fn side_by_side_apps_have_distinct_registration_resources() {
         beta["deviceRegistrationResourceId"], production["deviceRegistrationResourceId"],
         "bundle-scoped APNs tokens must not overwrite one another"
     );
-    let listed = fixture
-        .list("side-by-side-list", json!({"limit": 10}))
-        .await;
-    assert_eq!(listed["devices"].as_array().unwrap().len(), 2);
+    for resource_id in [
+        beta["deviceRegistrationResourceId"].as_str().unwrap(),
+        production["deviceRegistrationResourceId"].as_str().unwrap(),
+    ] {
+        let inspection = fixture
+            .deps
+            .engine_host
+            .inspect_resource(resource_id)
+            .await
+            .expect("inspect app registration")
+            .expect("app registration");
+        assert_eq!(inspection.resource.lifecycle, "active");
+    }
 }
 
 #[tokio::test]
@@ -186,14 +154,18 @@ async fn matching_token_route_supersedes_older_registration() {
         original["deviceRegistrationResourceId"],
         replacement["deviceRegistrationResourceId"]
     );
-    let active = fixture
-        .list("supersede-active-list", json!({"limit": 10}))
-        .await;
-    assert_eq!(active["devices"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        active["devices"][0]["deviceRegistrationResourceId"],
-        replacement["deviceRegistrationResourceId"]
-    );
+    let replacement_inspection = fixture
+        .deps
+        .engine_host
+        .inspect_resource(
+            replacement["deviceRegistrationResourceId"]
+                .as_str()
+                .unwrap(),
+        )
+        .await
+        .expect("inspect replacement")
+        .expect("replacement registration");
+    assert_eq!(replacement_inspection.resource.lifecycle, "active");
     let original_inspection = fixture
         .deps
         .engine_host
@@ -209,7 +181,7 @@ async fn matching_token_route_supersedes_older_registration() {
 }
 
 #[tokio::test]
-async fn unregister_preserves_durable_state_and_default_list_hides_it() {
+async fn unregister_preserves_durable_state() {
     let fixture = Fixture::new("unregister").await;
     let registered = fixture
         .register("unregister-register", register_payload())
@@ -221,17 +193,12 @@ async fn unregister_preserves_durable_state_and_default_list_hides_it() {
     assert_eq!(unregistered["status"], json!("unregistered"));
     assert_eq!(unregistered["apnsTokenRedacted"], json!(true));
 
-    let active_only = fixture.list("list-active", json!({"limit": 10})).await;
-    assert_eq!(active_only["devices"].as_array().unwrap().len(), 0);
-
-    let all = fixture
-        .list(
-            "list-all",
-            json!({"limit": 10, "includeUnregistered": true}),
-        )
-        .await;
-    assert_eq!(all["devices"].as_array().unwrap().len(), 1);
-    assert_eq!(all["devices"][0]["state"], json!("unregistered"));
+    let inspection = fixture.deps.engine_host.inspect_resource(resource_id).await;
+    let inspection = inspection
+        .expect("inspect unregistered")
+        .expect("unregistered registration");
+    assert_eq!(inspection.resource.lifecycle, "unregistered");
+    assert_eq!(current_payload(&inspection)["state"], json!("unregistered"));
 }
 
 #[tokio::test]
@@ -320,7 +287,7 @@ async fn device_registration_rejects_broad_or_untrusted_authority() {
         register_payload(),
         ActorKind::System,
     );
-    wrong_function.function_id = FunctionId::new("capability::execute").unwrap();
+    wrong_function.function_id = FunctionId::new("worker_kernel::list").unwrap();
     let wrong_function = register_device_value_at(
         &fixture.deps,
         &wrong_function,
@@ -336,26 +303,9 @@ async fn device_registration_rejects_broad_or_untrusted_authority() {
     );
 }
 
-#[tokio::test]
-async fn device_reads_use_global_redacted_registration_scope() {
-    let fixture = Fixture::new("scope-a").await;
-    let registered = fixture.register("scope-register", register_payload()).await;
-    let resource_id = registered["deviceRegistrationResourceId"].as_str().unwrap();
-    let other = fixture.clone_for_session("scope-b-session").await;
-
-    let inspected = other.inspect("scope-visible", resource_id).await;
-    assert_eq!(
-        inspected["device"]["payload"]["scope"]["kind"],
-        json!("system")
-    );
-    assert_eq!(inspected["apnsTokenReturned"], json!(false));
-}
-
 struct Fixture {
     deps: Deps,
     session_id: String,
-    write_grant_id: AuthorityGrantId,
-    read_grant_id: AuthorityGrantId,
 }
 
 impl Fixture {
@@ -366,67 +316,7 @@ impl Fixture {
             apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
-        let write_grant_id = derive_grant(
-            &deps,
-            &format!("{label}-write"),
-            &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
-            &[DEVICE_REGISTRATION_KIND],
-            &["kind:device_registration"],
-            "none",
-        )
-        .await;
-        let read_grant_id = derive_grant(
-            &deps,
-            &format!("{label}-read"),
-            &[READ_SCOPE, RESOURCE_READ_SCOPE],
-            &[DEVICE_REGISTRATION_KIND],
-            &["kind:device_registration"],
-            "none",
-        )
-        .await;
-        Self {
-            deps,
-            session_id,
-            write_grant_id,
-            read_grant_id,
-        }
-    }
-
-    async fn clone_for_session(&self, session_id: &str) -> Self {
-        let read_grant_id = self
-            .derive_grant(
-                &format!("{session_id}-read"),
-                &[READ_SCOPE, RESOURCE_READ_SCOPE],
-                &[DEVICE_REGISTRATION_KIND],
-                &["kind:device_registration"],
-                "none",
-            )
-            .await;
-        Self {
-            deps: self.deps.clone(),
-            session_id: session_id.to_owned(),
-            write_grant_id: self.write_grant_id.clone(),
-            read_grant_id,
-        }
-    }
-
-    async fn derive_grant(
-        &self,
-        suffix: &str,
-        scopes: &[&str],
-        resource_kinds: &[&str],
-        selectors: &[&str],
-        network_policy: &str,
-    ) -> AuthorityGrantId {
-        derive_grant(
-            &self.deps,
-            suffix,
-            scopes,
-            resource_kinds,
-            selectors,
-            network_policy,
-        )
-        .await
+        Self { deps, session_id }
     }
 
     async fn register(&self, key: &str, payload: Value) -> Value {
@@ -486,21 +376,6 @@ impl Fixture {
             .expect("unregister")
     }
 
-    async fn list(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.read_invocation(key, payload);
-        list_devices_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("list devices")
-    }
-
-    async fn inspect(&self, key: &str, resource_id: &str) -> Value {
-        let invocation =
-            self.read_invocation(key, json!({"deviceRegistrationResourceId": resource_id}));
-        inspect_device_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("inspect device")
-    }
-
     async fn device_lifecycle_events(&self) -> Value {
         let subscription_id = format!("device-lifecycle-{}", self.session_id);
         self.deps
@@ -525,88 +400,21 @@ impl Fixture {
     }
 
     fn write_invocation(&self, key: &str, payload: Value, actor_kind: ActorKind) -> Invocation {
-        self.write_invocation_with_grant(
+        let mut invocation = invocation(
             key,
             payload,
             actor_kind,
-            self.write_grant_id.clone(),
             &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
-            &self.session_id,
-        )
-    }
-
-    fn write_invocation_with_grant(
-        &self,
-        key: &str,
-        payload: Value,
-        actor_kind: ActorKind,
-        grant_id: AuthorityGrantId,
-        scopes: &[&str],
-        session_id: &str,
-    ) -> Invocation {
-        let mut invocation =
-            invocation(key, payload, grant_id, actor_kind, scopes, Some(session_id));
+            Some(&self.session_id),
+        );
         invocation.function_id = FunctionId::new("device::register").unwrap();
         invocation
     }
-
-    fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
-        invocation(
-            key,
-            payload,
-            self.read_grant_id.clone(),
-            ActorKind::Agent,
-            &[READ_SCOPE, RESOURCE_READ_SCOPE],
-            Some(&self.session_id),
-        )
-    }
-}
-
-async fn derive_grant(
-    deps: &Deps,
-    suffix: &str,
-    scopes: &[&str],
-    resource_kinds: &[&str],
-    selectors: &[&str],
-    network_policy: &str,
-) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
-        .derive_authority_grant(DeriveGrant {
-            grant_id: Some(AuthorityGrantId::new(format!("device-{suffix}")).unwrap()),
-            parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
-            subject_actor_id: None,
-            subject_worker_id: None,
-            subject_invocation_id: None,
-            allowed_capabilities: vec!["capability::execute".to_owned()],
-            allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
-            allowed_authority_scopes: scopes.iter().map(|scope| (*scope).to_owned()).collect(),
-            allowed_resource_kinds: resource_kinds
-                .iter()
-                .map(|kind| (*kind).to_owned())
-                .collect(),
-            resource_selectors: selectors
-                .iter()
-                .map(|selector| (*selector).to_owned())
-                .collect(),
-            file_roots: vec!["/tmp".to_owned()],
-            network_policy: network_policy.to_owned(),
-            max_risk: RiskLevel::Low,
-            budget: json!({"class": "device_test"}),
-            expires_at: None,
-            can_delegate: false,
-            provenance: json!({"source": "device_test"}),
-            trace_id: TraceId::new(format!("trace-device-{suffix}")).unwrap(),
-        })
-        .await
-        .expect("derive grant");
-    grant.grant_id
 }
 
 fn invocation(
     key: &str,
     payload: Value,
-    grant_id: AuthorityGrantId,
     actor_kind: ActorKind,
     scopes: &[&str],
     session_id: Option<&str>,
@@ -620,7 +428,7 @@ fn invocation(
     let mut context = CausalContext::new(
         actor_id,
         actor_kind,
-        grant_id,
+        AuthorityGrantId::new("engine-system").unwrap(),
         TraceId::new(format!("trace-{key}")).unwrap(),
     )
     .with_workspace_id("workspace-device")
@@ -633,7 +441,7 @@ fn invocation(
     }
     Invocation {
         id: InvocationId::new(format!("invocation-{key}")).unwrap(),
-        function_id: FunctionId::new("capability::execute").unwrap(),
+        function_id: FunctionId::new("device::register").unwrap(),
         delivery_mode: crate::engine::DeliveryMode::Sync,
         payload,
         causal_context: context,

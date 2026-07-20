@@ -3,6 +3,10 @@
 //! This layer protects primitive runtime integrity: idempotency, schemas,
 //! resource leases, compensation metadata, delivery modes, visibility, and
 //! routability. It does not encode product prompt policy.
+//! The source-owned `worker_kernel` may mark its trusted-local direct
+//! functions to bypass compensation-description ceremony: its atomic publish,
+//! immutable versions, rollback, disable, inbox, and audit mechanisms are the
+//! executable recovery contract. Idempotency remains mandatory reliability.
 //!
 //! INVARIANT: `engine.internal.invoke` is a trusted runtime scope, not public
 //! authority. It can unlock internal catalog visibility only for engine-owned
@@ -27,6 +31,12 @@ pub const ENGINE_INTERNAL_INVOKE_SCOPE: &str = "engine.internal.invoke";
 
 /// Validate a function definition before registration.
 pub fn validate_function_registration(function: &FunctionDefinition) -> Result<()> {
+    let trusted_local_kernel = function.owner_worker.as_str() == "worker_kernel"
+        && function
+            .metadata
+            .get("trustedLocalKernel")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
     if function.effect_class.requires_idempotency() && function.idempotency.is_none() {
         return Err(EngineError::PolicyViolation(format!(
             "mutating function {} requires idempotency",
@@ -40,8 +50,9 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
         )));
     }
 
-    if function.effect_class == EffectClass::IrreversibleSideEffect
-        || (function.effect_class.is_mutating() && function.risk_level >= RiskLevel::High)
+    if !trusted_local_kernel
+        && (function.effect_class == EffectClass::IrreversibleSideEffect
+            || (function.effect_class.is_mutating() && function.risk_level >= RiskLevel::High))
     {
         let Some(compensation) = &function.compensation else {
             return Err(EngineError::PolicyViolation(format!(
@@ -318,20 +329,20 @@ mod tests {
         WorkerId,
     };
 
-    fn high_risk_execute_function() -> FunctionDefinition {
+    fn high_risk_external_function() -> FunctionDefinition {
         FunctionDefinition::new(
-            FunctionId::new("capability::execute").expect("function id"),
-            WorkerId::new("capability").expect("worker id"),
-            "Execute primitive operation".to_owned(),
+            FunctionId::new("test_worker::external_effect").expect("function id"),
+            WorkerId::new("test_worker").expect("worker id"),
+            "External effect".to_owned(),
             VisibilityScope::System,
             EffectClass::ExternalSideEffect,
         )
         .with_risk(RiskLevel::High)
-        .with_required_authority(AuthorityRequirement::scope("capability.execute"))
+        .with_required_authority(AuthorityRequirement::scope("test.external"))
         .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
         .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
-            "capability_execute",
-            "capability_execute:{sessionId}",
+            "external_effect",
+            "external_effect:{sessionId}",
             60_000,
         ))
         .with_compensation(CompensationContract::new(
@@ -343,10 +354,32 @@ mod tests {
 
     #[test]
     fn high_risk_registration_requires_compensation_not_prompt_metadata() {
-        let function = high_risk_execute_function();
+        let function = high_risk_external_function();
 
         validate_function_registration(&function)
             .expect("high-risk registration relies on idempotency, lease, and compensation");
+    }
+
+    #[test]
+    fn worker_kernel_recovery_marker_replaces_compensation_ceremony_only_for_its_owner() {
+        let mut worker_function = FunctionDefinition::new(
+            FunctionId::new("worker_kernel::dynamic_research").unwrap(),
+            WorkerId::new("worker_kernel").unwrap(),
+            "Persistent worker",
+            VisibilityScope::System,
+            EffectClass::ExternalSideEffect,
+        )
+        .with_risk(RiskLevel::High)
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+        worker_function.metadata = serde_json::json!({"trustedLocalKernel":true});
+        validate_function_registration(&worker_function)
+            .expect("worker versions and audit are the executable recovery contract");
+
+        worker_function.owner_worker = WorkerId::new("untrusted_plugin").unwrap();
+        assert!(matches!(
+            validate_function_registration(&worker_function),
+            Err(EngineError::PolicyViolation(message)) if message.contains("compensation")
+        ));
     }
 
     #[test]

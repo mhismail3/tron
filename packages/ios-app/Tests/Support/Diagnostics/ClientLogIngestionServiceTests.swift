@@ -83,7 +83,7 @@ struct ClientLogIngestionServiceTests {
             (date.addingTimeInterval(7), .engine, .debug, "← Engine Response [\(requestId)] logs::ingest ✓ (12.3ms) result=redacted"),
             (date.addingTimeInterval(8), .websocket, .error, "Failed to send message for logs::ingest: connection lost"),
             (date.addingTimeInterval(9), .general, .warning, "Automatic client log ingestion failed after periodic: connection lost"),
-            (date.addingTimeInterval(10), .engine, .debug, "← Engine Response [CAPABILITY] capability::execute ✓ (80.0ms) result=redacted"),
+            (date.addingTimeInterval(10), .engine, .debug, "← Engine Response [WORKER] worker_kernel::list ✓ (80.0ms) result=redacted"),
         ]
 
         let batch = try #require(ClientLogIngestionPlanner.makeBatch(from: logs))
@@ -91,7 +91,7 @@ struct ClientLogIngestionServiceTests {
         #expect(batch.entries.map(\.message) == [
             "Failed to send message for logs::ingest: connection lost",
             "Automatic client log ingestion failed after periodic: connection lost",
-            "← Engine Response [CAPABILITY] capability::execute ✓ (80.0ms) result=redacted",
+            "← Engine Response [WORKER] worker_kernel::list ✓ (80.0ms) result=redacted",
         ])
     }
 

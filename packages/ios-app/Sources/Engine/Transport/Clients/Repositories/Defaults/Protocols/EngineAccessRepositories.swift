@@ -28,6 +28,7 @@ protocol SessionEventRepository: AnyObject {
 /// UI/session-facing settings snapshot. The engine repository maps the wire
 /// `ServerSettings` DTO into this contract before it crosses into SwiftUI.
 struct ServerSettingsSnapshot: Equatable, Sendable {
+    let autonomousWorkers: Bool
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
@@ -41,7 +42,8 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         tailscaleIp: String?,
         compactionPreserveRecentCount: Int,
         compactionTriggerTokenThreshold: Double,
-        transcriptionEnabled: Bool
+        transcriptionEnabled: Bool,
+        autonomousWorkers: Bool = false
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
@@ -49,6 +51,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
         self.transcriptionEnabled = transcriptionEnabled
+        self.autonomousWorkers = autonomousWorkers
     }
 
     init(_ settings: ServerSettings) {
@@ -58,7 +61,8 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             tailscaleIp: settings.tailscaleIp,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
             compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
-            transcriptionEnabled: settings.transcriptionEnabled
+            transcriptionEnabled: settings.transcriptionEnabled,
+            autonomousWorkers: settings.autonomousWorkers
         )
     }
 }
@@ -66,6 +70,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 /// UI-owned settings mutation vocabulary translated to wire DTOs inside the
 /// settings repository boundary.
 enum SettingsMutation {
+    case autonomousWorkers(Bool)
     case defaultWorkspace(String)
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)
@@ -301,94 +306,48 @@ protocol WorkspaceBrowserRepository: AnyObject {
     ) async throws -> WorkspaceCreateDirectoryResult
 }
 
-// MARK: - Worker Lifecycle Repository
+// MARK: - Worker Kernel Repository
 
-/// Black-box worker lifecycle contract for the agent cockpit.
+/// Black-box operational contract for the profile-global worker console.
 @MainActor
-protocol WorkerLifecycleRepository: AnyObject {
-    func overview(afterRevision: UInt64?) async throws -> CatalogWatchSnapshotDTO
-
-    func listResources(kind: WorkerLifecycleResourceKind, lifecycle: String?, limit: UInt64) async throws -> ResourceListResultDTO
-
-    func inspectResource(_ resourceId: String) async throws -> ResourceInspectResultDTO
-
-    func moduleActivityOverview(
-        limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> ModuleActivityOverviewDTO
-
-    func capabilityCockpitOverview(
-        limit: UInt64,
-        sessionId: String?,
-        workspaceId: String?
-    ) async throws -> CapabilityCockpitOverviewDTO
-
-    func proposePackageChange(
-        manifest: [String: AnyCodable],
-        summary: String,
-        sessionId: String?,
-        workspaceId: String?,
+protocol WorkerKernelRepository: AnyObject {
+    func workers(includeRetired: Bool) async throws -> WorkerListResultDTO
+    func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO
+    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO
+    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO
+    func invokeWorker(
+        workerId: String,
+        input: AnyCodable,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func installPackage(
-        manifest: [String: AnyCodable],
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerInvocationDTO
+    func setWorkerEnabled(
+        _ enabled: Bool,
+        workerId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func enablePackage(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerSummaryDTO
+    func rollbackWorker(
+        workerId: String,
+        version: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func disablePackage(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerRollbackResultDTO
+    func retireWorker(
+        workerId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func launchWorker(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerSummaryDTO
+    func purgeWorker(
+        workerId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func stopWorker(
-        launchAttemptResourceId: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerPurgeResultDTO
+    func setWorkersStopped(
+        _ stopped: Bool,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
-
-    func createCatalogDiscoveryReport(
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
+    ) async throws -> WorkerStopAllResultDTO
+    func rotateWorkerWebhook(
+        workerId: String,
+        triggerId: String,
         idempotencyKey: EngineIdempotencyKey
-    ) async throws -> CatalogDiscoveryReportResultDTO
-
-    func retirePackage(
-        packageId: String,
-        packageVersion: String,
-        reason: String?,
-        sessionId: String?,
-        workspaceId: String?,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> WorkerLifecycleResultDTO
+    ) async throws -> WorkerWebhookCredentialDTO
+    func pollWorkerEvents(topic: String, cursor: EngineStreamCursor?) async throws -> EngineStreamPage
 }
 
 // MARK: - Chat Session Services
@@ -402,5 +361,5 @@ struct ChatSessionServices {
     let models: any ModelRepository
     let messages: any MessageRepository
     let transcription: any TranscriptionRepository
-    let workerLifecycle: any WorkerLifecycleRepository
+    let workerKernel: any WorkerKernelRepository
 }

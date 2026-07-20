@@ -194,36 +194,6 @@ impl InMemoryEngineResourceStore {
         Ok(link)
     }
 
-    /// List outgoing links for one resource/relation with a caller-supplied cap.
-    pub fn list_links_for_source(
-        &self,
-        source_resource_id: &str,
-        relation: &str,
-        limit: usize,
-    ) -> Result<Vec<EngineResourceLink>> {
-        validate_token("source resource id", source_resource_id)?;
-        validate_token("link relation", relation)?;
-        if limit == 0 {
-            return Err(EngineError::PolicyViolation(
-                "resource link list limit must be greater than zero".to_owned(),
-            ));
-        }
-        let mut links = Vec::new();
-        for link in self.links.values().filter(|link| {
-            link.source_resource_id == source_resource_id && link.relation == relation
-        }) {
-            links.push(link.clone());
-            links.sort_by(|left, right| {
-                right
-                    .created_at
-                    .cmp(&left.created_at)
-                    .then_with(|| right.link_id.cmp(&left.link_id))
-            });
-            links.truncate(limit);
-        }
-        Ok(links)
-    }
-
     /// Inspect one resource.
     pub fn inspect(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>> {
         validate_token("resource id", resource_id)?;

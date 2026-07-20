@@ -279,7 +279,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 
     private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
-        if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
+        if let command = commandString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
             return command.truncated(to: 96)
         }
         if let query = firstString(["query", "q", "searchQuery"], in: object)?.nilIfEmpty {

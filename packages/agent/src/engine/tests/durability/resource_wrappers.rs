@@ -1,23 +1,23 @@
 use super::*;
-use crate::engine::RUNTIME_METADATA_WORKING_DIRECTORY;
+
 #[tokio::test]
-async fn resource_backed_primitive_outputs_have_trace_identity() {
+async fn resource_backed_direct_worker_outputs_have_trace_identity() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
-        .register_worker_for_setup(worker("capability", "capability"), false)
+        .register_worker_for_setup(worker("worker_test", "worker_test"), false)
         .unwrap();
     let function = FunctionDefinition::new(
-        fid("capability::execute"),
-        wid("capability"),
-        "execute primitive",
+        fid("worker_test::materialize"),
+        wid("worker_test"),
+        "materialize artifact",
         VisibilityScope::Agent,
         EffectClass::IdempotentWrite,
     )
-    .with_required_authority(AuthorityRequirement::scope("capability.execute"))
+    .with_required_authority(AuthorityRequirement::scope(
+        "legacy.scope.is.not.a.local_gate",
+    ))
     .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-    .with_output_contract(DurableOutputContract::resource_backed([
-        "materialized_file",
-    ]));
+    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
     handle
         .register_function_for_setup(
             function,
@@ -26,8 +26,8 @@ async fn resource_backed_primitive_outputs_have_trace_identity() {
                 "bytesWritten": 5,
                 "created": true,
                 "resourceRefs": [{
-                    "resourceId": "materialized_file:test",
-                    "kind": "materialized_file",
+                    "resourceId": "artifact:test",
+                    "kind": "artifact",
                     "versionId": "ver-test",
                     "role": "updated",
                     "contentHash": "hash-test"
@@ -36,54 +36,28 @@ async fn resource_backed_primitive_outputs_have_trace_identity() {
             false,
         )
         .unwrap();
-    let grant_id = "capability-materialized-output-grant";
-    let derived = crate::engine::tests::authority::derive_bootstrap_grant(
-        &handle,
-        grant_id,
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute"],
-            "allowedResourceKinds": ["materialized_file"],
-            "resourceSelectors": [
-                "kind:materialized_file",
-                "resource:materialized_file:test"
-            ],
-            "fileRoots": ["/tmp"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 2},
-            "provenance": {"source": "resource-wrapper-test"}
-        }),
-    )
-    .await;
-    assert_eq!(derived.error, None);
     let result = handle
         .invoke(host_invocation(
-            "capability::execute",
+            "worker_test::materialize",
             json!({
-                "operation": "file_write",
                 "path": "/tmp/tron-materialized-output.txt",
                 "content": "draft"
             }),
-            CausalContext::new(
+            CausalContext::trusted_local(
                 actor("system"),
                 ActorKind::System,
-                grant(grant_id),
-                trace("capability-materialized-output"),
+                trace("direct-worker-materialized-output"),
             )
             .with_session_id("session-a")
             .with_workspace_id("workspace-a")
-            .with_scope("capability.execute")
-            .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp")
-            .with_idempotency_key("capability-materialized-output"),
+            .with_idempotency_key("direct-worker-materialized-output"),
         ))
         .await;
     assert_eq!(result.error, None);
     let refs = result.value.as_ref().unwrap()["resourceRefs"]
         .as_array()
         .unwrap();
-    assert_eq!(refs[0]["kind"], "materialized_file");
+    assert_eq!(refs[0]["kind"], "artifact");
 
     assert!(
         !result.trace_id.as_str().is_empty(),
@@ -276,206 +250,5 @@ async fn resource_primitive_manages_typed_resources_through_capabilities() {
             .unwrap()
             .len(),
         1
-    );
-}
-
-#[tokio::test]
-async fn artifact_goal_decision_wrappers_produce_resource_refs() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-
-    let artifact = handle
-        .invoke(host_invocation(
-            "artifact::create",
-            json!({
-                "resourceId": "artifact-wrapper-test",
-                "payload": {"title": "Audit", "body": "draft"}
-            }),
-            mutating_causal("artifact-wrapper-create").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(artifact.error, None);
-    assert_eq!(
-        artifact.value.as_ref().unwrap()["resource"]["resourceId"],
-        "artifact-wrapper-test"
-    );
-
-    let promoted = handle
-        .invoke(host_invocation(
-            "artifact::promote",
-            json!({"resourceId": "artifact-wrapper-test"}),
-            mutating_causal("artifact-wrapper-promote").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(promoted.error, None);
-    assert_eq!(
-        promoted.value.as_ref().unwrap()["version"]["resourceId"],
-        "artifact-wrapper-test"
-    );
-
-    let goal = handle
-        .invoke(host_invocation(
-            "goal::create",
-            json!({
-                "resourceId": "goal-wrapper-test",
-                "payload": {"intent": "Finish substrate", "successCriteria": ["decision recorded"]}
-            }),
-            mutating_causal("goal-wrapper-create").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(goal.error, None);
-
-    let agent_result = handle
-        .invoke(host_invocation(
-            "resource::create",
-            json!({
-                "kind": "agent_result",
-                "resourceId": "agent-result-wrapper-test",
-                "payload": {
-                    "message": "Completed",
-                    "promotedRefs": ["artifact-wrapper-test"],
-                    "decisionRefs": [],
-                    "subgoalRefs": [],
-                    "stopReason": "completed",
-                    "tokenUsage": {}
-                }
-            }),
-            mutating_causal("agent-result-wrapper-create").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(agent_result.error, None);
-
-    let completed = handle
-        .invoke(host_invocation(
-            "goal::complete",
-            json!({
-                "goalResourceId": "goal-wrapper-test",
-                "agentResultResourceId": "agent-result-wrapper-test",
-                "promotedResourceIds": ["artifact-wrapper-test"],
-                "decision": {"status": "done", "summary": "Substrate checkpoint complete"}
-            }),
-            mutating_causal("goal-wrapper-complete").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(completed.error, None);
-    let value = completed.value.as_ref().unwrap();
-    assert_eq!(value["goalVersion"]["resourceId"], "goal-wrapper-test");
-    assert_eq!(value["decision"]["kind"], "decision");
-    assert_eq!(value["link"]["relation"], "decided_by");
-    assert_eq!(value["agentResultLink"]["relation"], "produced");
-    assert_eq!(value["promotedLinks"][0]["relation"], "promoted_output");
-}
-
-#[tokio::test]
-async fn artifact_curation_and_goal_working_set_return_bounded_resource_refs() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-
-    let source = handle
-        .invoke(host_invocation(
-            "artifact::create",
-            json!({
-                "resourceId": "curation-source",
-                "payload": {"title": "Source", "body": "alpha beta gamma"}
-            }),
-            mutating_causal("curation-source").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(source.error, None);
-
-    let split = handle
-        .invoke(host_invocation(
-            "artifact::split",
-            json!({
-                "resourceId": "curation-source",
-                "parts": [
-                    {"resourceId": "curation-part-a", "payload": {"title": "A", "body": "alpha"}},
-                    {"resourceId": "curation-part-b", "payload": {"title": "B", "body": "beta"}}
-                ]
-            }),
-            mutating_causal("curation-split").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(split.error, None);
-    assert_eq!(
-        split.value.as_ref().unwrap()["resourceRefs"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
-
-    let composed = handle
-        .invoke(host_invocation(
-            "artifact::compose",
-            json!({
-                "resourceId": "curation-composed",
-                "inputResourceIds": ["curation-part-a", "curation-part-b"],
-                "payload": {"title": "Composed", "body": "alpha beta"}
-            }),
-            mutating_causal("curation-compose").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(composed.error, None);
-    assert_eq!(
-        composed.value.as_ref().unwrap()["resourceRefs"][0]["kind"],
-        "artifact"
-    );
-
-    let search = handle
-        .invoke(host_invocation(
-            "artifact::search",
-            json!({"query": "source", "scope": "workspace", "workspaceId": "workspace-a", "limit": 5}),
-            causal().with_scope("resource.read"),
-        ))
-        .await;
-    assert_eq!(search.error, None);
-    assert!(
-        !search.value.as_ref().unwrap()["matches"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-
-    let goal = handle
-        .invoke(host_invocation(
-            "goal::create",
-            json!({
-                "resourceId": "curation-goal",
-                "payload": {"intent": "Curate artifacts", "successCriteria": ["candidate output identified"]}
-            }),
-            mutating_causal("curation-goal").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(goal.error, None);
-    let link = handle
-        .invoke(host_invocation(
-            "resource::link",
-            json!({
-                "sourceResourceId": "curation-goal",
-                "targetResourceId": "curation-composed",
-                "relation": "candidate_output"
-            }),
-            mutating_causal("curation-link").with_scope("resource.write"),
-        ))
-        .await;
-    assert_eq!(link.error, None);
-    let working_set = handle
-        .invoke(host_invocation(
-            "goal::working_set",
-            json!({"goalResourceId": "curation-goal", "previewBytes": 12, "limit": 10}),
-            causal().with_scope("resource.read"),
-        ))
-        .await;
-    assert_eq!(working_set.error, None);
-    assert_eq!(
-        working_set.value.as_ref().unwrap()["candidateOutputs"][0]["resource"]["resourceId"],
-        "curation-composed"
-    );
-    assert!(
-        working_set.value.as_ref().unwrap()["resources"][0]["preview"]
-            .as_str()
-            .unwrap()
-            .chars()
-            .count()
-            <= 12
     );
 }

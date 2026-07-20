@@ -103,7 +103,10 @@ enum CapabilityActivityPresentation {
     }
 
     private static func simpleSummary(from object: [String: Any]) -> String? {
-        if let command = firstString(["command", "cmd", "shellCommand"], in: object) {
+        if let command = CapabilityInvocationDisplayModel.commandString(
+            ["command", "cmd", "shellCommand"],
+            in: object
+        ) {
             return command
         }
         if let query = firstString(["query", "q", "searchQuery"], in: object) {

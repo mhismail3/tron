@@ -322,40 +322,6 @@ impl SqliteEngineResourceStore {
         Ok(link)
     }
 
-    /// List outgoing links for one resource/relation with a caller-supplied cap.
-    pub fn list_links_for_source(
-        &self,
-        source_resource_id: &str,
-        relation: &str,
-        limit: usize,
-    ) -> Result<Vec<EngineResourceLink>> {
-        validate_token("source resource id", source_resource_id)?;
-        validate_token("link relation", relation)?;
-        if limit == 0 {
-            return Err(EngineError::PolicyViolation(
-                "resource link list limit must be greater than zero".to_owned(),
-            ));
-        }
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT link_id, source_resource_id, target_resource_id, relation, metadata_json,
-                        created_by_invocation_id, trace_id, created_at
-                 FROM engine_resource_links
-                 WHERE source_resource_id = ?1 AND relation = ?2
-                 ORDER BY created_at DESC, link_id DESC
-                 LIMIT ?3",
-            )
-            .map_err(|err| sqlite_err("resource.links.source_limited.prepare", err.to_string()))?;
-        let rows = stmt
-            .query_map(
-                params![source_resource_id, relation, limit as i64],
-                row_to_resource_link,
-            )
-            .map_err(|err| sqlite_err("resource.links.source_limited.query", err.to_string()))?;
-        collect_rows(rows, "resource.links.source_limited.row")
-    }
-
     /// Inspect one resource.
     pub fn inspect(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>> {
         validate_token("resource id", resource_id)?;

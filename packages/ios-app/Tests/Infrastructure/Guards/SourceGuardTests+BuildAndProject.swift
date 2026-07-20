@@ -211,7 +211,7 @@ extension SourceGuardTests {
         #expect(!engineServersSection.contains("showLogs"))
         #expect(!engineServersSection.contains("LogViewer()"))
         #expect(!engineServersSection.contains("logsSection"))
-        #expect(!engineServersSection.contains("AgentCockpitSheet("))
+        #expect(!engineServersSection.contains("WorkerConsoleSheet("))
         #expect(!logViewer.hasPrefix("#if DEBUG || BETA"))
         #expect(!logViewer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
         #expect(!logViewer.contains("exportLogsToServer"))

@@ -137,8 +137,8 @@ final class DependencyContainer {
     /// Server-backed workspace browser repository.
     private(set) var workspaceBrowserRepository: any WorkspaceBrowserRepository
 
-    /// Worker lifecycle repository for the agent cockpit.
-    private(set) var workerLifecycleRepository: any WorkerLifecycleRepository
+    /// Profile-global worker repository for the worker console.
+    private(set) var workerKernelRepository: any WorkerKernelRepository
 
     /// Session context-control repository for Session Briefing.
     private(set) var contextControlRepository: any ContextControlRepository
@@ -275,7 +275,7 @@ final class DependencyContainer {
         messageRepository = DefaultMessageRepository(messageClient: client.message)
         transcriptionRepository = DefaultTranscriptionRepository(client: client.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: client.workspaceBrowser)
-        workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: client.workerLifecycle)
+        workerKernelRepository = DefaultWorkerKernelRepository(client: client.workerKernel)
         contextControlRepository = client.contextControl
 
         // Wire draft store into event store manager for cleanup on session delete
@@ -496,7 +496,7 @@ final class DependencyContainer {
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
         transcriptionRepository = DefaultTranscriptionRepository(client: newClient.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: newClient.workspaceBrowser)
-        workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: newClient.workerLifecycle)
+        workerKernelRepository = DefaultWorkerKernelRepository(client: newClient.workerKernel)
         contextControlRepository = newClient.contextControl
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1

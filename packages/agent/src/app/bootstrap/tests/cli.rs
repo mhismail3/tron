@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::cli::{AuthAction, Cli, Command};
+use crate::app::cli::{AuthAction, Cli, Command, StateAction};
 use clap::Parser;
 
 #[test]
@@ -128,6 +128,17 @@ fn cli_auth_without_action_fails() {
 fn cli_auth_unknown_action_fails() {
     let result = Cli::try_parse_from(["tron", "auth", "no-such-action"]);
     assert!(result.is_err(), "unknown auth action must error");
+}
+
+#[test]
+fn cli_parses_offline_worker_state_restore() {
+    let cli = Cli::parse_from(["tron", "state", "restore", "/tmp/snapshot"]);
+    match cli.command {
+        Some(Command::State {
+            action: StateAction::Restore { snapshot },
+        }) => assert_eq!(snapshot, std::path::PathBuf::from("/tmp/snapshot")),
+        other => panic!("expected worker state restore command, got {other:?}"),
+    }
 }
 
 #[test]

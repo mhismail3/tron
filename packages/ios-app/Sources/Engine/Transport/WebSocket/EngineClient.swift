@@ -136,9 +136,9 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 
-    /// Worker lifecycle and catalog overview client.
+    /// Profile-global worker-kernel operations.
     @ObservationIgnored
-    lazy var workerLifecycle: WorkerLifecycleClient = WorkerLifecycleClient(transport: self)
+    lazy var workerKernel: WorkerKernelClient = WorkerKernelClient(transport: self)
 
     /// Session context visibility and context-boundary client.
     @ObservationIgnored

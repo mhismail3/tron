@@ -74,38 +74,6 @@ pub(super) fn list_schema() -> Value {
     })
 }
 
-pub(super) fn wrapper_create_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["payload"],
-        "additionalProperties": false,
-        "properties": {
-            "resourceId": {"type": "string"},
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "lifecycle": {"type": "string"},
-            "policy": {"type": "object"},
-            "payload": {},
-            "locations": locations_schema()
-        }
-    })
-}
-
-pub(super) fn wrapper_update_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["resourceId", "payload"],
-        "additionalProperties": false,
-        "properties": {
-            "resourceId": {"type": "string"},
-            "expectedCurrentVersionId": expected_current_version_id_property(),
-            "payload": {},
-            "locations": locations_schema()
-        }
-    })
-}
-
 pub(super) fn wrapper_lifecycle_schema() -> Value {
     json!({
         "type": "object",
@@ -122,122 +90,6 @@ pub(super) fn expected_current_version_id_property() -> Value {
     json!({
         "type": "string",
         "description": "Optional CAS guard; use expectedCurrentVersionId, not versionId, with a prior result's version.versionId, resourceRefs[].versionId, or inspect.resource.currentVersionId."
-    })
-}
-
-pub(super) fn artifact_split_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["resourceId", "parts"],
-        "additionalProperties": false,
-        "properties": {
-            "resourceId": {"type": "string"},
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "lifecycle": {"type": "string"},
-            "policy": {"type": "object"},
-            "parts": {"type": "array", "items": {"type": "object"}, "minItems": 1}
-        }
-    })
-}
-
-pub(super) fn artifact_compose_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["inputResourceIds", "payload"],
-        "additionalProperties": false,
-        "properties": {
-            "inputResourceIds": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-            "resourceId": {"type": "string"},
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "lifecycle": {"type": "string"},
-            "policy": {"type": "object"},
-            "payload": {},
-            "locations": locations_schema()
-        }
-    })
-}
-
-pub(super) fn artifact_merge_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["targetResourceId", "sourceResourceIds", "payload"],
-        "additionalProperties": false,
-        "properties": {
-            "targetResourceId": {"type": "string"},
-            "sourceResourceIds": {"type": "array", "items": {"type": "string"}},
-            "expectedCurrentVersionId": expected_current_version_id_property(),
-            "lifecycle": {"type": "string"},
-            "payload": {},
-            "locations": locations_schema()
-        }
-    })
-}
-
-pub(super) fn artifact_search_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["query"],
-        "additionalProperties": false,
-        "properties": {
-            "query": {"type": "string"},
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "limit": {"type": "integer"}
-        }
-    })
-}
-
-pub(super) fn goal_complete_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["goalResourceId", "agentResultResourceId", "promotedResourceIds", "decision"],
-        "additionalProperties": false,
-        "properties": {
-            "goalResourceId": {"type": "string"},
-            "agentResultResourceId": {"type": "string"},
-            "promotedResourceIds": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-            "decision": {"type": "object"},
-            "metadata": {"type": "object"}
-        }
-    })
-}
-
-pub(super) fn attach_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["targetResourceId", "payload"],
-        "additionalProperties": false,
-        "properties": {
-            "resourceId": {"type": "string"},
-            "targetResourceId": {"type": "string"},
-            "relation": {"type": "string"},
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "lifecycle": {"type": "string"},
-            "policy": {"type": "object"},
-            "payload": {},
-            "locations": locations_schema(),
-            "metadata": {"type": "object"}
-        }
-    })
-}
-
-pub(super) fn attach_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["resource", "link", "resourceRefs"],
-        "additionalProperties": false,
-        "properties": {
-            "resource": {"type": "object"},
-            "link": {"type": "object"},
-            "resourceRefs": resource_refs_schema()
-        }
     })
 }
 
@@ -289,23 +141,6 @@ pub(super) fn materialized_file_update_schema() -> Value {
             "path": {"type": "string"},
             "content": {"type": "string"},
             "contentHash": {"type": "string"},
-            "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
-            "sessionId": {"type": "string"},
-            "workspaceId": {"type": "string"},
-            "policy": {"type": "object"}
-        }
-    })
-}
-
-pub(super) fn artifact_materialize_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["artifactResourceId", "path"],
-        "additionalProperties": false,
-        "properties": {
-            "artifactResourceId": {"type": "string"},
-            "resourceId": {"type": "string"},
-            "path": {"type": "string"},
             "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
             "sessionId": {"type": "string"},
             "workspaceId": {"type": "string"},

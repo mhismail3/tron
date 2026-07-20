@@ -3,7 +3,6 @@ use serde_json::Value;
 use crate::engine::{EngineResourceScope, Invocation};
 use crate::shared::server::errors::CapabilityError;
 
-pub(super) const LIST_LIMIT_DEFAULT: usize = 25;
 pub(super) const LIST_LIMIT_MAX: usize = 100;
 pub(super) const DEVICE_ID_MAX_BYTES: usize = 160;
 pub(super) const LABEL_MAX_BYTES: usize = 160;

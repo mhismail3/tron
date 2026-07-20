@@ -1,10 +1,10 @@
-//! Server-owned device registration and redacted inspection.
+//! Server-owned private device registration.
 //!
 //! Trusted engine clients register iOS APNs tokens through the internal
 //! `device::register` transport function. Durable `device_registration`
 //! resources retain policy and a token hash; raw tokens live only in the
-//! private [`crate::platform::apns`] store. Models can list and inspect the
-//! redacted registration records, but cannot register or unregister devices.
+//! private [`crate::platform::apns`] store. Registration is authenticated
+//! transport infrastructure and is never model-visible.
 //!
 //! ## Submodules
 //!
@@ -12,21 +12,20 @@
 //! |--------|---------|
 //! | `contract` | Internal registration contracts, stream topic, and authority scopes |
 //! | `handlers` | Trusted transport bindings for registration and unregistration |
-//! | `projection` | Bounded redacted device list/inspect projections |
-//! | `service` | Registration lifecycle plus list/inspect behavior |
-//! | `support` | Record construction, authority guards, refs, and redaction helpers |
+//! | `service` | Registration lifecycle behavior |
+//! | `support` | Record construction, transport guards, refs, and redaction helpers |
 //! | `validation` | Payload parsing, APNs environment/token, and bounds checks |
 //! | `tests` | Token redaction, authority, environment, and scope regressions |
 //!
 //! # INVARIANT: device tokens are never provider-visible
 //!
 //! Raw tokens may cross only the trusted engine-client registration boundary
-//! and the private APNs transport. Resources, projections, lifecycle events,
+//! and the private token store. Resources, lifecycle events,
 //! traces, and logs never return raw tokens, token fragments, or full token
-//! hashes. Registration and unregistration are deliberately not model-facing
-//! `capability::execute` operations. Device notification policy consumes the
-//! canonical event-family taxonomy owned by the notifications domain so the
-//! default send family is always eligible under the default device policy.
+//! hashes. Registration and unregistration are transport-only and never enter
+//! the model-facing direct-tool set. The fixed kernel stores no notification
+//! inbox and performs no APNs delivery; higher-level delivery belongs in a
+//! persistent worker.
 //! Registration identity includes the app bundle and APNs environment so
 //! side-by-side app variants cannot overwrite one another. Registering a token
 //! route durably retires older resources for the same bundle and environment,
@@ -36,7 +35,6 @@ use crate::domains::registration::worker::{DomainRegistrationContext, DomainWork
 
 pub(crate) mod contract;
 mod handlers;
-mod projection;
 pub(crate) mod service;
 mod support;
 mod validation;

@@ -117,42 +117,6 @@ pub(super) fn create_materialized_file(
     }
 }
 
-pub(super) fn artifact_materialize_response(
-    store: &mut super::ResourceStoreBackend,
-    invocation: &Invocation,
-) -> Result<Value> {
-    let artifact_id = required_string_owned(&invocation.payload, "artifactResourceId")?;
-    let path = required_str(&invocation.payload, "path")?;
-    let inspection = store
-        .inspect(&artifact_id)?
-        .ok_or_else(|| EngineError::NotFound {
-            kind: "resource",
-            id: artifact_id.clone(),
-        })?;
-    ensure_resource_kind(&inspection, "artifact")?;
-    let artifact_payload = current_payload(&inspection)?;
-    let content = artifact_payload
-        .get("body")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .unwrap_or_else(|| artifact_payload.to_string());
-    let payload = json!({
-        "path": path,
-        "content": content,
-        "resourceId": optional_string(invocation.payload.get("resourceId"))?,
-    });
-    let mut child_invocation = invocation.clone();
-    child_invocation.payload = payload;
-    let (materialized, version) = create_materialized_file(store, &child_invocation, true)?;
-    let resource_ref = resource_ref_from_version(&version, "materialized_file", "materialized");
-    Ok(json!({
-        "artifact": inspection.resource,
-        "materializedFile": materialized,
-        "version": version,
-        "resourceRefs": [resource_ref],
-    }))
-}
-
 pub(super) fn materialized_file_read_response(
     store: &mut super::ResourceStoreBackend,
     invocation: &Invocation,

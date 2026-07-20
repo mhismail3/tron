@@ -10,8 +10,8 @@ struct SessionSidebar: View {
     @State private var showArchiveConfirmation = false
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
-    @State private var engineCockpit = AgentCockpitViewModel()
-    @State private var showEngineCockpit = false
+    @State private var workerConsole = WorkerConsoleViewModel()
+    @State private var showWorkerConsole = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     let onNewSession: () -> Void
@@ -30,8 +30,8 @@ struct SessionSidebar: View {
         selectedSessionId ?? eventStoreManager.sortedSessions.first?.id
     }
 
-    private var cockpitRefreshKey: EngineCockpitDashboardRefreshKey {
-        EngineCockpitDashboardRefreshKey(
+    private var workerConsoleRefreshKey: WorkerConsoleRefreshKey {
+        WorkerConsoleRefreshKey(
             sessionId: dashboardSessionId,
             isConnected: dependencies.connectionRepository.connectionState.isConnected
         )
@@ -41,11 +41,8 @@ struct SessionSidebar: View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
                 Section {
-                    EngineCockpitDashboardBand(
-                        overview: engineCockpit.overview,
-                        isRefreshing: engineCockpit.isRefreshing
-                    ) {
-                        showEngineCockpit = true
+                    WorkerConsoleDashboardBand(viewModel: workerConsole) {
+                        showWorkerConsole = true
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -171,15 +168,13 @@ struct SessionSidebar: View {
             sessionExpansion.reconcile(groupCounts: groupCounts)
             reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
-        .task(id: cockpitRefreshKey) {
-            await refreshCockpit()
+        .task(id: workerConsoleRefreshKey) {
+            await refreshWorkerConsole()
         }
-        .sheet(isPresented: $showEngineCockpit) {
-            AgentCockpitSheet(
-                viewModel: engineCockpit,
-                repository: dependencies.workerLifecycleRepository,
-                sessionId: dashboardSessionId,
-                workspaceId: nil,
+        .sheet(isPresented: $showWorkerConsole) {
+            WorkerConsoleSheet(
+                viewModel: workerConsole,
+                repository: dependencies.workerKernelRepository,
                 connectionState: dependencies.connectionRepository.connectionState
             )
         }
@@ -260,11 +255,9 @@ struct SessionSidebar: View {
         }
     }
 
-    private func refreshCockpit() async {
-        await engineCockpit.refresh(
-            repository: dependencies.workerLifecycleRepository,
-            sessionId: dashboardSessionId,
-            workspaceId: nil,
+    private func refreshWorkerConsole() async {
+        await workerConsole.refresh(
+            repository: dependencies.workerKernelRepository,
             connectionState: dependencies.connectionRepository.connectionState
         )
     }
@@ -314,7 +307,7 @@ struct SessionSidebar: View {
     }
 }
 
-private struct EngineCockpitDashboardRefreshKey: Equatable {
+private struct WorkerConsoleRefreshKey: Equatable {
     let sessionId: String?
     let isConnected: Bool
 }

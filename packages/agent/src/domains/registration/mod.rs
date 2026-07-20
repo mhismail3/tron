@@ -1,26 +1,14 @@
 //! Domain worker registration.
 //!
-//! This module registers the in-process workers for the primitive engine.
-//! Product surfaces enter startup through source-backed domain contracts and
-//! inventory lineage.
-//!
-//! `capability` owns the only model-facing tool, `capability::execute`, and
-//! that tool performs direct primitive operations rather than catalog routing.
-//! The registration entrypoint is crate-private: transport setup is the
-//! server-facing facade, while this module owns the concrete domain-worker
-//! wiring, including the single jobs runtime state shared by the jobs worker
-//! and capability adapters. `catalog` owns shared capability contract types
-//! and stable registration identities without maintaining a second domain
-//! enumeration.
-//! `module_registry` owns the manifest resource contract, while
-//! `module_manifests` owns the ordered first-party payload composition.
-//! Registration installs both before any domain worker or function; the engine
-//! owns only generic type registration and version-preserving reconciliation.
+//! This module registers the small trusted-local worker-first kernel and the
+//! product infrastructure still needed by authenticated clients and sessions.
+//! Persistent behavior is registered dynamically from filesystem-owned worker
+//! bundles; there is no module manifest, proposal, binding, scheduler, legacy
+//! worker-lifecycle, or `capability::execute` registration plane.
 //! The complete production composition validates function ownership,
 //! canonical identity uniqueness, and stream-topic boundaries before either
-//! registration path mutates the engine catalog. Jobs and worker-lifecycle
-//! activation is returned as a one-shot token so transport setup starts those
-//! lifecycles only after domain and trigger registration both succeed.
+//! registration path mutates the engine catalog. The worker runtime returns one
+//! activation token so transport setup starts it only after registration.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -31,38 +19,48 @@
 pub(crate) mod bindings;
 pub(crate) mod catalog;
 pub(crate) mod contract;
-mod module_manifests;
 pub(crate) mod worker;
 
 use std::collections::BTreeSet;
 
-use crate::engine::{EngineError, EngineHostHandle, Result as EngineResult};
+use crate::engine::{EngineError, Result as EngineResult};
 use crate::shared::server::context::ServerRuntimeContext;
 
 use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, approval, auth, blob, capability, capability_binding, catalog_discovery,
-    context_control, device, filesystem, git, import_history, import_preview, jobs, logs, media,
-    memory, message, model, module_activity, module_authoring, module_dependencies, module_install,
-    module_lifecycle, module_registry, module_runtime, module_validation, notifications,
-    program_execution, prompt_artifacts, repository_tree, scheduler, session, settings, subagents,
-    system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
+    agent, auth, blob, context_control, device, filesystem, logs, memory, message, model, session,
+    settings, system, transcription, worker_kernel,
 };
 
 #[must_use = "activate after transport-trigger registration"]
 pub(crate) struct DomainLifecycleActivation {
-    jobs: jobs::Deps,
-    worker_lifecycle: worker_lifecycle::Deps,
+    worker_kernel: std::sync::Arc<worker_kernel::WorkerRuntime>,
+    autonomous_workers: bool,
+    shutdown_coordinator:
+        Option<std::sync::Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
 }
 
 impl DomainLifecycleActivation {
     pub(crate) fn activate(self) {
-        let shutdown_coordinator = self.jobs.shutdown_coordinator.clone();
-        self.jobs.activate_after_registration();
-        self.worker_lifecycle
-            .activate_after_registration(shutdown_coordinator);
+        let shutdown_coordinator = self.shutdown_coordinator;
+        if self.autonomous_workers {
+            let runtime = self.worker_kernel;
+            let cancellation = shutdown_coordinator
+                .as_ref()
+                .map_or_else(tokio_util::sync::CancellationToken::new, |shutdown| {
+                    shutdown.token()
+                });
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let task = handle.spawn(async move {
+                    runtime.activate(cancellation).await;
+                });
+                if let Some(shutdown) = shutdown_coordinator {
+                    shutdown.register_task(task);
+                }
+            }
+        }
     }
 }
 
@@ -80,7 +78,6 @@ pub(crate) fn register_domain_workers_for_context(
         activation,
     } = domain_worker_modules(ctx)?;
     let handle = &ctx.engine_host;
-    install_module_manifest_resources_for_setup(handle)?;
     for module in modules {
         handle.register_worker_for_setup(module.worker, false)?;
         for function in module.functions {
@@ -104,7 +101,6 @@ pub(crate) async fn register_domain_workers_for_runtime_context(
         activation,
     } = domain_worker_modules(ctx)?;
     let handle = &ctx.engine_host;
-    install_module_manifest_resources(handle).await?;
     for module in modules {
         handle.register_worker(module.worker, false).await?;
         for function in module.functions {
@@ -116,72 +112,23 @@ pub(crate) async fn register_domain_workers_for_runtime_context(
     Ok(activation)
 }
 
-#[cfg(test)]
-pub(in crate::domains) fn install_module_manifests_for_test(
-    handle: &EngineHostHandle,
-) -> EngineResult<()> {
-    install_module_manifest_resources_for_setup(handle)
-}
-
-fn install_module_manifest_resources_for_setup(handle: &EngineHostHandle) -> EngineResult<()> {
-    handle.register_resource_type_for_setup(module_registry::resource_type_definition())?;
-    handle
-        .reconcile_source_resources_for_setup(module_manifests::builtin_module_manifest_resources())
-}
-
-async fn install_module_manifest_resources(handle: &EngineHostHandle) -> EngineResult<()> {
-    handle
-        .register_resource_type(module_registry::resource_type_definition())
-        .await?;
-    handle
-        .reconcile_source_resources(module_manifests::builtin_module_manifest_resources())
-        .await
-}
-
 fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition> {
     let deps = DomainRegistrationContext::from_context(ctx);
-    let jobs_runtime = jobs::RuntimeState::new();
-    let jobs_deps = jobs::Deps::from_engine(&deps, jobs_runtime.clone());
-    let worker_lifecycle_deps = worker_lifecycle::Deps::from_engine(&deps);
+    let worker_kernel_registration = worker_kernel::registration(&deps)?;
+    let worker_kernel_runtime = worker_kernel_registration.runtime.clone();
+    let autonomous_workers = worker_kernel_registration.autonomous;
     let mut modules = vec![
         system::worker_module(&deps)?,
-        capability::worker_module(&deps, jobs_runtime)?,
-        catalog_discovery::worker_module(&deps)?,
-        approval::worker_module(&deps)?,
+        worker_kernel_registration.module,
         device::worker_module(&deps)?,
-        notifications::worker_module(&deps)?,
         context_control::worker_module(&deps)?,
-        media::worker_module(&deps)?,
-        import_history::worker_module(&deps)?,
-        repository_tree::worker_module(&deps)?,
-        import_preview::worker_module(&deps)?,
-        program_execution::worker_module(&deps)?,
-        prompt_artifacts::worker_module(&deps)?,
-        update_diagnostics::worker_module(&deps)?,
-        module_registry::worker_module(&deps)?,
-        module_authoring::worker_module(&deps)?,
-        module_validation::worker_module(&deps)?,
-        module_install::worker_module(&deps)?,
-        module_dependencies::worker_module(&deps)?,
-        capability_binding::worker_module(&deps)?,
-        module_lifecycle::worker_module(&deps)?,
-        module_runtime::worker_module(&deps)?,
-        module_activity::worker_module(&deps)?,
-        web_research::worker_module(&deps)?,
         memory::worker_module(&deps)?,
-        jobs::worker_module(jobs_deps.clone())?,
-        git::worker_module(&deps)?,
-        web::worker_module(&deps)?,
-        tool_sources::worker_module(&deps)?,
-        subagents::worker_module(&deps)?,
-        scheduler::worker_module(&deps)?,
         filesystem::worker_module(&deps)?,
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
         settings::worker_module(&deps)?,
         transcription::worker_module(&deps)?,
         auth::worker_module(&deps)?,
-        worker_lifecycle::worker_module(worker_lifecycle_deps.clone())?,
         agent::worker_module(&deps)?,
         logs::worker_module(&deps)?,
         session::worker_module(&deps)?,
@@ -194,8 +141,9 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
     Ok(DomainComposition {
         modules,
         activation: DomainLifecycleActivation {
-            jobs: jobs_deps,
-            worker_lifecycle: worker_lifecycle_deps,
+            worker_kernel: worker_kernel_runtime,
+            autonomous_workers,
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         },
     })
 }
@@ -307,8 +255,7 @@ mod tests {
     use crate::engine::{
         ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass,
         FunctionDefinition, FunctionId, FunctionQuery, InProcessFunctionHandler, Invocation,
-        RUNTIME_METADATA_WORKING_DIRECTORY, TraceId, VisibilityScope, WorkerDefinition, WorkerId,
-        WorkerKind,
+        TraceId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
     };
 
     #[derive(Debug)]
@@ -415,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn primitive_teardown_startup_catalog_excludes_deleted_product_domains() {
-        let ctx = crate::shared::server::test_support::make_test_context();
+        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
         let functions = ctx
             .engine_host
             .discover(&FunctionQuery {
@@ -429,13 +376,17 @@ mod tests {
             .map(|function| function.id.as_str().to_owned())
             .collect::<Vec<_>>();
 
-        assert!(
-            function_ids
-                .iter()
-                .any(|function_id| function_id == "capability::execute"),
-            "primitive execute must stay registered: {function_ids:?}"
-        );
         for expected in [
+            "worker_kernel::upsert",
+            "worker_kernel::discover",
+            "worker_kernel::list",
+            "worker_kernel::inspect",
+            "worker_kernel::invoke",
+            "worker_kernel::disable",
+            "worker_kernel::rollback",
+            "worker_kernel::stop_all",
+            "worker_kernel::core_proposal_create",
+            "worker_kernel::core_proposal_apply",
             "filesystem::apply_patch",
             "filesystem::diff",
             "filesystem::edit",
@@ -445,10 +396,6 @@ mod tests {
             "filesystem::read",
             "filesystem::search_text",
             "filesystem::write",
-            "git::diff",
-            "git::stage",
-            "git::status",
-            "git::unstage",
             "memory::configure_policy",
             "memory::edit",
             "memory::inspect",
@@ -464,7 +411,22 @@ mod tests {
                 function_ids
                     .iter()
                     .any(|function_id| function_id == expected),
-                "approved restored function missing from startup catalog: {expected}"
+                "worker-first fixed function missing from startup catalog: {expected}"
+            );
+        }
+        assert!(!function_ids.iter().any(|id| id == "capability::execute"));
+        for removed in [
+            "module_authoring::",
+            "module_install::",
+            "module_runtime::",
+            "capability_binding::",
+            "scheduler::",
+            "procedural::",
+            "worker_lifecycle::",
+        ] {
+            assert!(
+                !function_ids.iter().any(|id| id.starts_with(removed)),
+                "removed plane {removed} remains registered: {function_ids:?}"
             );
         }
         for forbidden_prefix in forbidden_startup_prefixes() {
@@ -478,83 +440,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn primitive_execute_observes_without_registry_routing() {
-        let ctx = crate::shared::server::test_support::make_test_context();
-        let tempdir = tempfile::tempdir().expect("working directory");
-        let actor_id = ActorId::new("agent:primitive-test").expect("actor id");
-        let grant = ctx
-            .engine_host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("grant::derive").expect("function id"),
-                json!({
-                    "parentGrantId": "agent-capability-runtime",
-                    "subjectActorId": actor_id.as_str(),
-                    "allowedCapabilities": ["capability::execute"],
-                    "allowedNamespaces": ["__no_namespace_authority__"],
-                    "allowedAuthorityScopes": ["capability.execute"],
-                    "allowedResourceKinds": ["agent_state"],
-                    "resourceSelectors": ["kind:agent_state"],
-                    "fileRoots": [tempdir.path().display().to_string()],
-                    "networkPolicy": "none",
-                    "maxRisk": "medium",
-                    "budget": {"remainingInvocations": 1},
-                    "canDelegate": false,
-                    "provenance": {"source": "registration-test", "operation": "observe"}
-                }),
-                CausalContext::new(
-                    ActorId::new("system:registration-test").expect("actor id"),
-                    ActorKind::System,
-                    AuthorityGrantId::new("grant").expect("grant id"),
-                    TraceId::generate(),
-                )
-                .with_scope("grant.write")
-                .with_session_id("primitive-test")
-                .with_idempotency_key("primitive-execute-observe-grant"),
-            ))
-            .await;
-        assert_eq!(grant.error, None, "derive grant failed: {:?}", grant.error);
-        let grant_id = AuthorityGrantId::new(
-            grant.value.expect("grant value")["grant"]["grantId"]
-                .as_str()
-                .expect("grant id"),
-        )
-        .expect("grant id");
+    async fn trusted_local_kernel_invocation_creates_no_grant() {
+        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
         let invocation = Invocation::new_sync(
-            FunctionId::new("capability::execute").expect("function id"),
-            json!({
-                "operation": "observe",
-                "input": "hello primitive loop"
-            }),
-            CausalContext::new(actor_id, ActorKind::Agent, grant_id, TraceId::generate())
-                .with_scope("capability.execute")
-                .with_session_id("primitive-test")
-                .with_runtime_metadata(
-                    RUNTIME_METADATA_WORKING_DIRECTORY,
-                    tempdir.path().display().to_string(),
-                )
-                .with_idempotency_key("primitive-execute-observe"),
+            FunctionId::new("worker_kernel::list").expect("function id"),
+            json!({}),
+            CausalContext::trusted_local(
+                ActorId::new("agent:worker-first-test").expect("actor id"),
+                ActorKind::Agent,
+                TraceId::generate(),
+            )
+            .with_session_id("worker-first-test"),
         );
+        let observed_grant_id = invocation.causal_context.authority_grant_id.clone();
+
         let result = ctx.engine_host.invoke(invocation).await;
+
+        assert_eq!(result.error, None, "direct list failed: {:?}", result.error);
+        assert!(result.value.expect("list value")["workers"].is_array());
         assert!(
-            result.error.is_none(),
-            "primitive execute returned engine error: {:?}",
-            result.error
-        );
-        let value = result.value.expect("capability result value");
-        assert_eq!(value["isError"], false, "{value}");
-        assert_eq!(value["details"]["primitiveOperation"], "observe", "{value}");
-        assert!(
-            value["content"][0]["text"]
-                .as_str()
-                .is_some_and(|text| text.contains("hello primitive loop")),
-            "{value}"
-        );
-        assert!(
-            value["details"].get("bindingDecision").is_none(),
-            "primitive execute must not route through capability registry: {value}"
+            ctx.engine_host
+                .inspect_authority_grant(&observed_grant_id)
+                .await
+                .expect("inspect local observation")
+                .is_none(),
+            "trusted-local invocation must not synthesize a grant"
         );
     }
-
     fn system_actor() -> ActorContext {
         ActorContext::new(
             ActorId::new("system:test").expect("actor id"),

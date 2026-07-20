@@ -3,17 +3,16 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::{ActorKind, EngineResource, PublishStreamEvent, WorkerId};
 use crate::engine::{
-    EngineGrant, EngineResourceInspection, EngineResourceScope, EngineResourceVersion, Invocation,
+    EngineResourceInspection, EngineResourceScope, EngineResourceVersion, Invocation,
 };
 use crate::shared::server::errors::CapabilityError;
 
 use super::contract::{
-    DEVICE_LIFECYCLE_TOPIC, RESOURCE_WRITE_SCOPE, SCHEMA_VERSION, WORKER, WRITE_SCOPE,
+    DEVICE_LIFECYCLE_TOPIC, EVENT_FAMILIES, RESOURCE_WRITE_SCOPE, SCHEMA_VERSION, WORKER,
+    WRITE_SCOPE,
 };
-use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE};
 use super::validation::*;
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
-use crate::domains::notifications::contract::EVENT_FAMILIES;
 
 pub(super) struct RegistrationRecordInput<'a> {
     pub(super) state: &'a str,
@@ -146,86 +145,6 @@ pub(super) async fn ensure_internal_write_authority(
     Ok(())
 }
 
-pub(super) async fn inspect_read_grant(
-    deps: &Deps,
-    invocation: &Invocation,
-    operation: &str,
-) -> Result<EngineGrant, CapabilityError> {
-    let grant = deps
-        .engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-        .await
-        .map_err(engine_error)?
-        .ok_or_else(|| invalid(format!("{operation} authority grant was not found")))?;
-    require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
-    require_explicit_grant_item(
-        &grant.allowed_authority_scopes,
-        RESOURCE_READ_SCOPE,
-        operation,
-    )?;
-    if grant.network_policy != "none" {
-        return Err(invalid(format!("{operation} requires networkPolicy none")));
-    }
-    Ok(grant)
-}
-
-pub(super) fn require_kind_selector(
-    grant: &EngineGrant,
-    operation: &str,
-) -> Result<(), CapabilityError> {
-    require_explicit_grant_item(
-        &grant.allowed_resource_kinds,
-        DEVICE_REGISTRATION_KIND,
-        operation,
-    )?;
-    if let Some(selector) = grant
-        .resource_selectors
-        .iter()
-        .find(|selector| is_broad_selector(selector))
-    {
-        return Err(invalid(format!(
-            "{operation} rejects broad resource selector {selector}"
-        )));
-    }
-    let expected = format!("kind:{DEVICE_REGISTRATION_KIND}");
-    if !grant
-        .resource_selectors
-        .iter()
-        .any(|selector| selector == &expected)
-    {
-        return Err(invalid(format!(
-            "{operation} requires explicit {expected} selector"
-        )));
-    }
-    Ok(())
-}
-
-fn require_explicit_grant_item(
-    values: &[String],
-    required: &str,
-    operation: &str,
-) -> Result<(), CapabilityError> {
-    if values.iter().any(|value| value == "*") {
-        return Err(invalid(format!("{operation} rejects wildcard grants")));
-    }
-    if !values.iter().any(|value| value == required) {
-        return Err(invalid(format!(
-            "{operation} requires explicit {required} grant"
-        )));
-    }
-    Ok(())
-}
-
-fn is_broad_selector(selector: &str) -> bool {
-    let trimmed = selector.trim();
-    trimmed == "*"
-        || trimmed == "kind:*"
-        || trimmed == "resource:*"
-        || trimmed == "kind:"
-        || trimmed == "resource:"
-        || trimmed.ends_with(":*")
-}
-
 pub(super) fn ensure_device_registration(
     inspection: &EngineResourceInspection,
     operation: &str,
@@ -319,14 +238,14 @@ pub(super) fn resource_policy() -> Value {
         "authority": WRITE_SCOPE,
         "retention": "explicit",
         "tokenCustody": "private_transport_store_with_hash_only_resource_evidence",
-        "liveApnsTransport": "runtime_configured"
+        "liveApnsTransport": "not_in_fixed_kernel"
     })
 }
 
 fn authority_record(invocation: &Invocation) -> Value {
     json!({
         "grantId": invocation.causal_context.authority_grant_id.as_str(),
-        "requiredScopes": [WRITE_SCOPE, READ_SCOPE, RESOURCE_WRITE_SCOPE, RESOURCE_READ_SCOPE],
+        "requiredScopes": [WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
         "resourceKind": DEVICE_REGISTRATION_KIND,
         "wildcardGrantsAllowed": false
     })

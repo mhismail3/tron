@@ -377,8 +377,8 @@ async fn invocation_authorization_uses_grant_not_raw_scope_strings() {
             json!({
                 "grantId": "artifact-read-only",
                 "parentGrantId": "grant",
-                "allowedCapabilities": ["artifact::inspect"],
-                "allowedNamespaces": ["artifact"],
+                "allowedCapabilities": ["resource::inspect"],
+                "allowedNamespaces": ["resource"],
                 "allowedAuthorityScopes": ["resource.read"],
                 "allowedResourceKinds": ["artifact"],
                 "resourceSelectors": ["kind:artifact"],
@@ -400,8 +400,9 @@ async fn invocation_authorization_uses_grant_not_raw_scope_strings() {
 
     let result = handle
         .invoke(host_invocation(
-            "artifact::create",
+            "resource::create",
             json!({
+                "kind": "materialized_file",
                 "payload": {"title": "draft", "body": "body"}
             }),
             CausalContext::new(
@@ -684,8 +685,8 @@ async fn revoked_grants_fail_before_handler_execution() {
             json!({
                 "grantId": "revoked-artifact-read",
                 "parentGrantId": "grant",
-                "allowedCapabilities": ["artifact::inspect"],
-                "allowedNamespaces": ["artifact"],
+                "allowedCapabilities": ["resource::inspect"],
+                "allowedNamespaces": ["resource"],
                 "allowedAuthorityScopes": ["resource.read"],
                 "allowedResourceKinds": ["artifact"],
                 "resourceSelectors": ["*"],
@@ -723,7 +724,7 @@ async fn revoked_grants_fail_before_handler_execution() {
 
     let denied = handle
         .invoke(host_invocation(
-            "artifact::inspect",
+            "resource::inspect",
             json!({"resourceId": "missing-artifact"}),
             CausalContext::new(
                 actor("agent"),
@@ -751,8 +752,8 @@ async fn expired_grants_fail_before_handler_execution() {
             json!({
                 "grantId": "expiring-artifact-read",
                 "parentGrantId": "grant",
-                "allowedCapabilities": ["artifact::inspect"],
-                "allowedNamespaces": ["artifact"],
+                "allowedCapabilities": ["resource::inspect"],
+                "allowedNamespaces": ["resource"],
                 "allowedAuthorityScopes": ["resource.read"],
                 "allowedResourceKinds": ["artifact"],
                 "resourceSelectors": ["*"],
@@ -776,7 +777,7 @@ async fn expired_grants_fail_before_handler_execution() {
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     let denied = handle
         .invoke(host_invocation(
-            "artifact::inspect",
+            "resource::inspect",
             json!({"resourceId": "missing-artifact"}),
             CausalContext::new(
                 actor("agent"),
@@ -802,10 +803,10 @@ async fn grant_resource_selectors_block_unauthorized_resource_mutations() {
             json!({
                 "grantId": "one-artifact-writer",
                 "parentGrantId": "grant",
-                "allowedCapabilities": ["artifact::create"],
-                "allowedNamespaces": ["artifact"],
+                "allowedCapabilities": ["resource::create"],
+                "allowedNamespaces": ["resource"],
                 "allowedAuthorityScopes": ["resource.write"],
-                "allowedResourceKinds": ["artifact"],
+                "allowedResourceKinds": ["materialized_file"],
                 "resourceSelectors": ["resource:allowed-artifact"],
                 "fileRoots": ["*"],
                 "networkPolicy": "none",
@@ -825,9 +826,10 @@ async fn grant_resource_selectors_block_unauthorized_resource_mutations() {
 
     let denied = handle
         .invoke(host_invocation(
-            "artifact::create",
+            "resource::create",
             json!({
                 "resourceId": "denied-artifact",
+                "kind": "materialized_file",
                 "payload": {"title": "draft", "body": "body"}
             }),
             CausalContext::new(

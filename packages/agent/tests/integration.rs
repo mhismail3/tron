@@ -55,6 +55,24 @@ async fn boot_server() -> TestServer {
 }
 
 async fn boot_server_with_config(config: ServerConfig) -> TestServer {
+    boot_server_with_config_and_autonomy(config, false).await
+}
+
+async fn boot_server_with_autonomous_workers() -> TestServer {
+    boot_server_with_config_and_autonomy(
+        ServerConfig {
+            host: "127.0.0.1".to_owned(),
+            ..ServerConfig::default()
+        },
+        true,
+    )
+    .await
+}
+
+async fn boot_server_with_config_and_autonomy(
+    config: ServerConfig,
+    autonomous_workers: bool,
+) -> TestServer {
     let temp = tempfile::tempdir().unwrap();
     let home = unique_home(temp.path());
     let db_path = temp.path().join("tron.sqlite");
@@ -74,6 +92,11 @@ async fn boot_server_with_config(config: ServerConfig) -> TestServer {
     let auth_path = home
         .join(tron::shared::foundation::paths::dirs::PROFILES)
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
+    if autonomous_workers {
+        tron::domains::settings::profile::SettingsStore::new(&settings_path)
+            .update(json!({"autonomousWorkers": true}))
+            .expect("enable autonomous workers for worker-kernel integration test");
+    }
     let runtime_context = ServerRuntimeContext {
         orchestrator: Arc::clone(&orchestrator),
         session_manager,
@@ -824,8 +847,8 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
 }
 
 #[tokio::test]
-async fn session_create_reconstruct_and_public_execute_fails_closed() {
-    let runtime = boot_server().await;
+async fn session_create_reconstruct_and_worker_kernel_list_is_direct() {
+    let runtime = boot_server_with_autonomous_workers().await;
     let mut ws = connect(&runtime.url, &runtime.auth_path).await;
     let working_directory = runtime._temp.path().join("workspace");
     std::fs::create_dir_all(&working_directory).unwrap();
@@ -857,35 +880,23 @@ async fn session_create_reconstruct_and_public_execute_fails_closed() {
     let events = reconstructed["events"].as_array().unwrap();
     assert!(events.iter().any(|event| event["type"] == "session.start"));
 
-    let rejected = invoke_with_context(
-        &mut ws,
-        "execute-observe",
-        "capability::execute",
-        json!({
-            "operation": "observe",
-            "input": "primitive integration observation"
-        }),
-        Some(json!({
-            "sessionId": session_id,
-        })),
-    )
-    .await;
-    assert_eq!(
-        rejected["ok"], true,
-        "engine invoke wrapper failed: {rejected}"
+    let workers = unwrap_invoke_value(
+        invoke_with_context(
+            &mut ws,
+            "worker-list",
+            "worker_kernel::list",
+            json!({"includeRetired": false}),
+            Some(json!({
+                "sessionId": session_id,
+            })),
+        )
+        .await,
     );
-    let child = rejected.pointer("/result/child").unwrap_or(&Value::Null);
-    let child_error = child
-        .pointer("/error/details/message")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     assert!(
-        child["value"].is_null()
-            && child["error"]["kind"] == "policy_violation"
-            && (child_error.contains("wildcard authority scopes")
-                || child_error.contains("trusted agent or system runtime context")),
-        "public capability::execute must fail closed, got: {rejected}"
+        workers["workers"].is_array(),
+        "worker list missing: {workers}"
     );
+    assert_eq!(workers["stopAll"], false);
 
     runtime.server.shutdown().shutdown();
 }

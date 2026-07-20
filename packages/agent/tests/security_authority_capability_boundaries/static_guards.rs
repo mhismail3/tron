@@ -230,177 +230,82 @@ fn sacb_delegated_engine_invoke_consumes_parent_budget_before_child_prepare() {
 }
 
 #[test]
-fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
-    let executor = [
-        read_repo_file(
-            "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
-        ),
-        read_repo_file(
-            "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
-        ),
-    ]
-    .join("\n");
+fn sacb_trusted_local_workers_bypass_call_grants_while_remote_auth_stays_explicit() {
+    let invocation = read_repo_file("packages/agent/src/engine/catalog/registry/invocation.rs");
     for required in [
-        "derive_capability_runtime_grant",
-        "rejected_operation_authority",
-        "FunctionId::new(\"grant::derive\")",
-        "\"parentGrantId\": \"agent-capability-runtime\"",
-        "target.function_id.clone()",
-        "target_function_id.as_str().to_owned()",
-        "\"allowedCapabilities\": resolved.allowed_capabilities",
-        "\"allowedNamespaces\": [\"__no_namespace_authority__\"]",
-        "authority_policy(operation)",
-        "operation_risk(operation)",
-        "policy.network_policy().as_str()",
-        "field.ends_with(\"ResourceId\")",
-        "field.ends_with(\"ResourceRef\")",
-        "push_resource_selector",
-        "normalize_working_directory(working_directory)",
-        "with_agent_working_directory_metadata(",
-        "RUNTIME_METADATA_WORKING_DIRECTORY",
-        "allowed_resource_kinds: Vec::new()",
-        "resource_selectors: Vec::new()",
+        "if invocation.causal_context.is_trusted_local()",
+        "return Ok(())",
+        ".authorize_invocation(function, invocation)",
+        ".consume_invocation_budget(ConsumeGrantInvocationBudget",
+    ] {
+        assert!(
+            invocation.contains(required),
+            "invocation boundary missing trusted-local/remote split: {required}"
+        );
+    }
+
+    let authorization =
+        read_repo_file("packages/agent/src/engine/authority/grants/authorization.rs");
+    for forbidden in [
+        "capability::execute",
+        "operation claim",
+        "ensure_capability_grant_is_explicit",
+        "capability_working_directory",
+    ] {
+        assert!(
+            !authorization.contains(forbidden),
+            "remote authorization must remain generic, found obsolete special case: {forbidden}"
+        );
+    }
+    for required in [
+        "authorize_with_grant",
+        "ensure_resource_authority",
+        "ensure_file_roots",
+    ] {
+        assert!(
+            authorization.contains(required),
+            "authenticated non-local calls still require generic grant enforcement: {required}"
+        );
+    }
+
+    let executor = read_repo_file(
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
+    );
+    for required in [
+        "CausalContext::trusted_local(actor_id, ActorKind::Agent",
+        "direct_tool_idempotency_key",
+        "RUNTIME_METADATA_PROVIDER_INVOCATION_ID",
     ] {
         assert!(
             executor.contains(required),
-            "agent capability executor missing least-privilege grant text: {required}"
+            "local model-tool executor missing trusted-local evidence: {required}"
+        );
+    }
+    for forbidden in ["grant::derive", "derive_capability_runtime_grant"] {
+        assert!(
+            !executor.contains(forbidden),
+            "local model-tool executor must not mint per-call grants: {forbidden}"
         );
     }
 
-    let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
-    let operations_context =
-        read_repo_file("packages/agent/src/domains/capability/operations/context.rs");
-    let operation_guards = format!("{operations}\n{operations_context}");
+    let workers = read_repo_file("packages/agent/src/domains/worker_kernel/runtime.rs");
     for required in [
-        "validate_execute_authority(invocation, &attempted_operation, &deps.engine_host).await?",
-        "validate_execute_authority(invocation, &operation, &deps.engine_host).await",
+        "CausalContext::trusted_local(",
+        "ActorKind::Worker",
+        "self.store.mark_failed(&queued.worker_id, &redacted)",
+        "self.unregister_dynamic_tool(&queued.worker_id).await",
     ] {
         assert!(
-            operations.contains(required),
-            "capability execute dispatch root must validate durable operation authority before dispatch: {required}"
-        );
-    }
-    let supported_authority = operations
-        .find("validate_execute_authority(invocation, &operation, &deps.engine_host).await?")
-        .expect("supported execute authority gate");
-    let trace_start = operations
-        .find("started_trace_record(invocation, deps, &operation, &started_at)?")
-        .expect("supported execute trace start");
-    assert!(
-        supported_authority < trace_start,
-        "supported execute authority must be verified before trace mutation"
-    );
-    let unsupported_identity = operations
-        .find(
-            "validate_execute_identity(invocation, &attempted_operation, &deps.engine_host).await?",
-        )
-        .expect("unsupported execute identity gate");
-    let rejected_trace = operations
-        .find("return trace_rejected_operation(invocation, deps, &attempted_operation)")
-        .expect("unsupported execute trace path");
-    assert!(
-        unsupported_identity < rejected_trace,
-        "unsupported execute identity and operation claim must be verified before trace mutation"
-    );
-    for required in [
-        "inspect_authority_grant(&invocation.causal_context.authority_grant_id)",
-        "capability::execute grant requires an exact operation claim",
-        "capability::execute grant operation claim does not match the requested operation",
-        "operation_contract::risk_level(operation)",
-        "operation_contract::authority_policy(operation)",
-        "policy.base_scope_additions()",
-        "policy.resource_kind_policy().base_kinds()",
-        "policy.network_policy().as_str()",
-        "is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id)",
-        "capability::execute requires a derived least-privilege authority grant",
-        "capability::execute requires a trusted agent or system runtime context",
-        "workspace state requires trusted workspace context",
-        "capability::execute cannot read or write system-scoped state",
-        "requires trusted current session context",
-    ] {
-        assert!(
-            operation_guards.contains(required),
-            "capability execute operation guard missing required text: {required}"
+            workers.contains(required),
+            "worker runtime missing trusted-local/reliability boundary: {required}"
         );
     }
 
-    let filesystem =
-        read_repo_file("packages/agent/src/domains/capability/operations/filesystem.rs");
+    let registration = read_repo_file("packages/agent/src/domains/registration/mod.rs");
     assert!(
-        !filesystem.contains("std::env::current_dir"),
-        "capability filesystem operations must not fall back to process cwd"
+        !registration.contains("FunctionId::new(\"capability::execute\")"),
+        "removed capability wrapper must not be registered"
     );
-    assert!(
-        filesystem.contains("capability::execute requires trusted working directory metadata"),
-        "capability filesystem operations must require trusted working-directory metadata"
-    );
-
-    let grant_authorization =
-        read_repo_file("packages/agent/src/engine/authority/grants/authorization.rs");
-    for required in [
-        "is_capability_execute(invocation)",
-        "ensure_capability_grant_is_explicit(grant, invocation)",
-        "capability_working_directory(invocation)?",
-        "RUNTIME_METADATA_WORKING_DIRECTORY",
-        "normalize_working_directory(raw)",
-        "resolve_invocation_path(invocation, raw)",
-        "cannot use wildcard",
-        "requires exact {selector} selector",
-    ] {
-        assert!(
-            grant_authorization.contains(required),
-            "grant authorization missing capability execute root guard text: {required}"
-        );
-    }
-
-    let process = read_repo_file("packages/agent/src/domains/capability/operations/process.rs");
-    for required in [
-        "inspect_authority_grant(&invocation.causal_context.authority_grant_id)",
-        "process_run requires an authority grant with networkPolicy none",
-        "/usr/bin/sandbox-exec",
-        "(deny network*)",
-    ] {
-        assert!(
-            process.contains(required),
-            "process_run missing network-denial guard text: {required}"
-        );
-    }
-
-    let state = read_repo_file("packages/agent/src/domains/capability/operations/state.rs");
-    assert!(
-        state.contains("capability::execute cannot read or write system-scoped state"),
-        "state operations must reject system scope"
-    );
-    for (path, required) in [
-        (
-            "packages/agent/src/domains/capability/operations/trace.rs",
-            "requires trusted current session context",
-        ),
-        (
-            "packages/agent/src/domains/capability/operations/logs.rs",
-            "requires trusted current session context",
-        ),
-    ] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(required),
-            "{path} missing trusted current-session guard text"
-        );
-    }
-
-    let trace_tests = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
-    for required in [
-        "execute_rejects_public_client_context",
-        "execute_rejects_bootstrap_authority_grants",
-        "execute_rejects_system_scoped_state",
-        "execute_process_run_requires_none_network_policy",
-        "execute_catalog_search_does_not_require_working_directory_metadata",
-    ] {
-        assert!(
-            trace_tests.contains(required),
-            "primitive trace tests missing SACB-6 regression: {required}"
-        );
-    }
 }
 
 #[test]

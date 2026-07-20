@@ -1,3027 +1,543 @@
-# Tron Technical Project Reference
+# Tron Worker-First Technical Reference
 
-**A persistent, event-sourced AI coding agent for macOS.**
+> Last verified: 2026-07-19 on `codex/worker-first-autonomy-poc`.
 
-Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The `worker_lifecycle` domain owns local launchable-package lifecycle while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with one server-truth Dashboard cockpit; fixed product panels are absent from supported baseline behavior. Features follow an iii-aligned Worker / Function / Trigger contract: capabilities enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
+This document describes the active worker-first implementation. Git history is
+the record of the removed capability-governance and module-proposal system; it
+is not an active compatibility contract.
 
-This document is the detailed cross-cutting reference behind the concise root
-README. The Rust codebase remains self-documenting: `packages/agent/src/lib.rs`
-declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:`
-comments mark critical correctness constraints. iOS and Mac documentation lives
-beside each client. When a cross-cutting contract described here changes, update
-this reference and its owning source documentation in the same commit.
+## Product Model
 
----
+Tron is a persistent local agent. A Rust service on the user's Mac owns model
+turns, session/event truth, authenticated client transport, and profile-global
+workers. The iOS app is a thin chat and worker-operations client. The Mac app
+packages and supervises the service and owns pairing; it does not maintain a
+parallel engine model.
 
-## Table of Contents
+The POC optimizes for one outcome: when a user or agent identifies reusable
+behavior, Tron can turn it into working persistent behavior immediately. A
+complete worker is created or improved through one `worker_upsert` operation.
+There is no later install, binding, grant, promotion, or lifecycle actuator.
 
-- [Architecture](#architecture)
-- [Living Architecture Docs](#living-architecture-docs)
-- [Repository Structure](#repository-structure)
-- [Rust Modules](#rust-modules)
-- [Quick Start](#quick-start)
-- [CLI Reference](#cli-reference)
-- [Capabilities](#capabilities)
-- [Engine Protocol API](#engine-protocol-api)
-- [Event System](#event-system)
-- [Settings](#settings)
-- [Authentication](#authentication)
-- [Context and Compaction](#context-and-compaction)
-- [Database Schema](#database-schema)
-- [iOS App](#ios-app)
-- [Mac App](#mac-app)
-- [Permissions](#permissions)
-- [Deployment](#deployment)
-- [Testing](#testing)
-- [Core Invariants](#core-invariants)
+## Fixed Kernel
 
----
+The source-owned kernel retains only:
 
-## Architecture
+- model/provider and agent-turn execution;
+- local filesystem, process, and HTTP primitives;
+- durable session state, events, named-secret injection, provenance, and audit;
+- worker bundles, immutable versions, runners, dispatch, triggers, inbox, and
+  management;
+- authenticated `/engine` transport and loopback external-worker transport;
+- private iOS device-token custody;
+- isolated core-change proposal creation and explicitly approved application;
+- product settings, auth, context, memory, logging, blobs, and transcription
+  needed by current clients.
 
-```
-+-----------------------------------------------------------------------------+
-|                              iOS App (SwiftUI)                              |
-|                           packages/ios-app                                  |
-|              MVVM  -  Coordinators  -  Event Plugins  -  Swift 6            |
-+-------------------------------+---------------------------------------------+
-                                | WebSocket (`/engine`), port 9847
-                                v
-+-----------------------------------------------------------------------------+
-|                          Rust Agent Server                                  |
-|                         packages/agent                                      |
-|                                                                             |
-|  +-------------+  +------------+  +------------+  +------------------------+ |
-|  |  Providers  |  | Capability |  |  Context   |  |     Orchestrator       | |
-|  |  Anthropic  |  | execute    |  |  soul      |  |  Session lifecycle     | |
-|  |  OpenAI     |  | state ops  |  |  state     |  |  Turn management       | |
-|  |  Google     |  | file ops   |  |  compaction|  |  Event routing         | |
-|  |  MiniMax    |  | process op |  |  messages  |  |  Turn recovery         | |
-|  +-------------+  +------------+  +------------+  +------------------------+ |
-+------------------------------------+----------------------------------------+
-                                     |
-                                     v
-+-----------------------------------------------------------------------------+
-|                         Event Store (SQLite)                                |
-|   - Immutable event log with tree structure (fork/rewind)                   |
-|   - Session state reconstruction via ancestor traversal                     |
-|   - SQLite-backed sessions, events, blobs, logs, engine ledger/state        |
-+-----------------------------------------------------------------------------+
+Higher-level behavior belongs in a worker bundle. The fixed tree no longer
+contains module proposal/validation/install/dependency/lifecycle/runtime
+planes, capability binding and shadow routing, procedural candidates,
+metadata-only schedules, the old worker lifecycle, fixed media/notification
+delivery planes, or the `capability::execute` wrapper.
 
-```
+The engine still uses generic words such as “capability invocation” in provider
+tool-call events and client rendering. Those names describe the model protocol;
+they do not imply the removed authorization or operation-catalog system.
 
-### Data Path
+## Autonomy Modes
 
-1. Client connects to `/engine` and sends engine protocol messages
-2. The `server` module validates framing and builds an `EngineTransportRequest`
-3. The envelope invokes a canonical `namespace::function` engine capability through a transport trigger
-4. Canonical functions call runtime, orchestrator, event store, or domain services as needed
-5. Domain output is serialized at the transport boundary
-6. Runtime events publish neutral `ServerEventPayload` records to engine streams, and `/engine` subscriptions deliver stream records
+`autonomousWorkers` is a profile setting.
 
-The `/engine` socket owner sends server-driven Ping frames using the configured
-heartbeat interval and retires peers that return no activity before the
-configured timeout. Each upgraded socket owns one registry lease plus bounded
-writer/subscription tasks. A shutdown-owned upgrade bridge is registered before
-the upgrade response completes, so disconnect, timeout, panic unwind, task
-cancellation, and graceful shutdown cannot strand the health connection count
-or child tasks. Subscription ids and cursors are connection-local rather than
-durable rows; startup narrowly deactivates exact legacy UUIDv7 socket rows left
-by older builds without touching caller-owned stream subscriptions.
+- Existing profiles default to `false`. The agent remains conversational and
+  explains that autonomous action can be enabled in Settings.
+- The bundled `worker-poc` profile defaults to `true`.
+- With the setting enabled, accepted user sessions and workers are trusted
+  local operators. Direct host and worker calls do not derive, mint, inspect,
+  or consume per-call capability grants.
+- Remote clients still require bearer-authenticated transport. Worker webhooks
+  are loopback-only and require their own rotatable trigger token.
 
----
+The setting is included in the complete `settings::get` response and has iOS
+decode, state, load/reset/server-switch, mutation encoding, and Settings UI
+ownership.
 
-## Architecture Ownership
+## Canonical Worker State
 
-Durable architecture documentation lives beside the code it describes. This
-reference owns cross-cutting product behavior; it is not an audit ledger.
-Current code, module docs, package docs, focused tests, and Git history are the
-authoritative implementation and decision record.
+Filesystem bundles are canonical:
 
-Use these owners:
-
-- Rust topology and dependency direction: `packages/agent/src/lib.rs` and the
-  nearest `mod.rs` and `INVARIANT:` comments.
-- Engine fabric, resources, and primitive execution:
-  `packages/agent/src/engine/` and
-  `packages/agent/src/domains/capability/`.
-- Public transport and event contracts:
-  `packages/agent/src/transport/engine/` and
-  `packages/agent/src/shared/protocol/events/`.
-- Settings, credentials, and database schema:
-  `packages/agent/src/domains/settings/profile/types/`,
-  `packages/agent/src/domains/auth/credentials/`, and
-  `packages/agent/src/domains/session/event_store/sqlite/migrations/`.
-- iOS architecture and validation: `packages/ios-app/docs/` and the
-  authoritative `packages/ios-app/project.yml`.
-- Mac composition and packaging: `packages/mac-app/docs/` and the
-  authoritative `packages/mac-app/project.yml`.
-- CLI, configuration, and release behavior: `scripts/tron --help`,
-  `scripts/tron.d/`, `scripts/tron-lib.d/`, `VERSION.env`,
-  `scripts/tron-version`, and `.github/workflows/`.
-- Cross-boundary guards: focused targets under `packages/agent/tests/`,
-  discovered dynamically by `scripts/tron ci test`. Tests validate the owners
-  above; they do not make campaign artifacts part of the live architecture.
-
-Capability-backed truth means durable facts that affect agents or operators are
-owned by resources, decisions, evidence, invocations, grants, queues, leases, or
-generated UI resources. Owner-private files or tables are acceptable only as
-documented cache or substrate boundaries with source-owned static guards; they
-are not policy, lineage, or product truth.
-
----
-
-## Repository Structure
-
-```
-tron/
-+-- VERSION.env             Canonical release version + Apple build source of truth
-+-- packages/
-|   +-- agent/              Rust agent server (single `tron` crate, modular layout)
-|   +-- ios-app/            SwiftUI iOS application
-|   +-- mac-app/            SwiftUI Mac menu-bar wrapper (Tron.app) — install wizard + server lifecycle
-+-- scripts/
-|   +-- tron                CLI dispatcher for build, manual deploy, service management
-|   +-- tron.d/             Workspace CLI command-family + bundle/signing modules
-|   +-- tron-version        Version print/check/sync helper used by CI + releases
-|   +-- tron-release-notes  Deterministic tagged-release changelog generator
-|   +-- tron-lib.sh         Shared bash configuration and module loader
-|   +-- tron-lib.d/         Runtime CLI service/log/auth modules
-|   +-- tron-cli            Contributor CLI helper for local service management
-|   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
-|   +-- benchmarks/         Performance benchmark runner and baselines
-|   +-- asc-jwt             Release-workflow App Store Connect JWT helper
-|   +-- install-hooks.sh    Installs repo-managed commit hooks
-|   +-- personal-info-guard.sh
-+-- .github/
-|   +-- workflows/          CI + Mac/iOS release pipelines
-|   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
-|   +-- dependabot.yml      Weekly Cargo + GitHub Actions dependency updates
-|   +-- pull_request_template.md
+```text
+~/.tron/workspace/workers/<worker-id>/
+├── worker.json
+└── versions/
+    └── <sha256-content-version>/
+        ├── manifest.json
+        ├── content.sha256
+        ├── dependencies.lock.json
+        ├── provenance.json
+        ├── files/
+        ├── dependencies/
+        └── dependency-runtime/
 ```
 
----
+`worker.json` is the filesystem-owned active-version and status record. Every
+version directory is immutable and addressed by a full tree hash. Its manifest
+contains:
 
-## Rust Modules
+- stable identity, name, description, typed tool name, and routing examples;
+- JSON input and output schemas;
+- runner type and entrypoint;
+- source files or durable agent instructions;
+- exact dependency sources, revisions, and SHA-256 checksums;
+- manual, schedule, engine-event, and webhook triggers;
+- logical named-secret bindings only;
+- smoke-test commands and source provenance.
 
-The agent is a single `tron` crate (see `packages/agent/Cargo.toml`). The crate tree now mirrors the pure engine model: app/bootstrap, thin transports, the engine fabric, worker-owned domains, platform integrations, and shared foundation/protocol helpers. Dependencies flow inward: transports build engine requests, domains own behavior, and the engine owns policy/ledger/streams/queues/workers.
+The SQLite worker database is disposable for bundle discovery and trigger
+configuration but durable for operational history. Startup reconstructs the
+catalog from valid filesystem bundles, disables invalid entries, resets
+interrupted `running` invocations to `queued`, and writes an index-rebuild
+report. Webhook hashes cannot be reconstructed, so rebuilt webhook triggers
+remain disabled until token rotation.
 
+## Atomic `worker_upsert`
+
+One request carries the complete candidate bundle and an optional predecessor.
+The runtime:
+
+1. validates identity, schemas, runner configuration, relative paths, trigger
+   definitions, secret names, and dependency locks;
+2. chooses the explicit predecessor or detects the closest semantic overlap by
+   name/description terms, preferring an update over a duplicate;
+3. stages outside the active worker directory;
+4. fetches dependencies into worker-owned directories and verifies exact tree
+   checksums;
+5. runs dependency installation and smoke tests with the worker dependency
+   environment, never the Tron installation environment;
+6. seals the staged tree with its content hash;
+7. publishes the immutable version, updates `worker.json` and indexes,
+   registers triggers, and installs the direct typed tool;
+8. emits lifecycle evidence and returns one-time webhook credentials.
+
+Any failure before publication abandons staging and leaves the prior active
+version untouched. Existing invocations retain their pinned version while new
+invocations route to the newly active version. SQLite index changes commit before
+the canonical filesystem pointer, so startup reconstruction returns any crash in
+that interval to the prior active version. Prior versions remain available
+for explicit rollback.
+
+## Runners
+
+### Agent runner
+
+An agent worker combines immutable instructions with typed input and output. It
+creates a child session through the existing model loop, waits for terminal
+session truth, extracts the final assistant result, normalizes JSON, validates
+the output schema, and records the result.
+
+### Command runner
+
+A command worker starts an executable with the version's `files/` directory as
+its working directory. JSON input is written to stdin. JSON stdout becomes the
+typed result; non-JSON stdout is wrapped as bounded text. Commands inherit the
+Tron user's normal host permissions. There is no application filesystem or
+process sandbox.
+
+### Resident-service runner
+
+A service worker starts lazily on first invocation, may use an HTTP health
+endpoint, and receives calls through its configured loopback invoke URL. The
+runtime reuses a healthy process for later calls and terminates it when the
+worker is disabled, retired, replaced, stop-all is engaged, or Tron shuts down.
+
+## Dependency and Secret Isolation
+
+Dependencies support `file://`, `git+https://`, and bounded HTTP(S) sources.
+Every dependency requires an exact revision string and `sha256:<hex>` tree
+checksum. Optional install commands run with worker-local Python, npm, Cargo,
+Ruby, and PATH roots under `dependency-runtime/`.
+
+Secret bindings resolve logical names from:
+
+```text
+~/.tron/workspace/vault/<binding-name>
 ```
-app/
-├── cli/          CLI parsing and auth subcommand dispatch
-├── bootstrap/    Runtime assembly, database open, service wiring, server bind
-├── health/       Health, deep-health, disk checks, and metrics
-└── lifecycle/    Onboarding, bearer-token state, and shutdown coordination
-transport/
-├── http/         HTTP-adjacent auth helpers
-├── engine/       /engine contracts, request routing, socket session, stream cursors
-└── runtime/      Runtime services, external-worker socket, stream projection, setup
-engine/
-├── authority/    Grants, leases, and compensation audit records
-├── catalog/      Discovery, live registry, catalog changes
-├── durability/   Ledger, queue, resources, state, streams, and SQLite codecs
-├── invocation/   Invocation model, host, handles, dispatch, idempotency flow
-├── kernel/       IDs, errors, policy, schemas, and core catalog type contracts
-├── primitives/   Model-facing primitive worker definitions and handlers
-├── runtime/      External-worker runtime, worker protocol, trigger runtime
-└── tests/        Subsystem-mirrored engine tests and shared fixtures
-domains/          Worker-owned behavior slices, contracts, services, and tests
-platform/         OS/vendor integrations retained by the primitive loop
-shared/
-├── foundation/   Constants, IDs, paths, profiles, retry/text helpers, shared errors
-├── protocol/     Content, events, memory, messages, and model capability DTOs
-├── server/       Runtime context, validation, params, and capability errors
-├── storage/      Unified SQLite storage helpers
-└── observability/ tracing subscriber and SQLite log transport
-main.rs           Thin binary entry point
-```
 
-| Module | Purpose | Key Types |
-|--------|---------|-----------|
-| `app` | CLI, startup/bootstrap, health, metrics, onboarding, and shutdown | `Cli`, `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
-| `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
-| `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel; `EngineHostHandle` is the production composition boundary while the raw host and catalog remain engine-owned | `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
-| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and the post-baseline worker lifecycle owner | `DomainRegistrationContext`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
-| `platform` | OS/vendor integrations | paired-device broker |
-| `shared` | Foundation vocabulary, protocol DTOs, server context/errors, observability, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
+Required bindings fail execution when absent; optional bindings permit graceful
+fallback. Values are injected as normalized `TRON_SECRET_*` environment
+variables. Upsert rejects a bundle containing any currently bound secret value.
+Known values are redacted from runner output, errors, inbox records, events,
+and diagnostics. Raw values are never stored in manifests or worker SQLite.
 
-The domain package is intentionally vertical. A domain root is only docs,
-exports, and crate-private worker registration. Shared worker registration
-types live in `domains::registration::worker`; transport setup enters the
-crate-private startup aggregator in `domains::registration`, which iterates
-each domain's `worker_module(...)`. That aggregator constructs and validates
-the complete domain composition before installing manifest resources or
-mutating the live catalog. It returns a one-shot jobs/worker-lifecycle
-activation token; transport setup consumes the token only after transport
-trigger registration also succeeds, so failed setup cannot leave startup tasks
-or shutdown callbacks running.
-`contract.rs` owns canonical function ids, schemas, authority, risk, and stream
-topics; each domain then keeps executable bodies under behavior owners rather
-than a shared boilerplate shape. Examples: `domains/agent/prompt`,
-`domains/agent/loop`, `domains/agent/context`, `domains/auth/oauth`,
-`domains/auth/credentials`, `domains/filesystem`, `domains/model/routing`,
-`domains/model/protocol`, and `domains/session/lifecycle`,
-`domains/session/query`, `domains/session/reconstruction`. Runtime support is
-split the same way in domain-owned folders such as `domains/agent/runtime/*`,
-`domains/session/event_store/*`, and
-`domains/agent/loop/primitive_surface.rs`. Provider-native stream/function-call
-argument parsing and provider-specific invocation id remapping are isolated
-under `domains/model/protocol/*` before canonical capability history reaches
-the loop, ledger, audit, or iOS DTO layers.
-`domains/model/responder` is the non-provider composition boundary: it builds
-provider-neutral stream options, opens provider streams, applies retry, maps
-provider errors to canonical failure envelopes, and redacts/bounds
-`model.provider_request` audit payloads before persistence.
-`domains/approval` owns durable `approval_request` and `approval_decision`
-resources plus the reusable fail-closed freshness check consumed by future tool
-packages. Approval evidence is never an authority grant; existing engine
-authority grants remain the execution-permission primitive.
-`domains/memory` owns the Phase 2 memory foundation plus the accepted Phase 3
-Slice 24D memory module pack: source-backed memory
-engine/policy/record/prompt-trace/query/decision/eval-run/migration resource
-contracts, explicit disabled/active/shadow/compare policy state, redacted record
-audit, provider-safe prompt trace text, deterministic preview-backed
-query/result evidence, and prompt-inclusion decision proof. Memory policy
-resolves by session, then workspace, then system scope; prompt-trace audit
-writes use trace-specific idempotency so later turns do not replay stale memory
-status. Provider prompt text reports whether trace and decision evidence were
-recorded without exposing their server-owned resource identifiers. Retained
-`bodyRef` payloads are pointer-only and reject inline
-body-like keys at any nested depth on retain, edit, and migration import.
-Direct record-id operations fail closed when the addressed resource is outside
-the caller memory scope. Query/decision evidence stores bounded refs, ranked
-preview snippets, confidence/provenance projections, policy proof, reason
-codes, redaction proof, trace/replay refs, deterministic timestamps, and
-idempotency fingerprints only; record list/inspect projections redact unsafe
-text and raw body pointers. It does not implement semantic retrieval,
-embeddings, vector stores, generated summaries, episodic event retrieval,
-procedural rules, hidden prompt memory, automatic retention, or network-backed
-memory behavior.
-`domains/context_control` is the authoritative server owner for user and
-agent context-management visibility. It exposes `context_control_status` for
-read-only current-session context composition without recording a snapshot or
-action; model-facing calls pass only `operation` because the trusted runtime
-supplies current-session scope. It records `context_control_snapshot`,
-`context_control_action`, `context_control_epoch`, `context_survivor`,
-`context_exclusion`, and `context_policy_snapshot` resources with provider
-safe projections only. `context_control_status`, `context_control_snapshot`,
-`context_control_compact`, `context_control_clear`, `context_control_action_list`, and
-`context_control_action_inspect`, plus `context_survivor_record/list/disable`,
-`context_exclusion_record/list/disable`, and `context_policy_snapshot`, stay
-behind `capability::execute` for model
-use, with explicit `context_control.read` / `context_control.write` plus
-`resource.read` / `resource.write` authority, exact current-session selectors,
-exact action-resource inspect selectors, exact policy-resource disable
-selectors, idempotency for write actions,
-`networkPolicy: none`, no wildcard selectors, no `agent_state`, and no state
-inheritance. Snapshots expose bounded composition metadata, token estimates,
-memory/resource/execution refs, redaction proof, truncation proof, and epoch
-freshness without raw prompt bodies, hidden chain-of-thought, secrets, env
-values, local paths, commands, logs, grant ids, or authority ids. Compact and
-clear durably prepare their action record before committing timeline evidence,
-then finalize the action through a replay-repairable version update; clear creates a new
-context epoch while keeping chat history, resources, traces, and durable refs
-inspectable. Survivor and exclusion records let users or agents mark bounded
-refs that future compaction/replacement summarizers must preserve or omit, and
-policy snapshots provide the server-owned evidence packet used to verify that
-replaceable summarizers honored those refs. Policy refs are typed,
-kind-matched, non-wildcard provider-safe refs with required rationale, and
-policy snapshot/list projections fail closed if active records exceed the
-bounded projection instead of silently truncating custody evidence. The iOS
-Session Briefing sheet renders this substrate from the prompt composer's
-proportional context ring and audited timeline actions as a Context Breakdown section,
-alongside the same model picker used by new-session setup. Native Session Briefing
-uses first-party `context_control::ui_*` wrappers that validate the current
-session and record through the same server-owned context-control service instead
-of widening model-facing authority. It does not restore memory retain/edit,
-skill activation, source-control controls, or prompt-library controls. Broader
-fixed pre-primitive UI families remain absent. Any future surface must establish
-a current module owner, server contract, and source-owned tests; the
-[iOS architecture](../../ios-app/docs/architecture.md) owns current mobile
-composition rather than a historical candidate ledger.
-`domains/filesystem` owns two separate surfaces: the iOS workspace-browser
-functions for home/list/create-dir selection and the Phase 2 agent filesystem
-toolbox. Agent operations resolve only from trusted working-directory metadata,
-deny traversal and symlink escapes, bound read/search/diff output, omit binary
-content bodies, return provider-visible paths relative to the authorized root,
-and record mutating previews/commits as patch proposal and materialized-file
-resources. Accepted Phase 3 Slice 24A declares those existing operations in the
-pending-review `file_git_module` manifest and derives exact
-`filesystem.read` / `filesystem.write` plus resource authority without adding a
-new provider-visible tool.
-`domains/worker_lifecycle` owns local package proposals,
-`tron.worker_package.v1` manifest validation, install/enable/disable/launch/
-stop/retire functions, verified source-tree package digests, scoped token
-minting, conformance reports, and `worker_package` resource/event evidence.
-It is host lifecycle infrastructure, not a provider-visible toolbox, and it
-does not add fixed iOS product panels.
-`domains/module_registry` owns the Phase 3 Slice 23A inspect-only module
-manifest resource contract, stored-payload validation, and provider-safe
-projections. The sole domain composition root in
-`domains/registration/module_manifests/mod.rs` owns the ordered first-party
-seed set. Domain registration installs the type and reconciles the seeds
-through generic engine boundaries before registering any domain worker.
-`module_list` and `module_inspect` remain behind `capability::execute`. The registry
-revalidates stored kind/schema/system scope/payload shape and returns bounded
-identity, capability/resource declarations, authority needs, settings and
-dependency intents, validation, provenance, lifecycle, and redaction proof
-without raw manifests, local paths, commands, env values, secrets, grant ids,
-network access, install, activation, dependency resolution, or execution.
-Accepted Slice 24A also seeds a `file_git_module` manifest with module
-lifecycle `pending_review`; it declares only existing filesystem/Git execute
-operations, their evidence resource kinds, and their exact authority needs.
-Accepted Slice 24B adds the pending-review `jobs_program_execution_module`
-manifest for the module-owned jobs/program-execution pack. It declares accepted
-baseline evidence for only
-`module_program_execution_start`, `module_program_execution_status`,
-`module_program_execution_cancel`, and `module_program_execution_cleanup`,
-maps them to exact module-runtime, module-lifecycle, program-execution, jobs,
-job-process, execution-output, and resource authority, and keeps provider
-projections to refs/fingerprints/truncation/duration/exit/timeout/cancel/
-cleanup metadata rather than `process_run`, raw job payloads, raw commands,
-stdio, logs, paths, env, pids, grant ids, PTYs, package installs, or network
-execution.
-Accepted Phase 3 Slice 24G also seeds a pending-review
-`notification_delivery_module` manifest for the existing server-owned
-`device_registration`, `notification`, and `notification_delivery` resource
-substrate. It declares only provider-visible device list/inspect and
-notification send/list/inspect/read/badge operation values, exact
-device/notification operation authority needs, kind-selector-bounded generic
-resource authority needs, and validation gates for APNs
-credential custody, APNs environment labels, entitlement proof, physical-device
-validation, delivery-failure evidence, provider redaction, and native inbox
-product decisions. The current platform adapter enables opt-in APNs relay
-delivery and iOS entitlements without changing that provider-visible manifest.
-Native inbox UI, public notification APIs, provider payload leakage, and hidden
-background behavior remain absent.
-Device registration and unregistration are not provider-visible operations and
-the agent cannot submit APNs token material. The trusted iOS client registers
-through internal engine functions; raw tokens remain in private platform
-custody while durable resources and model projections retain redacted evidence.
-Accepted Phase 3 Slice 24H also seeds a pending-review
-`import_update_module` manifest for existing `import_history_record`,
-`repository_tree_snapshot`, `import_preview`, and `update_diagnostic_record`
-resource foundations. It declares only existing import-history,
-repository-tree, import-preview, and update-diagnostic record/list/inspect
-operation values, kind-selector-bounded authority metadata, network policy
-`none`, and validation gates for approval, rollback, future action contracts,
-bounded payload custody, and provider redaction. It does not add import
-execution, repository mutation, raw tree dumps, installer/restart/update
-commands, package-manager behavior, production deploy behavior, native fixed
-panels, public `/engine` expansion, or network behavior.
-`domains/module_authoring` owns the accepted Phase 3 Slice 23B foundation for
-inert module proposals. It records current-session/workspace
-`module_proposal` resources with schema `tron.resource.module_proposal.v1` and
-payload schema `tron.module_proposal.v1`, bounded title/summary identity,
-intended module refs, source/doc/test refs, trace/replay fingerprints,
-idempotency fingerprints, validation placeholder status, lifecycle state, and
-explicit no-install/no-execution proof. `module_proposal_record`,
-`module_proposal_list`, and `module_proposal_inspect` stay behind
-`capability::execute` with explicit `module_authoring.read` /
-`module_authoring.write` plus `resource.read` / `resource.write` authority,
-`kind:module_proposal` selectors, exact `resource:<id>` inspect selectors, and
-`networkPolicy: none`. The authoring foundation does not install or activate
-modules, execute code, restore dependencies, use package managers, create a
-physical module workspace directory, touch repo-managed `packages/agent/skills`,
-store raw prompt/proposal/code/command/file-content fields, expose raw grant or
-authority ids, store or project token-like provider-visible proposal metadata, or
-write rejected raw proposal payloads into provider-visible trace metadata. It
-does not add public `/engine` APIs or fixed iOS panels.
-`domains/module_validation` owns the accepted Phase 3 Slice 23C module
-contract test harness foundation. It records current-session/workspace
-`module_validation_report` resources with schema
-`tron.resource.module_validation_report.v1` and payload schema
-`tron.module_validation_report.v1`, bounded module/proposal refs,
-manifest/resource/provider projection parity checks, required docs/tests
-evidence, deterministic command/result refs, failure evidence, trace/replay
-refs, idempotency fingerprints, lifecycle state, and explicit
-no-install/no-execution proof. `module_validation_record`,
-`module_validation_list`, and `module_validation_inspect` stay behind
-`capability::execute` with explicit `module_validation.read` /
-`module_validation.write` plus `resource.read` / `resource.write` authority,
-`kind:module_validation_report` selectors, exact `resource:<id>` inspect
-selectors, and `networkPolicy: none`. The validation foundation stores supplied
-evidence only; it does not run commands or module code, store raw logs,
-commands, env values, code, file contents, unsafe paths, raw grant/authority
-ids, token-like provider-visible metadata, install or activate modules, restore
-dependencies, use package managers, touch repo-managed `packages/agent/skills`,
-access networks, add public `/engine` APIs, or add fixed iOS panels.
-`domains/module_install` owns the accepted Phase 3 Slice 23D metadata-only
-review gate from passed validation evidence to install-candidate decision
-state. It records
-current-session/workspace `module_install_request` resources with schema
-`tron.resource.module_install_request.v1` and payload schema
-`tron.module_install_request.v1`, plus `module_install_decision` resources with
-schema `tron.resource.module_install_decision.v1` and payload schema
-`tron.module_install_decision.v1`. `module_install_request_record`,
-`module_install_request_list`, `module_install_request_inspect`,
-`module_install_decision_record`, `module_install_decision_list`, and
-`module_install_decision_inspect` stay behind `capability::execute` with
-explicit `module_install.read` / `module_install.write` plus `resource.read` /
-`resource.write` authority, non-wildcard `kind:module_install_request` and
-`kind:module_install_decision` selectors, exact inspect selectors, and
-`networkPolicy: none`. Requests require a current-scope passed
-`module_validation_report` with current-version revalidation, docs/tests
-evidence, and explicit no-install/no-execution proof. Decisions fail closed
-unless approval evidence is fresh, approved, scoped to the request/action/risk/
-selectors, and paired with derived authority; approval evidence by itself does
-not mint authority. Dependency policy and rollback proof are bounded metadata
-refs only, and lifecycle states such as `pending_review`, `install_candidate`,
-`rejected`, `superseded`, and `archived` are metadata gate states, not physical
-install state. The install gate does not install, activate, execute, restore
-dependencies, run package managers, touch repo-managed skills, store raw paths,
-env values, secrets, logs, commands, code, file contents, raw grant/authority
-ids, or token-like material, access networks, add public `/engine` APIs, or add
-fixed iOS panels.
-`domains/module_dependencies` owns the accepted Phase 3 Slice 23G metadata-only
-dependency request, decision, and policy activation records. It records
-current-session/workspace `module_dependency_request`
-resources with schema `tron.resource.module_dependency_request.v1` and payload
-schema `tron.module_dependency_request.v1`, `module_dependency_decision`
-resources with schema `tron.resource.module_dependency_decision.v1` and payload
-schema `tron.module_dependency_decision.v1`, and `module_dependency_policy`
-resources with schema `tron.resource.module_dependency_policy.v1` and payload
-schema `tron.module_dependency_policy.v1`. `module_dependency_request_record`,
-`module_dependency_request_list`, `module_dependency_request_inspect`,
-`module_dependency_decision_record`, `module_dependency_decision_list`,
-`module_dependency_decision_inspect`, `module_dependency_policy_activate`,
-`module_dependency_policy_list`, and `module_dependency_policy_inspect` stay
-behind `capability::execute` with explicit `module_dependencies.read` /
-`module_dependencies.write` plus `resource.read` / `resource.write` authority,
-non-wildcard kind selectors, exact inspect selectors, exact request/decision
-link selectors for decision and policy writes, and `networkPolicy: none`.
-Requests store owner module linkage, dependency identity, rationale,
-security/license/runtime need, removal plan, risk class, bounded refs, Cargo.toml
-and Cargo.lock parity evidence, idempotency, trace/replay refs, and side-effect
-proof only. Decisions require denial evidence for rejected or high-risk denied
-outcomes, and policy activation requires an approved dependency decision. The
-accepted slice does not restore dependencies, run package managers, mutate
-`Cargo.toml` or `Cargo.lock`, install packages, execute runtime code, access
-networks, store raw paths/env/logs/commands/code/file contents, raw dependency
-artifacts, raw package-manager output, raw grant/authority ids, token-like
-material, or personal-info literals, add public `/engine` APIs, or add fixed
-iOS panels.
-`domains/module_lifecycle` owns the accepted Phase 3 Slice 23E metadata
-lifecycle state for install-candidate modules. It records
-`module_lifecycle_state` resources with schema
-`tron.resource.module_lifecycle_state.v1` and payload schema
-`tron.module_lifecycle_state.v1` for `enable`, `disable`, `quarantine`, and
-`rollback` transitions. Follow-up requests for the same install candidate reuse
-the scoped lifecycle resource and append a fresh pending transition with
-current-version guarded provenance rather than returning stale prior state.
-`module_lifecycle_request`,
-`module_lifecycle_decision`, `module_lifecycle_list`, and
-`module_lifecycle_inspect` stay behind `capability::execute` with explicit
-`module_lifecycle.read` / `module_lifecycle.write` plus `resource.read` /
-`resource.write` authority, non-wildcard `kind:module_lifecycle_state`
-selectors, exact lifecycle inspect/decision selectors, current-version
-freshness guards, current-scope `module_install_decision` prerequisite
-revalidation, fresh approval checks, and `networkPolicy: none`. Lifecycle state
-is metadata only: it does not install, activate, execute, restore dependencies,
-run package managers, touch repo-managed skills, store raw paths/env/logs/
-commands/code/file contents, expose raw grant/authority ids, access networks,
-add public `/engine` APIs, or add fixed iOS panels. Disabled, quarantined, and
-rolled-back states fail closed through the lifecycle runtime authorization
-guard for future runtime slices to consult.
-`domains/module_runtime` owns the accepted Phase 3 Slice 23F supervised runtime
-envelope metadata for enabled modules. It records `module_runtime_state` resources with
-schema `tron.resource.module_runtime_state.v1` and payload schema
-`tron.module_runtime_state.v1`. `module_runtime_request`,
-`module_runtime_list`, `module_runtime_inspect`, and `module_runtime_cancel`
-stay behind `capability::execute` with explicit `module_runtime.read` /
-`module_runtime.write` plus `resource.read` / `resource.write` authority,
-non-wildcard `kind:module_runtime_state` selectors, exact runtime inspect/
-cancel selectors, exact enabled `module_lifecycle_state` selectors for
-requests, trace-safe runtime request projection, and `networkPolicy: none`.
-Runtime requests call the lifecycle fail-closed authorization guard before a
-runtime record is created, so disabled, quarantined, rolled-back, pending, or
-missing lifecycle states deny. The runtime envelope stores sandbox, network,
-secrets, timeout, cancellation, shutdown, bounded output-artifact refs, scoped
-authority proof, idempotency, trace/replay refs, and side-effect proof only; it
-does not physically install modules, activate packages, restore dependencies,
-run package managers, allocate PTYs, perform browser automation, access
-networks, expose jobs directly as the module surface, or store provider-visible
-raw commands, logs, stdout/stderr, paths, env values, secrets, code, file
-contents, raw grant ids, or raw authority ids.
-`domains/module_activity` owns the accepted Phase 3 Slice 23H inspect-only
-autonomous-work cockpit projection. It exposes the system-visible
-`module_activity::overview` read function for trusted engine clients and
-aggregates current-session/workspace resource-backed module-plane facts from
-manifests, proposals, validation reports, install requests/decisions,
-dependency requests/decisions/policies, lifecycle states, and runtime states.
-The read derives scope only from trusted invocation causal context, fails closed
-without session/workspace context, and revalidates inspected resources against
-that scope. The
-projection derives active, waiting, blocked, degraded, ready, and recorded statuses only
-from stored facts, and returns bounded summaries for authority labels, touched
-resources, rollback/quarantine/runtime-authorization gates, and generic
-timeline entries. It is not a provider-visible execute operation and does not
-write resources, activate modules, install packages, restore dependencies,
-execute runtime code, run package managers, access networks, parse raw payload
-semantics in iOS, add fixed product panels, or expose raw payloads, paths,
-commands, logs, stdout/stderr, env values, secrets, code, file contents, raw
-grant ids, raw authority ids, trace/invocation ids, token-like material, or
-personal-info literals.
-The Dashboard consumes this projection directly as the sole source of module
-activity truth. Its iOS presentation groups each explicit server status once
-into Needs review, Needs you, Active work, or Recent activity without a second
-request, wrapper projection, or parallel dashboard model. Unknown and completed
-states remain recent activity rather than being inferred from visual position.
-Accepted Phase 3 Slice 24I records fixed old iOS product panels as an
-accepted rejected-shape baseline: the iOS source guard explicitly rejects old
-approval/work panels and work dashboards alongside the existing source-control,
-memory, process, subagent, notification, skill, fabricated-activity, and other
-fixed-panel sentinels. It does not add native panels, runtime behavior, public
-API/DTO expansion, device work, package-manager/network behavior, SQLite
-migrations, or repo-managed skills.
-Accepted Phase 3 Slice 24J records broad product DTO resurrection as an
-accepted rejected-shape containment baseline. Accepted iOS DTO breadth remains
-module/resource-owned (`module_activity`, worker lifecycle resource DTOs, and
-generic `ui_surface` schemas), source guards reject broad product DTO buckets,
-product protocol namespaces, product event payloads, and product table names,
-and the primitive loop event catalog remains the source of event truth.
-`domains/goals` owns the accepted Slice 7A backend foundation for durable
-goal, user-question, and answer provenance records. It uses existing engine
-resources, streams, traces, replay refs, and the execute idempotency ledger; it
-does not run autonomous goals, plan task decomposition, launch subagents,
-create notification inboxes, or add native Work/question UI.
-`domains/scheduler` owns the accepted Slice 12 backend foundation for durable
-schedule and schedule-run records. It records UTC-instant trigger policy,
-timezone labels, missed-run policy, cancellation evidence, run retention,
-resource leases, trace/replay refs, and bounded inspection projections behind
-`capability::execute`; it does not start hidden cron loops, execute feature
-work directly, deliver push notifications, merge results into conversation
-state, or add native schedule UI.
-`domains/procedural` owns the accepted Slice 11A foundation for inert
-skill/rule/hook/procedure provenance inspection. It stores only
-`procedural_record` resource contracts and bounded/redacted list/inspect
-projections behind `capability::execute`; it does not activate skills, fire
-triggers, inject prompt context, learn behavior, run tools, launch workers/jobs/
-processes, or merge results into conversation state.
-`stream.rs` publishes only that domain's declared topics. Cross-domain access
-goes through explicit domain services or shared DTOs, so an engineer can follow
-a capability by reading one domain folder instead of a central dispatch table.
+## Dispatcher and Delivery Contract
 
-Rust tests mirror the production owners. Root `packages/agent/tests` contains
-only cross-crate integration/static gates, while engine unit tests live under
-`engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` with
-shared fixtures isolated in `engine/tests/fixtures`.
+All invocation sources enter the same durable queue:
 
----
+- manual invocation, including a model calling the worker's direct tool;
+- interval schedules;
+- engine stream events whose payload recursively contains the configured JSON
+  filter;
+- `POST /engine/workers/webhooks/<worker-id>/<trigger-id>` from loopback with
+  `X-Tron-Worker-Token` or `Authorization: Bearer` and optional
+  `X-Tron-Idempotency-Key`.
 
-## Quick Start
+Delivery is at least once. Tron persists `queued` before execution. On restart,
+interrupted work returns to `queued`. A `(workerId, idempotencyKey)` uniqueness
+constraint suppresses repeated delivery; workers also receive the idempotency
+key in their durable invocation record. Every run records a trace id, causal
+depth, trigger kind, pinned version, timestamps, input, output or error, and
+inbox result.
 
-### End Users (recommended)
+Profile ceilings are fixed reliability limits:
 
-1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
-2. Download the latest `tron-v*.dmg` from the configured GitHub Releases page and drag `Tron.app` into `/Applications`.
-3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and the iOS handoff.
-4. On iPhone, scan the wizard's Tron iOS Beta QR code to open the public TestFlight invite, install the latest available Tron beta, then scan the Mac pairing QR or enter the pairing fields manually.
+| Limit | Value |
+|---|---:|
+| Concurrent invocations per profile | 32 |
+| Concurrent invocations per worker | 8 |
+| Non-resident invocation timeout | 2 hours |
+| Causal trigger depth | 16 |
 
-The wizard and menu bar surface runtime actions such as pairing info, logs, feedback, restart, pause, resume, and uninstall — you never need the CLI unless you want to.
+Work beyond concurrency limits waits in the durable queue. Causal work beyond
+depth 16 is rejected before persistence. Event cursors advance only after
+matching invocations are durably queued.
 
-### Contributors (build from source)
+Successful and failed results enter the durable inbox and emit
+`worker.invocations`. Notable unseen background results are atomically attached
+to the next relevant model turn once; manual results remain explicitly
+inspectable.
 
-Prerequisites:
+## Failure and Recovery
 
-- **Rust**: `rustup` + `cargo` (stable toolchain)
-- **Xcode 26+** for the iOS app; **Xcode 16+** for the Mac app
-- **XcodeGen**: `brew install xcodegen`
+A normal execution failure, timeout, invalid typed output, missing required
+secret, or unhealthy resident disables the worker, unregisters its direct tool,
+stops its resident process, and records a high-visibility inbox result. Tron
+does not silently repair or roll it back.
 
-First-time setup:
+Operator controls are:
+
+- disable/enable — immediate route removal/restoration and active-work stop;
+- rollback — activate a retained version and rotate any restored webhook token;
+- retire — disable routes and triggers while preserving bundles and history;
+- purge — permanently remove a retired worker's bundle and operational rows,
+  while retaining the purge audit entry;
+- stop-all — block new dispatch, cancel active work, and stop resident services;
+  queued rows stay visible and resume only after explicit release.
+
+## Model-Facing Tools
+
+When autonomy is enabled, fixed kernel operations are direct typed tools. There
+is no wrapper operation field.
+
+### Host primitives
+
+| Model tool | Engine owner | Purpose |
+|---|---|---|
+| `filesystem_read` | `worker_kernel::filesystem_read` | Bounded UTF-8 read |
+| `filesystem_list` | `worker_kernel::filesystem_list` | Directory listing |
+| `filesystem_search_text` | `worker_kernel::filesystem_search_text` | Recursive literal search |
+| `filesystem_write` | `worker_kernel::filesystem_write` | Complete local text write |
+| `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
+| `web_fetch` | `worker_kernel::web_fetch` | Explicit bounded HTTP(S) fetch with provenance |
+
+### Worker operations
+
+| Model tool | Engine function |
+|---|---|
+| `worker_upsert` | `worker_kernel::upsert` |
+| `worker_discover` | `worker_kernel::discover` |
+| `worker_list` | `worker_kernel::list` |
+| `worker_inspect` | `worker_kernel::inspect` |
+| `worker_invoke` | `worker_kernel::invoke` |
+| `worker_disable` / `worker_enable` | `worker_kernel::disable` / `enable` |
+| `worker_rollback` | `worker_kernel::rollback` |
+| `worker_retire` / `worker_purge` | `worker_kernel::retire` / `purge` |
+| `worker_inbox` / `worker_runs` | `worker_kernel::inbox` / `runs` |
+| `worker_webhook_rotate` | `worker_kernel::webhook_rotate` |
+| `worker_stop_all` | `worker_kernel::stop_all` |
+
+Every enabled worker is also registered as a stable direct typed tool using the
+bundle's `toolName`, input schema, output schema, description, routing metadata,
+provenance, health, version, and recent success evidence.
+
+At each model turn Tron ranks dynamic workers by explicit session promotion,
+query overlap, recent successes, and identity, selecting at most 12. A
+`worker_discover` result promotes matching workers into that session's live
+tool surface without a restart. A newly upserted worker registers immediately.
+
+## Local Authority and Provenance
+
+For an autonomous profile, local model calls use a trusted-local causal context.
+The invocation executor records actor, session, workspace, model/provider call,
+trace, parent invocation, working directory, turn, and deterministic
+idempotency metadata. None of those observations is a permission grant.
+
+There are no local operation claims, resource selectors, synthetic profile
+grants, or agent-kind rejections. Executable workers can change local files and
+make consequential external requests without fresh confirmation. This is the
+intentional POC threat model.
+
+The remaining boundaries are practical:
+
+- bearer authentication protects remote `/engine` clients;
+- worker webhook tokens protect loopback trigger endpoints;
+- named-secret bindings limit accidental secret propagation;
+- versions, source checksums, provenance, traces, inbox results, and audits make
+  behavior inspectable and recoverable;
+- execution ceilings contain runaway concurrency and causal loops;
+- production deployment remains manual-only.
+
+## Authentication and Secrets
+
+Remote clients still authenticate to `/engine` with the paired bearer token;
+the trusted-local execution change does not weaken transport authentication.
+OAuth refresh is owned by `domains/auth/credentials/`. Refreshes serialize
+through a process-local refresh mutex and then an auth-file `flock`. Refreshes
+re-read `auth.json` after the lock and fail the refresh if persistence fails.
+Model providers receive ephemeral token copies rather than owning credential files.
+
+Provider credentials live in `~/.tron/profiles/auth.json`. Worker secrets live
+under `~/.tron/workspace/vault/` and enter a worker only through declared
+logical bindings. Bundle validation rejects likely secret material; runtime
+injection uses environment variables, and redaction covers persisted inputs,
+outputs, events, logs, and diagnostics.
+
+## Core Source Proposals
+
+Core changes use a separate boundary from workers. `core_proposal_create`:
+
+1. canonicalizes the requested Git repository;
+2. creates a dedicated `codex/core-proposal-*` branch and worktree under
+   `~/.tron/workspace/core-proposals/`;
+3. applies the supplied patch only in that worktree;
+4. runs the supplied test command with a two-hour ceiling;
+5. commits successful work and records branch, commit, worktree, and bounded
+   test evidence.
+
+Failure removes the temporary worktree/branch and does not retain a proposal.
+Creation never modifies the running tree or binary.
+
+`core_proposal_apply` accepts a proposal id plus session and message ids. It
+loads that later persisted event and requires a user-authored message created
+after the proposal that explicitly names and approves/applies it. Only then is
+the proposal commit cherry-picked into the named repository. The approval
+message is recorded directly; no capability grant is minted.
+
+## State Snapshot and Legacy Import
+
+Before a profile first opens the worker schema, Tron creates a verified snapshot
+under `~/.tron/internal/snapshots/`. The manifest records format/schema,
+source home/profile, creation time, every relative path, byte count, SHA-256,
+and restoration instructions. It captures profiles, prior worker files, and a
+consistent `VACUUM INTO` copy of the primary SQLite database.
+
+Offline commands:
 
 ```bash
-./scripts/tron setup       # Check prerequisites, build, link the workspace CLI
-./scripts/tron dev -d      # Start the server and initialize runtime state
-./scripts/tron login       # Authenticate with Claude (OAuth browser flow)
+scripts/tron state snapshots
+scripts/tron state restore /absolute/path/to/snapshot
 ```
 
-Build and run:
-
-```bash
-# Build the server
-cd packages/agent
-cargo build --release
-
-# Development mode (foreground, auto-rebuild)
-./scripts/tron dev
-
-# Or install as launchd service
-./scripts/tron install
-```
-
-iOS app:
-
-```bash
-cd packages/ios-app
-brew install xcodegen
-xcodegen generate
-open TronMobile.xcodeproj
-```
-
-Mac app wrapper (optional; for DMG development):
-
-```bash
-cd packages/mac-app
-xcodegen generate
-open TronMac.xcodeproj
-```
-
-Build with the `Tron` scheme for optimized production builds, `Tron Fast` for
-debug-speed builds that install over the production app, or `Tron Beta` for the
-side-by-side beta variant. The app starts without a server until the user pairs
-a Mac through onboarding.
-
-Codex app local actions are checked in under
-`.codex/environments/environment.toml`. Open this project root in the Codex app
-to get toolbar actions for starting `scripts/tron dev -bdt`, stopping the dev
-server with `scripts/tron dev --stop`, and clear physical-device iOS actions.
-`Rebuild + Install + Launch ...` actions call `scripts/tron-ios-beta install`,
-which regenerates the Xcode project, builds current source, installs the fresh
-app bundle, and launches it. `Just Launch Installed ...` actions call
-`scripts/tron-ios-beta launch`, so they only open the app that is already on
-the device.
-The install helper installs the requested configuration's `iphoneos` product, so
-production actions do not accidentally launch a stale Beta or ProdDebug build
-from DerivedData. Production rebuild actions call `install`, not `launch`, so
-source changes are built into the app before it is installed and post-install
-launched.
-The iPhone environments are Beta (`Tron Beta`/`Beta`), Prod Fast (`Tron
-Fast`/`ProdDebug`), and Prod Release (`Tron`/`Prod`). Because the two
-production builds share `com.tron.mobile`, there is one deduplicated production
-just-launch action; it opens whichever production-bundle binary is currently
-installed. iPad currently has Beta rebuild/install/launch and just-launch
-actions.
-The iOS actions pass generic `TRON_IOS_DEVICE_NAME=iPhone` or
-`TRON_IOS_DEVICE_NAME=iPad` selectors so the repo does not store personal device
-details. Post-install launch is bounded by the helper's launch timeout so a
-stuck `devicectl` launch exits cleanly. The matching launch action relaunches
-the already-installed app without rebuilding.
-
-See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for commit conventions, TDD expectations, and release workflows.
-
----
-
-## CLI Reference
-
-The `scripts/tron` CLI manages workspace development and contributor service workflows. Its bottom-level dispatch and configuration own workspace-only commands and the contributor helper bundle identifier, while `scripts/tron-lib.sh::dispatch_runtime_command` and `show_runtime_command_help` are the single route and help owners for runtime commands shared with the installed `tron-cli`; command-family and contributor bundle/signing bodies live in `scripts/tron.d/`, and runtime service/log/auth helpers live in `scripts/tron-lib.d/`. Low-level `launchd_start` and `launchd_restart` are contributor-only; the shared `service_start` owner alone selects installed Release command mode or the contributor fallback. Manual deploy owns its installed-contributor prerequisite rather than exporting that workspace check through the installed shared library. Development setup takes the pair lock and links the workspace entrypoint only when no installed pair exists; rerunning it preserves an installed CLI. `scripts/tron.d/manual-deploy.sh::install_runtime_cli_payload` is the single installer for the contributor CLI, shared runtime helpers, signing resources, the Mac-owned helper icon, and workspace delegation path used by install and manual deploy. It rejects callers that do not own the contributor-pair writer lock. Before either command mutates an installed artifact, the shared service owner atomically publishes an immutable rollback plan: a reinstall/deploy plan contains the prior complete signed helper bundle, CLI payload and resources, optional `deployed-commit`, launchd plist, and CLI entrypoint; a clean install records `no-prior-pair` plus any pre-existing plist or entrypoint. Mutable workspace build output is never accepted as recovery proof. Install, deploy, rollback, uninstall, and setup entrypoint changes are exclusive writers, while installed login and `auth rotate` hold the same OS mutex as readers for their complete Rust-helper calls. A crashed writer leaves `deploy.in-progress` and its published rollback plan, so authentication remains closed until rollback or successful completion even though the OS releases the dead process's mutex automatically. The installed CLI clears inherited Rust-workspace input and uses only its paired helper. When adding or renaming a subcommand, update the shared or workspace dispatcher and the owning module together.
-
-### Development (workspace only)
-
-| Command | Description |
-|---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground. The command builds exactly once before stopping the installed helper: `-b` places that build before optional `-t` tests, while without `-b` tests run first; `-d` selects the launchd-backed background takeover. It then stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and delegates every exit, stop, or candidate preparation/launch failure restore to the same `service_start` owner as `tron start`. That owner uses `/Applications/Tron.app` and its SMAppService command mode when installed, retains the contributor LaunchAgent fallback otherwise, and reports restoration only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
-| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
-| `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
-| `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`, `test`, and hosted-CI `github-output`). `VERSION.env` is the only hand-edited release identity source; validated `print` output owns contributor helper-bundle metadata, `sync` updates active platform project mirrors, and `check` is the sole read-only validator and rejects duplicate iOS Base.xcconfig version fields. |
-| `tron setup` | Check prerequisites, build, and link `~/.local/bin/tron` to the workspace entrypoint when no installed pair owns it; an installed CLI is preserved. Complete runtime/profile initialization remains owned by first server startup. |
-
-### Manual Deployment (workspace only)
-
-| Command | Description |
-|---------|-------------|
-| `tron preflight` | Pre-deploy infrastructure check |
-| `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check, and fail-closed rollback (`--force` skips confirms; `--ci` is non-interactive). `deployed-commit` and the restart sentinel advance only after `/health` passes. No automatic deploy watcher or shorter deploy alias is retained. |
-| `tron install` | Contributor-only helper/CLI pair install for workspace testing. It always rebuilds, publishes a clean-install or prior-pair rollback plan, and holds the writer lock through bundle, payload, plist, symlink, service start, and health validation; `deployed-commit` advances only after `/health` passes. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
-
-### Runtime
-
-| Command | Description |
-|---------|-------------|
-| `tron start` | Start `com.tron.server`. When `/Applications/Tron.app` is installed, this enters the wrapper's `--tron-start-server-and-quit` path so `SMAppService` owns production registration and success is reported only after `/health` passes; the older contributor `~/Library/LaunchAgents` path is used only when no installed Release wrapper is available. |
-| `tron stop` | Stop the service |
-| `tron restart` | Stop and start the service through the same health-gated path as `tron start`. |
-| `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
-| `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
-| `tron rollback` | Restore the complete prior contributor installation state (`--yes` skips confirm), or remove an interrupted clean install. A restored prior helper must pass `/health` before its rollback plan is retired. |
-| `tron login` | Authenticate with a provider after the server has initialized auth storage (`--label <name>` for multi-account) |
-| `tron auth rotate` | Rotate the WebSocket bearer token from either the workspace or installed CLI (forces every paired iOS device to pair again) |
-| `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
-| `tron errors` | Show the newest 20 error-or-higher rows through the canonical `tron logs --level error --limit 20` query |
-
-### Build Profiles
-
-```bash
-cd packages/agent
-cargo check                        # Fast correctness check (no binary)
-cargo build --profile dev-server   # Dev server (thin LTO, fast iteration)
-cargo build --release              # Production (fat LTO, maximum optimization)
-cargo test                         # Run the full test suite
-cargo clippy --workspace --all-targets # Lint with Cargo.toml policy
-```
-
----
-
-## Capabilities
-
-The current restoration baseline keeps the server-side model surface collapsed
-to one provider-visible function while restored backend capabilities enter as
-operation values behind that single `execute` provider surface:
-
-| Provider tool | Engine function | Purpose |
-|---------------|-----------------|---------|
-| `execute` | `capability::execute` | Run one primitive host operation and return a bounded observation/result to the turn loop. |
-
-The registered host contract retains the complete closed request-field union for
-engine validation. Provider metadata exposes only the compact discovery
-bootstrap (`operation`, `catalog_search`, and `catalog_inspect` fields) and keeps
-operation-specific payloads open for the provider transport; callers discover
-the exact input contract through `catalog_inspect`, while the host remains the safety
-boundary. This avoids sending the complete cross-operation field union on every
-model request without creating a second capability surface. Operation output
-schemas are opt-in through `includeOutputSchema: true`; ordinary inspection
-returns one input schema rather than duplicating input/output contracts across
-multiple result fields.
-
-Every supported operation uses the same closed
-`tron.provider_operation_output.v1` model envelope. The capability domain owns
-the operation-specific profile and semantic evidence contract, sanitized
-summary policy, redacted evidence projection, common failure branch, and
-structural 15 KB byte budget; the turn runner and provider adapters transport
-the canonical text without reconstructing domain output. Raw
-`CapabilityResult` details remain internal audit/UI state, while model context
-receives only bounded facts, resource refs, collections, next actions, explicit
-truncation proof, and a typed recoverable error when applicable. Oversized
-evidence is removed as whole JSON elements rather than slicing serialized
-bytes, collection fact limits reserve room for navigation identifiers such as
-trace/resource/invocation refs before optional audit detail, and omission
-counters describe the final retained structure exactly. Successful operation
-results also carry one canonical engine outcome that explicitly distinguishes a
-fresh invocation from an idempotent replay and, for replay, names the safe
-source invocation ref.
-Inline capability-result images fail closed because provider media must enter
-through durable resource custody. Unsupported operation guesses use the same
-safe failure envelope and retain catalog-based recovery guidance.
-
-Catalog search extracts complete operation-like tokens from natural-language
-queries. Unsupported names are reported explicitly and do not produce unrelated
-fuzzy operation matches, while valid prefixes still expand to supported
-operations. Inspecting an unsupported `execute::<operation>` id returns bounded
-recovery guidance rather than an opaque catalog failure.
-
-Operation ownership and evolution metadata live in the exhaustive
-`OperationId` match in
-`packages/agent/src/domains/capability/operations/operation_contract/metadata.rs`.
-Runtime consumers use its `kernel_locked`, `governance_locked`, `record_plane`,
-`adapter_replaceable`, and `module_owned` classifications directly. Source-owned
-tests require every operation to have metadata, keep protected kernel,
-governance, record-plane, and module-owned boundaries locked, and require
-replaceable/module/record-plane targets to name their safety constraints.
-Replacement means governed contract-compatible substitution with
-authority, evidence, visibility, replay, and rollback constraints; it does not
-mean arbitrary hot swapping. Kernel and module-governance operations remain
-non-replaceable because they validate future replacement. Capability Binding adds
-metadata-only `capability_binding_request`, `capability_binding_decision`, and
-`capability_binding_policy` records for future shadow/extend/replace proposals;
-active binding policy records do not route execution, hot-swap modules, mutate
-dispatch, install or activate modules, restore dependencies, run package
-managers, inherit `agent_state`, access networks, or expose raw paths, secrets,
-commands, logs, grant IDs, authority IDs, or debug payloads.
-The Shadow Replacement Trial adds metadata-only
-`capability_shadow_trial_request`, `capability_shadow_trial_decision`,
-`capability_shadow_trial_run`, and `capability_shadow_trial_evidence` records
-for the selected read-only `git_status` operation. The trial compares bounded
-built-in and deterministic candidate projections, requires exact selectors,
-rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`,
-and still performs no candidate execution, dispatch mutation, hot-swap, module
-activation, package-manager, dependency, or network behavior.
-Dynamic Replacement adds governed route records for the first read-only target,
-`git_status`: `capability_replacement_candidate`,
-`capability_route_binding`, `capability_route_activation`,
-`capability_route_event`, and `capability_route_rollback`. These records make a
-scoped route explicit, versioned, auditable, disableable, and rollbackable.
-Candidate and binding records revalidate the exact current accepted
-`capability_shadow_trial_evidence` resource/version before a route can activate.
-Candidate records also require exact lifecycle/runtime selectors and validate the
-referenced current module lifecycle/runtime records through the same supervised
-shadow-projection boundary used at invocation. The dispatcher seam resolves an
-active scoped `git_status` route, verifies accepted shadow evidence plus
-lifecycle/runtime refs, revalidates and replays the accepted provider-safe shadow
-projection, and emits route events. This route mode does not execute live module
-code. The routed `git_status` provider projection explicitly reports route state,
-execution mode, accepted-shadow source, and the fact that live module code was
-not executed, while keeping route-event and runtime resource identifiers out of
-model context. If the replacement runtime
-envelope, lifecycle authorization, version refs, scope, network policy, or
-projection shape are unsafe, candidate recording or routing fails closed and does
-not substitute a built-in success projection for the unsafe route.
-Cockpit Visibility adds the system-visible pure-read
-`capability_binding::cockpit_overview` projection for Dashboard clients.
-It joins registry ownership metadata with scoped binding-policy, shadow-trial,
-dynamic route records, and the Engine Capability Pool role classification so
-iOS can show one provider-visible operation count, total versus returned
-operations, operation-list and bounded resource-scan completeness, redacted
-operation owner and replacement target summaries, session-work versus
-diagnostics/governance/kernel-evolution role, runtime-routable versus
-producer-extensible versus kernel-evolution-only replacement class,
-server-derived readiness/next-action labels,
-built-in/module/locked status, replaceability, binding/shadow attempts, active
-routes, route events, routed invocations, failed-closed/disabled/rolled-back
-route state, bounded route-story cards for "What Changed" cockpit summaries,
-verification context, and rollback/disable/abort availability
-without exposing raw resource IDs, paths, commands, logs, grants, authority
-IDs, or token-like material, package-manager output, dependency artifacts, or
-candidate module payloads. `capability_binding` is the projection source for
-these facts, not the operation owner.
-Self-adaptation remains constrained by canonical operation metadata and the
-route, context-policy, and cockpit source owners. Authority, transport, event
-history, resource custody, redaction, trace/replay/catalog, module governance,
-context policy, route resolution, and server-owned visibility remain protected
-substrate. Replaceable behavior must pass through exact evidence,
-provider-safety, route events, and rollback/disable contracts. The current
-runtime proves one scoped read-only `git_status` route; it does not claim broad
-autonomous self-update across every operation.
-`catalog_inspect` also projects operation-specific contracts for provider-safe
-trace and web operations. `execute::trace_list` and `execute::trace_get` show the
-model the safe record shape and redaction guarantees before invocation.
-Canonical operations verify trusted actor/session context and exact durable
-operation authority before any trace mutation, then start a trace before exact
-payload validation so structural rejection remains inspectable. Unknown
-operation names use the redacted failed-trace contract only when a trusted
-rejection grant carries that exact unsupported-operation claim. Whole
-session trace proof is point-in-time: agents call `trace_list` after the
-operations being audited or explicitly qualify that later operations are not
-covered. Final answers should explicitly say provider transcript tool-call ids
-may still be visible in provider message history for protocol threading, while
-trace projections exclude raw trace `providerInvocationId` fields.
-`execute::web_robots_check` and `execute::web_fetch` show the exact top-level
-web payload fields, bounded network controls, and robots-policy freshness
-linkage needed for safe web use.
-
-`capability::execute` is a direct primitive operation endpoint. Its request
-schema requires an `operation` field and accepts only operation-specific
-primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
-`path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
-`timeoutMs`, `maxOutputBytes`, `jobResourceId`, `state`, `cleanupAfterSeconds`,
-`goalResourceId`, `questionResourceId`, `scheduleResourceId`,
-`toolSourceResourceId`, `mediaResourceId`, `expectedMediaVersionId`,
-`objective`, `prompt`, `answerText`,
-`expectedQuestionVersionId`, `expiresAt`, `title`, `scheduleKind`,
-`triggerType`, `startAt`, `createdAt`, `cancelledAt`, `evaluationAt`,
-`intervalSeconds`, `timezone`, `missedRunPolicy`, `maxCatchUpRuns`, `target`,
-`maxRunRecords`, `maxAgeDays`, `allowFreeForm`,
-`successCriteria`, `constraints`, `queueRefs`, `planRefs`, `evidenceRefs`,
-`kind`, `id`, `mediaId`, `mediaKind`, `mimeType`, `sizeBytes`, `blobRef`,
-`contentHash`, `durationMs`, `summary`, `transcriptionState`,
-`transcriptionText`, `transcriptionLanguage`, `transcriptionModel`,
-`workerPackageResourceId`, `workerPackageKind`, `moduleManifestResourceId`,
-catalog search filters, `idempotencyKey`, and `reason`.
-The canonical operation-contract registry owns each operation's closed input
-schema, effect, risk, authority, and preflight metadata. Every operation that
-is not read-only structurally requires a stable caller-supplied
-`idempotencyKey`; provider guidance, capability-pool projections, runtime
-validation, and module-manifest effect validation derive from that registry
-instead of maintaining parallel operation-name policy lists. The separate
-model primitive `execute` remains capability-domain-owned and delegates one
-validated operation per call.
-Agent-launched `execute` invocations carry provider type, provider call id,
-run/turn ids, canonical working directory, and trace parentage as trusted engine
-runtime metadata under a per-call derived authority grant. The child grant is
-scoped to the exact primitive function and operation, no namespace authority,
-a bounded wrapper-compatible risk covering the canonical operation risk, the
-static authority scopes for that operation, and
-the operation's base resource kinds/selectors and network policy. Before
-dispatch, the capability domain resolves the durable grant and revalidates all
-of those static facts, so a surviving read-only or rejection grant cannot be
-replayed as a mutating operation. Conditional selectors and resource kinds,
-file roots, and payload-specific authority remain enforced by their owning
-domain and the engine authorizer. The
-production bootstrap set excludes test fixture grants, and opening the durable
-authority store revokes any retired engine-bootstrap root and its descendants.
-The worker rejects bootstrap grants, public caller contexts, and system-scoped
-state. File and process operations additionally require trusted working
-directory metadata before resolving paths. Trace records use those trusted facts
-directly instead of inferring provider ownership from model id strings.
-`replay_manifest` is the read-only exception: it returns the current session
-replay manifest without creating a trace record, so the read does not mutate
-the manifest it exports.
-
-Capability discovery now reports a unified capability pool with two surfaces:
-`agent_operation` entries are the supported `capability::execute` operation
-values Tron can use for normal session work, while `catalog_function` entries
-are engine substrate functions used for transport, diagnostics, governance,
-and kernel evolution. Catalog projections annotate each function with an
-audience, default visibility, and replacement class; when a catalog function is
-also useful to the model, `modelFacingInvocation` points back to the supported
-`capability::execute` operation instead of asking the model to call an
-internal engine function. This keeps one model-facing tool while still making
-the internal engine/catalog substrate inspectable and classifiable.
-
-Agent backend observability is native to this primitive surface. Prompt runs,
-turns, provider requests, streaming, capability invocation waves, and primitive
-`execute` operations emit structured logs with `component` and `agent_event`
-fields such as `agent.runtime`, `agent.loop`, `agent.turn`, `agent.provider`,
-`agent.stream`, `agent.capability`, and `agent.execute`. INFO logs mark durable
-lifecycle boundaries and include session/workspace/run/turn/trace/invocation
-IDs where available. TRACE logs add high-volume sequencing and size metadata for
-stream deltas and argument deltas without logging prompt text, generated text,
-tool arguments, or file content. The provider-neutral stream accumulator keeps
-text, thinking, and capability blocks in observed order, treats repeated
-terminal thinking snapshots as finalization rather than new content, and
-normalizes any completed turn carrying a capability invocation to the
-`capability_invocation` stop reason so live events and durable replay agree. The
-SQLite log transport redacts known
-credential/token patterns from server-side messages, structured data, and error
-fields before persistence, but call sites still treat logs as lifecycle metadata
-rather than content storage. Authorized content and effect evidence remain in
-session events, trace records, blobs, resources, provider audits, and replay
-manifests; retained logs are the searchable agent/backend trace that points back
-to those canonical artifacts.
-
-Current primitive operations:
-
-| Operation | Effect |
-|-----------|--------|
-| `observe` | Record text as an assistant-visible observation. |
-| `state_get` | Read an agent-owned state value. |
-| `state_set` | Write an agent-owned state value. |
-| `state_list` | List agent-owned state entries for a scope/namespace. |
-| `filesystem_read` | Read a bounded text preview under the trusted working-directory root; binary content bodies are omitted. The provider projection carries relative path, size/binary facts, and line-aware bounded redacted text chunks with explicit source/provider truncation proof. Whole Authorization header values for every scheme, escape-aware quoted JSON and labeled credentials, complete private-key blocks, `file://` URIs, UNC/Windows paths, and local absolute/parent-relative paths remain outside provider context. A slash literal is retained only in explicit quoted route-call syntax such as `router.get("/api/users")`; unquoted, generic quoted, and ambiguous slash paths fail closed as local paths. `writeSafeFromProjection` is true and the full-content hash is exposed only when the complete unredacted text is present, preventing a partial/redacted view from becoming an unsafe full-file write precondition. |
-| `filesystem_list` | List bounded directory entries under the trusted working-directory root. The provider projection preserves nonempty entry rows with validated relative paths; `sourceTotalItems` / `sourceReturnedItems` / `sourceOmittedItems` truthfully describe source-level limiting, while the canonical provider collection separately owns post-projection and byte-budget `total` / `returned` / truncation counts. |
-| `filesystem_find` | Walk bounded entries matching a simple name/path pattern without following symlinks. Provider-visible match rows retain only bounded metadata and validated relative paths; source truncation is reported only after an extra matching entry or the walk bound is actually observed. |
-| `filesystem_glob` | Walk bounded entries matching a glob-style pattern without following symlinks. Provider-visible match rows retain only bounded metadata and validated relative paths; source truncation is reported only after an extra matching entry or the walk bound is actually observed. |
-| `filesystem_search_text` | Search bounded UTF-8 file previews under the trusted root while skipping binary content. Provider-visible matches include bounded redacted preview, relative path, line, and content-hash evidence. Each preview reports source/provider byte omission, exact result overflow is distinguished from an exact-limit complete search, and files searched through only a bounded prefix are counted as `truncatedInputFiles` and mark the search incomplete. Canonical provider collections own final returned/omitted row counts after byte-budget reduction. Raw credentials, `file://` URIs, and arbitrary local absolute/parent-relative paths are redacted. |
-| `filesystem_diff` | Produce a bounded preview diff between current file content and proposed text. The read-only provider projection exposes redacted diff chunks and before/after metadata with explicit truncation; write/edit/apply-patch results remain metadata/resource-only and never echo proposed file bodies or diffs. |
-| `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
-| `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
-| `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
-| `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, bounded porcelain evidence, copyable provider-safe `repositoryTreeSnapshotInput` / `treeObjectRef` refs for content-free repository tree custody, and explicit `indexTreeTruncated` / `indexTreeOidUnavailable` evidence when the read-only staged-index hash is too large to compute. The model-facing result and structured projection explicitly distinguish optional durable resource evidence from repository/root/HEAD/tree navigation refs: the status read creates no resource, labels the refs as non-durable content-free input for `repository_tree_snapshot`, preserves complete copy-ready ref-object JSON, and summarizes branch, clean/dirty state, staged/unstaged/untracked/conflicted counts, porcelain emptiness, durable-resource-ref count, and truncation without requiring inference. |
-| `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers; oversized staged-index hashing degrades to explicit unavailable evidence instead of failing the read. |
-| `git_branch_inventory` | Return bounded read-only local branch inventory evidence: current/detached state, sorted local branch refs, OIDs, upstream/ahead-behind when locally available, last-commit metadata, and staged-index availability flags. |
-| `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
-| `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
-| `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
-| `git_branch_start` | Slice 6D operation that creates one new local branch at `expectedHead`, moves symbolic `HEAD` to it after a guarded ref/OID check without checkout, preserves index/worktree content, and records branch-start resource and stream evidence. |
-| `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
-| `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, fail-closed `networkPolicy: none`, and an explicit caller idempotency key. |
-| `job_status` | Inspect one durable `job_process` resource in the current session scope through a redacted lifecycle projection: `job_process` / `execution_output` refs, limits, exit code, duration, timeout/cancellation and output-truncation metadata, and no process id, raw command, working directory, authority, idempotency key, stdout, or stderr. |
-| `job_list` | List durable `job_process` resources in the current session scope with the same redacted lifecycle projection, optionally filtered by lifecycle state. |
-| `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
-| `job_cancel` | Request cancellation for a running durable job; runtime finalization records terminal cancellation with bounded output evidence after signalling the owned process group. |
-| `module_program_execution_start` | Slice 24B operation that starts a module-owned supervised non-interactive job after enabled lifecycle/runtime authorization, records content-free `program_execution_record` evidence, delegates process execution to durable jobs, and returns only runtime/program/job/output refs plus bounded safety metadata without raw command, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, PTY, package install, or network behavior. |
-| `module_program_execution_status` | Inspect one delegated module job through exact runtime and job selectors, returning ref-only job/output custody with fingerprints, truncation, duration, exit, timeout, and terminal metadata instead of job logs or output previews. |
-| `module_program_execution_cancel` | Request cancellation for one delegated module job through exact runtime/job selectors and idempotency, updating module runtime cancellation metadata while keeping raw reason/output/process payloads out of provider-visible results. |
-| `module_program_execution_cleanup` | Archive one terminal delegated module job after exact module-runtime and job-version freshness checks, recording cleanup metadata and bounded refs without exposing raw job or execution-output resource payloads. |
-| `goal_create` | Create a scoped durable `goal` record with bounded objective, owner/scope, queue/plan/evidence refs, trace/replay refs, lifecycle state, resource evidence, and exact provider-safe inspect/cancel argument bases. |
-| `goal_list` | List scoped goal records with bounded summaries, explicit truncation metadata, and exact provider-safe `goal_inspect`/`goal_cancel` argument bases for returned records. |
-| `goal_inspect` | Inspect one scoped goal record with current resource/version refs and lifecycle evidence. |
-| `goal_cancel` | Cancel one nonterminal goal idempotently with required reason, lifecycle stream evidence, and resource-version freshness. |
-| `question_create` | Create a scoped durable `user_question` record, optionally associated with a goal, with prompt/options/free-form/expiry, trace/replay evidence, and exact provider-safe inspect/answer argument bases. |
-| `question_list` | List scoped user questions with bounded summaries, explicit truncation metadata, and exact provider-safe `question_inspect`/`question_answer` argument bases for returned pending questions. |
-| `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
-| `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
-| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, optionally linking current-session allow `web_robots_policy` evidence by `webRobotsPolicyResourceId` plus `expectedWebRobotsPolicyVersionId` before target network I/O. |
-| `web_robots_check` | Check one origin `robots.txt` for one requested URL under declared network authority, producing bounded `web_robots_policy` evidence and copy-ready `webRobotsPolicyResourceId`/`webRobotsPolicyVersionId` refs for a later robots-gated `web_fetch`, with no sitemap traversal, crawling, search, browser, or login scope. |
-| `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
-| `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
-| `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
-| `web_research_request_record` | Accepted Slice 24F operation that records one current-session or current-workspace `web_research_request` metadata record with bounded question/scope summaries, policy labels, source/citation/robots/dependency/current-scope/trace/replay refs, idempotency fingerprint, side-effect proof, and `networkPolicy: none` without fetching, search, crawling, browser automation, cookies, raw HTML, logs, commands, local paths, or credentials. |
-| `web_research_request_list` | List scoped `web_research_request` records as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with explicit truncation metadata and no network or browser side effects. |
-| `web_research_request_inspect` | Inspect one scoped `web_research_request` through exact `kind:web_research_request` plus `resource:<id>` selector authorization, returning bounded metadata and refs without raw web, browser, command, path, grant, authority, token-like, personal, or debug material. |
-| `web_research_review_record` | Accepted Slice 24F operation that records one scoped `web_research_review` linked to an exact request selector, with bounded review outcome/summary, evidence refs, idempotency fingerprint, and `networkPolicy: none` without approval minting, network, browser, crawl, or raw local/web material. |
-| `web_research_review_list` | List scoped `web_research_review` records as bounded provider-safe summaries after resource-store revalidation and without network access. |
-| `web_research_review_inspect` | Inspect one scoped `web_research_review` through exact `kind:web_research_review` plus `resource:<id>` selector authorization, returning bounded review metadata and refs only. |
-| `web_research_source_record` | Accepted Slice 24F operation that records one bounded source/citation artifact metadata record linked by exact request or review selectors, with source/citation/robots/dependency/current-scope/evidence refs, idempotency fingerprint, and no raw page dumps, browser logs, cookies, credentials, commands, raw file contents, or network behavior. |
-| `web_research_source_list` | List scoped `web_research_source` artifact records as bounded provider-safe source/citation summaries after kind/schema/scope/current-version revalidation. |
-| `web_research_source_inspect` | Inspect one scoped `web_research_source` through exact `kind:web_research_source` plus `resource:<id>` selector authorization, returning bounded citation/source artifact metadata and refs only. |
-| `tool_source_list` | List a bounded number of current-session inert `tool_source_proposal` records with source identity, state/summary, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
-| `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
-| `subagent_launch` | Accepted Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
-| `subagent_status` | Inspect one scoped `subagent_task`, then inspect the delegated module runtime/job binding through `module_program_execution_status`, returning bounded/redacted task and delegated job refs without raw output payloads. |
-| `subagent_result` | Return a reviewable merge proposal for one scoped delegated subagent task by reading the bound module runtime/job refs; it proves `parentConversationMutated: false` and does not merge output into conversation state. |
-| `subagent_cancel` | Cancel one nonterminal scoped delegated subagent task with idempotency and optional expected subagent version freshness, delegating cancellation through the bound module runtime/job pair before recording subagent cancellation provenance. |
-| `subagent_task_list` | List scoped `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, handoff/evidence/output refs, explicit truncation metadata, `networkPolicy: none`, and no raw prompts, raw results, logs, paths, or result-merge side effects. |
-| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle, delegation, and merge-proposal evidence without raw prompts, secrets, raw process output, local paths, or raw authority ids. |
-| `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
-| `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
-| `context_control_status` | Implementation-candidate read-only operation called with only `operation` in provider-facing `capability::execute`; trusted runtime context supplies the current session. It returns provider-safe context composition, token estimates, memory/resource/execution refs, epoch metadata, and freshness proof without recording a snapshot or action, using exact session-scoped read authority, `networkPolicy: none`, and no raw prompt bodies, hidden chain-of-thought, secrets, env values, local paths, commands, logs, grant ids, or authority ids. |
-| `context_control_snapshot` | Implementation-candidate operation that records and returns a provider-safe current-session context snapshot with bounded composition blocks, token estimates, memory/resource/execution refs, epoch freshness, redaction/truncation proof, exact session-scoped authority, idempotency evidence, `networkPolicy: none`, and no raw prompt bodies, hidden chain-of-thought, secrets, env values, local paths, commands, logs, grant ids, or authority ids. |
-| `context_control_compact` | Implementation-candidate operation that records a durable preflight snapshot, writes a bounded compact-boundary timeline event when context is summarizable, and stores a context-control action record with actor, reason, expected effect, result, audit refs, and provider-safe proof without deleting history/resources/traces or exposing raw prior context. |
-| `context_control_clear` | Implementation-candidate operation that records a durable preflight snapshot, writes a context-cleared timeline event, creates a new `context_control_epoch`, and stores a context-control action record proving prior turns are excluded from future provider context while chat history, resources, traces, and durable refs remain inspectable. |
-| `context_control_action_list` | Implementation-candidate operation that lists current-session context-control action summaries as bounded provider-safe audit rows after stored kind/schema/scope revalidation, with no raw prompt/log/command/grant/authority material. |
-| `context_control_action_inspect` | Implementation-candidate operation that inspects one context-control action through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning provider-safe preflight, result, audit refs, and proof only. |
-| `context_survivor_record` | Records one current-session context survivor policy ref with supported target kind, kind-matched non-wildcard safe ref, bounded label, required reason, priority, idempotency evidence, `networkPolicy: none`, and proof that future provider context binding must preserve only the safe ref, not raw message bodies, prompts, local paths, commands, logs, secrets, grant ids, or authority ids. |
-| `context_survivor_list` | Lists active current-session survivor policy refs as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, failing closed if active refs exceed the complete bounded projection. |
-| `context_survivor_disable` | Disables one survivor policy record through exact `resource:<id>` selector authorization, expected session scope, required reason, same-key idempotency replay, and provider-safe disabled-state projection. |
-| `context_exclusion_record` | Records one current-session context exclusion policy ref with supported target kind, kind-matched non-wildcard safe ref, bounded label, required reason, priority, idempotency evidence, `networkPolicy: none`, and proof that future provider context binding must omit only the safe ref, not raw message bodies, prompts, local paths, commands, logs, secrets, grant ids, or authority ids. |
-| `context_exclusion_list` | Lists active current-session exclusion policy refs as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, failing closed if active refs exceed the complete bounded projection. |
-| `context_exclusion_disable` | Disables one exclusion policy record through exact `resource:<id>` selector authorization, expected session scope, required reason, same-key idempotency replay, and provider-safe disabled-state projection. |
-| `context_policy_snapshot` | Records a provider-safe current-session policy snapshot containing the complete bounded active survivor/exclusion summaries and proof that replacement summarizers must consume server-owned policy refs without bypassing context-control custody; overflow fails closed instead of silently omitting refs. |
-| `module_list` | List system-scoped `module_manifest` records as bounded provider-safe module summaries after stored kind/schema/scope/payload revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, network, or write side effects. |
-| `module_inspect` | Inspect one system-scoped `module_manifest` after stored kind/schema/scope/version/payload revalidation, returning bounded provider-safe identity, declarations, authority/settings/dependency intents, validation, provenance, distinct resource and manifest lifecycle fields, refs, and redaction proof without raw manifests, local paths, env values, commands, secrets, token-like strings, raw grant ids, or personal-info literals. |
-| `module_proposal_record` | Accepted Slice 23B operation that records one scoped `module_proposal` resource for bounded module authoring metadata only, with title/summary identity, intended module refs, bounded source/doc/test refs, validation placeholder status, lifecycle evidence, trace/replay fingerprints, idempotency fingerprint, and explicit proof of no install, execution, dependency restore, package manager, network, physical workspace directory, repo-managed skills, raw prompt/proposal/code/command/file-content storage, raw grant/authority ids, or token-like provider-visible proposal metadata. |
-| `module_proposal_list` | Accepted Slice 23B operation that lists scoped `module_proposal` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with explicit truncation metadata, `networkPolicy: none`, token-like metadata rejection, and no install, activation, execution, dependency resolution, package-manager, network, or workspace-directory side effects. |
-| `module_proposal_inspect` | Accepted Slice 23B operation that inspects one scoped `module_proposal` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only proposal identity, refs, lifecycle, validation status, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without unsafe paths, env values, secrets, commands, token-like material, raw proposal bodies, raw prompts, file contents, raw grant ids, raw authority ids, or personal-info literals. |
-| `module_validation_record` | Accepted Slice 23C operation that records one scoped `module_validation_report` resource for bounded module contract validation evidence only, with module/proposal refs, manifest/resource/provider parity checks, required docs/tests evidence, deterministic command/result refs, failure evidence, trace/replay refs, idempotency fingerprint, lifecycle, `networkPolicy: none`, and explicit no-install/no-execution proof without running commands or module code, raw logs/commands/env/code/file contents, unsafe paths, package managers, dependency restore, repo-managed skills, raw grant/authority ids, token-like material, install, activation, network, or public `/engine` expansion. |
-| `module_validation_list` | Accepted Slice 23C operation that lists scoped `module_validation_report` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, command execution, dependency resolution, package-manager, network, or workspace-directory side effects. |
-| `module_validation_inspect` | Accepted Slice 23C operation that inspects one scoped `module_validation_report` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only validation identity, subject refs, parity/evidence counts and bounded refs, lifecycle, status/checks, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without unsafe paths, env values, secrets, raw logs, raw commands, token-like material, code, file contents, raw grant ids, raw authority ids, or personal-info literals. |
-| `module_install_request_record` | Slice 23D accepted operation that records one scoped `module_install_request` resource for metadata-only review promotion from a passed current-scope validation report, with dependency policy metadata refs/status, rollback proof refs/readiness, lifecycle `pending_review`, trace/replay fingerprints, idempotency fingerprint, `networkPolicy: none`, and explicit no-install/no-execution proof without physical install, activation, execution, dependency restore, package managers, raw paths/env/logs/commands/code/file contents, raw grant/authority ids, token-like material, repo-managed skills, network, or public `/engine` expansion. |
-| `module_install_request_list` | Slice 23D accepted operation that lists scoped `module_install_request` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, dependency/rollback metadata statuses, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
-| `module_install_request_inspect` | Slice 23D accepted operation that inspects one scoped `module_install_request` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only request identity, validation-report ref, dependency/rollback refs, lifecycle, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
-| `module_install_decision_record` | Slice 23D accepted operation that records one scoped `module_install_decision` resource for approved install-candidate or rejected decision evidence only after fresh scoped approval and derived authority checks, with denial evidence required for rejected/denied outcomes and no approval-evidence authority minting, physical install, activation, execution, dependency restore, package managers, network, raw local data, or public `/engine` expansion. |
-| `module_install_decision_list` | Slice 23D accepted operation that lists scoped `module_install_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with approval/denial metadata refs, lifecycle state, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
-| `module_install_decision_inspect` | Slice 23D accepted operation that inspects one scoped `module_install_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only approval freshness summary, denial evidence refs, lifecycle, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
-| `module_dependency_request_record` | Slice 23G accepted operation that records one scoped `module_dependency_request` resource for metadata-only dependency review, with owner/module linkage, dependency identity, rationale, security/license/runtime need, removal plan, risk class, Cargo.toml/Cargo.lock parity evidence, bounded refs, idempotency fingerprint, `networkPolicy: none`, and no package-manager execution, dependency restoration, manifest/lockfile mutation, raw dependency artifacts, raw local material, or network access. |
-| `module_dependency_request_list` | Slice 23G accepted operation that lists scoped `module_dependency_request` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, parity evidence summaries, `networkPolicy: none`, and no dependency restoration, package-manager, network, or workspace side effects. |
-| `module_dependency_request_inspect` | Slice 23G accepted operation that inspects one scoped `module_dependency_request` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only dependency review evidence without raw paths, env values, secrets, logs, commands, code, file contents, package-manager output, raw grant ids, raw authority ids, token-like material, or personal-info literals. |
-| `module_dependency_decision_record` | Slice 23G accepted operation that records one scoped `module_dependency_decision` resource after exact request selector authority, with approved-policy or rejected/denied decision evidence, high-risk denial evidence requirements, bounded refs, idempotency fingerprint, `networkPolicy: none`, and no approval-evidence authority minting, dependency restoration, package-manager execution, manifest/lockfile mutation, network, or raw local data. |
-| `module_dependency_decision_list` | Slice 23G accepted operation that lists scoped `module_dependency_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with request linkage, denial evidence summaries, `networkPolicy: none`, and no package-manager, network, install, or dependency side effects. |
-| `module_dependency_decision_inspect` | Slice 23G accepted operation that inspects one scoped `module_dependency_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only decision evidence without raw dependency artifacts, package-manager output, local paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
-| `module_dependency_policy_activate` | Slice 23G accepted operation that records one active scoped `module_dependency_policy` resource from an approved dependency decision after exact decision selector authority, carrying approved metadata policy evidence for later module-pack/runtime work without running package managers, restoring dependencies, mutating manifests or lockfiles, executing runtime code, or accessing networks. |
-| `module_dependency_policy_list` | Slice 23G accepted operation that lists scoped `module_dependency_policy` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with active policy metadata, request/decision linkage, `networkPolicy: none`, and no install, dependency restoration, package-manager, network, or workspace side effects. |
-| `module_dependency_policy_inspect` | Slice 23G accepted operation that inspects one scoped `module_dependency_policy` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning approved metadata policy evidence without raw paths, env values, secrets, logs, commands, code, file contents, raw artifacts, raw grant ids, raw authority ids, or token-like material. |
-| `capability_binding_request_record` | Capability Binding Policy operation that records one scoped `capability_binding_request` resource for metadata-only future shadow/extend/replace governance, with target operation, current built-in owner, ownership class, binding mode, requested target, actor scope, rationale, contract/evidence refs, authority constraints, stale-version guards, rollback/disable refs, safe audit refs, idempotency fingerprint, `networkPolicy: none`, locked-class replacement rejection, and no runtime routing or hot-swap. |
-| `capability_binding_request_list` | Capability Binding Policy operation that lists scoped `capability_binding_request` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with operation/binding/status summaries, truncation metadata, `networkPolicy: none`, and no dispatch, module, package-manager, dependency, network, or workspace side effects. |
-| `capability_binding_request_inspect` | Capability Binding Policy operation that inspects one scoped `capability_binding_request` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded request, requirement, audit, idempotency, and no-routing proof without raw paths, secrets, commands, logs, file contents, debug payloads, raw grant ids, raw authority ids, or `agent_state` inheritance. |
-| `capability_binding_decision_record` | Capability Binding Policy operation that records one scoped `capability_binding_decision` after exact request selector authority and expected request version freshness, carrying approved-policy or rejected decision evidence, denial evidence for rejections, copied operation/binding/requirement metadata, idempotency fingerprint, and no routing, hot-swap, module activation/execution, package-manager, dependency-restore, or network behavior. |
-| `capability_binding_decision_list` | Capability Binding Policy operation that lists scoped `capability_binding_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with request linkage, decision state, policy-candidate metadata, `networkPolicy: none`, and no runtime side effects. |
-| `capability_binding_decision_inspect` | Capability Binding Policy operation that inspects one scoped `capability_binding_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded decision, copied binding requirements, audit/history refs, and no-routing proof without raw local material, raw grant ids, raw authority ids, debug payloads, or token-like strings. |
-| `capability_binding_policy_activate` | Capability Binding Policy operation that records one active scoped `capability_binding_policy` resource from an approved decision after exact decision selector authority and expected decision version freshness, carrying rollback/disable refs and active metadata policy evidence only; it does not route execution, mutate dispatch, hot-swap, install, activate, execute, restore dependencies, run package managers, or access networks. |
-| `capability_binding_policy_list` | Capability Binding Policy operation that lists scoped `capability_binding_policy` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with active policy metadata, request/decision linkage, `networkPolicy: none`, and no runtime side effects. |
-| `capability_binding_policy_inspect` | Capability Binding Policy operation that inspects one scoped `capability_binding_policy` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning approved metadata policy evidence, activation proof, rollback/disable refs, and audit history without raw paths, secrets, commands, logs, file contents, raw grant ids, raw authority ids, `agent_state`, or debug payloads. |
-| `capability_binding_cockpit_overview` | Provider-visible read-only operation that projects Dashboard truth for current `capability::execute` operations: friendly display name and concise behavior description, operation-pool role, replacement class, agent usage/preflight guidance, route/binding/shadow state, operation-list completeness, and redacted verification context. Broad system calls return the bounded cockpit overview used by the UI, while the model-context digest is a compact operation directory with summary/family coverage and exact `targetOperation` next steps instead of deep per-operation preflight payloads. Exact `targetOperation` calls return the compact durable target row for one operation, including role/effect, readiness, scoped shadow/route/binding counts, bounded exact shadow-evidence inspect payloads when such evidence exists, completion verdict, exact governed next steps, and required final-answer suffix. The discovery sequence already consumed before the targeted call stays in durable audit data instead of being repeated in provider context. This lets the agent verify replacement readiness without broad scans, unsupported list guesses, invoking adapters, mutating routing, invoking modules, running package managers, using network, flooding context with all operation paths, or exposing raw paths, commands, logs, grants, authority ids, trace ids, invocation ids, or token-like material. |
-| `capability_shadow_trial_request_record` | Shadow Replacement Trial operation that records one scoped `capability_shadow_trial_request` for the exact `git_status` target, with authoritative built-in owner/class metadata, deterministic metadata-only candidate adapter description, exact selector authority constraints, stale guards, rollback/disable/abort refs, idempotency, `networkPolicy: none`, and no routing or candidate execution. |
-| `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. The model-facing schema names the required top-level fields: `capabilityShadowTrialRequestResourceId`, `expectedCapabilityShadowTrialRequestVersionId`, `decision`, and `reason`. |
-| `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. The model-facing schema names the required top-level fields: `capabilityShadowTrialDecisionResourceId`, `expectedCapabilityShadowTrialDecisionVersionId`, `builtInProjection`, and `candidateProjection`; both projections are bounded provider-safe `git_status` comparison objects with concrete evidence refs. |
-| `capability_shadow_trial_evidence_inspect` | Shadow Replacement Trial operation that inspects one scoped `capability_shadow_trial_evidence` through exact `resource:<id>` selector authorization and optional expected evidence version freshness, returning provider-safe comparison, rollback/disable/abort refs, and no-routing proof without raw commands, logs, paths, files, grant ids, authority ids, or `agent_state` inheritance. |
-| `capability_replacement_candidate_record` | Dynamic Replacement operation that records one scoped `capability_replacement_candidate` for the exact read-only `git_status` target, with candidate owner/module/runtime/lifecycle refs, schema/effect/risk evidence, exact current accepted shadow-evidence resource/version proof, exact authority constraints, current lifecycle/runtime projection-boundary validation, rollback controls, safe audit refs, idempotency, `networkPolicy: none`, and no package-manager, network, deploy, or live module-adapter execution. |
-| `capability_replacement_candidate_list` | Dynamic Replacement operation that lists scoped replacement candidates as bounded provider-safe summaries after kind/schema/scope/current-version revalidation, with lifecycle state, candidate owner labels, operation target, truncation metadata, `networkPolicy: none`, and no routing side effects. |
-| `capability_replacement_candidate_inspect` | Dynamic Replacement operation that inspects one scoped replacement candidate through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded candidate contract and rollback evidence without raw paths, secrets, commands, logs, code, file contents, grant ids, authority ids, or module payloads. |
-| `capability_route_binding_record` | Dynamic Replacement operation that records one scoped `capability_route_binding` after exact candidate and shadow-evidence selector authority plus expected candidate/shadow-evidence version freshness, linking a validated `git_status` candidate to a route version with activation gates, rollback/disable requirements, idempotency, `networkPolicy: none`, and no dispatch-table mutation. |
-| `capability_route_binding_list` | Dynamic Replacement operation that lists scoped route bindings as bounded provider-safe summaries with ready/disabled state, route version, target operation, truncation metadata, and no package-manager, network, deploy, or module execution side effects. |
-| `capability_route_binding_inspect` | Dynamic Replacement operation that inspects one scoped route binding through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded activation-gate and route-version evidence without raw local material or authority internals. |
-| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` projection route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, lifecycle/runtime refs, and `networkPolicy: none`, recording activation and route-event resources so invocation can revalidate and replay accepted provider-safe shadow evidence. This route mode does not execute live module code. |
-| `capability_route_disable` | Dynamic Replacement operation that records a terminal disable event for one active scoped route after exact binding and activation selector authority plus expected current versions, restoring built-in ownership for future route lookups without mutating dispatch tables. |
-| `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
-| `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
-| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded accepted-shadow-projection replay state, route results, fail-closed status, and rollback/disable history. |
-| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Dashboard projection over all current `capability::execute` operations, joining canonical friendly names and concise descriptions, registry ownership classes, Engine Capability Pool role classifications, agent usage guidance, and current-session/workspace binding-policy, shadow-trial, and route facts so native clients can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
-| `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
-| `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
-| `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
-| `module_lifecycle_inspect` | Slice 23E accepted operation that inspects one scoped `module_lifecycle_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only lifecycle transition, approval, rollback, runtime-authorization, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, debug payloads, chain-of-thought, or token-like material. |
-| `module_runtime_request` | Slice 23F accepted operation that records one scoped `module_runtime_state` supervisor envelope only after exact-selector authority and enabled lifecycle authorization, with sandbox/network/secrets labels, timeout/shutdown metadata, bounded input/output/evidence refs, idempotency fingerprint, trace-safe request projection, `networkPolicy: none`, and no raw commands/logs/output, package install, dependency restore, PTY, browser automation, network, or provider-visible job logs/raw job payloads. |
-| `module_runtime_list` | Slice 23F accepted operation that lists scoped `module_runtime_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, output artifact refs only, `networkPolicy: none`, and no execution side effects or raw runtime material. |
-| `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
-| `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
-| `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked/degraded status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
-| `procedural_definition_record` | Accepted Slice 24E operation that records one scoped `procedural_record` for metadata-only skill/rule/hook/procedure definitions, including validation evidence, review state, trigger declarations, conflict/ordering metadata, scoped-authority proof, trace/replay refs, bounded refs, content hash, and idempotency fingerprint without storing raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, trigger registration, prompt injection, dependency restoration, or code execution. |
-| `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
-| `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
-| `procedural_activation_request_record` | Accepted Slice 24E operation that records one pending-review `procedural_activation_request` for activate/deactivate/rollback review against an exact procedural record selector, carrying validation, trigger, conflict, ordering, scoped-authority, rollback, trace/replay, bounded-ref, and idempotency evidence while proving activation, trigger registration, hook firing, prompt injection, dependency restoration, package-manager, network, repo-managed skills, and code execution did not occur. |
-| `procedural_activation_request_list` | List scoped `procedural_activation_request` resources with bounded provider-safe summaries, exact procedural/resource authority, `proceduralKind:*` selector proof, `networkPolicy: none`, and no activation side effects. |
-| `procedural_activation_request_inspect` | Inspect one scoped `procedural_activation_request` through an exact `resource:<id>` selector, returning redacted metadata-only review/request evidence and no-execution proof without raw bodies, commands, file contents, unsafe paths, secrets, grant ids, or authority ids. |
-| `procedural_activation_decision_record` | Accepted Slice 24E operation that records one metadata-only `procedural_activation_decision` for approve/deny activation, approve deactivation, or approve rollback after exact activation-request and procedural-record selector authority, preserving decision reason, activation/deactivation/rollback proof refs, trace/replay refs, bounded refs, and idempotency proof without actually firing hooks, injecting prompts, registering triggers, running procedures, or restoring dependencies. |
-| `procedural_activation_decision_list` | List scoped `procedural_activation_decision` resources with bounded provider-safe summaries, exact procedural/resource authority, `proceduralKind:*` selector proof, `networkPolicy: none`, and no activation side effects. |
-| `procedural_activation_decision_inspect` | Inspect one scoped `procedural_activation_decision` through an exact `resource:<id>` selector, returning redacted metadata-only decision and rollback/deactivation proof evidence without raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, or debug payloads. |
-| `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
-| `media_list` | List scoped `media_artifact` resources as bounded/redacted metadata projections with blob refs and transcription summaries only. |
-| `media_inspect` | Inspect one scoped `media_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, lifecycle evidence, storage refs, and local transcription metadata without raw audio. |
-| `media_archive` | Archive one scoped `media_artifact` with expected-version freshness, reason, lifecycle stream evidence, and fingerprinted idempotency evidence; blob deletion/pruning remains a later retention worker concern. |
-| `import_history_record` | Record one scoped `import_history_record` resource for generic session/resource lineage only, with bounded parent/child/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, repository trees, or unsafe paths. |
-| `import_history_list` | List scoped `import_history_record` resources as bounded/redacted generic graph summaries with lineage counts and metadata only. |
-| `import_history_inspect` | Inspect one scoped `import_history_record` after stored kind/schema/scope revalidation, returning bounded/redacted generic graph lineage metadata, refs, and lifecycle evidence without raw import payloads, repository trees, or raw authority ids. |
-| `repository_tree_snapshot` | Accepted Slice 14D operation that records one scoped `repository_tree_snapshot` resource for content-free repository tree metadata only, with exact top-level repository/root/head refs, tree object refs, bounded normalized relative path metadata, aggregate counts, source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw file contents, blob bytes, absolute paths, unbounded tree dumps, repository visualization, or git mutation; unsupported top-level fields are rejected so agents use the published `catalog_inspect` contract instead of guessing aliases. |
-| `repository_tree_list` | Accepted Slice 14D operation that lists scoped `repository_tree_snapshot` resources as bounded/redacted metadata projections with counts and path previews only. |
-| `repository_tree_inspect` | Accepted Slice 14D operation that inspects one scoped `repository_tree_snapshot` after stored kind/schema/scope revalidation, returning bounded/redacted repository tree metadata, refs, lifecycle evidence, and content-free proof without raw repository contents, unsafe paths, or raw authority ids. |
-| `import_preview_record` | Accepted Slice 14E operation that records one scoped `import_preview` resource for content-free import preview metadata only, linking import-history and repository-tree refs with bounded relative path metadata, counts, summaries, source/evidence refs, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, preview payloads, file contents, repository contents, import execution, visualization, or git mutation. |
-| `import_preview_list` | Accepted Slice 14E operation that lists scoped `import_preview` resources as bounded/redacted metadata projections with linked import-history/repository-tree refs, counts, summaries, and path previews only. |
-| `import_preview_inspect` | Accepted Slice 14E operation that inspects one scoped `import_preview` after stored kind/schema/scope revalidation, returning bounded/redacted preview metadata, refs, lifecycle evidence, and content-free proof without raw payloads, raw contents, unsafe paths, or raw authority ids. |
-| `program_execution_record` | Accepted Slice 15A operation that records one scoped `program_execution_record` resource for content-free program execution metadata only, with runtime/language identifiers, resource-limit policy, I/O-envelope metadata, source/input/output refs or fingerprints, lifecycle evidence, trace/replay refs, fingerprinted idempotency evidence, and no raw code, raw stdin/stdout/stderr, command text, runtime execution, process launch, package install, file writes, or live network behavior. |
-| `program_execution_list` | Accepted Slice 15A operation that lists scoped `program_execution_record` resources as bounded/redacted metadata projections with runtime/language identifiers, lifecycle state, fingerprints, and resource-limit summaries only. |
-| `program_execution_inspect` | Accepted Slice 15A operation that inspects one scoped `program_execution_record` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, refs, lifecycle evidence, and explicit non-execution proof without raw code, raw I/O, command strings, unsafe paths, or raw authority ids. |
-| `prompt_artifact_record` | Accepted Slice 16A operation that records one scoped `prompt_artifact` resource for explicit opt-in prompt artifact metadata only, with artifact kind, title/summary/preview, content refs or fingerprints, retention state, lifecycle evidence, trace/replay/source refs, fingerprinted idempotency evidence, and no raw prompt body, provider-visible raw prompt payload, automatic prompt-history capture, prompt injection, context inclusion, or learned behavior. |
-| `prompt_artifact_list` | Accepted Slice 16A operation that lists scoped `prompt_artifact` resources as bounded/redacted metadata projections with artifact kind, lifecycle state, retention state, content fingerprints, and explicit metadata-only proof. |
-| `prompt_artifact_inspect` | Accepted Slice 16A operation that inspects one scoped `prompt_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, refs, lifecycle evidence, retention evidence, and explicit no-raw-prompt proof without raw prompt bodies, provider raw payloads, unsafe paths, raw idempotency keys, or raw authority ids. |
-| `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
-| `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
-| `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
-| `trace_list` | List durable Agent Trace-style records for the trusted current session as the default provider-safe trace proof path, optionally filtered by exact trace id, execute operation, and lifecycle status so an agent can isolate failures even when a broad result is truncated; provider-visible projections include the applied filters, an explicit `traceRecordId` distinct from `traceId`, safe engine invocation refs, parent engine invocation refs, request/result hashes, completed-status summary, in-progress count, status/timing, safe errors, projection-boundary guidance, and per-record redaction proof. Unsupported operation-name attempts receive a rejection-only child grant and are recorded as failed traces without storing their raw request. When the provider byte budget is reached, the newest bounded record subset remains present with exact omission proof instead of dropping the entire record collection. The current `trace_list` call is reported as pending only when the active filters can include it. Raw provider invocation ids, raw authority/grant ids, idempotency keys, process ids, working directories, raw requests/results, prompts, logs, commands, code, paths, file contents, and VCS payloads remain excluded. |
-| `trace_get` | Read one durable trace record by exact `traceRecordId` within the trusted current session only when focused per-record detail is needed after `trace_list`; it uses the same provider-safe projection as `trace_list`, preserving the required provider-safe record schema/version, separately named trace-record, trace, and invocation refs, hashes, and redaction proof without exposing raw provider call metadata or execution payloads. |
-| `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive; model-context replay includes bounded entry ids, timestamps, levels, components, messages, session ids, and trace ids instead of a count-only summary. |
-| `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled-state reporting. |
-| `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
-| `memory_inspect` | Inspect one redacted memory record and its version history within the current session. |
-| `memory_query_list` | Accepted Slice 24D operation that lists redacted current-session `memory_query` evidence records with deterministic resource-backed retrieval metadata, ranked record refs, bounded previews, redaction proof, and no embedding/vector index or raw body exposure. |
-| `memory_query_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_query` evidence resource/version with bounded result refs, ranking/confidence/provenance, prompt-safe snippet policy evidence, and proof that retained memory body content was not included. |
-| `memory_decision_list` | Accepted Slice 24D operation that lists redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
-| `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
-| `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
-| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments plus a preferred `catalog_inspect` step for `execute::<operation>` so the agent inspects the provider-visible schema before backing engine-substrate functions, preferred next-step guidance includes immediate invoke arguments only for read-only non-mutating matches and emits blocked-invoke guidance for write-like matches, `namespacePrefix` also matches capability-pool family/owner metadata so related operations can be found even when names do not share the literal prefix, readiness and trace/evidence searches retain deterministic full `agentSearchPlan` records in durable audit details while the provider projection receives only exact matches and one compact `agentNextStep`, avoiding duplicated plans and contextual write schemas, broad module-governance readiness/list/inspect searches preserve the exact read-only module registry/lifecycle/runtime/dependency, binding, candidate, route, and route-event plan with default payloads marked complete, empty lists documented as valid evidence, and activation/rollback/write surfaces excluded, `effectClass` accepts canonical values plus safe read-only aliases (`read`, `read_only`, `inspect`) for `pure_read`, supported operations excluded by the requested read-only effect class are returned separately with bounded metadata and a clear non-invocation reason, `allDiscoveredInspectTargets` gives durable audit data one merged list of exact `catalog_inspect` arguments for both immediate read-only matches and effect-class-excluded supported operations, the model-facing summary states whether the execute-operation search was complete or truncated, unsupported operation-like names stay recovery-guidance results instead of fuzzy near matches, and generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation. |
-| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, required top-level payload fields, and current-invocation guidance that keeps normal read-only/session calls separate from explicit replacement, shadow, route, disable, and rollback workflows. Every supported execute operation reports one closed `exact_structural_contract` plus one canonical provider-output profile and semantic evidence contract consumed by catalog inspection and runtime validation; domain services retain lifecycle, stale-version, resource-linkage, and runtime checks that cannot be expressed statically. |
-| `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks; this is verification-report evidence, not passive read-only inspection. |
-
-File access goes through the hardened `filesystem_*` operation package.
-
-The execute-operation contract boundary is fail closed. All 188 supported
-operations have one canonical closed input schema and provider-safe output
-contract under `operations::operation_contract`, including the normalized
-envelope profile, required semantic success facts, expected resource/collection
-evidence, summary policy, and safety exclusions, together with canonical
-ownership/replacement, effect, context/idempotency, and base-authority policy.
-The shared provider projection excludes raw commands, paths, process and
-process-group identifiers, credentials, grant/authority identifiers, and other
-runtime-only material while preserving typed resource/version refs.
-Catalog inspection, pre-authority validation, capability-pool projection, and
-grant derivation consume those contracts; permissive cross-operation payloads
-and duplicate catalog/grant policy tables are not retained. Domain services remain the
-owners of semantic, lifecycle, stale-version, resource-linkage, and runtime
-validation that cannot be expressed as a static provider contract.
-
-Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
-`settings`, `auth`, `agent`, `logs`, `session`, `transcription`, `media`,
-`worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
-accepted Phase 3 module-plane additions through Slice 23H include `module_registry`,
-`module_authoring`, `module_validation`, `module_install`, `module_lifecycle`,
-`module_runtime`, `module_dependencies`, `capability_binding`, and `module_activity` metadata and
-cockpit projection records through Slice 23H; provider-visible module-plane operations
-remain operation values under the single `capability::execute` primitive, not
-public `/engine` expansion. The
-`filesystem` domain is deliberately split: workspace-browser functions remain
-limited to `filesystem::get_home`, `filesystem::list_dir`, and
-`filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
-write/edit/apply-patch behavior is exposed only as `capability::execute`
-operation values with trusted root checks and resource-backed mutation
-evidence. The `approval` domain is a backend evidence/freshness
-gate with `approval::request`, `approval::decide`, and `approval::check`
-engine functions; it does not add a provider-visible approval tool, native iOS
-approval UI, or default risky-action policy. The post-baseline
-`memory` domain is a backend contract/audit surface with `memory::status`,
-`memory::configure_policy`, `memory::retain`, `memory::edit`,
-`memory::tombstone`, `memory::list`, `memory::inspect`,
-`memory::record_prompt_trace`, and migration import/export functions; the model
-sees only read-only `execute` memory audit operations. Prompt assembly records
-query/decision proof through the memory module pack and may include only
-explicitly policy-enabled bounded record previews; retained memory body content
-is never injected.
-The `jobs` domain owns durable non-interactive process lifecycle records:
-`jobs::start`, `jobs::status`, `jobs::list`, `jobs::log`, `jobs::cancel`, and
-`jobs::cleanup` create/update scoped `job_process` resources, bounded
-`execution_output` resources, `jobs.lifecycle` stream rows, trace/replay refs,
-process-group timeout/cancellation cleanup, terminal-state idempotency,
-shutdown cancellation, and retention cleanup. Startup and lifecycle
-read/cleanup reconciliation scans scoped running jobs internally so older
-pre-startup stale records cannot be hidden behind a public list page of live or
-post-startup rows; targeted status/log/cancel also rechecks the addressed
-resource after scope validation without mutating unrelated scopes. Domain
-composition creates one jobs runtime and startup boundary per server instance;
-the direct jobs worker and all `capability::execute` jobs/program adapters share
-that state rather than a process-global registry or independent cutoffs. Jobs
-dependency construction is inert; startup reconciliation and shutdown
-cancellation registration begin only when the complete engine setup consumes
-its lifecycle activation token. Production registers the one-shot
-reconciliation handle with the server shutdown coordinator instead of
-detaching it; coordinator-free embeddings reconcile on the first lifecycle
-read/cancel/cleanup operation instead.
-Provider-visible access remains the single `execute` tool through `job_*`
-operation values; PTY sessions, interpreters, job-owned network behavior,
-subagents, scheduling, native iOS process panels, and deployment behavior are
-not part of this foundation. Slice 24B adds a module-owned adapter over the
-same job resources for `module_program_execution_*` operations. That adapter
-uses redacted job status/cleanup projections only: provider-visible module
-results can carry `job_process` and `execution_output` refs, version ids,
-content hashes, truncation, duration, exit, timeout, cancellation, and cleanup
-metadata, but not raw commands, canonical working directories, grant ids,
-stdout/stderr previews, logs, or raw job/output resource payloads.
-The accepted Slice 7A `goals` domain owns durable backend records only.
-Provider-visible access remains operation values behind the single
-`capability::execute` primitive: `goal_create`, `goal_list`, `goal_inspect`,
-`goal_cancel`, `question_create`, `question_list`, `question_inspect`, and
-`question_answer`. Goal records use the generic `goal` resource kind with
-bounded objective/success criteria/constraints, owner/scope, queue/plan/
-evidence refs, lifecycle, trace refs, replay refs, and revisions. Question
-records use `user_question` resources with pending/answered/expired/cancelled
-lifecycle, prompt/options/free-form allowance, expiry, goal refs, trace/replay
-refs, and answer summaries. Answers create `goal_answer` resources with the
-question version they answered, answer text, required reason, actor,
-authority/freshness evidence, idempotency details, trace/replay refs, and
-bounded provider-visible refs. Answering requires a stable idempotency key and
-`expectedQuestionVersionId`; stale, wrong-scope, expired, closed, malformed,
-empty, oversized, missing-reason, or untrusted-context calls fail closed.
-Create/list projections include exact provider-safe inspect arguments and
-bounded answer/cancel argument bases so the model can continue from returned
-resource refs without inventing goal or question ids; raw prompt bodies,
-authority grant ids, and hidden payloads remain outside model context.
-This foundation does not add an autonomous goal runner, planner, hidden prompt
-queue, notification/APNs behavior, subagents, public
-`/engine` goal API expansion, settings fields, or native Work/question UI.
-The accepted Slice 12 foundation adds `domains/scheduler`, built-in `schedule`
-and `schedule_run` resource schemas, the `scheduler.lifecycle` stream, and
-provider-visible `schedule_create`, `schedule_list`, `schedule_inspect`,
-`schedule_cancel`, and `schedule_fire_due` operation values behind the same
-single `capability::execute` primitive. Schedule creation requires trusted
-current-session/workspace context, explicit `scheduler.write` authority,
-idempotency, an RFC3339 first fire instant, UTC-instant recurrence, a bounded
-timezone policy label, a `skip`/`fire_once`/`catch_up` missed-run policy, and
-an explicit non-wildcard target resource kind/action with bounded resource
-selectors. `schedule_fire_due` requires both `scheduler.fire` and
-`scheduler.write`, an explicit RFC3339 `evaluationAt`, acquires a resource
-lease before mutating a schedule, emits deterministic run records, updates
-`nextFireAt`, and preserves replay/trace evidence. Slice 12 records background
-results as durable evidence only; feature
-domains own execution, and hidden cron tables, autonomous planning, public
-`/engine` scheduler APIs, APNs/device notification delivery, fixed native
-schedule UI, and result merge remain deferred.
-The accepted Slice 13 foundation adds `domains/device` and
-`domains/notifications` as server-owned resource foundations behind the same
-single `capability::execute` primitive. `domains/device` owns the durable
-`device_registration` schema and production redacted list/inspect projections.
-Only `device_list` and `device_inspect` are model-facing. A trusted engine
-client may call internal `device::register` and `device::unregister` functions;
-models cannot. Durable resources retain a token hash while raw APNs tokens live
-only in the private platform store under the internal notifications directory.
-Registration records explicit environment, bundle, opt-in, retention, and
-lifecycle evidence. Registration resource identity includes scope, platform,
-APNs environment, bundle id, and app-install identity so side-by-side variants
-cannot overwrite each other's token policy. A current registration durably
-retires older active resources for the same token route, preventing duplicate
-relay sends while preserving lifecycle history. Raw tokens, token fragments,
-and full token hashes are never returned in provider projections, lifecycle
-events, or logs.
-`domains/notifications` owns durable `notification` inbox/read-state records,
-`notification_delivery` evidence, unread-count badge semantics, trace/replay
-refs, retention defaults, and `notifications.lifecycle` stream evidence.
-Provider-visible access is limited to `notification_send`,
-`notification_list`, `notification_inspect`, `notification_mark_read`, and
-`notification_mark_all_read`, with explicit non-wildcard resource grants.
-Push-requested sends record inbox-only, no-device, policy-disabled,
-family-opt-out, relay-disabled, delivered, or failed evidence. Eligible sends
-delegate to the injected HMAC APNs relay adapter; the notification domain does
-not own tokens or credentials. Device registration and notification sends use
-one canonical event-family taxonomy; the default `agent_attention` family is
-enabled by the default device policy. Send results distinguish durable inbox
-recording from APNs acceptance, partial delivery, policy/configuration skips,
-and transport failure, including on idempotent replay. iOS versions its token
-registration idempotency key when registration policy changes so an existing
-token can acquire the current policy without duplicate transport sends. Each
-iOS app installation persists its own random identity and retries the trusted
-registration path after pairing, connection, token refresh, and foreground.
-iOS owns permission and token lifecycle plus safe session deep-link handling.
-Public notification APIs, a native inbox, hidden background loops, and fake
-client-local inboxes remain absent.
-Accepted Slice 14A adds `domains/media` as a narrow server-owned resource
-foundation for media artifacts and voice-note metadata behind the same single
-`capability::execute` primitive. Media records are
-durable `media_artifact` resources that store blob refs, bounded metadata,
-retention policy, source/evidence refs, local transcription result metadata,
-trace/replay refs, fingerprinted idempotency evidence, and lifecycle evidence.
-Accepted MIME types are allow-listed and upload sizes are bounded by media
-class; raw bytes/base64 payloads are rejected, resources store blob refs only,
-raw caller idempotency keys are not persisted, and provider-visible projections
-mark raw audio as not sent. Local composer transcription remains separate: this
-foundation may record bounded metadata about existing local transcription
-output, but it does not add server transcription models, native capture UI,
-microphone/camera permission changes, public media APIs, or provider-visible
-raw audio.
-Accepted Slice 14B adds `domains/import_history` as a narrow server-owned
-import/session-resource graph foundation behind the same single
-`capability::execute` primitive. Import-history records are durable
-`import_history_record` resources that store bounded subject, parent, child,
-source, and evidence refs; bounded lineage metadata; retention policy;
-trace/replay refs; lifecycle evidence; and fingerprinted idempotency evidence.
-They do not store raw import payloads, repository trees, unsafe filesystem
-paths, or provider-visible raw graph payloads. Render hints remain
-`generic_graph` only; native tree UI, import preview/execute behavior,
-repository visualization remain later slices.
-Accepted Slice 14C adds a backend foundation for `domains/update_diagnostics`
-behind the same single `capability::execute` primitive. Update diagnostic
-records are durable `update_diagnostic_record` resources that store bounded
-release identity, diagnostic status, signature status, signed-release
-provenance refs, source/evidence refs, retention policy, trace/replay refs,
-lifecycle evidence, and fingerprinted idempotency evidence. They do not store
-raw update payloads, package bytes, production endpoint details, installer
-commands, restart commands, deploy commands, or provider-visible raw update
-metadata. This foundation records metadata only: live production update checks,
-installer/restart/self-update flows, deploy automation, package/catalog
-registration, native iOS update panels, and public update APIs remain deferred.
-Accepted Slice 14D adds a backend-only
-`domains/repository_tree` foundation behind `capability::execute`.
-Repository tree snapshots are durable `repository_tree_snapshot` resources
-that store repository/root/head refs, tree object refs, bounded normalized
-relative path metadata, aggregate counts, source/evidence refs, retention
-policy, trace/replay refs, lifecycle evidence, and fingerprinted idempotency
-evidence. They do not store raw file contents, blob bytes, absolute paths,
-unbounded repository tree dumps, raw import payloads, unsafe paths,
-repository visualization state, git mutation state, or provider-visible raw
-tree payloads. Native tree UI, import preview/execute behavior, repository
-visualization, and git mutation workflows remain deferred.
-Accepted Slice 14E adds a backend-only `domains/import_preview`
-foundation behind `capability::execute`. Import preview records are durable
-`import_preview` resources that link bounded `import_history_record` and
-`repository_tree_snapshot` refs with preview fingerprints, normalized relative
-path metadata, counts, summaries, retention policy, source/evidence refs,
-trace/replay refs, lifecycle evidence, and fingerprinted idempotency evidence.
-They do not store raw import payloads, raw preview payloads, raw file contents,
-blob bytes, repository contents, absolute paths, unsafe paths, import execution
-state, repository visualization state, git mutation state, or provider-visible
-raw preview payloads. Actual import execution/application, native import/tree
-UI, repository visualization, and git mutation workflows remain deferred.
-Accepted Slice 15A adds a backend-only
-`domains/program_execution` foundation behind `capability::execute`. Program
-execution records are durable `program_execution_record` resources that store
-runtime/language identifiers, resource-limit policy, I/O-envelope metadata,
-source/input/output refs or fingerprints, retention policy, trace/replay refs,
-lifecycle evidence, and fingerprinted idempotency evidence. They do not store
-raw code, raw stdin/stdout/stderr, command strings, shell snippets, package
-manager directives, absolute or unsafe paths, file contents, secrets, personal
-info, process state, runtime execution output, or provider-visible raw payloads.
-Embedded runtimes, subprocess/job launch, package installation, live network
-behavior, file writes, notebook/PTY surfaces, and result merge remain absent.
-Slice 24B may create a program-execution record as evidence for a delegated
-module job, but the record still stores only runtime/language ids, program
-fingerprints, I/O-envelope refs, output refs/fingerprints, and lifecycle
-evidence. Raw command/code/stdin/stdout/stderr/log/path/env/process/network
-material remains ineligible for `program_execution_record` custody.
-Accepted Slice 16A adds a backend-only
-`domains/prompt_artifacts` foundation behind `capability::execute`. Prompt
-artifact records are durable `prompt_artifact` resources for explicit opt-in
-prompt artifact metadata only: artifact kind, title/summary/preview,
-content refs or fingerprints, retention state, source/evidence refs,
-trace/replay refs, lifecycle evidence, and fingerprinted idempotency evidence.
-They do not store raw prompt bodies, provider-visible raw prompt payloads, raw
-idempotency keys, absolute or unsafe paths, secrets, token-like material,
-personal info, automatic prompt-history capture, prompt injection/context
-inclusion state, or learned-behavior state. Native snippet/template UI, prompt
-injection into future turns, automatic capture, settings/profile migration, and
-public `/engine` expansion remain deferred.
-The accepted Slice 8A foundation adds the `web` domain as a source provenance
-owner without adding direct public `web::*` catalog functions, and the accepted
-Slice 8B foundation adds read-only source list/inspect operations for citation
-assembly. Provider-visible access remains the single
-`capability::execute` primitive with operation values `web_fetch`,
-`web_source_list`, `web_source_inspect`, the accepted Slice 8D
-`web_source_archive`, and the accepted Slice 8E `web_robots_check`. Direct
-fetch requires a trusted
-agent/system runtime context, current session, idempotency key, allowed
-`web_source` write authority, and a derived grant with `networkPolicy:
-declared`; grants with `networkPolicy: none` fail before any HTTP client is
-built. The operation accepts one explicit URL, rejects
-credentials, fragments, malformed or overlong URLs, unsupported schemes, and
-unsafe local/internal targets except deterministic HTTP loopback test targets
-for `web_fetch`.
-Fetches use `reqwest` with bounded timeout, redirects, captured response bytes,
-provider-visible text bytes, content-type handling, deterministic truncation
-metadata, captured-byte SHA-256 evidence, common secret redaction for previews
-and error details, sanitized source/final URLs, replay refs, and idempotent
-`web_source` resource/cache evidence on `web.lifecycle`. HTML/XHTML responses
-derive bounded readable text before redaction/snippet generation, removing
-script/style/noise blocks and recording extraction mode, extractor id/version,
-safe title, extracted text bytes, and truncation metadata while preserving the
-raw captured-byte SHA-256 as the durable source hash. `web_source_list` and
-`web_source_inspect` require trusted current-session context plus `web.read`
-and `resource.read` authority, inspect only scoped `web_source` resources, and
-return bounded requested/final URLs, fetched time, status, content type,
-captured SHA-256, byte/truncation/redaction/extraction metadata,
-trace/replay refs, resource refs, archive metadata when present, and redacted
-snippets; they perform no network I/O and require `networkPolicy: none`.
-List defaults to active/fetched sources and returns archived records only when
-`includeArchived` is explicitly true, while inspect can still read the exact
-archived source for replay/citation audit. `web_source_archive` is an accepted
-Slice 8D lifecycle operation requiring trusted current-session context,
-`web.read`, `web.write`, `resource.read`, `resource.write`,
-`kind:web_source`, stable `idempotencyKey`, bounded non-empty `reason`, and
-`expectedWebSourceVersionId`; it appends an archived resource version with
-actor/grant identity, previous version id, trace/replay refs, and retention
-metadata while preserving source payload/provenance. The accepted Slice 8E
-foundation adds `web_robots_check` as a narrow declared-network operation that
-derives a single origin `robots.txt` URL from one requested URL,
-requires `web.write`, `resource.read`, `resource.write`, and
-`kind:web_robots_policy` authority,
-requires HTTPS in production while preserving an explicit test-only HTTP
-loopback fixture flag, applies the existing URL/redirect/DNS safety policy
-before HTTP client construction or network I/O, writes
-session-scoped `web_robots_policy` evidence with origin, robots URL,
-fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
-version, matched user-agent, allow/deny decision, relevant matched rule,
-sitemap refs as metadata only, authority refs, trace/replay refs, redacted
-display URLs, an exact canonical target URL fingerprint, and idempotency/cache
-refs. Fresh and idempotently replayed model-facing `web_robots_check` results
-name the explicit allow/deny decision and reason, bounded body and redirect
-facts, sanitized target URL, and copy-ready `webRobotsPolicyResourceId` and
-`webRobotsPolicyVersionId`; callers use the version as
-`expectedWebRobotsPolicyVersionId` when a later `web_fetch` must be robots-gated.
-The model-facing network and archive schemas require a stable bounded
-`idempotencyKey`; trusted runtime context binds that caller key to the engine
-ledger, while provider-safe results and source inspection never echo the raw
-key. The accepted Slice 8F foundation lets callers
-supply robots evidence when they need policy-bound fetch proof, and when
-`web_fetch` receives
-`webRobotsPolicyResourceId` plus
-`expectedWebRobotsPolicyVersionId` it validates the current-session
-`web_robots_policy` resource, version, origin, sanitized display target URL,
-exact target fingerprint, and `allow` decision before target HTTP client
-construction. Robots-linked fetch grants add only the needed `web.read`,
-`resource.read`, and `kind:web_robots_policy` authority when both robots fields
-are non-empty strings; `web_fetch` and `web_robots_check` reject wildcard,
-`state.*`, or `agent_state`-inherited grants at the kernel authorization
-boundary. Source payloads, `web_source_list`, and `web_source_inspect` expose
-sanitized requested/final URLs, content type, bounded snippet and byte counts,
-truncation/extraction/redirect facts, and bounded `robotsPolicyRefs` without
-captured hashes, raw bodies, cache keys, target fingerprints, authority,
-idempotency evidence, or sitemap content. It fetches only `robots.txt`; sitemap
-traversal, search providers, browser automation, crawling, login/cookies,
-credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
-side channels, native iOS web UI, and public `/engine` web API expansion remain
-deferred.
-Accepted Phase 3 Slice 24F adds a separate
-`web_research` owner instead of expanding `web_fetch` into a crawler or
-browser. It registers metadata-only `web_research_request`,
-`web_research_review`, and `web_research_source` resource contracts and exposes
-only record/list/inspect operation values through `capability::execute`.
-Records require trusted current-session or current-workspace context, explicit
-non-wildcard `web_research.read` / `web_research.write` plus `resource.read` /
-`resource.write` authority as needed, exact `kind:web_research_*` selectors,
-exact `resource:<id>` selectors for inspect and linked review/source writes,
-stable idempotency keys for writes, and `networkPolicy: none`. Stored and
-projected payloads are bounded summaries, policy labels, source refs, citation
-refs, robots evidence refs, dependency-request refs, trace/replay refs,
-current-scope linkage, side-effect proof, and idempotency fingerprints only.
-They deliberately omit raw HTML, page dumps, browser logs, cookies,
-credentials, raw local paths, commands, raw code or file contents, raw grant
-ids, raw authority ids, token-like strings, personal-info literals, debug
-payloads, hidden chain-of-thought, package-manager output, and raw dependency
-artifacts. Actual fetch and robots network use remains in `web_fetch` and
-`web_robots_check`; search providers, browser drivers, crawling, sitemap
-traversal, logged-in cookie custody, and native research cockpit UI remain
-future module/runtime decisions.
-The `tool_sources` domain is the read-only projection boundary over existing
-`tool_source_proposal` and `tool_source_conformance_report` resources. It does
-not register a production proposal or report writer; a future accepted writer
-must own creation authority and payload validation rather than hiding that
-lifecycle in the read domain. Agent-visible access is limited to
-`tool_source_list` and `tool_source_inspect` under `capability::execute`; those
-operations require current-session context, `tool_sources.read`,
-`resource.read`, explicit resource-kind grants plus matching
-`kind:tool_source_*` selectors, stored kind/schema revalidation, and
-`networkPolicy: none`; list cardinality and inspected schema previews are
-bounded, and neither operation performs network I/O. This boundary does
-not start or restart MCP servers, install packages, register catalog tools,
-execute proposed tools, promote trust, change worker lifecycle behavior, add
-browser/search/crawl/login scope, expand public `/engine` APIs, or add native
-iOS fixed UI.
-
-The accepted Slice 10A foundation adds the `subagents` domain as an inert task
-lifecycle/provenance boundary. Trusted internal system/admin callers can
-create and update `subagent_task` resources only with derived non-bootstrap
-`subagents.write` and `resource.write` authority, explicit non-wildcard
-`subagent_task` resource grants, idempotency, bounded objective/prompt
-summaries, parent session/workspace/trace refs, evidence/output refs,
-summary-only redaction, and `networkPolicy: none`. Agent-visible access is
-read-only through `subagent_task_list` and `subagent_task_inspect` under
-`capability::execute`; those operations require trusted current-session
-context, `subagents.read`, `resource.read`, explicit `subagent_task` resource
-authority plus a matching `kind:subagent_task` selector, stored kind/schema
-revalidation, allowlisted bounded/redacted projection, scope isolation, and
-`networkPolicy: none`.
-
-Accepted Slice 24C activates provider-visible subagent lifecycle operation values
-`subagent_launch`, `subagent_status`, `subagent_result`, and
-`subagent_cancel` behind the same single `capability::execute` primitive.
-Launch requires trusted current-session context, derived non-bootstrap
-`subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
-authority, exact `resource:<subagent_task_id>` selectors in addition to
-`kind:subagent_task`, idempotency, explicit
-`modelPolicy: accepted_jobs_program_execution_v1`, `workerKind:
-module_program_execution`, `modulePackId: jobs_program_execution`, bounded
-objective/prompt summaries, summary-only handoff refs, one running subagent
-task per current scope, parent session/workspace/trace refs, replay refs, exact
-enabled module lifecycle/runtime selectors, and delegated module
-runtime/program/job refs. Status/result/cancel follow the delegated
-module-runtime/job binding through the accepted `module_program_execution_*`
-adapter and require the exact task resource selector from
-`subagentTaskResourceId`; result returns reviewable merge-proposal evidence and
-explicitly does not mutate parent conversation state. Accepted Slice 24C still does not
-spawn hidden child agents, launch arbitrary workers or packages, execute tools
-outside the accepted module pack, open network/browser/search/login scope,
-register catalog entries, promote trust, merge results into conversation state,
-start autonomous work, expand public `/engine` APIs, add settings/profile
-migrations, or add fixed native iOS subagent UI.
-
-The accepted Slice 11A foundation added the smallest procedural inspection
-foundation: a built-in `procedural_record` resource schema for skills, rules,
-hooks, and procedures plus bounded `procedural_state_list` and
-`procedural_state_inspect` operation values behind the existing
-`capability::execute` primitive. Accepted Slice 24E extends the same procedural owner
-with metadata-only procedural module-pack state: `procedural_definition_record`
-records authoring/review metadata into `procedural_record`; activation,
-deactivation, and rollback review are represented by
-`procedural_activation_request` and `procedural_activation_decision` resources
-plus record/list/inspect operation values. These operations require trusted
-current-session/workspace context, explicit non-wildcard `procedural.read` /
-`procedural.write` and `resource.read` / `resource.write` authority as needed,
-exact procedural resource-kind grants, matching `kind:*`, `proceduralKind:*`,
-and inspect/prerequisite `resource:<id>` selectors, and `networkPolicy: none`.
-They revalidate stored resource kind/schema/version, scope, lifecycle/status,
-procedural kind, provider-visible eval scalar fields, content hashes, and
-request/decision linkage before projection, and they return bounded/redacted
-provenance, eval, review, trigger-declaration, conflict/ordering,
-scoped-authority, trace/replay, idempotency, rollback/deactivation, and
-activation-proof evidence. Slice 24E also seeds a pending-review
-`procedural_module` manifest in the module registry. It does not restore
-repo-managed skills, trigger activation, bootstrap prompt injection, learned
-behavior, autonomous execution, scheduler work, tool execution,
-worker/package/job/process/network launch, dependency restoration, MCP
-lifecycle, package install/catalog registration, trust promotion, public
-`/engine` APIs, settings/profile migrations, browser/search/crawl/login scope,
-native fixed UI, or result merge into conversation state.
-Accepted Slice 24L records a rejected-shape guard for the same boundary: no
-`packages/agent/skills`, package `SKILL.md` assets, repo-managed first-party
-skill assets, skill-copy wiring, bootstrap skill registries, bootstrap prompt
-context, or hidden prompt-context skill injection may return. The static guard
-normalizes code-like identifiers so camel/snake and singular/plural names such
-as `SkillsRegistry`, `BootstrapSkillsRegistry`, `ManagedSkillsRegistry`,
-`SkillLoader`, `SkillsLoader`, `SkillBootstrapRegistry`, and
-`SkillsPromptContext` are rejected. The
-`module_registry_procedural_manifest` seed remains allowed only as
-metadata-only `procedural_module` registry evidence, not as a skill asset,
-prompt plane, hook runner, or runtime activation path.
-
-The accepted Slice 9B foundation adds read-only worker-package lifecycle
-inspection under the same `capability::execute` primitive. `worker_package_list` and
-`worker_package_inspect` require trusted current-session context,
-`worker.lifecycle.read`, `resource.read`, explicit non-wildcard lifecycle
-resource-kind grants, matching `kind:worker_*` selectors, and
-`networkPolicy: none`. They inspect only `worker_package`,
-`worker_package_installation`, `worker_package_proposal`,
-`worker_package_conformance_report`, and `worker_launch_attempt` records,
-revalidating the stored resource kind and schema before projection rather than
-trusting id prefixes. The projection returns bounded/redacted identity,
-lifecycle state, provenance, source metadata, namespace claims, expected
-functions/triggers, requested grants, conformance and launch status, refs, and
-truncation metadata while omitting raw manifests, scoped worker tokens, env
-values, endpoints, token grant details, direct authority grant ids,
-grant-like nested metadata, and local paths. It does not add package
-proposal, install, enable, disable, launch, stop, retire, MCP start/restart,
-catalog registration, proposed-tool execution, trust promotion, public
-`/engine` expansion, or fixed native source/package UI.
-
-Phase 3 Slice 23A adds the inspect-only module manifest registry foundation.
-The module-registry domain defines `module_manifest` with resource schema
-`tron.resource.module_manifest.v1` and payload schema version
-`tron.module_manifest.v1`. Domain registration installs that contract through
-the generic resource-store boundary, then reconciles the ordered narrow
-first-party metadata for the registry, capability domain, the pending-review
-`file_git_module` operation pack, the accepted Slice 24B pending-review
-`jobs_program_execution_module` pack, the accepted Slice 24D pending-review
-`memory_engine_module` pack, and the accepted Slice 24E pending-review
-`procedural_module` pack, plus the accepted Slice 24F
-pending-review `web_research_module` pack, plus the accepted Slice 24G
-pending-review `notification_delivery_module` pack, plus the accepted Slice 24H
-pending-review `import_update_module` pack
-without converting Phase 2 domains into separate provider-visible tools.
-`module_list` and `module_inspect` stay behind the
-single `capability::execute` primitive and require explicit non-wildcard
-`module_registry.read` and `resource.read` authority, `module_manifest`
-resource-kind grants, `kind:module_manifest` selectors, and `networkPolicy:
-none`. The operations read only system-scoped manifests, revalidate stored
-kind/schema/scope/current-version/payload bounds, and return provider-safe
-projections for identity, capability declarations, resource declarations,
-authority needs, settings declarations, dependency intents, validation status
-and refs, provenance/source refs, lifecycle, and redaction proof. They do not
-write resources, expose raw manifests, expose local paths/env values/commands/
-secrets/raw grant ids/token-like material/personal-info literals, install or
-activate modules, resolve dependencies, execute module behavior, access
-networks, add public `/engine` APIs, restore repo-managed skills, or add fixed
-iOS panels.
-The Slice 24B manifest declares only `module_program_execution_*` operation
-values, exact module/runtime/program/job/output/resource authority needs, and
-ref-only output custody for delegated jobs; it deliberately does not expose
-`process_run`, `job_start`, `job_log`, raw commands, raw stdio/log previews,
-paths, env, pids, grant ids, package installs, PTYs, or network behavior as
-module-owned provider output.
-
-Phase 3 Slice 23B adds the accepted module authoring workspace foundation. The
-generic resource store registers `module_proposal` with
-resource schema `tron.resource.module_proposal.v1` and payload schema version
-`tron.module_proposal.v1`. Proposal operations stay behind the single
-`capability::execute` primitive and require explicit module-authoring/resource
-authority plus non-wildcard `kind:module_proposal` selectors; inspect also
-requires an exact `resource:<module_proposal_id>` selector through engine
-authorization. Records are current-session/workspace scoped and metadata-only:
-bounded identity, intended module refs, source/doc/test refs, trace/replay
-fingerprints, idempotency fingerprint, validation placeholder/status,
-lifecycle state, and no-install/no-execution proof. This foundation does not
-create a physical module workspace directory, store raw code/prompts/proposal
-bodies/commands/file contents/unsafe paths, store or project token-like
-provider-visible proposal metadata, expose raw grant or authority ids, write
-rejected raw proposal payloads into provider-visible trace metadata, install or
-activate modules, execute code, restore dependencies, use package managers,
-touch repo-managed `packages/agent/skills`, access networks, add public
-`/engine` APIs, or add fixed iOS panels.
-
-Phase 3 Slice 23C adds the accepted module contract test harness foundation.
-The generic resource store
-registers `module_validation_report` with resource schema
-`tron.resource.module_validation_report.v1` and payload schema version
-`tron.module_validation_report.v1`. Validation operations stay behind the
-single `capability::execute` primitive and require explicit
-module-validation/resource authority plus non-wildcard
-`kind:module_validation_report` selectors; inspect also requires an exact
-`resource:<module_validation_report_id>` selector through engine authorization.
-Records are current-session/workspace scoped and metadata-only: bounded
-module/proposal refs, manifest/resource/provider projection parity checks,
-required docs/tests evidence refs, deterministic command identity/result refs
-with non-shell summaries/fingerprints, failure evidence refs, trace/replay
-refs, idempotency fingerprint, lifecycle state, validation status/check
-summaries, and no-install/no-execution proof. This foundation does not execute
-commands or module code, store raw logs/commands/env/code/file contents/unsafe
-paths, store or project token-like provider-visible metadata, expose raw grant
-or authority ids, write rejected raw validation payloads into provider-visible
-trace metadata, install or activate modules, restore dependencies, use package
-managers, touch repo-managed `packages/agent/skills`, access networks, add
-public `/engine` APIs, or add fixed iOS panels.
-
-Phase 3 Slice 23D adds the accepted module review approval and install gate
-foundation. The generic resource store registers `module_install_request` with
-resource schema
-`tron.resource.module_install_request.v1` and payload schema version
-`tron.module_install_request.v1`, and `module_install_decision` with resource
-schema `tron.resource.module_install_decision.v1` and payload schema version
-`tron.module_install_decision.v1`. Install request and decision
-operations stay behind the single `capability::execute` primitive and require
-explicit module-install/resource authority plus non-wildcard
-`kind:module_install_request` and `kind:module_install_decision` selectors;
-inspect also requires exact `resource:<module_install_request_id>` or
-`resource:<module_install_decision_id>` selectors through engine
-authorization. Requests are current-session/workspace scoped and require a
-current-version, current-scope, passed `module_validation_report` with bounded
-module refs, docs/tests evidence, and explicit no-install/no-execution proof.
-Decisions revalidate the request and validation report, require fresh scoped
-approval plus derived authority, require denial evidence for rejected/denied
-outcomes, and record only metadata lifecycle states such as `pending_review`,
-`install_candidate`, `rejected`, `superseded`, and `archived`. This foundation
-does not install or activate modules, execute code, restore dependencies, use
-package managers, touch repo-managed `packages/agent/skills`, access networks,
-store or project raw logs/commands/env/code/file contents/unsafe paths,
-token-like material, raw grant or authority ids, add public `/engine` APIs, or
-add fixed iOS panels.
-
-Accepted Phase 3 Slice 23G adds module dependency request and policy activation
-metadata. The generic resource store registers
-`module_dependency_request`, `module_dependency_decision`, and
-`module_dependency_policy` resource schemas with payload schema versions
-`tron.module_dependency_request.v1`, `tron.module_dependency_decision.v1`, and
-`tron.module_dependency_policy.v1`. The dependency request, decision, and policy
-operations stay behind the single `capability::execute` primitive and require
-explicit module-dependencies/resource authority plus non-wildcard kind selectors;
-inspect requires exact `resource:<module_dependency_*_id>` selectors, decision
-writes require an exact request selector, and policy activation requires an
-exact approved decision selector. Policy activation records approved metadata
-for later module pack/runtime work only. It does not run package managers,
-restore dependencies, mutate `Cargo.toml` or `Cargo.lock`, install packages,
-execute code, access networks, store raw package-manager output, raw dependency
-artifacts, raw paths/env/logs/commands/code/file contents, token-like material,
-raw grant or authority ids, personal-info literals, add public `/engine` APIs,
-or add fixed iOS panels.
-
-The Capability Binding Policy owner registers metadata-only
-`capability_binding_request`, `capability_binding_decision`,
-`capability_binding_policy`, `capability_shadow_trial_request`,
-`capability_shadow_trial_decision`, `capability_shadow_trial_run`, and
-`capability_shadow_trial_evidence` resources plus governed route
-`capability_replacement_candidate`, `capability_route_binding`,
-`capability_route_activation`, `capability_route_event`, and
-`capability_route_rollback` resources with payload schema versions
-`tron.capability_binding_request.v1`, `tron.capability_binding_decision.v1`,
-`tron.capability_binding_policy.v1`,
-`tron.capability_shadow_trial_request.v1`,
-`tron.capability_shadow_trial_decision.v1`,
-`tron.capability_shadow_trial_run.v1`, and
-`tron.capability_shadow_trial_evidence.v1`,
-`tron.capability_replacement_candidate.v1`,
-`tron.capability_route_binding.v1`, `tron.capability_route_activation.v1`,
-`tron.capability_route_event.v1`, and `tron.capability_route_rollback.v1`.
-Binding request, decision, policy, shadow-trial, and route operations stay
-behind the single `capability::execute`
-primitive and require explicit capability-binding/resource authority,
-non-wildcard kind selectors, `networkPolicy: none`, idempotency keys,
-stale-version guards, and exact selectors for inspect plus linked writes. The request path
-derives target operation owner/class metadata from the server-owned execute
-registry, rejects unknown target operations, and rejects caller owner/class or
-replacement-target mismatches before checking replacement eligibility. The
-records model the target operation, current built-in owner, requested
-replacement or extension target, ownership class, binding mode, actor scope,
-rationale, contract/evidence refs, authority constraints, rollback/disable
-refs, decision state, and audit history. `kernel_locked` and
-`governance_locked` operations cannot request replacement even when a request
-claims an adapter class; `adapter_replaceable` and `module_owned` replacement
-requests require rollback/disable metadata and remain proposals only. Route
-activation is currently limited to scoped `git_status`: it records activation,
-route-event, disable, and rollback evidence, verifies lifecycle/runtime refs at
-candidate-record and invocation time, and routes through the supervised
-module-runtime provider-safe projection boundary. This plane never mutates dispatch tables, hot-swaps modules, installs
-or activates modules, restores dependencies, runs package managers, inherits
-`agent_state`, accesses networks, stores raw local material, exposes raw grant
-or authority ids, adds public `/engine` APIs, or adds fixed iOS panels.
-
-The shadow trial path is narrower than general binding policy: it accepts only
-`git_status`, records deterministic candidate metadata and provider-safe
-built-in/candidate projections, requires rollback/disable/abort refs and exact
-metadata selectors, rejects stale evidence inspection, and proves no live
-replacement or candidate execution occurred.
-
-The accepted Slice 6A read-only source-control foundation registers the `git`
-domain with `git::status` and `git::diff` backend read contracts, while Slice
-6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
-Accepted Slice 6C adds the `git_commit` execute operation with backend
-staged-index commit evidence; commit is not registered as a direct `git::*`
-catalog function. Accepted Slice 6D adds the local-only
-`git_branch_start` execute operation for creating one new local branch at the
-current expected `HEAD` and moving symbolic `HEAD` to it after rechecking the
-old symbolic ref and OID without checkout or file updates. Slice 6E adds the
-read-only `git_branch_inventory` execute operation for bounded local branch
-inventory evidence without branch mutation or remote access.
-Provider-visible access remains operation values behind the single
-`capability::execute` primitive: `git_status`, `git_diff`,
-`git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, and
-`git_branch_start`. Accepted Phase 3 Slice 24A declares those operation values
-in the pending-review `file_git_module` manifest and maps them to exact
-`git.read` /
-`git.write`, resource, and trusted working-directory authority without
-`agent_state` selectors or wildcard selectors. The implementation resolves only relative paths under
-trusted working-directory metadata, rejects path traversal and worktree-root
-escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty summaries,
-returns bounded status/diff and branch-inventory evidence, exposes the staged
-index tree without writing repository tree objects, degrades read-only
-status/diff/inventory reads to explicit `indexTreeTruncated` /
-`indexTreeOidUnavailable` evidence when exact staged-index hashing exceeds the
-local byte limit, and requires idempotency key, human/action reason, and
-expected HEAD for mutation. Successful stage/unstage
-operations create `git_index_change` resources and publish `git.lifecycle`
-stream evidence. Accepted Slice 6C `git_commit` creates exactly one single-parent commit
-from the already-staged index on the current named branch after expected HEAD and
-expected index tree freshness checks, rejects detached/conflicted/empty-index
-and merge/sequencer states, rechecks the staged tree immediately before creating
-the commit object, then advances the branch with a guarded `update-ref` compare
-against the expected HEAD while symbolic `HEAD` is locked and reverified. The
-`commit-tree` path does not invoke hooks or an editor and suppresses
-pager/signing/credential prompts, creates a `git_commit` resource, and publishes
-`git.commit_created` lifecycle evidence. Accepted Slice 6D `git_branch_start`
-requires a safe new branch name, non-conflicted and sequencer-clean repository
-state, trusted working-directory metadata, expected `HEAD`, reason, and explicit
-idempotency. It creates a `git_branch_start` resource, publishes
-`git.branch_started` lifecycle evidence, rejects detached HEAD, existing or
-unsafe branch names, stale `expectedHead`, missing idempotency, nested/non-repo
-misuse, and merge/rebase/cherry-pick/sequencer states, rolls back the newly
-created branch ref if locked symbolic `HEAD` movement fails while it still
-points at `expectedHead`, and proves checkout, hooks, remotes,
-merge/rebase/reset, index mutation, and worktree file updates are not invoked.
-Slice 6E `git_branch_inventory` enumerates only local `refs/heads/*`, reports
-the current branch or detached HEAD, serializes sorted branch names/refs/OIDs,
-computes ahead/behind only from already-present local upstream refs, retains
-bounded last-commit metadata, keeps oversized metadata rows as truncated
-evidence, reports unavailable staged-index-tree hashes through explicit
-truncation flags, and records explicit count/byte truncation metadata without
-adding a durable resource kind.
-Merges, rebases, resets, pushes, arbitrary branch checkout, branch
-deletion/rename, conflict resolution
-workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
-UI remain deferred.
-Policy lookup is `session -> workspace -> system`, and prompt-trace audit
-idempotency is keyed by trace so memory status can change across turns.
-Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
-`worker_lifecycle` owner is the explicit exception for local package
-proposal/apply/launch state. `transcription` is a local, opt-in composer
-speech-to-text domain; composer voice input probes local model readiness before
-recording, treats recording startup as cancellation-aware, cancels capture and
-in-flight transcription when leaving chat, and the server reports explicit
-disabled/loading/ready/failed model state. Its pinned Parakeet MLX environment
-is disposable and health-checked on each enabled server startup: a missing
-Homebrew interpreter, failed import, or package-version drift rebuilds only the
-venv from an available Python 3.10+ runtime while preserving the independently
-cached model. Readiness is published only after the exact-version import and
-worker model load both succeed. Slice 14A adds backend-only
-`media_artifact` resource custody for blob refs and bounded metadata; native
-voice-note UI, capture flows, and server-side transcription orchestration are
-still absent. Slice 14B adds a backend-only `import_history_record` lineage
-foundation for generic session/resource graphs; native import/session tree UI,
-repository visualization, and import execution are still absent. Product/tool
-domains such as
-`process`, `program`, `worktree`, `browser`, `display`, `plan`,
-`prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
-`worker`, and `voice_notes` are not registered by default on this branch; the
-only import surface is the bounded `import_history_*` execute foundation.
-Slice 14C adds an accepted backend-only `update_diagnostic_record`
-metadata foundation; native update panels, live update checks, install/restart
-flows, and deploy automation are still absent.
-Slice 14D adds an accepted backend-only
-`repository_tree_snapshot` metadata foundation; raw file contents, blob bytes,
-absolute paths, repository visualization, import preview/execute, native tree
-UI, and git mutation workflows remain absent.
-Slice 14E adds an accepted backend-only `import_preview` metadata
-foundation; actual import execution/application, native import/tree UI,
-repository visualization, file writes, and git mutation workflows remain
-absent.
-Slice 15A adds an accepted backend-only
-`program_execution_record` metadata foundation; embedded runtimes, shell
-execution, subprocess/job launch, package installation, live network behavior,
-file writes, notebook/PTY surfaces, and result merge remain absent.
-Slice 16A adds an accepted backend-only
-`prompt_artifact` metadata foundation; automatic prompt-history capture, raw
-prompt body persistence, snippet/template native UI, prompt injection/context
-inclusion, learned behavior, settings/profile migration, and public prompt APIs
-remain absent.
-Slice 17A adds accepted backend-only provider reasoning/status evidence at the
-model/responder audit boundary; hidden chain-of-thought exposure, invented
-reasoning summaries, raw provider reasoning payload persistence, provider-visible
-raw reasoning payloads, native reasoning UI, settings/profile migration, and
-public reasoning APIs remain absent.
-Slice 18A adds accepted backend-only memory query/decision evidence resources;
-semantic/vector retrieval, embeddings, ranking, summarization, episodic
-event-to-memory conversion, prompt inclusion, automatic retention, native memory
-UI, settings/profile migration, and public memory APIs remain absent.
-
-The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
-Public registered functions are limited to `agent::prompt`, `agent::abort`,
-`agent::abort_invocation`, and `agent::status`. Hidden internal functions
-`agent::prompt_apply` and `agent::run_turn` serialize accepted prompts into the
-provider loop and keep session truth consistent. Their success contracts carry
-a run id and only `acknowledged: true`; validation failures and busy sessions
-return canonical child errors rather than negative success acknowledgements.
-`agent::abort` returns `aborted: true` only when it signals a currently
-registered run, or `false` when no run matches. That acknowledgement is not a
-terminal outcome: durable `turn.failed` cancellation evidence and the later
-agent completion/ready lifecycle remain authoritative, including for reconnect
-and replay.
-On completion, the durable
-`agent_result` resource derives its final answer and source event reference from
-the flushed event-store reconstruction, so replay uses the same canonical text
-as session history rather than a parallel runtime copy.
-
-## Engine Protocol API
-
-Tron exposes one public client capability protocol: the authenticated `/engine`
-WebSocket. Domain behavior is addressed only by live canonical
-`namespace::function` capabilities discovered through the catalog and invoked
-with engine protocol messages. Dotted domain method names are not registered.
-
-### Connection
-
-```
-Engine clients:    GET /engine            ws://<host>:<port>/engine            Bearer-authenticated client capability protocol
-Workers:           GET /engine/workers    ws://<host>:<port>/engine/workers    Loopback-only local engine workers
-Health:            GET /health            http://<host>:<port>/health
-Metrics:           GET /metrics           http://<host>:<port>/metrics
-```
-
-Engine protocol messages are JSON objects with a `type`, optional correlation
-`id`, and camelCase fields:
-
-```json
-{"type":"hello","id":"h1","protocolVersion":1,"sessionId":"session-1"}
-{"type":"invoke","id":"i1","functionId":"system::ping","payload":{"protocolVersion":1}}
-{"type":"response","id":"i1","ok":true,"result":{"child":{"value":{"pong":true}}}}
-```
-
-`invoke` accepts only canonical function ids such as `system::ping`,
-`agent::prompt`, or `settings::get`. Mutating calls must include an explicit
-idempotency key. Message ids are correlation ids only.
-
-Public clients cannot become the agent actor by invoking `capability::execute`
-directly. Trusted agent runtime paths must use a derived least-privilege grant
-and trusted working-directory runtime metadata; bootstrap grants are rejected by
-the primitive worker. Catalog discovery operations (`catalog_search` and
-`catalog_inspect`) derive discovery-only execute grants without session-state
-read/write authority, so operation search and schema inspection cannot carry
-scratch-state write privileges. Unsupported operation names derive a
-rejection-only `capability::execute` child grant with no resources, selectors,
-or network authority so the canonical validator can return structured recovery
-and record a redacted failed trace after matching trusted actor/session and
-operation-claim checks; that grant cannot dispatch domain behavior.
-Public wire context does not accept `authorityScopes` or
-`runtimeMetadata`; runtime metadata is reserved for trusted engine and
-agent-owned execution paths. `execute` is the primitive operation boundary.
-
-Hidden functions remain in the engine catalog for internal runtime effects such
-as agent apply/run-turn and prompt-history capture. Normal discovery excludes
-them and the public transport cannot invoke them directly.
-
-The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
-`promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request
-translates into an internal `EngineTransportRequest`, carrying actor,
-authority, trace, scope, payload, and explicit idempotency.
-Correlation ids are never command ids or idempotency keys. Stream clients should
-persist delivered cursors locally and ACK the latest delivered cursor per
-subscription, not every event in a burst; ACK responses use normal engine
-backpressure so catch-up traffic does not become a socket-fatal overload.
-Public `promote` is a user-owned `engine::promote` path, not a client-side catalog edit:
-it requires a non-empty `idempotencyKey`, workspace/system authority, and
-workspace context for workspace promotion. It is not a tool-synthesis or
-generated-capability authoring API. Owner mismatch, idempotency, and invalid
-visibility promotion failures return typed public error codes with structured
-details.
-Failed `/engine` responses expose the same canonical failure envelope used by
-runtime events: stable `code`, `category`, sanitized `message`, `retryable`,
-`recoverable`, `origin`, optional provider/model/status/error-type/retry-after
-fields, safe `details`, and trace/session/invocation references when available.
-The outer response keeps `traceId` for correlation; clients should prefer the
-server envelope over local error-taxonomy inference whenever it is present.
-
-`/engine/workers` is the local-first worker protocol. A worker performs a
-versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
-scope, heartbeat interval, and supported capability labels; then it registers
-canonical function and trigger definitions with the same schema, authority,
-effect/risk, idempotency, lease, compensation, visibility, and provenance
-metadata as in-process domain workers. The hello must be loopback bearer
-authenticated, register `WorkerKind::External`, bind session/workspace-visible
-workers through the scoped token, and reference an active grant at the token
-revision and policy hash. Namespace checks use exact segment/prefix matching,
-not substring matching. The first valid hello binds the socket to one opaque
-runtime generation. Active duplicate identities are rejected; pre-hello
-operations, second hellos, foreign worker ids, and stale-socket teardown cannot
-mutate or disconnect another generation. Triggers must use the worker token
-grant and target functions owned by the same accepted worker. Workers publish
-events by asking the engine to invoke `stream::publish`; stream visibility,
-topic selectors, and session/workspace scope are checked against the accepted
-token and connection. There is no direct socket event bypass.
-
-Volatile worker entries are removed on disconnect or missed heartbeat. Durable
-local worker entries stay in the catalog but are marked unhealthy when the
-worker disconnects, so invocation fails closed until the worker reconnects and
-re-registers. On SQLite-backed server restart, durable external worker/function
-definitions hydrate as stopped/unhealthy with no handler, so an unclean socket
-loss cannot become an optimistic callable function. Runtime retirement first
-closes outbound admission for the socket and every captured invocation proxy,
-wakes pending calls with `WORKER_DISCONNECTED`, and closes the owning socket;
-no call waits for the per-invocation timeout after heartbeat or explicit runtime
-retirement. Worker
-connect/register/disconnect/heartbeat-timeout events are stored on
-`worker.lifecycle` through the stream primitive and are visible through retained
-ledger/log records. Invocation
-results are owned by the socket connection's pending invocation map; disconnects
-and outbound backpressure drain or fail pending calls as worker transport
-failures. Every upgraded worker socket is registered with graceful shutdown
-before the HTTP upgrade completes. Server shutdown interrupts socket reads and
-bounded outbound sends, closes outbound admission, immediately fails pending
-calls with `WORKER_DISCONNECTED`, applies the normal volatile/durable disconnect
-policy, and joins the writer before reporting the socket session drained.
-
-Agents do not receive a server-authored helper-launch loop. The retained
-`/engine/workers` protocol is host infrastructure for already-running external
-workers to register functions and triggers; it is not exported as a provider
-tool. Model-created helper behavior must start as ordinary `execute` output,
-agent-owned state, workspace files, or generic resources. If a future helper
-needs to become a live worker, it must be introduced through explicit host
-infrastructure rather than a checked-in product lifecycle.
-
-`worker_lifecycle` is that explicit host infrastructure for local packages
-under `workspace/workers`. A package change starts as an inert
-`worker_package_proposal`, then a trusted non-bootstrap authority grant can
-install a canonicalized local package only after the manifest `packageDigest`
-matches a deterministic hash of every regular file under the source root,
-enable it, launch it with an allowlisted environment and scoped
-`TRON_WORKER_TOKEN_JSON`, conformance-check the live catalog, and record
-`worker_package`, `worker_package_installation`, `worker_launch_attempt`, and
-`worker_package_conformance_report` resources on `worker.lifecycle`. Stop
-returns package/installation state to `enabled` for immediate relaunch, while
-startup reconciliation runs before lifecycle requests and marks durable running
-launch attempts `unhealthy` if process ownership was lost. Dependency
-construction does not start reconciliation; the task begins only after domain
-and transport-trigger registration both succeed, and production shutdown owns
-the task handle until it completes. Coordinator-free embeddings defer the same
-reconciliation to their first lifecycle request. A failed launch,
-conformance mismatch, digest mismatch, or unowned stop is recorded or rejected
-fail-closed. The provider-visible model tool remains `execute`; lifecycle
-mutation operations are engine capabilities invoked through the authenticated
-`/engine` protocol by trusted host surfaces, while provider-visible
-`worker_package_list` and `worker_package_inspect` are read-only projections of
-already-stored lifecycle evidence.
-
-Engine substrate primitives provide host infrastructure behind the loop:
-state, streams, queues, triggers, grants, generic resources, storage operations,
-and bounded internal projections. They are not exported as model tools. The
-agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
-`log_recent`, `replay_manifest`, `catalog_search`, `catalog_inspect`,
-`catalog_conformance`, the `job_*` lifecycle operations, and Slice 24B
-`module_program_execution_*` module-owned job refs; trace operations read durable
-`trace_records` emitted around effectful `execute` calls, while `log_recent`
-reads bounded retained logs and `replay_manifest` reads the canonical replay
-snapshot through the same single tool. Diagnostic capability results replay
-bounded model-context evidence for catalog, capability-binding cockpit
-overview, trace, recent-log, safe metadata-record/list/inspect operations,
-module/procedural/prompt/program/repository-tree/import/web/media/memory/state
-reads, and schema failures so the agent sees actionable ids, lifecycle/status,
-refs, truncation metadata, and error paths instead of count-only summaries.
-Cockpit overview evidence includes operation-list completeness,
-missing-classification/missing-agent-guidance counts, family summaries, and
-representative operation samples; catalog search evidence includes direct
-execute-operation matches when the query names or prefixes a supported
-operation, while generic `capability::execute` schema searches remain catalog
-schema lookups instead of broad operation expansions. Raw commands, output,
-logs, local paths, code, file contents,
-secrets, grant ids, authority ids, and hidden reasoning stay out of provider
-context. Failure projections omit `actual` detail payloads, and metadata
-projections deny authority-bearing id/version/ref suffixes while retaining
-non-sensitive resource/version refs. Catalog discovery reads current
-catalog/resource truth, supplies a bounded canonical execute operation registry
-with total/returned/truncated/omitted metadata to model guidance, marks
-metadata-only catalog targets as non-callable, derives only catalog-scoped
-runtime authority for search/inspect calls, and writes only append-oriented
-`catalog_discovery_report` evidence. Tool-source inspection reads scoped
-`tool_source_proposal` and
-`tool_source_conformance_report` resources only; it neither writes those
-records nor activates external tools.
-Failures rejected before an effectful trace record is inserted still rely on
-the direct capability failure result projection for bounded error code/path
-evidence; durable pre-trace failure records remain a deferred tracing slice.
-Subagent lifecycle operations read and mutate scoped `subagent_task` resources
-and, for Slice 24C provider-visible launch/status/result/cancel, inspect or
-cancel only the delegated jobs/program-execution module runtime/job refs
-recorded on that task. Projections are allowlisted, bounded, and redacted:
-summary-only handoff refs and merge-proposal refs are visible, while raw
-prompts, raw results, command output, logs, paths, raw authority ids, and
-silent parent conversation mutation remain excluded.
-Approval requests and decisions are generic resources with lifecycle
-events on `approval.lifecycle`; replay/evidence explanations point back to
-request, decision, trace, resource-selector, and replay refs for each approved,
-denied, expired, pending, missing, malformed, stale, or scope-mismatch check
-outcome. Durable jobs are generic `job_process` resources with bounded
-`execution_output` artifacts and lifecycle events on `jobs.lifecycle`;
-runtime cancellation first signals the owned process group and terminal
-finalization then records bounded output evidence. If a nonterminal cancel
-request wins the resource-version race, finalization reloads, preserves the
-request metadata, and retries the terminal update so output refs stay attached.
-Late cancel requests do not overwrite already-completed jobs. Module-owned
-program execution reuses those resources through redacted refs/fingerprints and
-module runtime supervision updates rather than provider-visible job logs or raw
-execution-output payloads. Goal/question
-records are generic `goal`, `user_question`, and `goal_answer` resources with
-lifecycle events on `goals.lifecycle`; answer handoff uses the execute
-idempotency ledger and resource expected-version checks so replaying the same
-answer key returns the same evidence without double-answering. Notification
-state uses engine resource versions plus `notifications.lifecycle` stream
-rows. Trusted internal device-registration fixtures exercise
-`device.lifecycle`, but production device list/inspect does not accept token
-material or publish registration lifecycle events. Neither domain adds
-transport-visible notification session-event variants. The replay snapshot includes resolved
-session events, provider request audits, trace records, engine idempotency
-entries, engine invocations, engine stream rows, and engine queue rows. It adds
-stable section hashes plus request/result/outcome/payload hashes where the
-underlying durable rows carry replay-critical payloads or results.
-Each internal trace record carries the causal trace id, invocation id, provider
-tool-call id, session/workspace, turn, model id/provider, authority envelope,
-VCS revision when available, result/error hashes, and file attribution with
-content hashes. Model-facing trace reads intentionally project only safe trace
-and invocation refs, hashes, status/timing, safe errors, and redaction proof;
-provider tool-call ids and raw authority/idempotency metadata stay internal.
-The retained substrate workers are covered by the source-owned state,
-scheduling, security, observability, storage, and resource-governance boundary
-tests under `packages/agent/tests/`.
-
-Fixed helper-orchestration routes are not registered on the primitive teardown
-branch. Any future parallel helper behavior must be created by the agent
-through `execute` and recorded as agent-owned state or generic runtime
-artifacts.
-
----
-
-## Event System
-
-The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure. Provider reasoning/status evidence is optional metadata on existing `model.provider_request`, `message.assistant`, and `stream.turn_end` payloads; it records requested reasoning level, provider/model ids, bounded stop/status, thinking-emitted status, reasoning/thought token counts, audit refs, trace/replay refs, and redaction policy without adding an event variant, raw reasoning payloads, invented summaries, or provider-visible operations. Domain lifecycle streams such as `jobs.lifecycle`, `approval.lifecycle`, `git.lifecycle`, `goals.lifecycle`, and `scheduler.lifecycle` live in the engine stream substrate, not in the transport-visible session event enum.
-
-The event enum is generated by the `define_events!` macro in `packages/agent/src/domains/session/event_store/types/macros.rs`, invoked from `packages/agent/src/domains/session/event_store/types/generated.rs`. Transport-visible event DTOs and stream factories live under `packages/agent/src/shared/protocol/events/`. Adding a new event means editing `generated.rs` and adding a payload type only when the event is true loop infrastructure. Product events, fixed capability events, rules/skills/hooks, prompt queue events, worktree/repo events, push-token events, and config mutation events are intentionally absent on this branch.
-Static event-catalog guards compare the generated count and wire labels against
-this section and the `event_store/types` progressive docs, and they reject
-representative unsupported product event names so product lifecycle streams stay
-outside the persisted session enum.
-
-Event-store ownership is folder-backed: `event_store/envelope`,
-`event_store/reconstruction`, `event_store/store`, and `event_store/sqlite`
-expose normal Rust modules without `#[path]` aliases. The high-level
-`EventStore` facade under `event_store/store/event_store` exclusively owns
-session root/fork creation, identity-aware append, parent/sequence allocation,
-and durable writes, while SQLite repositories stay under
-`event_store/sqlite/repositories`.
-Prompt execution appends `message.user` after reconstructing prior history but
-before constructing or calling a provider. If that append fails, the runtime
-emits a canonical persistence error, releases the active run, and creates no
-provider audit or assistant event. Prior-history reconstruction is also
-fail-closed; the runtime never substitutes an empty conversation for unavailable
-durable history.
-
-### Event Categories
-
-| Domain | Events |
-|--------|--------|
-| `session` | `session.start`, `session.end`, `session.fork` |
-| `message` | `message.user`, `message.assistant`, `message.system`, `message.deleted` |
-| `model` | `model.provider_request` |
-| `capability` | `capability.invocation.started`, `capability.invocation.progress`, `capability.invocation.completed` |
-| `stream` | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
-| `compact` | `compact.boundary`, `compact.summary_staging`; live `agent.compaction_started` / `agent.compaction` stream events show pre-turn compaction progress and terminal idle/failure state |
-| `context` | `context.cleared` |
-| `metadata` | `metadata.update`, `metadata.tag` |
-| `error` | `error.agent`, `error.capability`, `error.provider` |
-| `turn` | `turn.failed` |
-
-`capability.invocation.started`, `capability.invocation.progress`, and
-`capability.invocation.completed` are immutable primitive lifecycle labels for
-model-requested `execute` calls. `completed` uses the canonical
-`content`/`isError`/`duration` payload shape for both live and reconstructed
-sessions. Failed capability completions preserve model-visible text and include
-`details.failure`, the server-authored canonical failure envelope. Live
-`started` and `completed` broadcasts are emitted from the persisted event rows
-and use those row sequences; for a batch of parallel model-requested calls, all
-persisted `started` rows are broadcast before any child execution begins so
-active clients can render every execution chip immediately. Transient
-`capability.invocation.generating` remains a model-stream drafting hint, not
-durable execution state, but active clients still render it immediately and
-reconstruct it on reconnect while the invocation is in flight.
-Active runtime/UI identity is primitive-execution native: payloads carry the
-model-visible primitive name, invocation id, trace id, turn, operation
-arguments, result content, error state, and duration. iOS renders active work
-from those primitive fields and does not map deleted built-in names to
-capability identity. Server-authored capability identity only promotes
-`operationName` after the actual `operation` value matches the canonical
-execute operation registry; caller-supplied aliases or stale names remain
-requested arguments instead of becoming authoritative UI labels.
-Live turn lifecycle and `error` runtime events are emitted through canonical
-server builders. Starts, ends, and failures persist before broadcast and reuse
-the durable row sequence, so reconnect and live rendering observe the same
-ordering. Cancellation is terminalized inside the active turn runner, where the
-session-global ordinal and partial content are authoritative; partial assistant
-content plus failure commit atomically. Capability starts commit as one batch
-before execution; executed and skipped completions then commit as one ordered
-terminal batch before any completion broadcast. The streaming journal remains
-until capability results and the turn terminal are durable. Journal writes fail closed before an
-unrecoverable delta is broadcast, and provider/network stream failures retain
-already visible partial content in the same atomic batch as `turn.failed`.
-Compaction cancellation restores its pre-summary checkpoint and emits a paired
-failed completion before the turn is terminalized, so clients cannot remain in
-a compacting state. The next prompt advances from the
-greatest reconstructed, completed, or started turn even when cancellation had
-no assistant content; corrupt, exhausted, or unreadable sequence/turn high-water
-state fails closed. Startup recovery recognizes legacy rows without starts,
-does not duplicate an already durable assistant, repairs incomplete capability
-invocations, atomically closes the interrupted turn, and sweeps durable starts
-with no terminal even when no stream journal was created. New runtime emissions carry stable code/category,
-retryability, recoverability, origin, and `details.failure`; provider-backed
-failures also preserve provider/model/status/error-type semantics when known.
-iOS decodes the same server-authored envelope through `CanonicalFailurePayload`
-and prefers `details.failure` in live plugins, persisted projections, provider
-error pills, session summaries, and capability error rows.
-
-### Event Streaming
-
-Runtime events are projected into neutral server event payloads and stored in
-engine streams before `/engine` delivery:
-
-```
-TronAgent (run loop)  ->  EventEmitter  ->  Runtime event bus
-                                                    |
-EngineStreamEventPump  <------------------------------------------+
-    |
-    v
-Engine stream (`events.session`, `catalog`, `jobs`, ...)
-    |
-    v
-/engine subscriptions -> Per-connection WebSocket writers
-```
-
-Live `/engine` subscriptions are not history loaders. Session screens reconstruct
-persisted history through `session::reconstruct`; their `events.session`
-subscription then starts at the current topic tail and carries only future
-records. Stateless stream polling and non-session catch-up remain explicit cursor
-operations. The socket map is the sole owner of live subscription ids, filters,
-scope, and cursors; direct topic polling reuses the engine's visibility and
-pagination logic without creating durable subscription rows. Durable
-`stream::subscribe` rows remain available to engine consumers that intentionally
-own resumable state. Stream polling applies engine visibility before pagination, so a
-session subscriber is never blocked behind older stream rows owned by unrelated
-sessions.
-The runtime-to-engine projection queue is bounded. If it ever overruns, the
-pump stores a system-scoped `stream.recovery_required` control event directly
-in `events.session` before processing later source events. That control event
-crosses session/workspace narrowing (while still respecting an explicit event
-type filter), and mounted clients reconstruct their current session. If the
-control record itself cannot be stored, projection stops rather than presenting
-a discontinuous stream as complete.
-The reconstruction `lastSequence` cursor is representation-backed. During an
-active run, the event emitter snapshots turn state and its source sequence in
-the same ordered dispatch critical section, before broadcast; the top-level DB
-window is capped to that cut before its result limit is applied. Run/turn
-transitions retry the read, raw allocator state cannot advance it, and parent
-sequences in a forked ancestor chain never advance the child's live cursor. iOS
-applies this cut only on top-level reconnect, then drains buffered child-session
-continuations above it. Older pagination responses do not redefine the live
-watermark. The same projection owns terminal processing phase, active compaction,
-and current capability progress/run status, so reconnect cannot acknowledge a
-frame while losing the UI state it established. Dropping the matching run guard
-removes that projection without affecting a replacement run; post-run engine
-resource publication occurs after the active run is released.
-`session::reconstruct` paginates with `beforeEventId` / `oldestEventId` event
-IDs, not session-local sequence cursors. Forked sessions reconstruct from the
-ordered ancestor chain ending at the child head so inherited parent history and
-child events arrive in one server-authored timeline. `tree::get_ancestors`
-returns resolved wire `events` for the same reason: clients inspect lineage
-without maintaining a second tree-only event shape.
-The iOS chat timeline autoloads earlier pages from a noninteractive,
-viewport-relative top detent after initial load; it does not show a manual
-history-loading pill and it does not prepend history merely because the user
-left the bottom. Older pages are transformed with already-loaded adjacent
-event context so capability chips remain completed when assistant and
-capability lifecycle events are split across page boundaries. Prepends preserve
-the first visible row identity and restore it to the top after insertion; the
-timeline intentionally does not replay viewport-relative offsets as SwiftUI
-target anchors because that can strand lazy content in empty space. Earlier
-history has one automatic trigger: the geometry top-detent loader requests
-additional pages before the 1px top sentinel must materialize, after active
-drag/deceleration settles and a short stable-geometry delay completes so prepends
-do not fight the user's gesture or stale viewport frames. Initial reconstruction
-requests 300 persisted events and displays up to 300 recent messages; each
-top-detent load inserts up to 90 older messages. Each scheduling pass inserts at
-most one bounded earlier page, consumes that top-detent sample, and re-arms only
-when the user scrolls again or leaves and re-enters the top zone.
-Reconnect reconstruction keeps
-the user's already-expanded visible history window, merges it with the latest
-server-authoritative suffix, and performs bounded older-page backfill if that
-suffix would otherwise leave an event-sequence gap. A server reconstruction
-failure closes the server-history source for that pagination epoch so the top
-detent cannot immediately retry the same failed cursor.
-`session::replay_manifest` is a separate pure-read audit export. It returns
-`format: "tron.replay.v1"` with resolved session events, provider request audit
-events, trace records, `engineIdempotencyEntries`, engine invocation rows,
-stream rows, queue rows, section hashes, and an overall `replayHash`.
-Idempotency entries carry payload-fingerprint request hashes, outcome hashes,
-and first/latest invocation refs; invocation, stream, and queue projections add
-`resultHash` or `payloadHash` where applicable. Failed engine invocation rows
-include `error.failure`, the canonical failure envelope, while retaining
-replay-local diagnostic fields for postmortem inspection. It is for offline
-audit/reconstruction and does not call providers, run tools, write files, spawn
-processes, drain queues, publish streams, or mutate resources.
-The replay manifest is a capability result, not a persisted event type, so iOS
-does not need a separate replay event decoder.
-
-Agent authority is declared before the loop starts through the causal authority
-envelope and the one model-visible `execute` primitive. Approval records are
-package-owned evidence/freshness gates, not authority grants or an engine-minted
-permission ledger: schema, idempotency, resource leases, compensation
-contracts, allowed scopes, existing grants, and the selected primitive
-operation either validate before execution or return a normal policy error. The
-trace record for that `execute` call captures the authority grant id, scopes,
-provider/model metadata, request/result hashes, and
-file/VCS attribution so the agent can inspect why an action did or did not run.
-
-The `EngineStreamEventPump` routes retained neutral engine/session stream
-records to subscribed clients. Runtime state observers consume the same
-`TronEvent` stream through the shared `TronEventObserver` contract, so transport
-code can fan out events without importing the domain implementation that owns
-that state.
-
----
-
-## Settings
-
-**Location:** `~/.tron/profiles/`
-
-Settings are loaded from three layers (highest priority last):
-
-1. **Active profile settings** (`[settings]` in the resolved `profiles/<name>/profile.toml` chain)
-2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
-3. **Environment variables** (`TRON_DEFAULT_MODEL`, `TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID`)
-
-Settings are server-authoritative. `settings::get` returns the complete current valid `TronSettings` snapshot; this includes provider, retry, runtime, tmux, and TUI configuration in addition to mobile product settings. Engine-native clients write sparse user overrides through `settings::update` and clear the complete sparse server overlay through `settings::reset_to_defaults`; both operations require explicit idempotency keys. The iOS client intentionally admits a narrower product projection from the full response and ignores unrelated profile keys; every admitted field must still map through its snapshot/state owner to a read-only row or editable control, and only editable fields receive a write DTO. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an engine/transport error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then compiled and atomically swapped by `ProfileRuntime`, with no parallel settings cache. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active. Prompt admission captures one immutable settings value; both the main response provider and background title provider are constructed from that run's `ApiSettings`, while the long-lived responder factory retains only the shared HTTP connection pool and provider-health state. Therefore an in-flight run stays internally consistent and the next admitted run observes a successful provider-setting update.
-
-The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings, unknown nested settings keys, invalid TOML, and non-object `[settings]` fail fast. iOS decodes its admitted server-owned fields strictly instead of substituting local defaults, while unrelated full-profile keys remain server-owned; device-only iOS preferences live in iOS storage/Keychain, not in the server settings profile.
-
-The strict root schema is defined in `packages/agent/src/domains/settings/profile/types/`; `ServerSettings` owns the local transcription Engine policy. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
-
-### Key Configuration
-
-The canonical defaults and field-level comments live in
-`packages/agent/defaults/profiles/default/profile.toml`; the strict Rust schema
-and validation bounds live in `domains/settings/profile/types/`. Keep examples
-out of this reference so they cannot become a second copy of profile defaults.
-
-Database diagnostic verbosity is fixed at the managed `info` level with
-managed dependency filters. `RUST_LOG` may filter optional terminal output but
-cannot change persisted evidence. The engine always runs diagnostic cleanup
-with a seven-day horizon and checks a managed 512 MB soft budget for the active
-database. Manual `storage::retention_run` calls may request `dryRun`, but cannot
-select a different horizon. This cleanup covers verbose iOS diagnostic rows,
-expired diagnostic/pending payload refs, and unowned blobs. It does not define
-or delete chat, session, message, memory, or audit-owned retention.
-
-The strict settings schema accepts transcription only at
-`server.transcription`; `logging`, `observability`, `storage`, and root-level
-`transcription` are unknown fields. Managed profiles are reseeded from the
-bundled profile when stale; a sparse user overlay containing those invalid keys
-must be corrected before the updated server can start.
-
----
-
-## Authentication
-
-**Storage:** `~/.tron/profiles/auth.json` (mode 600)
-
-The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types/mod.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
-
-First server startup has Constitution create the exact empty JSON compatibility sentinel `{}` atomically at mode `0o600`, because active-profile validation requires its declared raw auth store to exist. Startup immediately materializes that sentinel through the secure auth writer into the full schema, including `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Rust writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file. The contributor login shell owns only prompts, browser opening, pasted-redirect parsing, and the localhost callback. Hidden Rust CLI actions share the auth domain's provider configuration, PKCE URL construction, token exchange, actual-expiry calculation, canonical auth-file lock, state re-read, and secure writer. Callback completion validates an independent CSRF state; the explicitly user-entered Anthropic code path is marked as manual and cannot synthesize returned state. Authorization codes, state, and verifiers reach completion over stdin rather than process arguments, and the verifier never enters the browser URL. Installed login holds the contributor-pair reader mutex across the entire browser flow. A hidden stdin-only `store-oauth` compatibility action accepts completion from a pre-transaction shell that was already in flight when the helper changed; new flows do not exchange or parse tokens in shell. `/engine` OAuth retains its existing authenticated `flowId`/`code` wire contract and therefore omits an authorization-state parameter rather than emitting one it cannot validate.
-
-OAuth refresh is owned by `domains/auth/credentials/`: Anthropic, OpenAI, and Google refresh paths take a process-local refresh mutex, acquire the auth-file `flock`, re-read `auth.json` after the lock, persist refreshed tokens while holding the lock, and fail the refresh if persistence fails. Model providers receive ephemeral token copies for request execution and do not write durable auth state directly.
-
-Provider-derived errors, retry events, client logs, and provider request audit
-payloads share the same server redaction policy. Audit payloads are body-only,
-versioned as `tron.model_provider_request.v2`, and classified as exact provider
-envelopes, bounded provider-envelope projections, or provider-independent
-snapshots. Bulk inline strings such as media data are replaced in audit evidence
-with their byte count and SHA-256 digest; the exact request bytes still go to the
-provider unchanged. If the remaining request structure is still too large, the
-audit stores a whole-envelope byte count and digest. The resulting audit is
-recursively redacted and stays within the provider-audit payload bound before
-the provider stream opens. Raw provider reasoning payload fields are omitted
-from audit storage, and secret/token-like strings plus unsafe or absolute
-path-like debug strings are redacted before persistence.
-Historical `tron.model_provider_request.v1` events remain readable; v2 is used
-for newly persisted audits.
-
-OpenAI credential selection is owned by auth credentials through `OpenAIAuthPath`: ChatGPT OAuth accounts route model metadata and requests to the Codex backend, while OpenAI API keys route to Platform metadata and `/v1/responses`.
-
-### Providers
-
-| Provider | Module | Auth Methods | Notes |
-|----------|--------|--------------|-------|
-| Anthropic | `domains/model/providers/anthropic/` | OAuth (primary), API key | PKCE OAuth flow; cache pruning supported |
-| OpenAI    | `domains/model/providers/openai/`    | OAuth, API key            | OAuth uses ChatGPT/Codex metadata; API keys use Platform `/v1/responses` metadata |
-| Google    | `domains/model/providers/google/`    | OAuth, API key            | Cloud Code Assist OAuth, Gemini API key |
-| MiniMax   | `domains/model/providers/minimax/`   | API key only              | - |
-| Kimi      | `domains/model/providers/kimi/`      | API key only              | - |
-| Ollama    | `domains/model/providers/ollama/`    | None (local)              | Requires Ollama running locally on the same Mac as the agent |
-
-### Multi-Account
-
-```bash
-tron login --label work
-tron login --label personal
-```
-
-`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app, CLI, or canonical `auth::*` capabilities through `/engine` `invoke`. When an API key is saved without a custom label, Tron stores it as `Default`.
-
-OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth credentials route to `chatgpt.com/backend-api/codex` and use Codex catalog limits such as `gpt-5.5` and `gpt-5.3-codex` at 272K context. OpenAI API keys route to `api.openai.com/v1/responses` and use Platform limits such as `gpt-5.5` at 1.05M context and `gpt-5.3-codex` at 400K context. `model.list` is auth-path-aware: OAuth shows the live Codex catalog plus documented Codex previews, while API keys show all streaming text/image-in-to-text-out Responses models Tron can serve without a separate image, audio, video, embedding, moderation, realtime, or background provider path. Dated snapshots like `gpt-5.5-2026-04-23` are accepted as hidden aliases and preserve the exact request model ID. Retired OpenAI models remain listed with replacement metadata, but `model.switch` rejects them so they cannot be newly selected; non-streaming models such as `gpt-5.5-pro`, `o3-pro`, and `o1-pro` stay hidden and are rejected by the streaming provider.
-
-Every `model.list` row also carries a required `attachmentPolicy`. The model
-domain combines accepted MIME types and provider dimensions with Tron's
-effective inline byte budget, then `agent::prompt` enforces that same policy.
-Clients may resize or transcode images to satisfy the contract, but provider
-names and limits are not duplicated in client code. PDF support and text-file
-extraction remain explicit policy fields, and malformed, unsupported, or
-oversized attachments fail before provider invocation.
-
-The `/engine` WebSocket transport has one runtime-owned message budget:
-`ServerConfig.max_message_size`. The upgrade enforces it and `hello.ok`
-advertises the same `maxMessageSize` value so clients can reject an encoded
-prompt locally before transmission. This transport budget is intentionally
-larger than provider attachment budgets; provider policy remains the owner of
-which media reaches a model, while transport only bounds the complete request
-envelope.
-
-### Auth Precedence
-
-1. A session-pinned credential, when present
-2. The provider's `activeCredential` from `auth.json` (OAuth or API key, by label)
-3. The provider's first OAuth account
-4. The provider's first API key
-
-### WebSocket Bearer Token
-
-**Storage:** `~/.tron/profiles/auth.json` top-level `bearerToken` (mode 600, atomic writes)
-
-Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
-
-The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. Constitution's private exact `{}` sentinel is upgraded through the secure auth writer during that same startup; the reader retains the sentinel interpretation for interrupted or older installs. The Mac onboarding wizard and iOS pairing flow both display the token for the user to copy into the iOS pairing step.
-
-```bash
-# Rotate the token (forces every paired iOS device to pair again)
-tron auth rotate
-
-# Then use the iOS re-pair action for each affected server to scan or paste the fresh token.
-```
-
-Rotation is serialized through a process-wide mutex plus the canonical auth-file `flock`, then persisted atomically (`tempfile + sync_all + rename`). It therefore cannot lose a concurrent provider refresh or contributor OAuth update from another process. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
-
-Both `scripts/tron` and the installed `tron-cli` route this runtime command
-directly to the shared `scripts/tron-lib.d/auth.sh::cmd_auth` owner. Its `rotate`
-arm keeps the installed contributor-pair reader lock around the complete Rust
-auth-owner invocation instead of delegating to a workspace checkout.
-
-The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
-
-See [`packages/agent/src/app/lifecycle/onboarding/mod.rs`](../src/app/lifecycle/onboarding/mod.rs) for the full token + sentinel lifecycle.
-
----
-
-## Context and Compaction
-
-The context system manages the LLM's input window for the primitive loop. Each
-turn assembles only the agent soul/system prompt, the compact agent-owned state
-projection, an explicit memory prompt-trace audit, environment metadata,
-conversation history, and any pending `execute` results. The memory audit
-records disabled/active/shadow/compare mode, considered/included/excluded
-counts, query/decision refs, prompt-inclusion policy proof, and the prompt-trace
-resource id. When policy explicitly enables bounded snippets, the prompt may
-include redacted memory record previews only; retained memory body content is
-never injected. The audit is recorded per turn trace, not reused as a
-session-stable idempotency result. Built-in rules, skills, worker guides, hooks,
-and profile policy
-primers are not model-context planes on this branch.
-
-The prompt loop records context totals in session events and trace metadata.
-Before a provider call this is the chars/4 local component estimate; after a
-provider call it uses the exact provider-reported context count. When provider
-tokenizer/cache accounting is higher than the sum of local sections, trace
-metadata carries a provider adjustment so clients can show the attributed
-sections plus the provider tokenizer delta without guessing.
-Provider reasoning/status evidence follows the same metadata-only rule: token
-counts and status flags can be audited, but raw hidden reasoning text and
-synthetic reasoning summaries are not generated for replay or display.
-
-### Compaction Pipeline
-
-When context crosses the proactive trigger (default
-`triggerTokenThreshold: 0.70` of the model context window), compaction runs
-before the next provider call:
-
-1. **Summarize**: The loop handler invokes an explicit compaction summarizer strategy; the default primitive strategy is the deterministic keyword summarizer.
-2. **Prove**: the handler records a context-control action and preflight snapshot for the compact boundary. Survivor/exclusion policy snapshots remain server-owned proof inputs that a future replacement summarizer must consume before it can be routed.
-3. **Boundary**: a `compact.boundary` event commits the cutoff only after the context-control snapshot and requested action version are durable; the boundary carries the summary and proof refs used by server-side reconstruction. Interrupted action finalization is repaired idempotently.
-4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
-5. **Preserve recent**: The most recent `preserveRecentCount` turns always survive the cut.
-
-If a triggered compaction produces no durable token reduction, the server does
-not persist a `compact.boundary`. If the summarizer produces a reduction but
-context-control proof cannot be recorded, compaction fails closed: the runtime
-restores the pre-compaction provider context checkpoint, appends no unaudited
-boundary, and emits a terminal live `agent.compaction` event with
-`success=false` so connected clients can retire any in-progress compaction
-indicator without reconstructing a false boundary. Manual compact and clear
-boundaries also correlate the capability invocation that created them;
-that correlation remains durable audit evidence. Reconstruction independently
-enforces the provider protocol: it emits a capability result only when the
-matching invocation survives in the immediately preceding assistant message.
-Compact and clear boundaries therefore cannot leave orphaned function outputs
-in resumed provider history. Manual compact and clear operations are active-run
-boundaries: their durable action result is visible in session evidence, the
-current agent run ends before any later serialized capability wave can begin,
-and the next run reconstructs from the committed summary
-or empty epoch instead of issuing another provider request from stale context.
-The generic engine idempotency ledger intentionally re-enters context control
-for compact/clear caller-key replays so the domain can repair requested actions
-and avoid replaying an old turn-stop decision. The explicit payload action key
-remains the stable domain identity across those invocation-specific outer-ledger
-entries. Up-front invocation start rows
-for later waves receive terminal `skipped` completion evidence without running
-their handlers. A later automatic compaction reconciles any requested runtime
-action whose boundary committed before action finalization.
-
-Compaction is internal prompt-loop infrastructure. It is observable through
-session events and primitive trace records, not through public `context::*`
-capabilities.
-The loop owns the strategy injection boundary, while context-control records own
-manual and automatic compact action audit. A future engine-owned compaction
-strategy can replace the summarizer without changing session persistence,
-context-control records, or the iOS notification surface. Replacement
-strategies are contractually limited to summary generation; the server-owned
-proof and boundary commit remain the custody substrate.
-
-### Context Assembly Order
-
-```
-Agent soul / system prompt
-  + Agent-owned state summary
-  + Memory prompt trace audit
-  + Environment metadata
-  + History reconstructed from session truth
-  + Pending user prompt and execute results
-```
-
----
-
-## Database Schema
-
-Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v4-*` and starts fresh. Non-current product/session data is archived, not migrated or read by the new runtime. Pre-unified database artifacts are archived the same way and are never read as active storage.
-
-The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
-
-Tron intentionally exposes no database-only reset script. `session::delete` owns one session's destructive transaction: it removes that session's event and session rows, clears its in-memory sequence/compaction state, and emits the session-deleted lifecycle event. Blob retention and other audit/durability records remain governed by their own owners; session deletion is not a whole-database reset. For a complete local reset, stop every process that owns the resolved Tron home and reversibly move that entire home aside before restarting; do not delete selected SQLite tables, blobs, or WAL/SHM files in place.
-
-Retained session rows, event rows, Agent Trace-style records, bounded
-server/iOS logs, and compressed content-addressed blobs share that same SQLite
-file. Large correctness and audit payloads flow through blob refs where the
-owning row needs them; compact rows keep human/agent-readable JSON inline. The
-model-visible evidence read path is `capability::execute` with `trace_list`,
-`trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
-`catalog_inspect`, `catalog_conformance`, `job_*` lifecycle operations,
-`schedule_*` schedule/run operations, `device_*` registration projections, and
-`notification_*` inbox/read/delivery-evidence operations; trace/log/replay/job/
-schedule/device/notification reads require trusted current-session context, and
-catalog conformance plus mutating job/schedule/notification operations require
-idempotency.
-Trace reads are backed by `trace_records`; effectful `execute` calls insert a
-running record before the effect runs and update that same record with status,
-duration, result/error hashes, authority, provider/model metadata, VCS revision
-when available, and file attribution/content hashes after completion. Provider
-projections for `trace_list` and `trace_get` copy only bounded safe engine
-trace/invocation refs, parent engine invocation refs, status/timing fields,
-request/result hashes, safe errors, projection-boundary guidance, and redaction
-proof from those rows. Raw provider invocation ids, raw authority/grant ids,
-idempotency keys, working directories, raw requests/results, prompts, logs,
-commands, code, file contents, local paths, VCS payloads, and secrets stay
-internal. Agents should use `trace_list` as the normal current-session proof
-path and reserve `trace_get` for explicit focused inspection of one record;
-final answers should state that provider-visible projections expose only safe
-engine refs, exclude raw provider invocation ids and other raw internals, and
-that transcript tool-call ids may still exist in provider message history for
-protocol threading while `trace_list`/`trace_get` do not project
-`providerInvocationId`; do not report transcript call ids as absent when only
-trace projection safety was checked. Internal audit storage may retain raw
-fields for replay and policy.
-Engine-internal durability may still create prompt-trace/resource/audit
-bookkeeping; safety claims should therefore say no provider-visible mutating
-capability operation was used rather than saying no mutation occurred at all. The
-agent backend logs run/turn/provider/stream/capability/execute lifecycle
-metadata to the `logs` table with stable `component`, `agent_event`, session,
-workspace, trace, run, turn, invocation, resource, and status fields where those
-facts exist; verbose stream logs record sizes and sequencing rather than
-content, and the SQLite transport redacts known credential/token patterns from
-server-side messages, structured data, and error fields before persistence. The
-iOS automatic client-log uploader attaches the active session id at the batch
-boundary and salts upload idempotency by that scope, so `log_recent` and
-`logs::recent` can narrow a phone-tested run to the session that produced it.
-The `replay_manifest` operation is read-only and does not insert a trace record; it
-reads session events, provider
-audits, trace records, idempotency entries, invocation ledger rows, stream rows,
-and queue rows through owner APIs and returns canonical section hashes plus the
-overall `replayHash`. The direct `logs::recent` worker and `tron logs` CLI both
-return bounded rows and can narrow by stable session, workspace, and trace IDs
-without exposing bearer/API/OAuth secrets.
+Restore verifies every checksum, requires the primary database lock (Tron must
+be stopped), moves current state into a timestamped recovery directory, restores
+the snapshot, and removes the disposable worker index so it rebuilds.
+
+The explicit legacy importer reads the pre-migration SQLite database without
+mutating it. Complete executable bundles become inactive candidates. Metadata-
+only proposals—including the recorded `last30days` proposal—are reported as
+unconvertible rather than fabricated into executable behavior. Import and
+rebuild reports are written beside canonical worker state.
+
+## Storage
+
+The primary `tron.sqlite` remains the source for sessions, messages, provider
+audits, generic resources, streams, and approval-message evidence. The worker
+kernel does not move these shared engine records into its disposable index.
 
 ### Tables
 
-| Table | Purpose |
-|-------|---------|
-| `schema_version` | Migration version tracking |
-| `workspaces` | Project/directory contexts (id, path, name, timestamps) |
-| `sessions` | Session metadata: head pointer, title, model, working directory, turn/token counts, tags, and fork lineage |
-| `events` | Immutable append-only event log. Denormalized columns (`role`, `model_primitive_name`, `invocation_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
-| `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, uncompressed/compressed size metadata) |
-| `logs` | Application logs (level, component, message, error fields, session/workspace/trace IDs) |
-| `trace_records` | Agent Trace-style durable records for primitive `execute` calls, including trace/session/invocation/provider ids, model primitive name, operation, status, timestamps, duration, and full JSON `record_json` |
-| `engine_invocations` | Engine invocation ledger: function, worker, trace, parent, idempotency, status, result/error summaries |
-| `engine_grants`, `engine_grant_events` | Engine-owned authority model: parent/child grants, subject binding, allowed capabilities/namespaces/resource selectors/file roots/network/risk/budget/expiry/delegation, plus lifecycle events |
-| `engine_stream_events`, `engine_stream_subscriptions` | Engine stream publication and subscription history with cursor, topic, visibility, trace, and compact payload |
-| `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
-| `engine_idempotency_entries` | Durable idempotency reservations and replay records |
-| `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, accepted `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, accepted `capability_binding_request`, `capability_binding_decision`, `capability_binding_policy`, `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, `capability_shadow_trial_evidence`, `capability_replacement_candidate`, `capability_route_binding`, `capability_route_activation`, `capability_route_event`, and `capability_route_rollback` governance records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
-| `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
-| `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
+| Table | Ownership |
+|---|---|
+| `blobs` | content-addressed durable payloads |
+| `engine_catalog_changes` | catalog change stream |
+| `engine_catalog_functions` | durable external function definitions |
+| `engine_catalog_workers` | durable external worker definitions |
+| `engine_compensation_records` | engine compensation evidence |
+| `engine_grant_events` | retained non-local authority audit history |
+| `engine_grants` | retained non-local authority grants |
+| `engine_idempotency_entries` | engine invocation idempotency ledger |
+| `engine_invocations` | generic engine invocation history |
+| `engine_queue_items` | durable engine queue |
+| `engine_resource_events` | generic resource event history |
+| `engine_resource_leases` | generic resource leases |
+| `engine_resource_links` | generic resource relationships |
+| `engine_resource_type_definitions` | registered generic resource schemas |
+| `engine_resource_versions` | immutable generic resource versions |
+| `engine_resources` | generic resource heads |
+| `engine_state_entries` | engine-owned state values |
+| `engine_stream_events` | durable engine stream records |
+| `engine_stream_subscriptions` | durable stream cursors |
+| `events` | session event log |
+| `logs` | structured session logs |
+| `schema_version` | primary schema version |
+| `sessions` | session metadata |
+| `storage_checkpoints` | storage maintenance checkpoints |
+| `storage_exports` | storage export evidence |
+| `storage_metadata` | storage subsystem metadata |
+| `storage_payload_refs` | payload ownership references |
+| `storage_retention_runs` | retention-run evidence |
+| `trace_records` | cross-invocation causal trace records |
+| `workspaces` | workspace metadata |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Fresh storage contains no branches, push-token tables, cron tables, constitution audit tables, session profiles, worktree overrides, prompt queue events, config mutation events, rules/skills/hooks events, or deleted product catalog tables.
+### Worker database
 
----
+The rebuildable worker database is
+`~/.tron/internal/database/workers.sqlite` with:
 
-## iOS App
+| Table | Ownership |
+|---|---|
+| `worker_schema` | worker index schema version |
+| `workers` | rebuildable current catalog |
+| `worker_versions` | rebuildable version index |
+| `worker_triggers` | rebuildable trigger configuration and cursors |
+| `worker_invocations` | durable queue, attempts, idempotency, trace, results |
+| `worker_inbox` | durable visible results/failures and seen state |
+| `worker_audit` | lifecycle and mutation evidence |
+| `worker_runtime_settings` | durable profile stop-all state |
 
-**Minimum iOS:** 26.0 | **Swift:** 6.0 | **Build system:** XcodeGen
+Raw device tokens remain outside generic resources in a private `0600` file
+under `~/.tron/internal/devices/`. The fixed kernel performs no notification
+inbox or APNs delivery; that behavior belongs in a worker.
 
-The iOS 26 deployment baseline is shared by Xcode 26 and Xcode 27 builds. A
-single source tree and binary contract runs on iOS 26 and iOS 27; choosing the
-iOS 26 or iOS 27 SDK changes the build toolchain, not the product identity or
-deployment target.
+## Events and Transport
 
-### Architecture
+`GET /engine` remains the authenticated WebSocket upgrade endpoint for clients. The public
+invoke contract admits client identity and idempotency metadata but rejects
+injected internal authority/runtime fields. Bearer rotation continues to force
+client re-pairing.
 
-The app uses MVVM with coordinators, event plugins, and SwiftUI's `@Observable` macro. The authoritative architecture document is `packages/ios-app/docs/architecture.md`.
+Worker live topics are:
 
-```
-packages/ios-app/Sources/
-+-- App/                  Lifecycle entry point, delegates, scene phases
-+-- Engine/               Engine transport, protocol DTOs, event handling,
-                         local persistence, repositories
-+-- Session/              Chat workflow, attachments, parsing, timeline
-                         messages, reconstruction, activity, and tokens
-+-- Support/              Composition, diagnostics, feedback, foundation,
-                         pairing, share, storage
-+-- UI/                   Theme, chat, settings, onboarding, runtime
-                         surfaces, capabilities, components, system sheets
-+-- Resources/            Bundled fonts
-+-- Assets.xcassets/      Icons and images
-+-- Resources/Fonts/      Bundled typography assets
-+-- Info.plist            App metadata
-+-- PrivacyInfo.xcprivacy Apple privacy manifest
-```
+- `worker.lifecycle` — activation, enablement, disablement, rollback,
+  retirement, failure, and related state;
+- `worker.invocations` — started/completed/failed invocation summaries.
 
-### Key Patterns
+The session log has **24 typed event variants**:
 
-- **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
-- **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols. Chat view-local async work is ticketed through `ChatViewTaskCoordinator`, and transcript mutations go through `MessageMutating` so message-id and capability-id indexes stay synchronized during streaming, pagination, and reconnect reconstruction.
-- **Event plugins**: Live engine events arrive through `SessionEventRepository`; `EventRegistry` owns plugin parsing, lookup, and dispatch to the per-call `ChatViewModel` target. Registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
-- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries, persisted duplicate thinking snapshots inside one assistant message are collapsed defensively, reasoning summaries stay labeled separately from raw append-only thinking, and reconnect reconstruction preserves expanded visible history, in-flight generating capability chips, and bounded event gaps before rebuilding the displayed window.
-- **Primitive chat shell**: the app keeps connection/onboarding/settings,
-  collapsible workspace-grouped session navigation with compact one-line rows
-  that use inset liquid-glass interactive containers, prefer generated session
-  titles before prompt-derived labels, and show untitled rows as `New Session`.
-  Session refresh reads immutable creation-key 200-row server cursor pages
-  beneath one snapshot boundary into a generous bounded snapshot instead of
-  truncating the dashboard at 50 rows. Page/cursor/no-progress limits fail
-  non-destructively, and complete snapshots reconcile metadata and stale event
-  rows in one local transaction while preserving sessions newer than the
-  boundary. Each
-  workspace shows its latest 10 sessions by default and independently reveals
-  older rows in 10-session increments with full-width View more/View less controls.
-  The shell also keeps server-backed new-session workspace selection with configured/recent
-  shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
-  inline folder creation, prompt input with clearable
-  device-local recent-input reuse, the
-  Session Briefing sheet opened from the composer context ring for model switching,
-  provider-safe context breakdown, compact, clear, read-only memory status, and
-  recent action audit detail,
-  functional-only native composer attachment menu that preserves keyboard
-  focus while layering native camera/photo/file pickers above it, composer mic
-  input backed by the local transcription domain after a readiness check and
-  cancellation-aware through startup and cancelled with any in-flight
-  transcription when leaving chat,
-  a blank empty chat plus an intentional loading state that fades existing
-  sessions in only after measured latest-bottom transcript anchoring,
-  app-global connection toasts, ephemeral in-chat local error notifications,
-  streamed thinking content with one app-owned neural-spark placeholder indicator
-  and provider-authored reasoning-summary labels, including OpenAI replay blocks
-  that do not carry explicit `kind` metadata, one-line generic capability
-  evidence chips, local reconstruction, diagnostics, and generic runtime
-  surfaces.
-  Fixed product panels,
-  repository-specific panels, media workflow surfaces, assistant-management
-  panels, extension-source surfaces, voice-note storage, memory-retain, rules,
-  skills, prompt-library panels, prompt queues, and parallel tree-only
-  projections are removed from the primary source tree.
-- **Dashboard cockpit**: the session dashboard keeps the existing
-  workspace-grouped chat list and adds one Dashboard band above the groups.
-  The Dashboard band is
-  the core engine summary: connection state, visible capability count, issue
-  count, and plain verification state such as verified, needs review,
-  or unchecked. The cockpit sheet opens on
-  Capabilities, grouping operations into user-facing areas with drill-down
-  operation owner/status, session-work/diagnostics/governance/kernel-evolution
-  role, runtime-routable/producer-extensible/kernel-evolution-only replacement
-  class, replacement eligibility, binding/shadow-trial attempts,
-  rollback/disable/abort availability, and request/response schema bodies from
-  the live capability map where present; capability map version and
-  durable `catalog_discovery_report` resources are presented there as
-  contextual capability-check evidence rather than top-level telemetry.
-  Replacement-disclosure rows derive from
-  `capability_binding::cockpit_overview`, which reshapes server-owned registry,
-  binding-policy, shadow-trial, and dynamic route facts into route-story cards,
-  operation summaries, and drill-down details without exposing raw operation
-  internals, grants, authority ids, or resource handles at top level.
-  Deeper worker/package/surface tabs appear only when server evidence exists.
-  The sheet renders live worker lifecycle rows, capability schema/health gaps,
-  package lifecycle status,
-  redacted memory resource status through generic resource facts,
-  confirmation-backed lifecycle actions, server-owned `module_activity::overview`
-  active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context, and active
-  `ui_surface` resources through generic engine data using the standard
-  liquid-glass sheet chrome and shared segmented tab control. The Activity tab
-  groups every explicit server status exactly once into Needs review, Needs you,
-  Active work, or Recent activity. It does not issue a parallel summary request,
-  retain a duplicate projection model, or fabricate catalog/package activity locally,
-  and does not restore fixed source-control, memory, process, subagent,
-  notification, skill, approval, work, or work-dashboard panels; Slice 24I
-  accepts that absence as source-guarded rejected-shape scope. Slice 24J keeps
-  those cockpit DTOs narrow and module/resource-owned rather than broad product
-  DTOs while review is pending. Refresh failures
-  render as a degraded cockpit status while preserving the last good server facts, and malformed
-  catalog entries surface catalog decode degradation instead of disappearing
-  from projected counts. The primary chat shell does not mount a passive
-  worker-runtime banner.
-- **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`. `DependencyContainerRuntimeIO` selects immutable transport-attempt, pairing-probe, and paired-token backends once at that boundary and forwards the attempt directive into both the initial `EngineClient` and every active-server rebuild. Production remains live URL-session transport plus `URLSessionPairingProbe` and the production Keychain backend; hosted unit tests inject handled attempts, a test-target inert pairing probe, and a task-owned in-memory token backend without environment checks inside those owners.
-- **Generic runtime rendering**: server-owned runtime data, including data
-  written through agent operations, renders through
-  `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into
-  custom sheets.
-- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
-- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while the production `PairedServerTokenStore.Backend` preserves the exact `KeychainItem(service: "com.tron.mobile.bearer", account: serverId)` contract. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`. Hosted token backends are injected, memory-only, and emit balanced secret-free `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` identity records; they never call Keychain.
-- **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor. `EventStoreManager` predecessor-chains client replacement and load ownership, awaits database/completion effects for every accepted event, and uses one idempotent terminal drain: cancel/join the global lane, await `SessionRefreshService.shutdown()`, then cancel/join the load chain before an outer fixture closes its database. Shutdown does not finish the shared event bus or invent a process-termination hook.
-- **Hosted unit-test ownership**: `IsolatedTestState` is the only general hosted container/storage factory. It retains every manager, database, handled-attempt recorder, stub pairing probe, and token backend. Cleanup awaits the same terminal task for repeated callers and orders manager drain → token clear/proof/lifecycle emission → database close → root/defaults cleanup → process-fallback deregistration. Separate `TRON_TEST_SUITE_LIFECYCLE_V1` and `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` ledgers must be complete, unique, set-equal, and secret-free; hosted tests prove no live network, OAuth, pairing-probe, or production Keychain owner is constructed.
-- **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
-- **Forgetting a server**: Settings → Engine → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Engine shows the onboarding CTA.
-- **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings exposes the Logs sheet in every iOS build configuration from its toolbar so production installs can inspect or copy redacted local iOS logs without enabling verbose production logging; pairing lives under Settings -> Engine -> Servers without a duplicate Logs row. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with the active session id attached to each batch, client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic session-scoped batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
+| Concern | Event types |
+|---|---|
+| session | `session.start`, `session.end`, `session.fork` |
+| messages | `message.user`, `message.assistant`, `message.system`, `message.deleted` |
+| model | `model.provider_request` |
+| provider tools | `capability.invocation.started`, `capability.invocation.completed`, `capability.invocation.progress` |
+| streaming | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
+| context | `compact.boundary`, `compact.summary_staging`, `context.cleared` |
+| metadata | `metadata.update`, `metadata.tag` |
+| failures | `error.agent`, `error.capability`, `error.provider`, `turn.failed` |
 
-### Data Flow
+The historical `capability.invocation.*` and `error.capability` names describe
+generic provider tool-call conversation evidence; they do not restore the
+removed authorization plane. Removed governance-domain stream topics and
+schemas are not retained through adapters.
 
-```
-Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
-Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
-Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
-Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
-Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
-Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
-Dashboard: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
-```
+## iOS Client
 
-The camera child sheet mounts before AVFoundation warm-up and uses the viewport
-as the sheet surface, with controls layered at the bottom. The live/captured
-camera image is installed through `immersiveCameraSheetPresentation` as the
-modal presentation background, not just foreground content, so iOS 26
-partial-sheet safe-area material cannot show through below the viewport. The
-foreground layer stays controls-only with no bottom fade, keeping the camera
-view as one continuous surface, and it uses a full-height geometry root so the
-controls align to the bottom of the sheet instead of their intrinsic content
-area. The row adds the runtime bottom safe-area inset back into its padding so
-controls stay low without clipping into the rounded sheet edge. The sheet edge
-stays flat and does not add foreground glass, refraction, or decorative border
-layers over the live camera feed.
-`CameraCaptureSheet` defers `AVCaptureSession` and `AVCapturePhotoOutput`
-creation/configuration to its dedicated session queue so camera startup cannot
-block the initial sheet presentation. The flashlight, shutter, and switch
-controls share native interactive circular Liquid Glass surfaces with larger
-hit targets than their visual glass buttons; the shutter stays a minimal
-white-tinted frosted glass circle without a separate ring. After capture, the
-same center control animates into a green-tinted use-photo check button, the
-switch-camera control animates into the go-back-to-capture control, and the
-flashlight control fades out while the row geometry stays stable. Entering
-captured-photo preview stops the live `AVCaptureSession`; retake is the path
-that leaves preview and restarts the session. Torch toggles and camera
-switching run through the session queue, restore UI state on AVFoundation
-failure, turn off active torch before replacing the video input, and remove the
-old video input before validating the replacement input. Camera lookup uses
-`AVCaptureDevice` discovery so front/back switching works across wide-angle,
-TrueDepth, dual, and triple camera device variants.
+**Minimum iOS:** 26.0. The generated project and documented toolchain workflow
+support Xcode 26 and Xcode 27 without source forks for their runtime SDKs.
 
-### Build Configurations
+The iOS Worker Console is backed by `WorkerKernelClient`,
+`WorkerKernelRepository`, `WorkerConsoleViewModel`, and `UI/WorkerConsole`.
+It exposes:
 
-| Config | Use |
-|--------|-----|
-| Beta | Debug build, side-by-side bundle ID |
-| ProdDebug | Debug build, production bundle ID |
-| Prod | Release build, production bundle ID |
+- worker list, health, runner, active content version, provenance, and triggers;
+- JSON-schema-aware typed invocation;
+- runs, durable inbox, and audit history;
+- enable/disable, rollback, retirement, purge, webhook rotation, and stop-all;
+- live refresh from `worker.lifecycle` and `worker.invocations` cursors.
 
-### Documentation
+Conversational creation remains the authoring interface; the client does not
+contain a bundle editor. The Mac package is a server supervisor/pairing shell,
+so iOS is the only current operational engine client requiring the console.
 
-Detailed iOS documentation lives in `packages/ios-app/docs/`:
+The Session Briefing sheet opened from the composer context ring remains the
+server-backed surface for model selection, context composition, compaction,
+clear actions, memory references, and durable context-action evidence.
 
-- `architecture.md` — App architecture, patterns, file placement
-- `development.md` — Xcode setup, builds, testing
-- `events.md` — Event plugin system
-- `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
+Settings exposes the Logs sheet in every iOS build configuration from its toolbar.
+While connected, Tron automatically ingests deduplicated client logs into the
+server log store. Successful ingest plumbing is filtered to prevent
+self-feeding diagnostics loops.
 
----
+For fast production-identity testing, the `Tron Fast` scheme uses the
+`ProdDebug` configuration. Codex device actions include Rebuild + Install + Launch
+and Just Launch Installed variants, target a deduplicated production app, and
+the rebuild action installs the requested configuration's `iphoneos` artifact.
 
-## Mac App
+## Validation
 
-**Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
+Deterministic tests cover:
 
-`Tron.app` is the SwiftUI wrapper around the headless Rust agent. Production
-runs only from `/Applications/Tron.app`; it owns `com.tron.server` registration
-through `SMAppService`, waits for server health, and switches from a regular
-wizard window to accessory/menu-bar presentation after onboarding. The bundle
-contains signed production and isolated-test helper apps plus Constitution
-defaults. Default Xcode Debug is a companion observer; the isolated scheme uses
-`~/.tron-dev`, port `9848`, and `com.tron.server.dev`.
+- atomic publication, failed candidates, immutable hashes, overlap, rollback,
+  retirement, purge, and reconstruction;
+- command, agent, and resident-service runners;
+- manual, schedule, engine-event, and authenticated webhook dispatch;
+- restart recovery, idempotency, causal depth, concurrency queueing, timeout,
+  stop/disable, failure disablement, inbox, and secret redaction;
+- dynamic typed tools, relevance selection, discovery promotion, and absence of
+  local grant creation;
+- remote auth, snapshot/restore, legacy import reporting, and isolated core
+  proposal approval;
+- iOS protocol, repository, view-model, settings, and build parity.
 
-### Documentation
+The motivating replay lives at
+`packages/agent/tests/fixtures/last30days_worker_gap.json`. Its deterministic
+vertical slice authors one command worker with every trigger type, useful
+30-day research output, optional-credential fallback, an immediately callable
+typed tool, immutable bundle evidence, and successful fresh-runtime invocation.
 
-- [`packages/mac-app/docs/architecture.md`](../../mac-app/docs/architecture.md)
-  owns wrapper composition, wizard/menu behavior, lifecycle, and workflow
-  identities.
-- [`packages/mac-app/docs/development.md`](../../mac-app/docs/development.md)
-  owns XcodeGen, local build/test commands, helper staging, and DMG contributor
-  workflow.
-
----
-
-## Permissions
-
-The Mac wizard surfaces one system permission after the server is installed. Full Disk Access has an "Open System Settings" deep link when revoked, and the row names the exact wrapper app entry macOS expects in that pane.
-
-| Permission | Why | Required | Probe |
-|------------|-----|----------|-------|
-| Full Disk Access | Agent reads/writes user-selected files and app data outside the sandbox | Yes | Wrapper process opens FDA-gated user data |
-
-The install step validates the active signed helper (`Tron Server.app` for production/Release or `Tron Server Dev.app` for isolated Debug), registers the bundled LaunchAgent through `SMAppService`, and waits for the first heartbeat. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The LaunchAgent's `AssociatedBundleIdentifiers` lists the wrapper bundle IDs in the order appropriate for the active workflow, so macOS presents the helper's privacy grant under the responsible wrapper app: `Tron.app` in Release and `TronMac.app` in Debug. The wizard row therefore names the wrapper app, not the helper app. The settings button only opens System Settings; it never calls prompt APIs that would create a second modal over the already-open pane. Re-check/app activation use native non-prompting probes. Once Full Disk Access is green, Continue restarts the helper one time so launch-time-applied grants are visible to the server before pairing.
-
----
-
-## Deployment
-
-### Manual Contributor Deploy
+The separate upstream proof is ignored by default:
 
 ```bash
-tron manual-deploy          # Full pipeline with confirmations
-tron manual-deploy --force  # Skip uncommitted-changes / test-failure prompts
-tron manual-deploy --ci     # Non-interactive: any failure aborts
+TRON_WORKER_LIVE_NETWORK=1 \
+  cargo test --manifest-path packages/agent/Cargo.toml \
+  last30days_upstream_live_network_dependency_is_locked_and_activates -- --ignored
 ```
 
-`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. It creates a locally signed helper and validates that signature, but never submits developer builds to Apple's notary service. Production signing and notarization belong exclusively to the hosted DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The command has no shorter deploy alias.
+It resolves the upstream HEAD revision, independently calculates the exact
+tree checksum, lets `worker_upsert` clone and verify it again, smoke-tests the
+locked dependency, activates the worker, and invokes it.
 
-The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`) is retained for local contributor workflows:
+## Empirical POC Gate
 
-1. Aborts if a dev server is bound to the prod port.
-2. Warns on uncommitted changes (errors out under `--ci`).
-3. Builds the release binary (`cargo build --release`).
-4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
-5. Under `--ci`, also runs the benchmark gate.
-6. Under the deploy lock, atomically publishes the prior signed helper bundle, CLI payload, launchd plist, entrypoint, and commit marker as one immutable rollback plan before replacing any of them.
-7. Leaves complete Tron Home, managed-profile, and secure auth initialization to Rust server startup.
-8. Starts the contributor service and waits for `/health`.
-9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.
-10. If start or health fails, restores `contributor-pair.bak/`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, and exits nonzero.
+Automated correctness is necessary but not sufficient. The committed
+`worker_poc_observations.json` ledger is intentionally empty. Real testing must
+demonstrate:
 
-`restart-sentinel.json` is the sole durable manual-deploy outcome projection.
-Its status drives the preflight blocker, while its commit fields retain
-transition context without a second write-only result file.
+- at least 10 substantive passed scenarios;
+- at least three distinct calendar days;
+- at least three autonomous worker creations or improvements;
+- no unresolved failure caused by authority ceremony, a hidden actuator, a
+  proposal-only transition, or blocked activation of a valid worker.
 
-### Install Directory
-
-Rust server startup completes the `profiles`, `workspace`, and `internal` roots in the tree below through Constitution and auth-storage owners. Contributor shell tooling creates only the `internal/run` payload it directly owns before startup. Base-directory paths are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename one of those directories, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
-
-```
-~/.tron/
-+-- profiles/                     Agent execution specs and built-in auth
-|   +-- active.toml                Active profile pointer
-|   +-- auth.toml                  Readable credential-profile registry
-|   +-- auth.json                  LLM provider OAuth tokens + API keys + bearerToken (mode 600)
-|   +-- default/                   Managed, restorable base AgentExecutionSpec/manual
-|   |   +-- profile.toml           Complete typed AgentExecutionSpec v3
-|   +-- normal/                    Managed standard workspace/session profile
-|   |   +-- profile.toml           Inherits default; profileClass = "normal"
-|   +-- chat/                      Managed quick-chat profile
-|   |   +-- profile.toml           Inherits default; profileClass = "chat"
-|   +-- local/                     Managed local-provider profile
-|   |   +-- profile.toml           Inherits default; profileClass = "local"
-|   +-- user/                      Sparse user profile/settings overrides
-|       +-- profile.toml           Sparse `[settings]` overrides
-+-- workspace/                    Active work and generated artifacts
-|   +-- projects/                  Project-local active work
-|   +-- reports/                   Analysis and investigation reports
-|   +-- renders/                   Rendered pages displayed in chat
-|   +-- screenshots/               Saved screenshots from runtime execution
-|   +-- scratch/                   Downloads, temp files, experiments
-|   +-- labs/                      Manifested experimental spaces
-|   +-- archive/                   Archived workspace material
-|   +-- knowledge/                 Curated wiki/research experiment
-|   +-- vault/                     Local fast secret storage for agent-owned workspace state
-|   +-- workers/                   Approved local package root for `tron.worker_package.v1` manifests
-+-- internal/                     Tron-owned runtime machinery
-    +-- database/                  Unified SQLite engine storage and archives
-    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
-    |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
-    |   +-- archive/               One-way archive of non-current storage generations
-    |   +-- journals/              Streaming journals for crash recovery of partial LLM output
-    +-- run/                       Mutable runtime state and local contributor artifacts
-    |   +-- auth.lock              Auth-file refresh lock
-    |   +-- deploy.lock            Persistent BSD mutex for pair readers/writers
-    |   +-- deploy.in-progress     Writer sentinel; survives a crashed pair update
-    |   +-- contributor-pair.bak/  Immutable signed-bundle/CLI/launch rollback plan during updates
-    |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
-    |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
-    |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
-    |   +-- deployed-commit        Last contributor helper commit that passed `/health`
-    |   +-- restart-sentinel.json  Manual deploy restart state; `restarting` is a preflight blocker
-    |   +-- Tron-Deploy.app        Contributor-only service bundle used by `tron install` / `manual-deploy`
-    |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
-    +-- transcription/             Opt-in local composer speech-to-text runtime
-        +-- worker.py              Parakeet/MLX Python worker
-        +-- requirements.txt       Pip deps for the venv
-        +-- venv/                  Auto-created when enabled and the sidecar starts
-        +-- models/hf/             HuggingFace model cache (HF_HOME)
-```
-
-Notes:
-- The server-owned top-level homes are exactly `profiles`, `workspace`, and `internal`; for a clean reset, move `~/.tron` aside rather than deleting individual subtrees.
-- Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
-- Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
-
-### Service (SMAppService)
-
-The installed `/Applications/Tron.app` is the only production owner of
-`com.tron.server`. Its tracked LaunchAgent points at the bundled
-`Tron Server.app` executable with `tron --port 9847 --quiet`; registration and
-repair go through `SMAppService`, never a writable `~/Library/LaunchAgents`
-copy. Loaded state is not health: install, restart, resume, command-mode start,
-and version finalization wait for the server before reporting success.
-
-Default Debug is companion-only. Isolated Debug owns `com.tron.server.dev`,
-port `9848`, and `~/.tron-dev`. `tron dev` temporarily takes over production
-port `9847` and restores the installed helper through the wrapper command-mode
-entry point. The Mac
-[architecture owner](../../mac-app/docs/architecture.md#workflows--variants)
-documents registration repair, variants, and mutual exclusion.
-
-### DMG Release Pipeline
-
-Release identity is centralized in `VERSION.env`. Both hosted release workflows
-delegate mirror validation, release-tag matching, and GitHub step outputs to
-`scripts/tron version github-output`; the workflows do not parse version fields
-themselves. On a matching `server-v*` tag,
-[`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml)
-checks every version mirror, builds the locked Rust agent, verifies the tracked
-helper metadata, stages the executable into both helper bundles, generates the
-Xcode project, and archives `Tron.app`. Publication signs inside-out, notarizes
-the app, builds the DMG from a dedicated source directory, remounts it to
-require the production helper and `Applications` link, then signs/notarizes the
-DMG separately. `scripts/tron-release-notes` owns the dynamic release body and
-asset names; compare-link identity comes from hosted workflow context or an
-explicit local `--repo-url`, never Git remotes. The validated title comes from
-`scripts/tron-version`. The workflow creates a draft when no release exists, or
-updates existing assets without changing an already-published release's state, title,
-or notes.
-
-Manual dispatch defaults to structural dry-run and never publishes; with
-`dry_run=false` and signing credentials it may exercise signed/notarized
-packaging. Only the explicit manual dry-run may omit the five required
-signing/notarization secrets; tag and manual live runs reject incomplete
-credentials before the build. PR coverage is an unsigned structural proof.
-Both remain fail-closed. Exact contributor commands live in the Mac
-[development guide](../../mac-app/docs/development.md#ci-pipeline).
-
-The iOS TestFlight pipeline lives at `.github/workflows/release-ios.yml` and triggers on the same `server-v*` tag push. It regenerates `packages/ios-app/TronMobile.xcodeproj` from XcodeGen, verifies `VERSION.env` mirrors, runs the iOS simulator tests, archives the `Tron` scheme with the `Prod` configuration (`com.tron.mobile` / App ID `6761511764`), exports an App Store Connect IPA with Xcode's `app-store-connect` export method, uploads with `asc builds upload`, waits for the Apple build to become valid, resolves TestFlight export compliance, updates What to Test notes, submits TestFlight beta review when Apple requires it for external testing, and branches on the ASC review state. First external builds for a new marketing version normally enter `WAITING_FOR_BETA_REVIEW`; CI treats that as a successful pending-review checkpoint instead of timing out. Once Apple approves the version, rerunning the workflow or uploading later builds in the same version continues to group validation and assigns the build to the public external TestFlight group when one is configured or can be auto-discovered. The public group is the same TestFlight link shown by the Mac onboarding QR code. The workflow installs current Homebrew `asc` and uses `asc testflight groups list` as its single fail-closed group-list command instead of carrying legacy command aliases. TestFlight group checks are warning-only after the build is uploaded and processed because successful public distribution must not be blocked by stale or renamed group variables that CI does not need to create the beta build. Reruns are idempotent: if the Apple build number already exists in App Store Connect, CI skips the binary upload and reuses that build for processing/distribution. Manual workflow runs default to `dry_run=true` and stop before ASC upload. Tag runs and manual `dry_run=false` runs require all three ASC secrets and reject incomplete credentials before the build; only the explicit manual dry-run may omit them.
-
-Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8_BASE64`. `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` and `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` are optional repository variables used for group assignment diagnostics; CI can auto-discover a single public-link group and otherwise skips group assignment without failing an uploaded/processed build. CI can export with automatic Xcode cloud signing through the ASC key, or with local signing secrets when `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_APPSTORE_PROFILE_BASE64`, and `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` are set. Local signing supports both manually managed App Store profiles and matching Xcode-managed App Store profiles. ASC reads its key from the job environment rather than a persisted local profile. Manual signing snapshots the user keychain list/default, reuses identical existing provisioning profiles, and records only profiles it creates; one fail-closed `always()` teardown restores the keychain preferences and removes all job-owned key, certificate, keychain, and profile material. `ASC_KEY_ID` and the `.p8` path can be checked locally with `asc auth status --verbose` / `asc auth doctor`; `ASC_ISSUER_ID` is shown in App Store Connect under Users and Access -> Integrations -> App Store Connect API -> Team Keys. The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`; CI verifies that key in the archive/export and can apply the same App Store Connect API build setting to already-uploaded builds that predate the plist key. TestFlight/App Store Connect remains the distribution and audit surface for iOS binaries. Do not create separate GitHub releases for iOS unless an iOS artifact is intentionally published through GitHub too; the shared `VERSION.env` keeps Mac/server and iOS version labels aligned without adding duplicate tags.
-
-## Testing
-
-### Rust Tests
+Validate a local evidence ledger with:
 
 ```bash
-scripts/tron ci test                                    # Owned full Rust schedule
-cd packages/agent
-cargo test --lib paths::                                # Focused unit-test filter
-cargo test --test db_path_guard -- --nocapture          # Focused integration target
+TRON_WORKER_POC_LEDGER=/absolute/path/to/observations.json \
+  cargo test --manifest-path packages/agent/Cargo.toml \
+  --test worker_poc_gate worker_poc_empirical_gate -- --ignored
 ```
 
-The agent is a single `tron` crate. The repository-owned schedule runs its library and binary tests serially, then executes every top-level integration target discovered from `packages/agent/tests/*.rs`, with the process-global `integration` target last. Test counts are intentionally not hardcoded here because they drift quickly.
+Re-hardening begins only after this gate passes. Every new guardrail must map to
+an observed failure or concrete threat, include a regression scenario, and
+prove that accepted worker workflows remain uninterrupted.
 
-For repository CI, Cargo's default auto-discovery of top-level
-`packages/agent/tests/*.rs` files owns the integration-target fact set. The
-source-owned guard is `packages/agent/tests/repository_workflow_invariants.rs`.
-`scripts/tron.d/quality.sh::run_tests` derives that set from the same source layout,
-runs each target once in deterministic order, and reserves `integration` for the
-final serial invocation because it shares process-global test-server plumbing. The
-repository workflow invariant compares the derived schedule with
-Cargo and verifies GitHub Actions delegates to `scripts/tron ci test` rather
-than carrying a second target list.
+## Source Owners
 
-### iOS Tests
+- Worker kernel: `packages/agent/src/domains/worker_kernel/`
+- Provider tool selection: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
+- Trusted-local execution: `packages/agent/src/domains/agent/loop/capability_invocation_executor/`
+- Profile settings: `packages/agent/src/domains/settings/profile/types/`
+- Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
+- iOS worker protocol: `packages/ios-app/Sources/Engine/Protocol/WorkerKernel/`
+- iOS Worker Console: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
 
-```bash
-cd packages/ios-app
-xcodegen generate
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-```
-
-### CI
-
-```bash
-scripts/tron ci                      # Run every Rust check (fmt, check, clippy, test, bench, doc)
-scripts/tron ci fmt check            # Subset: formatting + compilation
-scripts/tron ci clippy test          # Subset: linting + tests
-```
-
-`scripts/tron ci test` runs Rust lib/bin tests serially first, then derives and executes
-each top-level Cargo integration target sequentially and fail-fast. The
-`integration` target runs last with one test thread. GitHub delegates to this
-command instead of maintaining a second target list, and runs the Rust quality
-path for every repository change because integration targets may inspect code,
-docs, scripts, workflows, and client source. The aggregate check requires
-successful path detection and accepts skipped client jobs only for
-path-filtered pull requests; pushes and manual runs require both clients.
-
-Install the local hook once per clone with `scripts/install-hooks.sh`; it
-blocks commits with staged Rust formatting drift and runs the personal-info
-guard on staged changes.
-
-Rust CI uses the lint policy in `packages/agent/Cargo.toml` and denies every
-warning that policy emits. Correctness, suspicious, performance, and configured
-Rust lints fail the build; style/pedantic suggestions remain disabled so the
-signal is not buried.
-
----
-
-## Core Invariants
-
-These constraints are enforced in code with `// INVARIANT:` markers at the enforcement site.
-
-1. **Canonical engine execution**: Production behavior is owned by canonical engine functions. The public `/engine` protocol is only transport; domain behavior is discovered and invoked by canonical `namespace::function` ids.
-
-2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent substitution or default provider substitution.
-
-3. **Deterministic event reconstruction**: Session state is always reconstructable from the immutable event log. No mutable session state stored outside events.
-
-4. **Session-serialized writes**: All event appends are serialized per-session via in-process mutex locks. SQLite `UNIQUE(session_id, sequence)` enforces ordering at the DB level.
-
-5. **Event ordering (iOS send button)**: `agent.ready` is emitted AFTER `agent.complete`. Clients see active work as `processing` and every terminal or between-turn window as `idle`; compaction and ledger state stay independent.
-
-6. **Primitive context boundary**: model context contains soul, agent-owned state, environment, session history, and pending `execute` results. Built-in rules, skills, hooks, worker guides, and profile primers are not prompt planes.
-
-7. **Compaction before provider calls**: threshold-triggered compaction runs before the next provider call and only persists a boundary when it reduces durable context.
-
-8. **Database path guard**: Startup validates the database path is exactly `<resolved-tron-home>/internal/database/tron.sqlite`. Rejects alternate filenames, wrong directories, and symlinked paths.
-
-9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `tron.sqlite.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `domains/session/event_store/sqlite/process_lock.rs::acquire_database_lock` called from startup database initialization.
-
----
-
-## License
-
-MIT
+Nearest `mod.rs` documentation and focused tests are the implementation-level
+truth when this cross-cutting reference and source disagree.

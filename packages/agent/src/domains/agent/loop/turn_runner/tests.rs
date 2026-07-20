@@ -8,22 +8,23 @@ use std::collections::{BTreeMap, HashSet};
 
 fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
     let mut targets_by_name = BTreeMap::new();
-    let function_id = FunctionId::new("capability::execute").expect("function id");
+    let function_id = FunctionId::new("worker_kernel::list").expect("function id");
     let function = FunctionDefinition::new(
         function_id.clone(),
-        WorkerId::new("capability").expect("worker id"),
-        "execute",
+        WorkerId::new("worker-kernel").expect("worker id"),
+        "list persistent workers",
         VisibilityScope::System,
         EffectClass::DelegatedInvocation,
     );
     let _ = targets_by_name.insert(
-        "execute".to_owned(),
+        "worker_list".to_owned(),
         PrimitiveExecutionTarget {
-            model_capability_id: "execute".to_owned(),
+            model_capability_id: "worker_list".to_owned(),
             function_id,
             function,
             stops_turn: false,
             execution_mode: mode,
+            trusted_local: false,
         },
     );
     ResolvedPrimitiveSurface {
@@ -47,16 +48,16 @@ fn turn_result_success() {
 }
 
 #[test]
-fn build_execution_waves_parallel_execute_calls_share_one_wave() {
+fn build_execution_waves_parallel_worker_calls_share_one_wave() {
     let calls = vec![
         crate::shared::protocol::messages::CapabilityInvocationDraft::new(
             "1",
-            "execute",
+            "worker_list",
             Default::default(),
         ),
         crate::shared::protocol::messages::CapabilityInvocationDraft::new(
             "2",
-            "execute",
+            "worker_list",
             Default::default(),
         ),
     ];
@@ -66,25 +67,25 @@ fn build_execution_waves_parallel_execute_calls_share_one_wave() {
 }
 
 #[test]
-fn build_execution_waves_serialized_execute_calls_are_sequenced() {
+fn build_execution_waves_serialized_worker_calls_are_sequenced() {
     let calls = vec![
         crate::shared::protocol::messages::CapabilityInvocationDraft::new(
             "1",
-            "execute",
+            "worker_list",
             Default::default(),
         ),
         crate::shared::protocol::messages::CapabilityInvocationDraft::new(
             "2",
-            "execute",
+            "worker_list",
             Default::default(),
         ),
         crate::shared::protocol::messages::CapabilityInvocationDraft::new(
             "3",
-            "execute",
+            "worker_list",
             Default::default(),
         ),
     ];
-    let surface = surface(ExecutionMode::Serialized("capability-execute".into()));
+    let surface = surface(ExecutionMode::Serialized("worker-list".into()));
     let waves = capability_invocations::build_execution_waves(&calls, &surface);
     assert_eq!(waves, vec![vec![0], vec![1], vec![2]]);
 }
