@@ -38,8 +38,6 @@ async fn server_boots_and_responds() {
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-        onboarded_marker_path: dir.path().join(".onboarded"),
     };
 
     let config = ServerConfig::default();
@@ -100,8 +98,6 @@ async fn server_graceful_shutdown() {
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-        onboarded_marker_path: dir.path().join(".onboarded"),
     };
 
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()

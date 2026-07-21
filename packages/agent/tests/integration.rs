@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU16;
 use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
@@ -103,8 +102,6 @@ async fn boot_server_with_config_and_autonomy(
         origin: "127.0.0.1:0".to_owned(),
         auth_path: auth_path.clone(),
         oauth_flows: Arc::new(Mutex::new(HashMap::new())),
-        ws_port: Arc::new(AtomicU16::new(0)),
-        onboarded_marker_path: temp.path().join(".onboarded"),
     };
     tron::transport::runtime::setup::register_server_domains_for_context(&runtime_context)
         .expect("primitive domains register");

@@ -128,12 +128,6 @@ fn runtime_paths_live_under_internal_run() {
         auth_lock_path_for_home(home),
         home.join(dirs::INTERNAL).join(dirs::RUN).join("auth.lock")
     );
-    assert!(onboarded_marker_path().ends_with(format!(
-        "{}/{}/{}",
-        dirs::INTERNAL,
-        dirs::RUN,
-        files::ONBOARDED_MARKER
-    )));
 }
 
 #[test]

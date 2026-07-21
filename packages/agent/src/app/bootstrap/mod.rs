@@ -326,11 +326,6 @@ fn build_server_runtime_context(
         origin,
         auth_path: crate::shared::foundation::paths::auth_path(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        // Provisional defaults; `TronServer::new` overwrites both with the
-        // actual `ServerConfig::port` and the canonical onboarded marker path
-        // so handlers see the live values from the start of the first request.
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: crate::app::lifecycle::onboarding::onboarded_marker_path(),
     }
 }
 

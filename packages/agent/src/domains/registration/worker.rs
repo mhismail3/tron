@@ -11,7 +11,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU16;
 use std::time::Instant;
 
 use crate::app::lifecycle::shutdown::ShutdownCoordinator;
@@ -41,8 +40,6 @@ pub(crate) struct DomainRegistrationContext {
             std::collections::HashMap<String, crate::domains::auth::oauth::flows::PendingOAuthFlow>,
         >,
     >,
-    pub(crate) ws_port: Arc<AtomicU16>,
-    pub(crate) onboarded_marker_path: PathBuf,
     pub(crate) engine_host: crate::engine::EngineHostHandle,
 }
 
@@ -60,8 +57,6 @@ impl DomainRegistrationContext {
             settings_path: ctx.settings_path.clone(),
             auth_path: ctx.auth_path.clone(),
             oauth_flows: Arc::clone(&ctx.oauth_flows),
-            ws_port: Arc::clone(&ctx.ws_port),
-            onboarded_marker_path: ctx.onboarded_marker_path.clone(),
             engine_host: ctx.engine_host.clone(),
         }
     }

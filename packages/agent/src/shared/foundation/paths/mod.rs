@@ -54,11 +54,6 @@ pub mod files {
     pub const AUTH_JSON: &str = "auth.json";
     /// Sparse user-owned engine settings.
     pub const SETTINGS_TOML: &str = "settings.toml";
-    /// First-run sentinel: empty marker file at `~/.tron/internal/run/.onboarded`.
-    /// Touched by the Mac wizard at the end of its install flow OR on
-    /// the first successful engine authentication from any iOS device. The
-    /// `system.getInfo` engine capability reports `paired: true` once it exists.
-    pub const ONBOARDED_MARKER: &str = ".onboarded";
 }
 
 // ── Core path functions ────────────────────────────────────────────────
@@ -215,14 +210,6 @@ pub fn auth_path() -> PathBuf {
 /// `<home>/internal/run/auth.lock` — auth file serialization lock.
 pub fn auth_lock_path_for_home(home: &Path) -> PathBuf {
     run_dir_for_home(home).join("auth.lock")
-}
-
-/// `~/.tron/internal/run/.onboarded` — first-run sentinel marker.
-///
-/// See [`files::ONBOARDED_MARKER`] for purpose. Existence-checked by
-/// `system.getInfo` to populate the `paired` field; the Mac wizard owns writes.
-pub fn onboarded_marker_path() -> PathBuf {
-    run_dir().join(files::ONBOARDED_MARKER)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────

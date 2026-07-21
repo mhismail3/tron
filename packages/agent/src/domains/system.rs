@@ -9,37 +9,27 @@ use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::registration::worker::DomainWorkerModule;
-use crate::domains::settings::SettingsRuntime;
 use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU16;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 const STREAM_TOPICS: &[&str] = &["system.status"];
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    onboarded_marker_path: PathBuf,
     orchestrator: Arc<Orchestrator>,
-    settings_runtime: Arc<SettingsRuntime>,
     server_start_time: Instant,
-    ws_port: Arc<AtomicU16>,
 }
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
-            onboarded_marker_path: deps.onboarded_marker_path.clone(),
             orchestrator: deps.orchestrator.clone(),
-            settings_runtime: deps.settings_runtime.clone(),
             server_start_time: deps.server_start_time,
-            ws_port: deps.ws_port.clone(),
         }
     }
 }
@@ -74,8 +64,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "system",
             EffectClass::PureRead,
             RiskLevel::Low)
-        .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"onboardedMarkerPath":{"type":"string"}},"type":"object"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-        .response_schema(json!({"additionalProperties":false,"properties":{"activeSessions":{"type":"integer"},"arch":{"type":"string"},"paired":{"type":"boolean"},"platform":{"type":"string"},"port":{"type":"integer"},"runtime":{"type":"string"},"tailscaleIp":{"type":["string","null"]},"uptime":{"type":"integer"},"version":{"type":"string"}},"required":["version","uptime","activeSessions","platform","arch","runtime","port","tailscaleIp","paired"],"type":"object"}))
+        .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"activeSessions":{"type":"integer"},"uptime":{"type":"integer"},"version":{"type":"string"}},"required":["version","uptime","activeSessions"],"type":"object"}))
         .build()?,
         CapabilityContract::new(
             "system::shutdown",
@@ -98,11 +88,8 @@ operation_bindings! {
             ping_value(Some(&invocation.payload))
         },
         "get_info" => |invocation, deps| {
-            let allow_server_context = matches!(
-                invocation.causal_context.actor_kind,
-                crate::engine::ActorKind::Client
-            );
-            Ok(system_info_value(&invocation.payload, deps, allow_server_context))
+            let _ = invocation;
+            Ok(system_info_value(deps))
         },
         "shutdown" => |_invocation, deps| {
             system_shutdown_value(deps).await
@@ -164,26 +151,51 @@ fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
     }))
 }
 
-fn system_info_value(payload: &Value, deps: &Deps, allow_server_context: bool) -> Value {
-    let marker_path = allow_server_context
-        .then(|| {
-            payload
-                .pointer("/__capabilityContext/onboardedMarkerPath")
-                .and_then(Value::as_str)
-                .map(PathBuf::from)
-        })
-        .flatten()
-        .unwrap_or_else(|| deps.onboarded_marker_path.clone());
+fn system_info_value(deps: &Deps) -> Value {
     json!({
         "version": env!("CARGO_PKG_VERSION"),
         "uptime": deps.server_start_time.elapsed().as_secs(),
-        // Wire compatibility: `activeSessions` reports cached session projections.
+        // A session is active while its projection remains in the orchestrator cache.
         "activeSessions": deps.orchestrator.cached_session_count(),
-        "platform": std::env::consts::OS,
-        "arch": std::env::consts::ARCH,
-        "runtime": "agent",
-        "port": deps.ws_port.load(Ordering::SeqCst),
-        "tailscaleIp": deps.settings_runtime.current().settings.server.tailscale_ip,
-        "paired": crate::app::lifecycle::onboarding::is_onboarded(&marker_path),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn get_info_contract_matches_the_production_projection() {
+        let context = crate::shared::server::test_support::make_test_context();
+        let registration = DomainRegistrationContext::from_context(&context);
+        let value = system_info_value(&Deps::from_engine(&registration));
+        let actual = value
+            .as_object()
+            .expect("system info object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let expected = BTreeSet::from(["activeSessions", "uptime", "version"]);
+        assert_eq!(actual, expected);
+
+        let contract = capabilities()
+            .expect("system contracts")
+            .into_iter()
+            .find(|spec| spec.operation_key == "get_info")
+            .expect("system info contract");
+        let schema = contract.response_schema.expect("response schema");
+        let properties = schema["properties"]
+            .as_object()
+            .expect("response properties")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(properties, expected);
+        assert_eq!(
+            schema["required"],
+            json!(["version", "uptime", "activeSessions"])
+        );
+    }
 }

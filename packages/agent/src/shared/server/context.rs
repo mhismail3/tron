@@ -1,7 +1,7 @@
 //! Server runtime setup context and shared domain support.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -196,15 +196,6 @@ pub struct ServerRuntimeContext {
             std::collections::HashMap<String, crate::domains::auth::oauth::flows::PendingOAuthFlow>,
         >,
     >,
-    /// WebSocket listening port. Surfaced via `system.getInfo` so iOS clients
-    /// can render the connection display ("Tailscale 100.x:9847") without
-    /// re-parsing user input. Initialized from config and updated after bind.
-    pub ws_port: Arc<AtomicU16>,
-    /// Path to the first-run sentinel (`~/.tron/internal/run/.onboarded`). Stored on
-    /// the context so tests can inject a temp path; production sets it to
-    /// [`crate::app::lifecycle::onboarding::onboarded_marker_path`]. Drives the `paired`
-    /// field returned by `system.getInfo`.
-    pub onboarded_marker_path: PathBuf,
 }
 
 impl ServerRuntimeContext {
@@ -219,16 +210,6 @@ impl ServerRuntimeContext {
         F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
     {
         run_blocking_task(task_name, f).await
-    }
-
-    /// Current WebSocket listening port.
-    pub fn ws_port(&self) -> u16 {
-        self.ws_port.load(Ordering::SeqCst)
-    }
-
-    /// Update the current WebSocket listening port after bind.
-    pub fn set_ws_port(&self, port: u16) {
-        self.ws_port.store(port, Ordering::SeqCst);
     }
 }
 

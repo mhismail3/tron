@@ -1,6 +1,6 @@
-//! # app/lifecycle/onboarding — bearer-token lifecycle + first-run sentinel
+//! # app/lifecycle/onboarding — bearer-token lifecycle
 //!
-//! Per-server bootstrap state: bearer-token lifecycle and first-run sentinel.
+//! Per-server bootstrap state for authenticated client transport.
 //!
 //! ## What this module owns
 //!
@@ -13,12 +13,6 @@
 //!   pairing bearer share one secure auth document. First server boot creates
 //!   the full auth schema plus `bearerToken`; an older exact `{}` install
 //!   sentinel is materialized rather than discarded.
-//!
-//! - **`run/.onboarded`** sentinel at [`crate::shared::foundation::paths::onboarded_marker_path()`].
-//!   Empty marker file owned and atomically written by the Mac wizard at the
-//!   end of its install flow. The
-//!   `system::get_info` capability returns `paired: true` once it exists so iOS
-//!   can detect "this server has already been paired with someone."
 //!
 //! ## INVARIANTS
 //!
@@ -33,7 +27,6 @@
 //!   canonical auth-file lock. They therefore serialize with provider token
 //!   refresh, OAuth login, and other auth writers across processes. Concurrent
 //!   reads see a consistent snapshot via the atomic rename.
-//! - The Rust server reads but never writes the Mac-owned onboarding sentinel.
 //!
 #![deny(unsafe_code)]
 
@@ -62,11 +55,6 @@ const ENCODED_TOKEN_LEN: usize = 43;
 /// Default file path for the bearer token: `~/.tron/profiles/auth.json`.
 pub fn bearer_token_path() -> PathBuf {
     crate::shared::foundation::paths::auth_path()
-}
-
-/// Default file path for the first-run sentinel: `~/.tron/internal/run/.onboarded`.
-pub fn onboarded_marker_path() -> PathBuf {
-    crate::shared::foundation::paths::onboarded_marker_path()
 }
 
 /// Generate a fresh bearer token: 32 cryptographic-random bytes encoded
@@ -127,14 +115,6 @@ pub fn rotate_bearer_token(path: &Path) -> io::Result<String> {
     Ok(token)
 }
 
-/// Returns true when the first-run sentinel marker exists at `path`.
-///
-/// Used by `system.getInfo` to populate the `paired` field. Existence
-/// is the entire signal — the file's contents are deliberately empty.
-pub fn is_onboarded(path: &Path) -> bool {
-    path.exists()
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // Internals
 // ─────────────────────────────────────────────────────────────────────────
@@ -191,12 +171,6 @@ mod tests {
     fn temp_token_path() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("auth.json");
-        (dir, path)
-    }
-
-    fn temp_marker_path() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join(".onboarded");
         (dir, path)
     }
 
@@ -484,21 +458,6 @@ mod tests {
         );
     }
 
-    // ── Sentinel ──
-
-    #[test]
-    fn is_onboarded_false_when_marker_absent() {
-        let (_dir, path) = temp_marker_path();
-        assert!(!is_onboarded(&path));
-    }
-
-    #[test]
-    fn is_onboarded_true_when_marker_present() {
-        let (_dir, path) = temp_marker_path();
-        std::fs::write(&path, b"").expect("Mac-owned marker fixture");
-        assert!(is_onboarded(&path));
-    }
-
     // ── Path helpers ──
 
     #[test]
@@ -509,17 +468,6 @@ mod tests {
         assert!(
             s.contains("/.tron/profiles/"),
             "must live under ~/.tron/profiles/, got: {s}"
-        );
-    }
-
-    #[test]
-    fn onboarded_marker_path_lives_under_internal_dir() {
-        let p = onboarded_marker_path();
-        let s = p.to_string_lossy();
-        assert!(s.ends_with("/run/.onboarded"), "got: {s}");
-        assert!(
-            s.contains("/.tron/internal/run/"),
-            "must live under ~/.tron/internal/run/, got: {s}"
         );
     }
 }

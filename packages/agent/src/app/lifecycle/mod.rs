@@ -2,7 +2,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`onboarding`] | Bearer-token lifecycle and first-run paired sentinel |
+//! | [`onboarding`] | Authenticated transport bearer-token lifecycle |
 //! | [`shutdown`] | Graceful shutdown coordination and task cancellation |
 
 pub mod onboarding;

@@ -85,7 +85,6 @@ impl TronServer {
         let shutdown = Arc::new(ShutdownCoordinator::new());
         // Inject shutdown coordinator into context so handlers can register tasks
         runtime_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
-        runtime_context.set_ws_port(config.port);
         let auth_store = Arc::new(BearerTokenStore::new(runtime_context.auth_path.clone()));
         let engine_clients = Arc::new(EngineClientRegistry::new());
         Self {
@@ -146,8 +145,6 @@ impl TronServer {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let bound_addr = listener.local_addr()?;
-        self.runtime_context.set_ws_port(bound_addr.port());
-
         info!(addr = %bound_addr, "engine server started");
 
         let router = self.router();
@@ -490,7 +487,6 @@ mod tests {
     #[tokio::test]
     async fn engine_endpoint_requires_upgrade() {
         let (server, _dir, token) = make_server_with_auth();
-        let marker = server.runtime_context().onboarded_marker_path.clone();
         let app = server.router();
 
         // GET /engine without WebSocket upgrade headers → should return an error
@@ -504,7 +500,6 @@ mod tests {
         // Without upgrade headers, axum returns a non-success status
         assert_ne!(resp.status(), StatusCode::OK);
         assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
-        assert!(!marker.exists(), "invalid upgrades must not mark paired");
     }
 
     #[tokio::test]
@@ -818,7 +813,6 @@ mod tests {
         let (addr, handle) = server.listen().await.unwrap();
 
         assert_ne!(addr.port(), 0); // auto-assigned
-        assert_eq!(server.runtime_context().ws_port(), addr.port());
         assert_eq!(addr.ip().to_string(), "0.0.0.0");
 
         // Shutdown

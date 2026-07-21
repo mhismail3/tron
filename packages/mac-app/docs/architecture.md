@@ -268,12 +268,13 @@ directly, while snapshots store only orthogonal process and host metadata.
 `ServerPing.decodeFrame` parses each WebSocket frame once, requires the
 canonical pong, timestamp, server/protocol versions, minimum client protocol,
 and compatibility fields, and projects only the server version. The configured
-port and settings-backed Tailscale cache stay with `EnvironmentSetup`; `paired`
-belongs to `system::get_info`, not the ping response. The status poller,
-pairing window, log window, and feedback action each read the bearer token
-through `EnvironmentSetup.readBearerToken` at the point of use and never retain
-it in presentation state. Every Mac token read rejects `auth.json` when group
-or other permission bits are present; no caller can bypass that owner-only
+port and settings-backed Tailscale cache stay with `EnvironmentSetup`; the Mac
+app owns its wizard-completion sentinel directly. `system::get_info` returns
+only the version, uptime, and cached-session count consumed by iOS. The status
+poller, pairing window, log window, and feedback action each read the bearer
+token through `EnvironmentSetup.readBearerToken` at the point of use and never
+retain it in presentation state. Every Mac token read rejects `auth.json` when
+group or other permission bits are present; no caller can bypass that owner-only
 policy. `MenuBarController` owns the setup used to compose
 the pairing and log windows; `MenuBarActionHandler` dispatches those typed
 window actions without resupplying composition. `MenuBarLogReader` accepts the

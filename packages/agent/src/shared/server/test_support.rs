@@ -186,8 +186,6 @@ fn make_test_context_with_responder_and_autonomy(
         origin: "localhost:9847".to_string(),
         auth_path,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
-        onboarded_marker_path: unique_test_path("onboarded", "marker"),
     };
     crate::transport::runtime::setup::register_server_domains_for_context(&ctx).unwrap();
     ctx
