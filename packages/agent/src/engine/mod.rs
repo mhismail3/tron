@@ -59,8 +59,8 @@ pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payloa
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
     CatalogRevision, DedupeScope, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, Provenance,
-    ReplayBehavior, RiskLevel, StreamVisibility,
+    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ReplayBehavior,
+    RiskLevel, StreamVisibility,
 };
 
 #[cfg(test)]

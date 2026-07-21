@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
-    Provenance, Result as EngineResult, RiskLevel, WorkerId,
+    Result as EngineResult, RiskLevel, WorkerId,
 };
 
 /// Fully-owned contract record supplied by one source domain.
@@ -152,8 +152,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         spec.visibility.clone(),
         spec.effect_class,
     )
-    .with_risk(spec.risk_level)
-    .with_provenance(Provenance::system());
+    .with_risk(spec.risk_level);
     if let Some(contract) = &spec.idempotency {
         definition = definition.with_idempotency(contract.clone());
     }

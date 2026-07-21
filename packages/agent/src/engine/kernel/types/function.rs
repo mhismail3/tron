@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{FunctionHealth, FunctionRevision, FunctionVisibility, Provenance};
+use super::{FunctionHealth, FunctionRevision, FunctionVisibility};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
 
 /// Side-effect class of a function.
@@ -172,8 +172,6 @@ pub struct FunctionDefinition {
     pub idempotency: Option<IdempotencyContract>,
     /// Health.
     pub health: FunctionHealth,
-    /// Provenance.
-    pub provenance: Provenance,
     /// Escape-hatch metadata.
     pub metadata: Value,
 }
@@ -200,7 +198,6 @@ impl FunctionDefinition {
             risk_level: RiskLevel::Low,
             idempotency: None,
             health: FunctionHealth::Healthy,
-            provenance: Provenance::system(),
             metadata: Value::Null,
         }
     }
@@ -237,13 +234,6 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_response_schema(mut self, schema: Value) -> Self {
         self.response_schema = Some(schema);
-        self
-    }
-
-    /// Set provenance.
-    #[must_use]
-    pub fn with_provenance(mut self, provenance: Provenance) -> Self {
-        self.provenance = provenance;
         self
     }
 }

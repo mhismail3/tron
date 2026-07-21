@@ -550,6 +550,9 @@ Actor identity has only four production variants: Agent, Client, Worker, and
 System. Session and workspace are causal observations rather than actor fields.
 Unknown persisted stream scopes fail closed. This keeps admission, duplicate
 suppression, and delivery from becoming another synthetic authorization model.
+The generic function-definition provenance record was removed because no
+runtime consumed it; executable worker bundles retain the source revisions and
+checksums that actually support inspection, ranking, recovery, and audit.
 
 Attaching unseen worker inbox results is an engine-owned session projection,
 not an agent action. It runs under the internal runtime identity while retaining
