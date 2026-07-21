@@ -32,6 +32,25 @@ fn test_settings_runtime(
     std::sync::Arc::new(crate::domains::settings::SettingsRuntime::load(home).unwrap())
 }
 
+#[tokio::test]
+async fn process_shutdown_runs_agent_cleanup_before_drain() {
+    let context = crate::shared::server::test_support::make_test_context();
+    let orchestrator = Arc::clone(&context.orchestrator);
+    let run = orchestrator
+        .begin_run("shutdown-session", "shutdown-run")
+        .expect("active run");
+    let cancelled = run.cancel_token();
+    let shutdown = Arc::new(ShutdownCoordinator::new());
+
+    register_agent_shutdown(&shutdown, Arc::clone(&orchestrator));
+    shutdown
+        .graceful_shutdown(vec![], Some(std::time::Duration::from_secs(2)))
+        .await;
+
+    assert!(cancelled.is_cancelled());
+    assert_eq!(orchestrator.active_run_count(), 0);
+}
+
 #[test]
 fn bootstrap_snapshots_legacy_settings_before_retirement() {
     let root = tempfile::tempdir().unwrap();

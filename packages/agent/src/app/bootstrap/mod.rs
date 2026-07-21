@@ -16,6 +16,7 @@ pub mod server;
 use crate::app::bootstrap::config::ServerConfig;
 use crate::app::bootstrap::server::TronServer;
 use crate::app::cli::{Cli, run_subcommand};
+use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomplete_turns};
 use crate::domains::model::responder::{DefaultModelResponderFactory, ModelResponderFactory};
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
@@ -329,6 +330,23 @@ fn build_server_runtime_context(
     }
 }
 
+/// Attach agent-runtime cleanup to the process shutdown path.
+///
+/// INVARIANT: accepted runs and durable session projections are ended before
+/// capability and storage drains begin. Process signals are the lifecycle
+/// authority; no externally invokable shutdown function is required.
+fn register_agent_shutdown(shutdown: &Arc<ShutdownCoordinator>, orchestrator: Arc<Orchestrator>) {
+    shutdown.register_phase_callback(
+        ShutdownPhase::Agent,
+        "agent-orchestrator",
+        move || async move {
+            if let Err(error) = orchestrator.shutdown().await {
+                tracing::warn!(%error, "agent orchestrator shutdown failed");
+            }
+        },
+    );
+}
+
 /// TTL for idle session cache eviction. Sessions idle beyond this are
 /// dropped from the in-memory cache by the background eviction task.
 const IDLE_SESSION_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
@@ -446,6 +464,10 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     )
     .await
     .context("Failed to register server domain workers")?;
+    register_agent_shutdown(
+        server.shutdown(),
+        Arc::clone(&orchestrator_for_stream_events),
+    );
     register_blocking_supervisor_shutdown(server.shutdown());
     // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(

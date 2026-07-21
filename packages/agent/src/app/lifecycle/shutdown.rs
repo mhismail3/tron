@@ -12,8 +12,8 @@
 //!    in [`ShutdownPhase`] order BEFORE the task drain so that, e.g.,
 //!    capability blocking work can drain before the database pool closes.
 //!
-//! The order is intentional: agent loops finish turns -> capabilities drain ->
-//! DB pool closes. See [`ShutdownPhase`].
+//! The order is intentional: the orchestrator cancels accepted agent runs ->
+//! capabilities drain -> DB pool closes. See [`ShutdownPhase`].
 //!
 //! INVARIANT: task registration and registry closure are one atomic decision.
 //! Once closure wins, new handles are aborted; once registration wins, shutdown
@@ -45,8 +45,8 @@ const PER_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5);
 /// declaration order (lower variant runs first).
 ///
 /// The order matters:
-/// - [`Agent`](ShutdownPhase::Agent) drains in-flight turns first so
-///   capabilities they own finish naturally.
+/// - [`Agent`](ShutdownPhase::Agent) cancels in-flight turns and closes their
+///   durable session projections before lower-level drains begin.
 /// - [`Capabilities`](ShutdownPhase::Capabilities) then cancels anything still running
 ///   (e.g. long process capabilities that ignored turn cancel).
 /// - [`Database`](ShutdownPhase::Database) flushes pending writes last.

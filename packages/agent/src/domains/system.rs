@@ -9,15 +9,13 @@ use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::registration::worker::DomainWorkerModule;
-use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
+use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
-
-const STREAM_TOPICS: &[&str] = &["system.status"];
 
 #[derive(Clone)]
 pub(crate) struct Deps {
@@ -41,7 +39,7 @@ pub(crate) fn worker_module(
         let domain_deps = Deps::from_engine(deps);
         crate::domains::registration::worker::domain_worker_module(
             "system",
-            STREAM_TOPICS,
+            &[],
             function_registrations(capabilities()?, domain_deps)?,
         )
     }
@@ -67,16 +65,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"activeSessions":{"type":"integer"},"uptime":{"type":"integer"},"version":{"type":"string"}},"required":["version","uptime","activeSessions"],"type":"object"}))
         .build()?,
-        CapabilityContract::new(
-            "system::shutdown",
-            "system",
-            EffectClass::IrreversibleSideEffect,
-            RiskLevel::Critical)
-        .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-        .response_schema(json!({"additionalProperties":false,"properties":{"acknowledged":{"type":"boolean"}},"required":["acknowledged"],"type":"object"}))
-        .idempotency(IdempotencyContract::caller_session_engine_ledger())
-        .stream_topics(STREAM_TOPICS.to_vec())
-        .build()?,
     ])
 }
 
@@ -91,20 +79,7 @@ operation_bindings! {
             let _ = invocation;
             Ok(system_info_value(deps))
         },
-        "shutdown" => |_invocation, deps| {
-            system_shutdown_value(deps).await
-        },
     ];
-}
-
-async fn system_shutdown_value(deps: &Deps) -> Result<Value, CapabilityError> {
-    deps.orchestrator
-        .shutdown()
-        .await
-        .map_err(|error| CapabilityError::Internal {
-            message: error.to_string(),
-        })?;
-    Ok(json!({ "acknowledged": true }))
 }
 
 fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
@@ -196,6 +171,16 @@ mod tests {
         assert_eq!(
             schema["required"],
             json!(["version", "uptime", "activeSessions"])
+        );
+
+        let function_ids = capabilities()
+            .expect("system contracts")
+            .into_iter()
+            .map(|spec| spec.function_id.to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            function_ids,
+            BTreeSet::from(["system::get_info".to_owned(), "system::ping".to_owned()])
         );
     }
 }
