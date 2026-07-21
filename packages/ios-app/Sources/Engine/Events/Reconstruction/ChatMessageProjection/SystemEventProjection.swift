@@ -3,25 +3,6 @@ import Foundation
 /// Event projections for transforming system events into ChatMessages.
 enum SystemEventProjection {
 
-    /// Transform context.cleared event into a ChatMessage.
-    ///
-    /// Context cleared events indicate when conversation context was reset.
-    static func transformContextCleared(
-        _ payload: [String: AnyCodable],
-        timestamp: Date
-    ) -> ChatMessage? {
-        guard let parsed = ContextClearedPayload(from: payload) else { return nil }
-
-        return ChatMessage(
-            role: .system,
-            content: .contextCleared(
-                tokensBefore: parsed.tokensBefore,
-                tokensAfter: parsed.tokensAfter
-            ),
-            timestamp: timestamp
-        )
-    }
-
     /// Transform compact.boundary event into a ChatMessage.
     ///
     /// Compaction events indicate when context was compressed to fit window.

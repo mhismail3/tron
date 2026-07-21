@@ -29,10 +29,9 @@ pub(in crate::engine::tests) use crate::engine::kernel::ids::{
     ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
-    CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind, DeliveryMode,
-    EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance, ReplayBehavior, RiskLevel,
-    VisibilityScope, WorkerDefinition, WorkerKind,
+    CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind, EffectClass,
+    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract, IdempotencyScope,
+    Provenance, ReplayBehavior, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 pub(in crate::engine::tests) use crate::engine::{
     CatalogWatchRequest, EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,
@@ -82,19 +81,15 @@ pub(in crate::engine::tests) fn write_function(id: &str, owner: &str) -> Functio
 
 pub(in crate::engine::tests) fn reject_idempotency() -> IdempotencyContract {
     IdempotencyContract {
-        key_source: IdempotencyKeySource::Caller,
         dedupe_scope: VisibilityScope::Session,
         replay_behavior: ReplayBehavior::Reject,
-        ledger_kind: LedgerKind::InMemory,
     }
 }
 
 pub(in crate::engine::tests) fn noop_idempotency() -> IdempotencyContract {
     IdempotencyContract {
-        key_source: IdempotencyKeySource::Caller,
         dedupe_scope: VisibilityScope::Session,
         replay_behavior: ReplayBehavior::NoOp,
-        ledger_kind: LedgerKind::InMemory,
     }
 }
 

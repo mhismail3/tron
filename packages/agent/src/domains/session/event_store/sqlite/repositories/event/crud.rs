@@ -141,37 +141,4 @@ impl EventRepo {
         )?;
         Ok(changed)
     }
-
-    /// Batch-fetch events by IDs.
-    ///
-    /// Returns a map of `event_id → EventRow`. Missing IDs are silently omitted.
-    pub fn get_by_ids(
-        conn: &Connection,
-        event_ids: &[&str],
-    ) -> Result<std::collections::HashMap<String, EventRow>> {
-        let mut result = std::collections::HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(result);
-        }
-
-        let placeholders: Vec<String> = (1..=event_ids.len()).map(|i| format!("?{i}")).collect();
-        let sql = format!(
-            "SELECT {EVENT_COLUMNS} FROM events WHERE id IN ({})",
-            placeholders.join(", ")
-        );
-
-        let mut stmt = conn.prepare_cached(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = event_ids
-            .iter()
-            .map(|s| s as &dyn rusqlite::types::ToSql)
-            .collect();
-        let rows = stmt
-            .query_map(params.as_slice(), Self::map_row)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        for row in rows {
-            let _ = result.insert(row.id.clone(), row);
-        }
-        Ok(result)
-    }
 }

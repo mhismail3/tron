@@ -127,16 +127,6 @@ fn persistence_error_write() {
 }
 
 #[test]
-fn persistence_error_with_query() {
-    let err = PersistenceError::new("sessions", PersistenceOperation::Query, "timeout")
-        .with_query("SELECT * FROM sessions WHERE ...");
-    assert_eq!(
-        err.query.as_deref(),
-        Some("SELECT * FROM sessions WHERE ...")
-    );
-}
-
-#[test]
 fn persistence_error_with_source() {
     let cause = std::io::Error::other("sqlite busy");
     let err =
@@ -211,44 +201,6 @@ fn capability_response_error_from_response_no_code() {
 fn capability_response_error_display() {
     let err = CapabilityResponseError::new("test error").with_code("MY_CODE");
     assert_eq!(err.to_string(), "[MY_CODE] test error");
-}
-
-// -- ErrorCollector --
-
-#[test]
-fn error_collector_empty() {
-    let collector = ErrorCollector::new();
-    assert!(!collector.has_errors());
-    assert_eq!(collector.count(), 0);
-    assert!(collector.errors().is_empty());
-}
-
-#[test]
-fn error_collector_collect_strings() {
-    let mut collector = ErrorCollector::new();
-    collector.collect("task 1 failed");
-    collector.collect("task 2 failed");
-    assert!(collector.has_errors());
-    assert_eq!(collector.count(), 2);
-}
-
-#[test]
-fn error_collector_collect_error() {
-    let mut collector = ErrorCollector::new();
-    collector.collect_error(TronError::internal("TEST", "test error"));
-    assert_eq!(collector.count(), 1);
-    assert_eq!(collector.errors()[0].code(), "TEST");
-}
-
-#[test]
-fn error_collector_flush() {
-    let mut collector = ErrorCollector::new();
-    collector.collect("error 1");
-    collector.collect("error 2");
-    let errors = collector.flush();
-    assert_eq!(errors.len(), 2);
-    assert_eq!(collector.count(), 0);
-    assert!(!collector.has_errors());
 }
 
 // -- has_error_code --

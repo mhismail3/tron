@@ -11,8 +11,6 @@ use super::GeminiThinkingLevel;
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct GeminiModelInfo {
-    /// Human-readable name.
-    pub name: &'static str,
     /// Short display name.
     pub short_name: &'static str,
     /// Context window size in tokens.
@@ -60,7 +58,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-3.1-pro-preview",
         GeminiModelInfo {
-            name: "Gemini 3.1 Pro (Preview)",
             short_name: "Gemini 3.1 Pro",
             context_window: 1_048_576,
             max_output: 65_536,
@@ -85,7 +82,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-3-pro-preview",
         GeminiModelInfo {
-            name: "Gemini 3 Pro (Preview)",
             short_name: "Gemini 3 Pro",
             context_window: 1_048_576,
             max_output: 65_536,
@@ -110,7 +106,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-3.1-flash-lite-preview",
         GeminiModelInfo {
-            name: "Gemini 3.1 Flash Lite (Preview)",
             short_name: "Gemini 3.1 Flash Lite",
             context_window: 1_048_576,
             max_output: 65_536,
@@ -135,7 +130,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-3-flash-preview",
         GeminiModelInfo {
-            name: "Gemini 3 Flash (Preview)",
             short_name: "Gemini 3 Flash",
             context_window: 1_048_576,
             max_output: 65_536,
@@ -160,7 +154,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-2.5-pro",
         GeminiModelInfo {
-            name: "Gemini 2.5 Pro",
             short_name: "Gemini 2.5 Pro",
             context_window: 2_097_152,
             max_output: 16_384,
@@ -185,7 +178,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-2.5-flash",
         GeminiModelInfo {
-            name: "Gemini 2.5 Flash",
             short_name: "Gemini 2.5 Flash",
             context_window: 1_048_576,
             max_output: 16_384,
@@ -210,7 +202,6 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
     m.insert(
         "gemini-2.5-flash-lite",
         GeminiModelInfo {
-            name: "Gemini 2.5 Flash Lite",
             short_name: "Gemini 2.5 Flash Lite",
             context_window: 1_048_576,
             max_output: 8_192,

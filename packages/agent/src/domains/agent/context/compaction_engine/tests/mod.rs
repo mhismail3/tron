@@ -83,14 +83,12 @@ impl CompactionDeps for MockDeps {
 
 struct MockSummarizer {
     narrative: String,
-    extracted_data: Option<ExtractedData>,
 }
 
 impl MockSummarizer {
     fn new(narrative: &str) -> Self {
         Self {
             narrative: narrative.into(),
-            extracted_data: None,
         }
     }
 }
@@ -103,7 +101,6 @@ impl Summarizer for MockSummarizer {
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         Ok(SummaryResult {
             narrative: self.narrative.clone(),
-            extracted_data: self.extracted_data.clone().unwrap_or_default(),
         })
     }
 }

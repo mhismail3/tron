@@ -5,14 +5,13 @@
 //! This is the largest subsystem, responsible for:
 //!
 //! - **Event types**: branch-local [`EventType`] enum for retained loop events
-//! - **Session events**: [`SessionEvent`] flat struct with typed payload access
+//! - **Session events**: [`SessionEvent`] flat struct with opaque JSON payloads
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
 //! - **Provider request audits**: bounded `model.provider_request` structure and
 //!   digest evidence persisted before model streams without duplicating bulk media
-//! - **Logs and traces**: bounded log queries plus Agent Trace-style records
-//!   keyed by session, workspace, trace, invocation, and provider identifiers
+//! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing capability result text
 //! - **Migrations**: Version-tracked SQL schema evolution
@@ -87,7 +86,6 @@ pub mod identity;
 pub mod reconstruction;
 pub mod sqlite;
 pub mod store;
-pub mod trace;
 pub mod types;
 
 pub use envelope::{
@@ -112,8 +110,6 @@ pub use store::{
     AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
     ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,
 };
-pub use trace::{AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord};
 pub use types::{
-    ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SessionEvent,
-    SessionEventPayload, SessionState, SessionSummary, TokenTotals, TokenUsage, Workspace,
+    EventType, Message, MessageWithEventId, SessionEvent, SessionState, TokenTotals, TokenUsage,
 };

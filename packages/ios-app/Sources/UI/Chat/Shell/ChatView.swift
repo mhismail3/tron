@@ -117,10 +117,6 @@ struct ChatView: View {
                 }
             )
         }
-        .onAppear {
-            // Reasoning level is restored from server via reconstruction (config.reasoning_level events)
-            // Note: Message entry animations are handled in .task after messages load
-        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             scrollCoordinator.sceneDidBecomeActive(

@@ -138,13 +138,11 @@ class UnifiedEventTransformerTestCase: XCTestCase {
             if augmented["turn"] == nil { augmented["turn"] = AnyCodable(1) }
             if augmented["model"] == nil { augmented["model"] = AnyCodable("claude-sonnet-4") }
             if augmented["stopReason"] == nil { augmented["stopReason"] = AnyCodable("end_turn") }
-        case "message.system":
-            if augmented["source"] == nil { augmented["source"] = AnyCodable("compaction") }
-        case PersistedEventType.capabilityInvocationStarted.rawValue:
+        case SessionEventType.capabilityInvocationStarted.rawValue:
             if augmented["modelPrimitiveName"] == nil {
                 augmented["modelPrimitiveName"] = AnyCodable("execute")
             }
-        case PersistedEventType.capabilityInvocationCompleted.rawValue:
+        case SessionEventType.capabilityInvocationCompleted.rawValue:
             if augmented["modelPrimitiveName"] == nil {
                 augmented["modelPrimitiveName"] = AnyCodable("execute")
             }
@@ -158,11 +156,8 @@ class UnifiedEventTransformerTestCase: XCTestCase {
         return augmented
     }
 
-    /// Canonical minimal payloads for every persisted event type that claims
-    /// `rendersAsChatMessage == true`. Keep this in lockstep with
-    /// `PersistedEventType.classification`; the coverage test below fails when
-    /// a new rendered event is added without a reconstruction fixture.
-    func renderableEventFixtures() -> [PersistedEventType: [String: AnyCodable]] {
+    /// Canonical minimal payloads for durable records rendered in the timeline.
+    func renderableEventFixtures() -> [SessionEventType: [String: AnyCodable]] {
         [
             .messageUser: [
                 // Production `session::reconstruct` payloads may omit `turn`.
@@ -173,10 +168,6 @@ class UnifiedEventTransformerTestCase: XCTestCase {
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-sonnet-4"),
                 "stopReason": AnyCodable("end_turn")
-            ],
-            .messageSystem: [
-                "content": AnyCodable("System note"),
-                "source": AnyCodable("compaction")
             ],
             .capabilityInvocationStarted: [
                 "invocationId": AnyCodable("capability-fixture"),
@@ -191,37 +182,10 @@ class UnifiedEventTransformerTestCase: XCTestCase {
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(25)
             ],
-            .configModelSwitch: [
-                "previousModel": AnyCodable("claude-sonnet-4"),
-                "newModel": AnyCodable("claude-opus-4")
-            ],
-            .configReasoningLevel: [
-                "previousLevel": AnyCodable("medium"),
-                "newLevel": AnyCodable("high")
-            ],
             .compactBoundary: [
                 "originalTokens": AnyCodable(10_000),
                 "compactedTokens": AnyCodable(2_000),
                 "reason": AnyCodable("manual")
-            ],
-            .contextCleared: [
-                "tokensBefore": AnyCodable(10_000),
-                "tokensAfter": AnyCodable(500)
-            ],
-            .errorAgent: [
-                "error": AnyCodable("Agent failed"),
-                "recoverable": AnyCodable(false)
-            ],
-            .errorCapability: [
-                "modelPrimitiveName": AnyCodable("execute"),
-                "invocationId": AnyCodable("capability-fixture"),
-                "error": AnyCodable("Command failed")
-            ],
-            .errorProvider: [
-                "provider": AnyCodable("anthropic"),
-                "error": AnyCodable("Rate limited"),
-                "category": AnyCodable("rate_limit"),
-                "retryable": AnyCodable(true)
             ],
             .turnFailed: [
                 "turn": AnyCodable(1),

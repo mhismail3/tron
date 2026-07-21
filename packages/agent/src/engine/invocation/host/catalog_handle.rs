@@ -77,27 +77,6 @@ impl EngineHostHandle {
             .register_function(definition, handler, volatile)
     }
 
-    /// Return the SQLite storage path when this host is backed by the durable
-    /// engine ledger. In-memory hosts return `None`.
-    pub async fn storage_path(&self) -> Option<PathBuf> {
-        self.inner.lock().await.storage_path.clone()
-    }
-
-    /// Return the SQLite storage path during startup/test setup without waiting
-    /// on an already-running host.
-    pub fn storage_path_for_setup(&self) -> Result<Option<PathBuf>> {
-        Ok(self
-            .inner
-            .try_lock()
-            .map_err(|_| {
-                EngineError::PolicyViolation(
-                    "engine host is busy during storage path setup".to_owned(),
-                )
-            })?
-            .storage_path
-            .clone())
-    }
-
     /// Unregister a function through the host boundary.
     pub async fn unregister_function(&self, id: &FunctionId, owner: &WorkerId) -> Result<()> {
         self.inner
@@ -154,17 +133,13 @@ impl EngineHostHandle {
     }
 
     /// Watch catalog changes through the host boundary.
+    #[cfg(test)]
     pub async fn watch(
         &self,
         actor: &ActorContext,
         request: CatalogWatchRequest,
     ) -> Result<CatalogWatchResponse> {
         self.inner.lock().await.watch_catalog(actor, request)
-    }
-
-    /// Return the current live catalog revision.
-    pub async fn catalog_revision(&self) -> CatalogRevision {
-        self.inner.lock().await.catalog.revision()
     }
 
     /// Promote function visibility through the host boundary.

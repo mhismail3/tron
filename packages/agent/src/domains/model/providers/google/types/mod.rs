@@ -420,30 +420,6 @@ pub struct UsageMetadata {
     /// Total token count.
     #[serde(default)]
     pub total_token_count: u32,
-    /// Modality breakdown for prompt tokens.
-    #[serde(default)]
-    pub prompt_tokens_details: Vec<ModalityTokenCount>,
-    /// Modality breakdown for cached prompt tokens.
-    #[serde(default)]
-    pub cache_tokens_details: Vec<ModalityTokenCount>,
-    /// Modality breakdown for generated candidate tokens.
-    #[serde(default)]
-    pub candidates_tokens_details: Vec<ModalityTokenCount>,
-    /// Modality breakdown for tool-use prompt tokens.
-    #[serde(default)]
-    pub tool_use_prompt_tokens_details: Vec<ModalityTokenCount>,
-}
-
-/// Gemini token count for a modality.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModalityTokenCount {
-    /// Modality name.
-    #[serde(default)]
-    pub modality: String,
-    /// Token count for the modality.
-    #[serde(default)]
-    pub token_count: u32,
 }
 
 /// API error in streaming response.

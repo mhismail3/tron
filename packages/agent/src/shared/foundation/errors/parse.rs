@@ -264,11 +264,6 @@ fn patterns() -> &'static [ErrorPattern] {
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Extract a string representation from any error-like value.
-pub fn extract_error_string(error: &dyn std::fmt::Display) -> String {
-    error.to_string()
-}
-
 /// Parse an error string into a user-friendly [`ParsedError`].
 #[must_use]
 pub fn parse_error(error_string: &str) -> ParsedError {
@@ -307,20 +302,6 @@ pub fn format_error(error_string: &str) -> String {
         Some(s) => format!("{}. {s}", parsed.message),
         None => parsed.message,
     }
-}
-
-/// Format an error with full details.
-#[must_use]
-pub fn format_error_verbose(error_string: &str) -> String {
-    let parsed = parse_error(error_string);
-    let mut parts = vec![parsed.message.clone()];
-    if let Some(details) = &parsed.details {
-        parts.push(format!("Details: {details}"));
-    }
-    if let Some(suggestion) = &parsed.suggestion {
-        parts.push(format!("Suggestion: {suggestion}"));
-    }
-    parts.join("\n")
 }
 
 /// Check if an error string represents an authentication error.
@@ -541,13 +522,6 @@ mod tests {
     fn format_error_without_suggestion() {
         let formatted = format_error("HTTP 400 Bad Request");
         assert_eq!(formatted, "Invalid request");
-    }
-
-    #[test]
-    fn format_error_verbose_all_parts() {
-        let formatted = format_error_verbose("HTTP 429 Too Many Requests");
-        assert!(formatted.contains("Rate limit exceeded"));
-        assert!(formatted.contains("Suggestion:"));
     }
 
     #[test]

@@ -11,9 +11,9 @@ use super::super::types::{WorkerBundle, WorkerState, WorkerTrigger};
 use super::store::validate_bundle;
 
 const REBUILD_FORMAT: &str = "tron.worker_index_rebuild.v1";
-const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v2";
-const IMPORT_MARKER_KEY: &str = "worker_first_retirement_v2";
-const IMPORT_REPORT_FILE: &str = "legacy-import-report.v2.json";
+const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v3";
+const IMPORT_MARKER_KEY: &str = "worker_first_retirement_v3";
+const IMPORT_REPORT_FILE: &str = "legacy-import-report.v3.json";
 const RETIRED_TABLES: &[&str] = &[
     "engine_resource_events",
     "engine_resource_links",
@@ -27,6 +27,7 @@ const RETIRED_TABLES: &[&str] = &[
     "engine_catalog_functions",
     "engine_catalog_workers",
     "engine_queue_items",
+    "trace_records",
 ];
 
 #[derive(Debug, Serialize)]
@@ -487,7 +488,7 @@ fn prepare_worker_first_retirement_with_fault(
         collect_legacy_candidates(&connection, &root, &imported_at)?;
     let mut report = ImportReport {
         format: IMPORT_FORMAT.to_owned(),
-        schema_version: 2,
+        schema_version: 3,
         imported_at,
         source_database: source.display().to_string(),
         source_sha256,
@@ -542,7 +543,8 @@ fn prepare_worker_first_retirement_with_fault(
              DROP TABLE IF EXISTS engine_grants;
              DROP TABLE IF EXISTS engine_queue_items;
              DROP TABLE IF EXISTS engine_catalog_functions;
-             DROP TABLE IF EXISTS engine_catalog_workers;",
+             DROP TABLE IF EXISTS engine_catalog_workers;
+             DROP TABLE IF EXISTS trace_records;",
         )
         .map_err(|error| format!("drop retired worker-first tables: {error}"))?;
     let report_json = serde_json::to_string(&report).map_err(|error| error.to_string())?;

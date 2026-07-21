@@ -2,7 +2,7 @@
 //!
 //! This module owns canonical function execution for the model namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! Model listing, switching, presets, and provider-neutral registry helpers
+//! Model listing, switching, and provider-neutral registry helpers
 //! live under `routing/`.
 //! Provider-native stream and function-call details are isolated under
 //! `providers/`, `protocol/`, and the `responder/` boundary before being
@@ -13,9 +13,9 @@
 //! Effective attachment limits live under `routing::attachments`; `model.list`
 //! publishes them and the agent prompt boundary enforces the same policy so
 //! clients never need provider-name heuristics.
-//! Provider reasoning/status evidence is metadata-only and stays in the
-//! responder/audit plus token-accounting boundary; it must not expose hidden
-//! reasoning text, synthesize summaries, or add model-visible tools.
+//! Provider request audits redact hidden reasoning and sensitive material before
+//! bounded persistence; normalized reasoning token counts remain part of the
+//! ordinary token-accounting path.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

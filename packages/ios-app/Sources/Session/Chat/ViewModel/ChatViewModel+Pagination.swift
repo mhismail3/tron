@@ -20,13 +20,6 @@ extension ChatViewModel {
         self.workspaceId = workspaceId
     }
 
-    /// Apply config state from reconstructed events.
-    func applyReconstructedConfig(_ state: ReconstructedState) {
-        if let eventSourcedLevel = state.reasoningLevel {
-            inputBarState.reasoningLevel = eventSourcedLevel
-        }
-    }
-
     /// Set token and cost state from reconstructed server events.
     /// Server events are the single source of truth for token values.
     func updateTokenState(from state: ReconstructedState, using manager: EventStoreManager) async {

@@ -188,34 +188,8 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertFalse(event.isForkable)
     }
 
-    func testStreamTextDelta_isNotForkable() {
-        let event = makeEvent(type: "stream.text_delta", payload: [
-            "delta": AnyCodable("Hello"),
-        ])
-        XCTAssertFalse(event.isForkable)
-    }
-
     func testCompactBoundary_isNotForkable() {
         let event = makeEvent(type: "compact.boundary")
-        XCTAssertFalse(event.isForkable)
-    }
-
-    func testErrorAgent_isNotForkable() {
-        let event = makeEvent(type: "error.agent", payload: [
-            "error": AnyCodable("Something went wrong"),
-        ])
-        XCTAssertFalse(event.isForkable)
-    }
-
-    func testConfigModelSwitch_isNotForkable() {
-        let event = makeEvent(type: "config.model_switch", payload: [
-            "model": AnyCodable("claude-opus-4"),
-        ])
-        XCTAssertFalse(event.isForkable)
-    }
-
-    func testContextCleared_isNotForkable() {
-        let event = makeEvent(type: "context.cleared")
         XCTAssertFalse(event.isForkable)
     }
 

@@ -2,8 +2,7 @@
 //!
 //! Domain contracts are the primitive manifest for retained in-process workers:
 //! they declare the canonical function id, schema, risk/effect, and
-//! capability metadata that the registry projects into contracts and
-//! implementations.
+//! metadata that the registry projects into contracts.
 //!
 //! Domain `contract.rs` files own their function inventory, schemas, risk,
 //! idempotency, and stream metadata. This
@@ -36,8 +35,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) visibility: VisibilityScope,
     /// Transport-level idempotency mode for engine client protocol bindings.
     pub(crate) idempotency_mode: TransportIdempotencyMode,
-    /// Domain module provenance.
-    pub(crate) domain_module: &'static str,
     /// Strict request schema.
     pub(crate) request_schema: Option<Value>,
     /// Strict response schema.
@@ -78,7 +75,6 @@ impl CapabilityContract {
             risk_level,
             visibility: VisibilityScope::System,
             idempotency_mode: TransportIdempotencyMode::NotRequired,
-            domain_module: owner_worker,
             request_schema: None,
             response_schema: None,
             idempotency: None,
@@ -110,12 +106,6 @@ impl CapabilityContract {
     /// Set engine visibility.
     pub(crate) fn visibility(mut self, visibility: VisibilityScope) -> Self {
         self.visibility = visibility;
-        self
-    }
-
-    /// Set domain module provenance.
-    pub(crate) fn domain_module(mut self, module: &'static str) -> Self {
-        self.domain_module = module;
         self
     }
 
@@ -166,7 +156,6 @@ impl CapabilityContract {
             risk_level: self.risk_level,
             visibility: self.visibility,
             idempotency_mode: self.idempotency_mode,
-            domain_module: self.domain_module,
             request_schema: self.request_schema,
             response_schema: self.response_schema,
             idempotency: self.idempotency,
@@ -201,31 +190,9 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     if let Some(schema) = &spec.response_schema {
         definition = definition.with_response_schema(schema.clone());
     }
-    let plugin_id = format!("first_party.{}", spec.domain_module);
-    let implementation_id = format!(
-        "{plugin_id}.v{}.{}",
-        definition.revision.0,
-        spec.operation_key.as_str()
-    );
-    let context_primer_level = "transport";
     let presentation_hints = presentation_hints_for_capability(spec);
     definition.metadata = json!({
-        "operationKey": spec.operation_key.as_str(),
-        "domainWorker": spec.domain_worker.as_str(),
-        "canonicalCapability": spec.function_id.as_str(),
-        "contractId": spec.function_id.as_str(),
-        "implementationId": implementation_id,
-        "pluginId": plugin_id,
-        "trustTier": "first_party_signed",
-        "contextPrimerLevel": context_primer_level,
-        "runtimeRequirements": {
-            "workerKind": "in_process",
-            "deliveryModes": definition.allowed_delivery_modes.iter().map(|mode| mode.as_str()).collect::<Vec<_>>()
-        },
-        "idempotencyMode": spec.idempotency_mode.as_str(),
-        "domainModule": spec.domain_module,
         "streamTopics": spec.stream_topics,
-        "stopsTurn": false,
         "presentationHints": presentation_hints,
     });
     definition

@@ -113,22 +113,4 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.count <= 50)
     }
 
-    func testSessionBranch_summary() {
-        let event = makeEvent(type: "session.branch")
-        XCTAssertEqual(event.summary, "Branch created")
-    }
-
-    func testContextCleared_summary() {
-        let event = makeEvent(type: "context.cleared")
-        XCTAssertEqual(event.summary, "Context cleared")
-    }
-
-    func testErrorAgent_showsCodeAndError() {
-        let event = makeEvent(type: "error.agent", payload: [
-            "code": AnyCodable("TIMEOUT"),
-            "error": AnyCodable("Request timed out"),
-        ])
-        XCTAssertEqual(event.summary, "TIMEOUT: Request timed out")
-    }
-
 }

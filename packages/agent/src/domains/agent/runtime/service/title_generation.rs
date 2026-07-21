@@ -187,13 +187,10 @@ async fn generate_title(
             capabilities: None,
             working_directory: Some(working_dir.to_owned()),
             agent_state_context: None,
-            memory_prompt_context: None,
             server_origin: Some(server_origin.to_owned()),
         },
         session_id: session_id.to_owned(),
         reasoning_level: Some(ModelReasoningLevel::None),
-        trace_id: None,
-        parent_invocation_id: None,
         cancel,
         retry_config: None,
     };

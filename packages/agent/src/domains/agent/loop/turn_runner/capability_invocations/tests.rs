@@ -260,10 +260,8 @@ async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) 
 
 fn context_manager_for_workdir(working_directory: &str) -> ContextManager {
     ContextManager::new(ContextManagerConfig {
-        model: "m".to_owned(),
         system_prompt: Some("system".to_owned()),
         working_directory: Some(working_directory.to_owned()),
-        capabilities: Vec::new(),
         compaction: CompactionConfig::default(),
     })
 }

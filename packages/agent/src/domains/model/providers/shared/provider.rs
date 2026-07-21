@@ -11,7 +11,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use super::context_composition::compose_context_audit_blocks;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 use crate::shared::server::failure::{
@@ -427,7 +426,7 @@ pub trait Provider: Send + Sync {
         crate::domains::model::routing::models::registry::model_context_window(self.model())
     }
 
-    /// Provider request envelope for Constitution audit/replay.
+    /// Provider request envelope for durable replay audit.
     ///
     /// Providers override this when they can expose their exact wire payload.
     /// The responder audit boundary projects bulk inline values before durable
@@ -443,7 +442,7 @@ pub trait Provider: Send + Sync {
         Ok(ProviderAuditPayload::provider_independent_snapshot(json!({
             "provider": self.provider_type().as_str(),
             "model": self.model(),
-            "contextBlocks": compose_context_audit_blocks(context),
+            "context": context,
             "options": options,
         })))
     }

@@ -7,8 +7,6 @@ fn empty_events_returns_empty() {
     let result = reconstruct_from_events(&[]);
     assert!(result.messages_with_event_ids.is_empty());
     assert_eq!(result.turn_count, 0);
-    assert!(result.reasoning_level.is_none());
-    assert!(result.system_prompt.is_none());
 }
 
 #[test]
@@ -156,73 +154,6 @@ fn capability_result_reconstruction_uses_model_context_content() {
         msgs[2].content,
         "display-only target output\n[execute observation - metadata for reasoning]\nidempotencyKey: replay-key\n[/execute observation]"
     );
-}
-
-#[test]
-fn context_clear_drops_results_without_a_remaining_invocation() {
-    let events = vec![
-        session_start(),
-        ev(
-            EventType::MessageUser,
-            serde_json::json!({"content": "clear this context"}),
-        ),
-        ev(
-            EventType::MessageAssistant,
-            serde_json::json!({
-                "content": [{
-                    "type": "capability_invocation",
-                    "id": "call_clear",
-                    "name": "session_clear",
-                    "arguments": {"reason": "test"}
-                }]
-            }),
-        ),
-        ev(
-            EventType::CapabilityInvocationStarted,
-            serde_json::json!({
-                "invocationId": "call_clear",
-                "arguments": {"reason": "test"}
-            }),
-        ),
-        ev(
-            EventType::ContextCleared,
-            serde_json::json!({
-                "tokensBefore": 100,
-                "tokensAfter": 0,
-                "reason": "test"
-            }),
-        ),
-        ev(
-            EventType::CapabilityInvocationCompleted,
-            serde_json::json!({
-                "invocationId": "call_clear",
-                "content": "clear completed",
-                "isError": false
-            }),
-        ),
-        ev(
-            EventType::MessageAssistant,
-            serde_json::json!({"content": [{"type": "text", "text": "New epoch active."}]}),
-        ),
-        ev(
-            EventType::MessageUser,
-            serde_json::json!({"content": "continue"}),
-        ),
-    ];
-
-    let result = reconstruct_from_events(&events);
-    let messages = get_messages(&result);
-    assert!(
-        messages
-            .iter()
-            .all(|message| message.role != "capabilityResult")
-    );
-    assert!(
-        messages
-            .iter()
-            .all(|message| message.content != "clear completed")
-    );
-    assert!(messages.iter().any(|message| message.content == "continue"));
 }
 
 #[test]

@@ -1,405 +1,136 @@
-//! Event type definitions for the primitive session loop.
+//! Persisted session-event discriminators.
 //!
-//! All definitions are produced by [`define_events!`] from a single
-//! source-of-truth table. Add or remove events by modifying the macro
-//! invocation below.
+//! This list contains only event families with a production writer or a
+//! production reconstruction path. Live-only progress and delta events belong
+//! to the transport protocol, not the durable session log.
 
 use serde::{Deserialize, Serialize};
 
-use super::base::SessionEvent;
-use super::payloads;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Discriminator for records accepted by the durable session event log.
+pub enum EventType {
+    /// Session creation record.
+    #[serde(rename = "session.start")]
+    SessionStart,
+    /// Session terminal record.
+    #[serde(rename = "session.end")]
+    SessionEnd,
+    /// Session fork record.
+    #[serde(rename = "session.fork")]
+    SessionFork,
+    /// User message record.
+    #[serde(rename = "message.user")]
+    MessageUser,
+    /// Assistant message record.
+    #[serde(rename = "message.assistant")]
+    MessageAssistant,
+    /// Redacted provider-request audit record.
+    #[serde(rename = "model.provider_request")]
+    ModelProviderRequest,
+    /// Soft-deletion record for a prior message.
+    #[serde(rename = "message.deleted")]
+    MessageDeleted,
+    /// Capability invocation start record.
+    #[serde(rename = "capability.invocation.started")]
+    CapabilityInvocationStarted,
+    /// Capability invocation terminal record.
+    #[serde(rename = "capability.invocation.completed")]
+    CapabilityInvocationCompleted,
+    /// Agent turn start record.
+    #[serde(rename = "stream.turn_start")]
+    StreamTurnStart,
+    /// Agent turn terminal record.
+    #[serde(rename = "stream.turn_end")]
+    StreamTurnEnd,
+    /// Committed context-compaction boundary.
+    #[serde(rename = "compact.boundary")]
+    CompactBoundary,
+    /// Failed turn terminal record.
+    #[serde(rename = "turn.failed")]
+    TurnFailed,
+}
 
-define_events! {
-    events {
-        /// New session started.
-        SessionStart => "session.start" => payloads::session::SessionStartPayload,
-        /// Session ended.
-        SessionEnd => "session.end" => payloads::session::SessionEndPayload,
-        /// Session forked from another.
-        SessionFork => "session.fork" => payloads::session::SessionForkPayload,
-        /// User message.
-        MessageUser => "message.user" => payloads::message::UserMessagePayload,
-        /// Assistant (model) message.
-        MessageAssistant => "message.assistant" => payloads::message::AssistantMessagePayload,
-        /// System-injected message.
-        MessageSystem => "message.system" => payloads::message::SystemMessagePayload,
-        /// Provider request audit persisted before model streaming starts.
-        ModelProviderRequest => "model.provider_request" => payloads::model::ModelProviderRequestPayload,
-        /// Message deleted (soft delete).
-        MessageDeleted => "message.deleted" => payloads::message_ops::MessageDeletedPayload,
-        /// Capability invocation started.
-        CapabilityInvocationStarted => "capability.invocation.started" => payloads::capability_invocation::CapabilityInvocationStartedPayload,
-        /// Capability invocation completed.
-        CapabilityInvocationCompleted => "capability.invocation.completed" => payloads::capability_invocation::CapabilityInvocationCompletedPayload,
-        /// Capability invocation progress update.
-        CapabilityInvocationProgress => "capability.invocation.progress" => payloads::capability_invocation::CapabilityInvocationProgressPayload,
-        /// Text delta during streaming.
-        StreamTextDelta => "stream.text_delta" => payloads::streaming::StreamTextDeltaPayload,
-        /// Thinking delta during streaming.
-        StreamThinkingDelta => "stream.thinking_delta" => payloads::streaming::StreamThinkingDeltaPayload,
-        /// Turn started streaming.
-        StreamTurnStart => "stream.turn_start" => payloads::streaming::StreamTurnStartPayload,
-        /// Turn finished streaming.
-        StreamTurnEnd => "stream.turn_end" => payloads::streaming::StreamTurnEndPayload,
-        /// Compaction boundary marker.
-        CompactBoundary => "compact.boundary" => payloads::compact::CompactBoundaryPayload,
-        /// Phase 1 of the H13 compaction two-phase commit: summary produced,
-        /// boundary not yet committed. Durably preserves the summarizer's
-        /// output before the context is mutated and the boundary persist is
-        /// attempted. Reconstruction ignores a staging event without a
-        /// matching successor `CompactBoundary`.
-        CompactSummaryStaging => "compact.summary_staging" => payloads::compact::CompactSummaryStagingPayload,
-        /// Context cleared.
-        ContextCleared => "context.cleared" => payloads::context::ContextClearedPayload,
-        /// Session metadata updated.
-        MetadataUpdate => "metadata.update" => payloads::metadata::MetadataUpdatePayload,
-        /// Session tag added/removed.
-        MetadataTag => "metadata.tag" => payloads::metadata::MetadataTagPayload,
-        /// Agent-level error.
-        ErrorAgent => "error.agent" => payloads::error::ErrorAgentPayload,
-        /// Capability invocation error.
-        ErrorCapability => "error.capability" => payloads::error::ErrorCapabilityPayload,
-        /// Provider (LLM) error.
-        ErrorProvider => "error.provider" => payloads::error::ErrorProviderPayload,
-        /// Turn failed.
-        TurnFailed => "turn.failed" => payloads::turn::TurnFailedPayload
+impl EventType {
+    /// Return the canonical storage and protocol discriminator.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SessionStart => "session.start",
+            Self::SessionEnd => "session.end",
+            Self::SessionFork => "session.fork",
+            Self::MessageUser => "message.user",
+            Self::MessageAssistant => "message.assistant",
+            Self::ModelProviderRequest => "model.provider_request",
+            Self::MessageDeleted => "message.deleted",
+            Self::CapabilityInvocationStarted => "capability.invocation.started",
+            Self::CapabilityInvocationCompleted => "capability.invocation.completed",
+            Self::StreamTurnStart => "stream.turn_start",
+            Self::StreamTurnEnd => "stream.turn_end",
+            Self::CompactBoundary => "compact.boundary",
+            Self::TurnFailed => "turn.failed",
+        }
     }
-    raw_events {
+}
+
+impl std::fmt::Display for EventType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
     }
-    domain_groups {
-        /// Whether this is a session lifecycle event (`session.*`).
-        is_session_type => [SessionStart, SessionEnd, SessionFork],
-        /// Whether this is a message event (`message.user|assistant|system`).
-        is_message_type => [MessageUser, MessageAssistant, MessageSystem],
-        /// Whether this is a streaming event (`stream.*`).
-        is_streaming_type => [StreamTextDelta, StreamThinkingDelta, StreamTurnStart, StreamTurnEnd],
-        /// Whether this is an error event (`error.*`).
-        is_error_type => [ErrorAgent, ErrorCapability, ErrorProvider],
+}
+
+impl std::str::FromStr for EventType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "session.start" => Ok(Self::SessionStart),
+            "session.end" => Ok(Self::SessionEnd),
+            "session.fork" => Ok(Self::SessionFork),
+            "message.user" => Ok(Self::MessageUser),
+            "message.assistant" => Ok(Self::MessageAssistant),
+            "model.provider_request" => Ok(Self::ModelProviderRequest),
+            "message.deleted" => Ok(Self::MessageDeleted),
+            "capability.invocation.started" => Ok(Self::CapabilityInvocationStarted),
+            "capability.invocation.completed" => Ok(Self::CapabilityInvocationCompleted),
+            "stream.turn_start" => Ok(Self::StreamTurnStart),
+            "stream.turn_end" => Ok(Self::StreamTurnEnd),
+            "compact.boundary" => Ok(Self::CompactBoundary),
+            "turn.failed" => Ok(Self::TurnFailed),
+            _ => Err(format!("unknown event type: {value}")),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
-    use std::path::PathBuf;
 
-    const EXPECTED: [(EventType, &str); 24] = [
-        (EventType::SessionStart, "session.start"),
-        (EventType::SessionEnd, "session.end"),
-        (EventType::SessionFork, "session.fork"),
-        (EventType::MessageUser, "message.user"),
-        (EventType::MessageAssistant, "message.assistant"),
-        (EventType::MessageSystem, "message.system"),
-        (EventType::ModelProviderRequest, "model.provider_request"),
-        (EventType::MessageDeleted, "message.deleted"),
-        (
-            EventType::CapabilityInvocationStarted,
-            "capability.invocation.started",
-        ),
-        (
-            EventType::CapabilityInvocationCompleted,
-            "capability.invocation.completed",
-        ),
-        (
-            EventType::CapabilityInvocationProgress,
-            "capability.invocation.progress",
-        ),
-        (EventType::StreamTextDelta, "stream.text_delta"),
-        (EventType::StreamThinkingDelta, "stream.thinking_delta"),
-        (EventType::StreamTurnStart, "stream.turn_start"),
-        (EventType::StreamTurnEnd, "stream.turn_end"),
-        (EventType::CompactBoundary, "compact.boundary"),
-        (EventType::CompactSummaryStaging, "compact.summary_staging"),
-        (EventType::ContextCleared, "context.cleared"),
-        (EventType::MetadataUpdate, "metadata.update"),
-        (EventType::MetadataTag, "metadata.tag"),
-        (EventType::ErrorAgent, "error.agent"),
-        (EventType::ErrorCapability, "error.capability"),
-        (EventType::ErrorProvider, "error.provider"),
-        (EventType::TurnFailed, "turn.failed"),
+    const ALL: [EventType; 13] = [
+        EventType::SessionStart,
+        EventType::SessionEnd,
+        EventType::SessionFork,
+        EventType::MessageUser,
+        EventType::MessageAssistant,
+        EventType::ModelProviderRequest,
+        EventType::MessageDeleted,
+        EventType::CapabilityInvocationStarted,
+        EventType::CapabilityInvocationCompleted,
+        EventType::StreamTurnStart,
+        EventType::StreamTurnEnd,
+        EventType::CompactBoundary,
+        EventType::TurnFailed,
     ];
 
     #[test]
-    fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 24);
-    }
-
-    #[test]
-    fn event_catalog_docs_stay_in_sync_with_generated_table() {
-        let expected_count = ALL_EVENT_TYPES.len();
-        let module_docs =
-            read_repo_file("packages/agent/src/domains/session/event_store/types/mod.rs");
-        assert!(
-            module_docs.contains(&format!("{expected_count}-variant enum")),
-            "event_store/types module docs must name the generated event count"
-        );
-        assert!(
-            module_docs.contains(&format!("ALL_EVENT_TYPES.len() == {expected_count}")),
-            "event_store/types module docs must point at the generated count guard"
-        );
-
-        let readme = read_repo_file("packages/agent/docs/project-reference.md");
-        assert!(
-            readme.contains(&format!("**{expected_count} typed event variants**")),
-            "README Event System section must name the generated event count"
-        );
-        for event_type in ALL_EVENT_TYPES {
-            assert!(
-                readme.contains(event_type.as_str()),
-                "README Event Categories must list persisted event type {}",
-                event_type.as_str()
-            );
-        }
-    }
-
-    #[test]
-    fn all_event_types_are_unique() {
-        let mut seen = std::collections::HashSet::new();
-        for et in &ALL_EVENT_TYPES {
-            assert!(seen.insert(et), "duplicate event type: {et}");
-        }
-    }
-
-    #[test]
-    fn as_str_matches_expected() {
-        for (variant, expected) in &EXPECTED {
+    fn wire_roundtrip_is_complete() {
+        for event_type in ALL {
+            let wire = event_type.as_str();
+            assert_eq!(wire.parse::<EventType>().unwrap(), event_type);
+            assert_eq!(serde_json::to_value(event_type).unwrap(), wire);
             assert_eq!(
-                variant.as_str(),
-                *expected,
-                "as_str mismatch for {variant:?}"
+                serde_json::from_value::<EventType>(serde_json::json!(wire)).unwrap(),
+                event_type
             );
         }
-    }
-
-    #[test]
-    fn as_str_matches_serde() {
-        for et in &ALL_EVENT_TYPES {
-            let json = serde_json::to_value(et).unwrap();
-            assert_eq!(
-                json.as_str().unwrap(),
-                et.as_str(),
-                "serde mismatch for {et:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn display_matches_as_str() {
-        for et in &ALL_EVENT_TYPES {
-            assert_eq!(format!("{et}"), et.as_str());
-        }
-    }
-
-    #[test]
-    fn serde_roundtrip_all_variants() {
-        for (variant, expected_str) in &EXPECTED {
-            let json = serde_json::to_value(variant).unwrap();
-            assert_eq!(
-                json,
-                serde_json::Value::String(expected_str.to_string()),
-                "serialize mismatch for {variant:?}"
-            );
-            let back: EventType = serde_json::from_value(json).unwrap();
-            assert_eq!(*variant, back, "roundtrip mismatch for {variant:?}");
-        }
-    }
-
-    #[test]
-    fn from_str_roundtrip() {
-        for (variant, expected_str) in &EXPECTED {
-            let parsed: EventType = expected_str.parse().unwrap();
-            assert_eq!(*variant, parsed);
-        }
-    }
-
-    #[test]
-    fn from_str_rejects_invalid() {
-        let err = "not.a.type".parse::<EventType>();
-        assert!(err.is_err());
-        assert!(err.unwrap_err().contains("unknown event type"));
-    }
-
-    #[test]
-    fn from_str_rejects_empty() {
-        assert!("".parse::<EventType>().is_err());
-    }
-
-    #[test]
-    fn from_str_rejects_retired_spell_types() {
-        // Primitive branch invariant: old spell event-type strings must fail
-        // to parse because the fresh schema has no historical event surface.
-        assert!("spell.cast".parse::<EventType>().is_err());
-        assert!("spell.consumed".parse::<EventType>().is_err());
-    }
-
-    #[test]
-    fn from_str_rejects_retired_compact_summary_type() {
-        assert!("compact.summary".parse::<EventType>().is_err());
-    }
-
-    #[test]
-    fn from_str_rejects_retired_message_queue_types() {
-        assert!(
-            concat!("message", ".", "queued")
-                .parse::<EventType>()
-                .is_err()
-        );
-        assert!(
-            concat!("message", ".", "dequeued")
-                .parse::<EventType>()
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn from_str_rejects_retired_product_event_types() {
-        for retired in [
-            "approval.lifecycle",
-            "device.lifecycle",
-            "git.lifecycle",
-            "goals.lifecycle",
-            "import_preview.lifecycle",
-            "jobs.lifecycle",
-            "memory.query",
-            "mcp.server_started",
-            "notification.created",
-            "procedural.record",
-            "prompt.queue",
-            "push.token_registered",
-            "repository_tree.lifecycle",
-            "schedule.lifecycle",
-            "skill.installed",
-            "subagent.task",
-            "tool_source.proposal",
-            "web.lifecycle",
-            "worker.package",
-            "worktree.status",
-        ] {
-            assert!(
-                retired.parse::<EventType>().is_err(),
-                "unsupported product event type must stay outside the persisted session enum: {retired}"
-            );
-        }
-    }
-
-    #[test]
-    fn event_catalog_domains_remain_loop_protocol_only() {
-        let actual_domains: BTreeSet<_> = ALL_EVENT_TYPES
-            .iter()
-            .map(|event_type| event_type.domain())
-            .collect();
-        let expected_domains = BTreeSet::from([
-            "capability",
-            "compact",
-            "context",
-            "error",
-            "message",
-            "metadata",
-            "model",
-            "session",
-            "stream",
-            "turn",
-        ]);
-        assert_eq!(
-            actual_domains, expected_domains,
-            "persisted session events must remain limited to primitive loop/protocol domains"
-        );
-    }
-
-    #[test]
-    fn serde_roundtrip_from_string() {
-        for et in &ALL_EVENT_TYPES {
-            let s = et.as_str();
-            let json_str = format!("\"{s}\"");
-            let parsed: EventType = serde_json::from_str(&json_str).unwrap();
-            assert_eq!(*et, parsed);
-        }
-    }
-
-    // -- Domain helpers --
-
-    #[test]
-    fn is_message_type() {
-        assert!(EventType::MessageUser.is_message_type());
-        assert!(EventType::MessageAssistant.is_message_type());
-        assert!(EventType::MessageSystem.is_message_type());
-        assert!(!EventType::MessageDeleted.is_message_type());
-        assert!(!EventType::CapabilityInvocationStarted.is_message_type());
-    }
-
-    #[test]
-    fn is_streaming_type() {
-        assert!(EventType::StreamTextDelta.is_streaming_type());
-        assert!(EventType::StreamThinkingDelta.is_streaming_type());
-        assert!(EventType::StreamTurnStart.is_streaming_type());
-        assert!(EventType::StreamTurnEnd.is_streaming_type());
-        assert!(!EventType::MessageUser.is_streaming_type());
-    }
-
-    #[test]
-    fn is_error_type() {
-        assert!(EventType::ErrorAgent.is_error_type());
-        assert!(EventType::ErrorCapability.is_error_type());
-        assert!(EventType::ErrorProvider.is_error_type());
-        assert!(!EventType::CapabilityInvocationCompleted.is_error_type());
-    }
-
-    #[test]
-    fn is_session_type() {
-        assert!(EventType::SessionStart.is_session_type());
-        assert!(EventType::SessionEnd.is_session_type());
-        assert!(EventType::SessionFork.is_session_type());
-        assert!(!EventType::MessageUser.is_session_type());
-    }
-
-    #[test]
-    fn domain_extraction() {
-        assert_eq!(EventType::SessionStart.domain(), "session");
-        assert_eq!(EventType::MessageUser.domain(), "message");
-        assert_eq!(
-            EventType::CapabilityInvocationStarted.domain(),
-            "capability"
-        );
-        assert_eq!(EventType::StreamTextDelta.domain(), "stream");
-        assert_eq!(EventType::CompactBoundary.domain(), "compact");
-        assert_eq!(EventType::ErrorAgent.domain(), "error");
-        assert_eq!(EventType::TurnFailed.domain(), "turn");
-    }
-
-    #[test]
-    fn into_typed_payload_matches_typed_payload() {
-        let event = SessionEvent {
-            id: "evt-1".into(),
-            parent_id: None,
-            session_id: "s".into(),
-            workspace_id: "w".into(),
-            timestamp: "t".into(),
-            event_type: EventType::SessionStart,
-            sequence: 1,
-            checksum: None,
-            payload: serde_json::json!({
-                "workingDirectory": "/test",
-                "model": "claude-opus-4-6",
-                "provider": "anthropic"
-            }),
-        };
-        let cloned = event.typed_payload().unwrap();
-        let owned = event.into_typed_payload().unwrap();
-        assert_eq!(cloned, owned);
-    }
-
-    fn repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("agent crate should live under packages/agent")
-            .to_path_buf()
-    }
-
-    fn read_repo_file(path: &str) -> String {
-        let full_path = repo_root().join(path);
-        std::fs::read_to_string(&full_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
     }
 }

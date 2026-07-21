@@ -208,7 +208,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         .filter(|id| !id.is_empty());
     let agent_state_context =
         load_agent_state_context(&engine_host, &session_id, resolved_workspace_id.as_deref()).await;
-    let memory_prompt_context = None;
     trace!(
         component = "agent.runtime",
         agent_event = "agent_state_context_loaded",
@@ -311,7 +310,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             crate::domains::agent::r#loop::types::ReasoningLevel::from_str_canonical(&level)
         }),
         agent_state_context,
-        memory_prompt_context,
         user_content_override,
         run_id: Some(run_id.clone()),
         engine_trace_id: engine_causality

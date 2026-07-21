@@ -4,6 +4,7 @@ use super::{BaseEvent, TronEvent};
 use crate::shared::server::failure::FailureEnvelope;
 
 /// Create an agent-start event.
+#[cfg(test)]
 #[must_use]
 pub fn agent_start_event(session_id: impl Into<String>) -> TronEvent {
     TronEvent::AgentStart {
@@ -12,6 +13,7 @@ pub fn agent_start_event(session_id: impl Into<String>) -> TronEvent {
 }
 
 /// Create an agent-end event.
+#[cfg(test)]
 #[must_use]
 pub fn agent_end_event(session_id: impl Into<String>) -> TronEvent {
     TronEvent::AgentEnd {
@@ -21,22 +23,11 @@ pub fn agent_end_event(session_id: impl Into<String>) -> TronEvent {
 }
 
 /// Create an agent-ready event.
+#[cfg(test)]
 #[must_use]
 pub fn agent_ready_event(session_id: impl Into<String>) -> TronEvent {
     TronEvent::AgentReady {
         base: BaseEvent::now(session_id),
-    }
-}
-
-/// Create a session-processing-changed event.
-#[must_use]
-pub fn session_processing_changed_event(
-    session_id: impl Into<String>,
-    is_processing: bool,
-) -> TronEvent {
-    TronEvent::SessionProcessingChanged {
-        base: BaseEvent::now(session_id),
-        is_processing,
     }
 }
 

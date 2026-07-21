@@ -1,61 +1,5 @@
 use super::*;
 
-// ========================================================================
-// preview
-// ========================================================================
-
-#[tokio::test]
-async fn preview_generates_summary() {
-    let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("Test summary");
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-
-    assert_eq!(preview.summary, "Test summary");
-    assert_eq!(preview.tokens_before, 78_500);
-}
-
-#[tokio::test]
-async fn preview_turn_based() {
-    let deps = MockDeps::new(default_messages()); // 6 messages, 3 turns
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("Summary");
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-
-    assert_eq!(preview.preserved_messages, 4); // 2 turns = 4 messages
-    assert_eq!(preview.summarized_messages, 2);
-    assert_eq!(preview.preserved_turns, 2);
-    assert_eq!(preview.summarized_turns, 1);
-}
-
-#[tokio::test]
-async fn preview_with_extracted_data() {
-    let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("Summary");
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-    assert!(preview.extracted_data.is_some());
-}
-
-#[tokio::test]
-async fn preview_empty_messages() {
-    let deps = MockDeps::new(vec![]);
-    let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = PanicSummarizer;
-
-    let preview = engine.preview(&summarizer).await.unwrap();
-    assert_eq!(preview.preserved_messages, 0);
-    assert_eq!(preview.summarized_messages, 0);
-    assert_eq!(preview.summary, "");
-}
-
-// ========================================================================
-// execute
-// ========================================================================
-
 #[tokio::test]
 async fn execute_compaction_updates_messages() {
     let deps = MockDeps::new(default_messages()); // 6 messages, 3 turns
@@ -84,7 +28,6 @@ async fn execute_uses_edited_summary() {
         .unwrap();
 
     assert_eq!(result.summary, "User edited");
-    assert!(result.extracted_data.is_none());
 }
 
 #[tokio::test]

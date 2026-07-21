@@ -20,7 +20,6 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
     let invocationId: String?
     let parentInvocationId: String?
     let sessionId: String?
-    let sourceEventId: String?
 
     init(
         code: String,
@@ -39,8 +38,7 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
         traceId: String? = nil,
         invocationId: String? = nil,
         parentInvocationId: String? = nil,
-        sessionId: String? = nil,
-        sourceEventId: String? = nil
+        sessionId: String? = nil
     ) {
         self.code = code
         self.category = category
@@ -59,7 +57,6 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
         self.invocationId = invocationId
         self.parentInvocationId = parentInvocationId
         self.sessionId = sessionId
-        self.sourceEventId = sourceEventId
     }
 
     init?(from payload: [String: AnyCodable]?) {
@@ -90,8 +87,7 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
             traceId: payload.string("traceId"),
             invocationId: payload.string("invocationId"),
             parentInvocationId: payload.string("parentInvocationId"),
-            sessionId: payload.string("sessionId"),
-            sourceEventId: payload.string("sourceEventId")
+            sessionId: payload.string("sessionId")
         )
     }
 
@@ -119,7 +115,6 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
         if let invocationId { payload["invocationId"] = AnyCodable(invocationId) }
         if let parentInvocationId { payload["parentInvocationId"] = AnyCodable(parentInvocationId) }
         if let sessionId { payload["sessionId"] = AnyCodable(sessionId) }
-        if let sourceEventId { payload["sourceEventId"] = AnyCodable(sourceEventId) }
         return payload
     }
 

@@ -8,11 +8,10 @@ use crate::domains::session::event_store::errors::EventStoreError;
 use crate::engine::{EngineError, InvocationResult};
 use crate::shared::server::errors::{self as codes, CapabilityError};
 use crate::shared::server::failure::{
-    ENGINE_DELIVERY_MODE_NOT_ALLOWED, ENGINE_DOMAIN_FAILURE, ENGINE_HANDLER_FAILED,
-    ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE,
-    ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
-    ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
-    ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory, FailureEnvelope, FailureOrigin,
+    ENGINE_DOMAIN_FAILURE, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID,
+    ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE,
+    ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION, ENGINE_STALE_FUNCTION_SURFACE,
+    ENGINE_STORED_INVOCATION_ERROR, FailureCategory, FailureEnvelope, FailureOrigin,
     RUNTIME_CANCELLED,
 };
 use serde_json::Value;
@@ -101,27 +100,6 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
         .with_details(Some(serde_json::json!({
             "workerId": worker_id,
             "functionId": function_id,
-        }))),
-        EngineError::UnsupportedDeliveryMode { mode } => FailureEnvelope::new(
-            ENGINE_UNSUPPORTED_DELIVERY_MODE,
-            FailureCategory::InvalidRequest,
-            error.to_string(),
-            false,
-            true,
-            FailureOrigin::Engine,
-        )
-        .with_details(Some(serde_json::json!({ "mode": mode }))),
-        EngineError::DeliveryModeNotAllowed { function_id, mode } => FailureEnvelope::new(
-            ENGINE_DELIVERY_MODE_NOT_ALLOWED,
-            FailureCategory::InvalidRequest,
-            error.to_string(),
-            false,
-            true,
-            FailureOrigin::Engine,
-        )
-        .with_details(Some(serde_json::json!({
-            "functionId": function_id,
-            "mode": mode,
         }))),
         EngineError::IdempotencyConflict {
             function_id,

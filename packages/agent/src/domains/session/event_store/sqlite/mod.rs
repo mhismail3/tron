@@ -1,7 +1,7 @@
 //! `SQLite` backend for the event store.
 //!
 //! Provides connection pooling, schema migrations, and repository implementations
-//! for primitive sessions, events, blobs, logs, and trace records. Fresh
+//! for primitive sessions, events, blobs, and logs. Fresh
 //! databases start from consolidated `migrations/v001_schema.sql`; that single
 //! schema is the clean-break branch storage surface. Constraints
 //! (`CHECK`, `UNIQUE`, `FOREIGN KEY`, `COALESCE`-nullable unique indexes) are
@@ -31,5 +31,5 @@ pub use connection::{
     ConnectionConfig, ConnectionPool, PooledConnection, PragmaState, check_integrity, new_file,
     new_in_memory, verify_pragmas,
 };
-pub use migrations::{MigrationResult, current_version, latest_version, run_migrations};
+pub use migrations::{MigrationResult, current_version, run_migrations};
 pub use process_lock::{DatabaseLock, LockError, acquire_database_lock};

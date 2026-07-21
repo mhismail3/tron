@@ -15,9 +15,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::domains::session::event_store::types::EventType;
-use crate::domains::session::event_store::{
-    AgentTraceRecord, EventRow, EventStore, ListEventsOptions, SessionRow,
-};
+use crate::domains::session::event_store::{EventRow, EventStore, ListEventsOptions, SessionRow};
 use crate::engine::{
     EngineError, EngineHostHandle, EngineReplaySnapshot, EngineStreamEvent, IdempotencyEntry,
     IdempotencyScope, IdempotencyStatus, InvocationRecord, ReplayBehavior, StoredInvocationOutcome,
@@ -30,7 +28,7 @@ use crate::shared::server::errors::{self, CapabilityError};
 mod roundtrip;
 
 /// Canonical replay manifest wire format.
-pub(crate) const REPLAY_MANIFEST_FORMAT: &str = "tron.replay.v1";
+pub(crate) const REPLAY_MANIFEST_FORMAT: &str = "tron.replay.v2";
 
 /// Dependencies required to build a replay manifest.
 #[derive(Clone)]
@@ -54,7 +52,6 @@ struct SessionReplaySnapshot {
     session: SessionRow,
     events: Vec<ReplaySessionEvent>,
     provider_audits: Vec<ReplayProviderAudit>,
-    trace_records: Vec<AgentTraceRecord>,
 }
 
 /// Build the canonical replay manifest for one session.
@@ -109,17 +106,10 @@ async fn read_session_snapshot(
             .filter(|event| event.event_type == EventType::ModelProviderRequest.as_str())
             .map(ReplayProviderAudit::from_event)
             .collect::<Vec<_>>();
-        let trace_records = event_store
-            .list_trace_records_for_replay(&session_id)
-            .map_err(|error| CapabilityError::Internal {
-                message: error.to_string(),
-            })?;
-
         Ok(SessionReplaySnapshot {
             session,
             events,
             provider_audits,
-            trace_records,
         })
     })
     .await
@@ -149,7 +139,6 @@ fn build_manifest_value(
         session: session_snapshot.session,
         session_events: session_snapshot.events,
         provider_audits: session_snapshot.provider_audits,
-        trace_records: session_snapshot.trace_records,
         engine_idempotency_entries,
         engine_invocations,
         engine_streams,
@@ -197,7 +186,6 @@ struct ReplaySections {
     session: SessionRow,
     session_events: Vec<ReplaySessionEvent>,
     provider_audits: Vec<ReplayProviderAudit>,
-    trace_records: Vec<AgentTraceRecord>,
     engine_idempotency_entries: Vec<ReplayIdempotencyEntry>,
     engine_invocations: Vec<ReplayInvocationRecord>,
     engine_streams: Vec<ReplayStreamEvent>,
@@ -209,7 +197,6 @@ struct ReplaySectionHashes {
     session: String,
     session_events: String,
     provider_audits: String,
-    trace_records: String,
     engine_idempotency_entries: String,
     engine_invocations: String,
     engine_streams: String,
@@ -221,7 +208,6 @@ impl ReplaySectionHashes {
             session: canonical_hash(&sections.session)?,
             session_events: canonical_hash(&sections.session_events)?,
             provider_audits: canonical_hash(&sections.provider_audits)?,
-            trace_records: canonical_hash(&sections.trace_records)?,
             engine_idempotency_entries: canonical_hash(&sections.engine_idempotency_entries)?,
             engine_invocations: canonical_hash(&sections.engine_invocations)?,
             engine_streams: canonical_hash(&sections.engine_streams)?,
@@ -365,7 +351,6 @@ struct ReplayInvocationRecord {
     trigger_id: Option<String>,
     session_id: Option<String>,
     workspace_id: Option<String>,
-    delivery_mode: Value,
     idempotency_key: Option<String>,
     idempotency_scope: Option<ReplayIdempotencyScope>,
     replayed_from: Option<String>,
@@ -396,7 +381,6 @@ impl ReplayInvocationRecord {
             trigger_id: record.trigger_id.as_ref().map(ToString::to_string),
             session_id: record.session_id.clone(),
             workspace_id: record.workspace_id.clone(),
-            delivery_mode: serde_json::to_value(&record.delivery_mode).unwrap_or(Value::Null),
             idempotency_key: record.idempotency_key.clone(),
             idempotency_scope: record
                 .idempotency_scope
@@ -510,12 +494,6 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
             "workerId": worker_id,
             "functionId": function_id
         }),
-        EngineError::UnsupportedDeliveryMode { mode } => {
-            json!({"kind": "unsupported_delivery_mode", "mode": mode})
-        }
-        EngineError::DeliveryModeNotAllowed { function_id, mode } => {
-            json!({"kind": "delivery_mode_not_allowed", "functionId": function_id, "mode": mode})
-        }
         EngineError::IdempotencyConflict {
             function_id,
             key,

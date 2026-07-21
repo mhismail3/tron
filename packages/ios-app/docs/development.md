@@ -386,7 +386,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/SettingsParityTests \
   -only-testing:TronMobileTests/PairingValidationTests \
   -only-testing:TronMobileTests/PairingURLParserTests \
-  -only-testing:TronMobileTests/EventTypeRegistryTests \
+  -only-testing:TronMobileTests/SessionEventTypeTests \
   -only-testing:TronMobileTests/ErrorEventProjectionTests \
   -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
   -only-testing:TronMobileTests/WorkerConsoleVisualContractTests

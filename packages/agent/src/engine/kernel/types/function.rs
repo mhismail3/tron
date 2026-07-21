@@ -72,42 +72,6 @@ impl RiskLevel {
     }
 }
 
-/// Invocation delivery mode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DeliveryMode {
-    /// Wait for a result.
-    Sync,
-    /// Fire-and-forget.
-    Void,
-    /// Durable queue handoff.
-    Enqueue,
-}
-
-impl DeliveryMode {
-    /// Static display string.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Sync => "sync",
-            Self::Void => "void",
-            Self::Enqueue => "enqueue",
-        }
-    }
-}
-
-/// Source of the idempotency key.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IdempotencyKeySource {
-    /// Caller supplies the key.
-    Caller,
-    /// Engine derives the key.
-    EngineDerived,
-    /// Trigger derives the key.
-    TriggerDerived,
-    /// External provider supplies/accepts the key.
-    ExternalProvider,
-}
-
 /// Replay behavior for a duplicate idempotency key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplayBehavior {
@@ -131,30 +95,13 @@ impl ReplayBehavior {
     }
 }
 
-/// Ledger location for idempotency/effect tracking.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LedgerKind {
-    /// In-memory ledger for Phase 1 tests.
-    InMemory,
-    /// Tron-native durable engine ledger.
-    EngineLedger,
-    /// Future durable event ledger.
-    EventStore,
-    /// External service ledger.
-    External,
-}
-
 /// Idempotency contract required for mutating agent-visible functions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdempotencyContract {
-    /// Key source.
-    pub key_source: IdempotencyKeySource,
     /// Dedupe scope.
     pub dedupe_scope: VisibilityScope,
     /// Duplicate replay behavior.
     pub replay_behavior: ReplayBehavior,
-    /// Ledger kind.
-    pub ledger_kind: LedgerKind,
 }
 
 impl IdempotencyContract {
@@ -163,10 +110,8 @@ impl IdempotencyContract {
     #[must_use]
     pub(in crate::engine) fn caller_session() -> Self {
         Self {
-            key_source: IdempotencyKeySource::Caller,
             dedupe_scope: VisibilityScope::Session,
             replay_behavior: ReplayBehavior::ReturnPrevious,
-            ledger_kind: LedgerKind::InMemory,
         }
     }
 
@@ -174,10 +119,8 @@ impl IdempotencyContract {
     #[must_use]
     pub fn caller_session_engine_ledger() -> Self {
         Self {
-            key_source: IdempotencyKeySource::Caller,
             dedupe_scope: VisibilityScope::Session,
             replay_behavior: ReplayBehavior::ReturnPrevious,
-            ledger_kind: LedgerKind::EngineLedger,
         }
     }
 
@@ -185,10 +128,8 @@ impl IdempotencyContract {
     #[must_use]
     pub fn caller_system_engine_ledger() -> Self {
         Self {
-            key_source: IdempotencyKeySource::Caller,
             dedupe_scope: VisibilityScope::System,
             replay_behavior: ReplayBehavior::ReturnPrevious,
-            ledger_kind: LedgerKind::EngineLedger,
         }
     }
 }
@@ -240,8 +181,6 @@ pub struct FunctionDefinition {
     pub risk_level: RiskLevel,
     /// Idempotency contract.
     pub idempotency: Option<IdempotencyContract>,
-    /// Allowed delivery modes.
-    pub allowed_delivery_modes: Vec<DeliveryMode>,
     /// Health.
     pub health: FunctionHealth,
     /// Provenance.
@@ -273,7 +212,6 @@ impl FunctionDefinition {
             effect_class,
             risk_level: RiskLevel::Low,
             idempotency: None,
-            allowed_delivery_modes: vec![DeliveryMode::Sync],
             health: FunctionHealth::Healthy,
             provenance: Provenance::system(),
             metadata: Value::Null,

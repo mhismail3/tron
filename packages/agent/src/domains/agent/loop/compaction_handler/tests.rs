@@ -5,7 +5,7 @@ use super::*;
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::context::summarizer::Summarizer;
 use crate::domains::agent::context::types::{
-    CompactionConfig, CompactionTriggerConfig, ContextManagerConfig, ExtractedData, SummaryResult,
+    CompactionConfig, CompactionTriggerConfig, ContextManagerConfig, SummaryResult,
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::session::event_store::{EventStore, EventType};
@@ -39,7 +39,6 @@ impl Summarizer for MarkerSummarizer {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(SummaryResult {
             narrative: "marker strategy summary".to_owned(),
-            extracted_data: ExtractedData::default(),
         })
     }
 }
@@ -60,10 +59,8 @@ fn context_manager_with_three_turns() -> ContextManager {
     let older_context = "older-context-detail ".repeat(2_000);
     let recent_context = "recent-context-detail ".repeat(50);
     let mut manager = ContextManager::new(ContextManagerConfig {
-        model: "test-model".into(),
         system_prompt: Some("soul".into()),
         working_directory: Some("/tmp".into()),
-        capabilities: vec![],
         compaction: CompactionConfig {
             threshold: 0.70,
             preserve_recent_turns: 1,
@@ -82,15 +79,6 @@ fn context_manager_with_three_turns() -> ContextManager {
 }
 
 #[tokio::test]
-async fn wait_returns_when_not_compacting() {
-    let handler = CompactionHandler::new(CompactionTriggerConfig::default());
-    handler
-        .wait_for_compaction(std::time::Duration::from_millis(1))
-        .await;
-    assert!(!handler.is_compacting());
-}
-
-#[tokio::test]
 async fn skipped_event_reports_no_durable_reduction() {
     let handler = CompactionHandler::new(CompactionTriggerConfig::default());
     let emitter = Arc::new(EventEmitter::new());
@@ -104,7 +92,6 @@ async fn skipped_event_reports_no_durable_reduction() {
             summarized_turns: 0,
             preserved_messages: 0,
             summary: String::new(),
-            extracted_data: None,
         }),
         std::time::Instant::now(),
         10,
@@ -118,7 +105,37 @@ async fn skipped_event_reports_no_durable_reduction() {
     )
     .await;
     assert!(!success);
-    assert!(!handler.is_compacting());
+    assert!(!handler.is_compacting.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn completed_event_reports_real_turn_counts() {
+    let emitter = Arc::new(EventEmitter::new());
+    let mut receiver = emitter.subscribe();
+
+    emit_complete(
+        &emitter,
+        "s1",
+        true,
+        1_000,
+        400,
+        0.4,
+        Some(CompactionReason::Manual),
+        Some("summary".to_owned()),
+        Some((2, 3)),
+        None,
+    );
+
+    let TronEvent::CompactionComplete {
+        preserved_turns,
+        summarized_turns,
+        ..
+    } = receiver.recv().await.unwrap()
+    else {
+        panic!("expected compaction complete");
+    };
+    assert_eq!(preserved_turns, Some(2));
+    assert_eq!(summarized_turns, Some(3));
 }
 
 #[tokio::test]
@@ -216,7 +233,7 @@ async fn cancellation_pairs_compaction_events_and_restores_context() {
     cancel.cancel();
     assert!(matches!(task.await.unwrap(), Err(RuntimeError::Cancelled)));
     assert_eq!(manager.lock().await.get_messages(), before_messages);
-    assert!(!handler.is_compacting());
+    assert!(!handler.is_compacting.load(Ordering::SeqCst));
 
     let start = receiver.recv().await.unwrap();
     let complete = receiver.recv().await.unwrap();

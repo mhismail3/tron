@@ -13,13 +13,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::domains::agent::context::compaction_trigger::CompactionTrigger;
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::context::summarizer::{KeywordSummarizer, Summarizer};
-use crate::domains::agent::context::types::{CompactionTriggerConfig, CompactionTriggerInput};
+use crate::domains::agent::context::types::CompactionTriggerConfig;
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
@@ -31,24 +30,21 @@ use tracing::{debug, warn};
 
 pub struct CompactionHandler {
     is_compacting: AtomicBool,
-    compaction_done: Arc<Notify>,
     persister: Mutex<
         Option<Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>>,
     >,
     session_manager: Mutex<Option<Arc<SessionManager>>>,
-    trigger: Mutex<CompactionTrigger>,
+    trigger: CompactionTrigger,
     summarizer: Arc<dyn Summarizer>,
 }
 
 struct CompactionGuard<'a> {
     is_compacting: &'a AtomicBool,
-    done: &'a Notify,
 }
 
 impl Drop for CompactionGuard<'_> {
     fn drop(&mut self) {
         self.is_compacting.store(false, Ordering::SeqCst);
-        self.done.notify_waiters();
     }
 }
 
@@ -71,10 +67,9 @@ impl CompactionHandler {
     ) -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
-            compaction_done: Arc::new(Notify::new()),
             persister: Mutex::new(None),
             session_manager: Mutex::new(None),
-            trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
+            trigger: CompactionTrigger::new(trigger_config),
             summarizer,
         }
     }
@@ -90,17 +85,6 @@ impl CompactionHandler {
 
     pub(crate) fn set_session_manager(&self, session_manager: Arc<SessionManager>) {
         *self.session_manager.lock().unwrap() = Some(session_manager);
-    }
-
-    pub fn is_compacting(&self) -> bool {
-        self.is_compacting.load(Ordering::Relaxed)
-    }
-
-    pub async fn wait_for_compaction(&self, timeout: std::time::Duration) {
-        if !self.is_compacting.load(Ordering::SeqCst) {
-            return;
-        }
-        let _ = tokio::time::timeout(timeout, self.compaction_done.notified()).await;
     }
 
     pub async fn check_and_compact(
@@ -119,15 +103,7 @@ impl CompactionHandler {
         let current_tokens = context_manager.get_current_tokens();
         #[allow(clippy::cast_precision_loss)]
         let token_ratio = current_tokens as f64 / context_limit as f64;
-        let trigger_result = self
-            .trigger
-            .lock()
-            .unwrap()
-            .should_compact(&CompactionTriggerInput {
-                current_token_ratio: token_ratio,
-                recent_event_types: Vec::new(),
-                recent_capability_invocations: Vec::new(),
-            });
+        let trigger_result = self.trigger.should_compact(token_ratio);
         if !trigger_result.compact {
             return Ok(false);
         }
@@ -143,20 +119,15 @@ impl CompactionHandler {
             "compaction triggered"
         );
 
-        let success = self
-            .execute_compaction_inner(
-                context_manager,
-                session_id,
-                emitter,
-                CompactionReason::ThresholdExceeded,
-                sequence_counter,
-                Some(cancel),
-            )
-            .await?;
-        if success {
-            self.trigger.lock().unwrap().reset();
-        }
-        Ok(success)
+        self.execute_compaction_inner(
+            context_manager,
+            session_id,
+            emitter,
+            CompactionReason::ThresholdExceeded,
+            sequence_counter,
+            Some(cancel),
+        )
+        .await
     }
 
     pub async fn execute_compaction(
@@ -199,7 +170,6 @@ impl CompactionHandler {
         }
         let _guard = CompactionGuard {
             is_compacting: &self.is_compacting,
-            done: &self.compaction_done,
         };
 
         let tokens_before = context_manager.get_current_tokens();
@@ -226,6 +196,7 @@ impl CompactionHandler {
                         1.0,
                         Some(reason),
                         Some("Compaction cancelled; the original context was restored.".to_owned()),
+                        None,
                         sequence_counter,
                     );
                     return Err(RuntimeError::Cancelled);
@@ -253,6 +224,7 @@ impl CompactionHandler {
                 1.0,
                 Some(reason),
                 Some("Compaction cancelled; the original context was restored.".to_owned()),
+                None,
                 sequence_counter,
             );
             return Err(RuntimeError::Cancelled);
@@ -316,6 +288,7 @@ impl CompactionHandler {
                         1.0,
                         Some(reason),
                         Some("Compaction skipped: no durable context reduction.".to_owned()),
+                        None,
                         sequence_counter,
                     );
                     return false;
@@ -342,6 +315,7 @@ impl CompactionHandler {
                             "Compaction failed closed: session boundary custody is unavailable."
                                 .to_owned(),
                         ),
+                        None,
                         sequence_counter,
                     );
                     return false;
@@ -364,6 +338,7 @@ impl CompactionHandler {
                             "Compaction failed closed: event persistence is unavailable."
                                 .to_owned(),
                         ),
+                        None,
                         sequence_counter,
                     );
                     return false;
@@ -378,7 +353,9 @@ impl CompactionHandler {
                         "compressionRatio": compaction_result.compression_ratio,
                         "reason": reason_label,
                         "summary": bounded_summary(&compaction_result.summary),
-                        "estimatedContextTokens": tokens_after
+                        "estimatedContextTokens": tokens_after,
+                        "preservedTurns": compaction_result.preserved_turns,
+                        "summarizedTurns": compaction_result.summarized_turns
                     }),
                     sequence_counter,
                 );
@@ -398,6 +375,7 @@ impl CompactionHandler {
                         1.0,
                         Some(reason),
                         Some("Compaction failed closed: boundary persistence failed.".to_owned()),
+                        None,
                         sequence_counter,
                     );
                     return false;
@@ -416,6 +394,10 @@ impl CompactionHandler {
                     compaction_result.compression_ratio,
                     Some(reason),
                     Some(compaction_result.summary),
+                    Some((
+                        compaction_result.preserved_turns,
+                        compaction_result.summarized_turns,
+                    )),
                     sequence_counter,
                 );
                 true
@@ -431,6 +413,7 @@ impl CompactionHandler {
                     1.0,
                     Some(reason),
                     Some(format!("Compaction failed: {error}")),
+                    None,
                     sequence_counter,
                 );
                 false
@@ -495,8 +478,12 @@ fn emit_complete(
     compression_ratio: f64,
     reason: Option<CompactionReason>,
     summary: Option<String>,
+    turn_counts: Option<(usize, usize)>,
     sequence_counter: Option<&AtomicI64>,
 ) {
+    let (preserved_turns, summarized_turns) = turn_counts
+        .map(|(preserved, summarized)| (Some(preserved), Some(summarized)))
+        .unwrap_or((None, None));
     let event = TronEvent::CompactionComplete {
         base: BaseEvent::now(session_id),
         success,
@@ -506,8 +493,8 @@ fn emit_complete(
         reason,
         summary,
         estimated_context_tokens: Some(tokens_after),
-        preserved_turns: None,
-        summarized_turns: None,
+        preserved_turns,
+        summarized_turns,
     };
     if let Some(counter) = sequence_counter {
         let _ = emitter.emit_sequenced(event, counter);

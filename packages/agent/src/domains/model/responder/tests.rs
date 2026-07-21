@@ -303,8 +303,6 @@ async fn long_lived_factory_projects_api_settings_per_create_call() {
                 context: Context::default(),
                 session_id: format!("settings-snapshot-{index}"),
                 reasoning_level: None,
-                trace_id: None,
-                parent_invocation_id: None,
                 cancel: CancellationToken::new(),
                 retry_config: None,
             })
@@ -334,8 +332,6 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
         },
         session_id: "sess-1".to_owned(),
         reasoning_level: Some(ModelReasoningLevel::XHigh),
-        trace_id: Some("trace-17a".to_owned()),
-        parent_invocation_id: Some("invoke-17a".to_owned()),
         cancel: CancellationToken::new(),
         retry_config: None,
     };
@@ -353,33 +349,6 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     assert_eq!(audit.reasoning_level.as_deref(), Some("x_high"));
     assert_eq!(audit.message_count, 1);
     assert_eq!(audit.capability_count, 0);
-    let evidence = audit
-        .reasoning_status_evidence
-        .as_ref()
-        .expect("request audit should carry reasoning status evidence");
-    assert_eq!(
-        evidence.format,
-        crate::shared::protocol::model_audit::MODEL_PROVIDER_REASONING_STATUS_EVIDENCE_FORMAT
-    );
-    assert_eq!(
-        evidence.phase,
-        crate::shared::protocol::model_audit::ModelProviderReasoningStatusPhase::RequestAudit
-    );
-    assert_eq!(
-        evidence.requested_reasoning_level.as_deref(),
-        Some("x_high")
-    );
-    assert_eq!(evidence.refs.trace_id.as_deref(), Some("trace-17a"));
-    assert_eq!(
-        evidence.refs.parent_invocation_id.as_deref(),
-        Some("invoke-17a")
-    );
-    assert_eq!(
-        evidence.refs.provider_audit_payload_kind,
-        Some(ProviderAuditPayloadKind::ExactProviderEnvelope)
-    );
-    assert_eq!(evidence.safety.raw_reasoning_text, "omitted");
-    assert_eq!(evidence.safety.synthetic_reasoning_summary, "omitted");
     assert!(audit.stream_options.get("promptCacheKey").is_none());
     assert_eq!(
         audit.stream_options["reasoningEffort"],
@@ -412,8 +381,6 @@ fn provider_request_audit_projects_bulk_media_without_blocking_model_request() {
         context: Context::default(),
         session_id: "sess-media".to_owned(),
         reasoning_level: None,
-        trace_id: Some("trace-media".to_owned()),
-        parent_invocation_id: None,
         cancel: CancellationToken::new(),
         retry_config: None,
     };

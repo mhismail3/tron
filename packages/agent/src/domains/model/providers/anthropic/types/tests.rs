@@ -12,7 +12,6 @@ fn assert_float_eq(actual: f64, expected: f64) {
 #[test]
 fn get_claude_model_opus_46() {
     let info = get_claude_model("claude-opus-4-6").unwrap();
-    assert_eq!(info.name, "Claude Opus 4.6");
     assert_eq!(info.context_window, 1_000_000);
     assert_eq!(info.max_output, 128_000);
     assert!(info.supports_thinking);
@@ -28,7 +27,6 @@ fn get_claude_model_opus_46() {
 #[test]
 fn get_claude_model_sonnet_46() {
     let info = get_claude_model("claude-sonnet-4-6").unwrap();
-    assert_eq!(info.name, "Claude Sonnet 4.6");
     assert_eq!(info.context_window, 1_000_000);
     assert_eq!(info.max_output, 64_000);
     assert!(info.supports_thinking);
@@ -67,7 +65,6 @@ fn get_claude_model_sonnet_45() {
 #[test]
 fn get_claude_model_opus_41_is_opus_not_sonnet() {
     let info = get_claude_model("claude-opus-4-1-20250805").unwrap();
-    assert_eq!(info.name, "Claude Opus 4.1");
     assert_eq!(info.short_name, "Opus 4.1");
     assert_eq!(info.max_output, 32_000);
     assert_float_eq(info.input_cost_per_million, 15.0);

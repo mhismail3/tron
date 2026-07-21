@@ -412,12 +412,10 @@ fn model_response(events: Vec<Result<StreamEvent, ModelResponseError>>) -> Model
     }
 }
 
-fn test_context_manager(model: &str) -> ContextManager {
+fn test_context_manager() -> ContextManager {
     ContextManager::new(ContextManagerConfig {
-        model: model.to_owned(),
         system_prompt: Some("You are a test agent.".into()),
         working_directory: Some("/tmp".into()),
-        capabilities: vec![],
         compaction: crate::domains::agent::context::types::CompactionConfig::default(),
     })
 }
@@ -428,7 +426,7 @@ fn make_deps_with_host(
 ) -> AgentDeps {
     AgentDeps {
         responder: Arc::new(responder),
-        context_manager: test_context_manager("mock-model"),
+        context_manager: test_context_manager(),
         compaction_trigger_config:
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
         invocation_abort_registry: Arc::new(InvocationAbortRegistry::new()),
@@ -448,16 +446,6 @@ fn make_primitive_loop_deps(
     engine_host: crate::engine::EngineHostHandle,
 ) -> AgentDeps {
     make_deps_with_host(responder, engine_host)
-}
-
-#[test]
-fn agent_uses_empty_initial_capability_snapshot() {
-    let agent = TronAgent::new(
-        AgentConfig::default(),
-        make_deps(MockResponder),
-        "empty-capability-snapshot-session".into(),
-    );
-    assert!(agent.context_manager().model_capability_names().is_empty());
 }
 
 #[tokio::test]

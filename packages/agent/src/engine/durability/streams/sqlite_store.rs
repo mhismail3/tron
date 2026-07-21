@@ -224,29 +224,6 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
         .collect()
     }
 
-    /// Advance a subscription cursor after client delivery.
-    pub fn acknowledge(
-        &mut self,
-        subscription_id: &str,
-        cursor: StreamCursor,
-    ) -> Result<EngineStreamSubscription> {
-        let subscription = self.subscription(subscription_id)?;
-        if !subscription.active {
-            return Err(EngineError::PolicyViolation(format!(
-                "stream subscription {subscription_id} is inactive"
-            )));
-        }
-        self.conn
-            .execute(
-                "UPDATE engine_stream_subscriptions
-                 SET cursor = CASE WHEN cursor < ?2 THEN ?2 ELSE cursor END
-                 WHERE subscription_id = ?1 AND active = 1",
-                params![subscription_id, cursor.0 as i64],
-            )
-            .map_err(|err| sqlite_err("stream.acknowledge", err.to_string()))?;
-        self.subscription(subscription_id)
-    }
-
     /// Poll a subscription after a cursor.
     pub fn poll(
         &self,

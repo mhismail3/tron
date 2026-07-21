@@ -77,7 +77,6 @@ fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
 fn rust_session_event_repository_tests_are_behavior_split() {
     let required = [
         "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/append_order_counters.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/pagination_filters.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/payload_blob_resolution.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/reconstruction_state.rs",
     ];
@@ -210,7 +209,6 @@ fn rust_model_domain_uses_routing_and_protocol_owners() {
     let required = [
         "packages/agent/src/domains/model/routing/mod.rs",
         "packages/agent/src/domains/model/routing/catalog.rs",
-        "packages/agent/src/domains/model/routing/presets.rs",
         "packages/agent/src/domains/model/routing/models/mod.rs",
         "packages/agent/src/domains/model/protocol/mod.rs",
         "packages/agent/src/domains/model/protocol/capability_parsing.rs",

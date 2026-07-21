@@ -159,14 +159,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         "agent turn entered"
     );
 
-    // H15 INVARIANT: every turn-entry path must advance the context
-    // manager's generation counter before any snapshot readers run, then
-    // refresh volatile tokens via set_volatile_tokens (called inside
-    // build_turn_context below). If a future refactor introduces a new
-    // turn-entry path that skips set_volatile_tokens, the debug_assert
-    // inside `get_snapshot` / `get_detailed_snapshot` will fire.
-    context_manager.begin_turn();
-
     // 1. Persist turn entry before any cancellable preparation. Compaction is
     // part of this turn's lifecycle, so a stop or failure there must close the
     // same durable ordinal rather than leaving an invisible consumed turn.
@@ -402,14 +394,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         context,
         session_id: session_id.to_owned(),
         reasoning_level: run_context.reasoning_level.clone(),
-        trace_id: run_context
-            .engine_trace_id
-            .as_ref()
-            .map(|trace_id| trace_id.as_str().to_owned()),
-        parent_invocation_id: run_context
-            .parent_invocation_id
-            .as_ref()
-            .map(|invocation_id| invocation_id.as_str().to_owned()),
         cancel: cancel.clone(),
         retry_config: retry_config.cloned(),
     };
@@ -797,15 +781,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         provider_type,
         token_record_json.as_ref(),
         cost,
-        model_request_audit.reasoning_level.clone(),
-        run_context
-            .engine_trace_id
-            .as_ref()
-            .map(|trace_id| trace_id.as_str().to_owned()),
-        run_context
-            .parent_invocation_id
-            .as_ref()
-            .map(|invocation_id| invocation_id.as_str().to_owned()),
     );
 
     if let Err(error) = persist_completed_assistant_message(
@@ -963,8 +938,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         cost,
         context_manager.get_context_limit(),
         &model_name,
-        provider_type,
-        model_request_audit.reasoning_level.as_deref(),
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),

@@ -3,8 +3,8 @@
 //! [`reconstruct_from_events`] implements a two-pass algorithm that rebuilds
 //! the message list from an ordered sequence of [`SessionEvent`]s:
 //!
-//! 1. **First pass**: collect deleted event IDs, capability invocation argument
-//!    maps, and system prompt.
+//! 1. **First pass**: collect deleted event IDs and capability invocation
+//!    argument maps.
 //! 2. **Second pass**: build messages while handling deletions, compaction,
 //!    context clears, provider-valid capability result pairing, capability
 //!    result injection, and consecutive-role merging.
@@ -45,10 +45,6 @@ pub struct ReconstructionResult {
     pub token_usage: TokenTotals,
     /// Highest turn number seen.
     pub turn_count: i64,
-    /// Reasoning level is no longer a session event surface.
-    pub reasoning_level: Option<String>,
-    /// System prompt from `session.start`.
-    pub system_prompt: Option<String>,
 }
 
 /// Pending capability result accumulated between assistant messages.
@@ -78,14 +74,12 @@ pub fn reconstruct_from_events(ancestors: &[SessionEvent]) -> ReconstructionResu
 struct Metadata {
     deleted_event_ids: std::collections::HashSet<String>,
     capability_invocation_args_map: std::collections::HashMap<String, Value>,
-    system_prompt: Option<String>,
 }
 
 /// Pass 1: Collect deleted event IDs and capability invocation arguments.
 fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     let mut deleted_event_ids = std::collections::HashSet::new();
     let mut capability_invocation_args_map = std::collections::HashMap::new();
-    let mut system_prompt: Option<String> = None;
 
     for event in ancestors {
         match event.event_type {
@@ -101,11 +95,6 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
                     let _ = capability_invocation_args_map.insert(id.to_string(), a.clone());
                 }
             }
-            EventType::SessionStart => {
-                if let Some(sp) = event.payload.get("systemPrompt").and_then(Value::as_str) {
-                    system_prompt = Some(sp.to_string());
-                }
-            }
             _ => {}
         }
     }
@@ -113,7 +102,6 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     Metadata {
         deleted_event_ids,
         capability_invocation_args_map,
-        system_prompt,
     }
 }
 
@@ -143,7 +131,6 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         }
         match event.event_type {
             EventType::CompactBoundary => handle_compact_boundary(event, &mut st),
-            EventType::ContextCleared => handle_context_cleared(event, &mut st),
             EventType::CapabilityInvocationCompleted => handle_capability_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
             EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
@@ -171,8 +158,6 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         messages_with_event_ids: st.combined,
         token_usage: st.tokens,
         turn_count: st.turn_count,
-        reasoning_level: None,
-        system_prompt: metadata.system_prompt.clone(),
     }
 }
 
@@ -206,12 +191,6 @@ fn inject_compaction_summary_pair(summary: &str, st: &mut BuildState) {
         },
         event_ids: vec![None],
     });
-}
-
-/// Handle `context.cleared`: discard all messages.
-fn handle_context_cleared(_event: &SessionEvent, st: &mut BuildState) {
-    st.combined.clear();
-    st.pending_capability_results.clear();
 }
 
 /// Handle `capability.invocation.completed`: accumulate for later flushing.

@@ -51,22 +51,6 @@ pub enum EngineError {
         function_id: String,
     },
 
-    /// A delivery mode is not implemented for execution in Phase 1.
-    #[error("delivery mode {mode} is not executable in phase 1")]
-    UnsupportedDeliveryMode {
-        /// Requested delivery mode.
-        mode: &'static str,
-    },
-
-    /// A delivery mode is not allowed by a definition.
-    #[error("delivery mode {mode} is not allowed for {function_id}")]
-    DeliveryModeNotAllowed {
-        /// Function id.
-        function_id: String,
-        /// Requested delivery mode.
-        mode: &'static str,
-    },
-
     /// A duplicate idempotency key cannot be replayed safely.
     #[error("idempotency conflict for {function_id} key {key:?}: {reason}")]
     IdempotencyConflict {

@@ -199,28 +199,21 @@ struct AssistantMessagePayload {
     }
 }
 
-/// Payload for message.system event
-/// Server: `events/types/payloads/message.rs::SystemMessagePayload`
-///
-/// Both `content` and `source` are non-optional on the Rust payload.
-/// Missing `source` or an unknown value fails decode rather than silently
-/// dropping the discriminator that would otherwise let the UI route the
-/// message (compaction banner vs. error banner vs. hook output).
-struct SystemMessagePayload {
-    let content: String
-    let source: SystemMessageSource
+/// Payload for a durable message tombstone.
+struct MessageDeletedPayload {
+    let targetEventId: String
+    let targetType: String
+    let targetTurn: Int?
+    let reason: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let content = payload.string("content"),
-              let sourceStr = payload.string("source"),
-              let source = SystemMessageSource(rawValue: sourceStr) else {
-            TronLogger.shared.warning(
-                "message.system event missing required field(s) content/source or unknown source value; dropping",
-                category: .events
-            )
+        guard let targetEventId = payload.string("targetEventId"),
+              let targetType = payload.string("targetType") else {
             return nil
         }
-        self.content = content
-        self.source = source
+        self.targetEventId = targetEventId
+        self.targetType = targetType
+        self.targetTurn = payload.int("targetTurn")
+        self.reason = payload.string("reason")
     }
 }

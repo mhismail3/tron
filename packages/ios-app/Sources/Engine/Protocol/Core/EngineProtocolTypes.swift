@@ -213,7 +213,6 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
     let invocationId: String?
     let parentInvocationId: String?
     let sessionId: String?
-    let sourceEventId: String?
 
     init(
         code: String,
@@ -232,8 +231,7 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
         traceId: String? = nil,
         invocationId: String? = nil,
         parentInvocationId: String? = nil,
-        sessionId: String? = nil,
-        sourceEventId: String? = nil
+        sessionId: String? = nil
     ) {
         self.code = code
         self.category = category
@@ -252,7 +250,6 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
         self.invocationId = invocationId
         self.parentInvocationId = parentInvocationId
         self.sessionId = sessionId
-        self.sourceEventId = sourceEventId
     }
 
     init(failure: CanonicalFailurePayload) {
@@ -273,8 +270,7 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
             traceId: failure.traceId,
             invocationId: failure.invocationId,
             parentInvocationId: failure.parentInvocationId,
-            sessionId: failure.sessionId,
-            sourceEventId: failure.sourceEventId
+            sessionId: failure.sessionId
         )
     }
 
@@ -296,8 +292,7 @@ struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
             traceId: traceId,
             invocationId: invocationId,
             parentInvocationId: parentInvocationId,
-            sessionId: sessionId,
-            sourceEventId: sourceEventId
+            sessionId: sessionId
         )
     }
 

@@ -346,7 +346,7 @@ mod tests {
             "kernel",
             serde_json::json!({}),
         );
-        let mut attach = FunctionDefinition::new(
+        let attach = FunctionDefinition::new(
             FunctionId::new("worker_kernel::inbox_attach").expect("function id"),
             WorkerId::new("worker_kernel").expect("worker id"),
             "Attach unseen inbox results",
@@ -356,7 +356,6 @@ mod tests {
         .with_idempotency(crate::engine::IdempotencyContract::caller_system_engine_ledger())
         .with_request_schema(serde_json::json!({"type":"object"}))
         .with_response_schema(serde_json::json!({"type":"object"}));
-        attach.metadata = serde_json::json!({"trustedLocalKernel":true});
         host.register_function_for_setup(attach, Some(Arc::new(InboxAttachHandler)), false)
             .expect("internal inbox attachment");
 

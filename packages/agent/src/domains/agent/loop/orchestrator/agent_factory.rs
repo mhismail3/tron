@@ -51,10 +51,8 @@ impl AgentFactory {
         let mut compaction = config.compaction.clone();
         compaction.context_limit = opts.responder.context_window();
         let mut context_manager = ContextManager::new(ContextManagerConfig {
-            model: config.model.clone(),
             system_prompt: config.system_prompt.clone(),
             working_directory: config.working_directory.clone(),
-            capabilities: Vec::new(),
             compaction,
         });
         if !opts.initial_messages.is_empty() {
@@ -74,59 +72,5 @@ impl AgentFactory {
         );
         agent.set_turn_offset(initial_turn_offset);
         agent
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domains::model::responder::{
-        ModelResponder, ModelResponderInfo, ModelResponse, ModelResponseError, ModelResponseRequest,
-    };
-    use async_trait::async_trait;
-
-    struct MockResponder;
-
-    #[async_trait]
-    impl ModelResponder for MockResponder {
-        fn info(&self) -> ModelResponderInfo {
-            ModelResponderInfo {
-                provider_type: crate::shared::protocol::messages::Provider::Anthropic,
-                provider_name: "anthropic",
-                model: "mock".to_owned(),
-                context_window: 200_000,
-            }
-        }
-
-        async fn respond(
-            &self,
-            _request: ModelResponseRequest,
-        ) -> Result<ModelResponse, ModelResponseError> {
-            Err(ModelResponseError::other("mock"))
-        }
-    }
-
-    fn default_opts(responder: Arc<dyn ModelResponder>) -> CreateAgentOpts {
-        CreateAgentOpts::primitive(
-            responder,
-            vec![],
-            0,
-            crate::domains::agent::context::types::CompactionTriggerConfig::default(),
-            Arc::new(InvocationAbortRegistry::new()),
-            crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
-        )
-    }
-
-    #[test]
-    fn create_agent_initial_context_has_no_frozen_capability_snapshot() {
-        let agent = AgentFactory::create_agent(
-            AgentConfig {
-                system_prompt: Some("soul".into()),
-                ..AgentConfig::default()
-            },
-            "s1".into(),
-            default_opts(Arc::new(MockResponder)),
-        );
-        assert!(agent.context_manager().model_capability_names().is_empty());
     }
 }

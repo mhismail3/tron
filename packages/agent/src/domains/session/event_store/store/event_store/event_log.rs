@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 
@@ -380,25 +378,6 @@ impl EventStore {
         EventRepo::get_token_usage_summary(&conn, session_id)
     }
 
-    /// Batch-fetch events by IDs.
-    ///
-    /// Returns a map of `event_id → EventRow`. IDs that don't match any event
-    /// are silently omitted.
-    pub fn get_events_by_ids(&self, event_ids: &[&str]) -> Result<HashMap<String, EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_ids(&conn, event_ids)
-    }
-
-    /// Get events of specific types across multiple sessions.
-    pub fn get_events_by_sessions_and_types(
-        &self,
-        session_ids: &[&str],
-        types: &[&str],
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_sessions_and_types(&conn, session_ids, types)
-    }
-
     /// Get events of specific types within a session.
     pub fn get_events_by_type(
         &self,
@@ -408,16 +387,6 @@ impl EventStore {
     ) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_by_types(&conn, session_id, types, limit)
-    }
-
-    /// Get the latest event of a specific type within a session.
-    pub fn get_latest_event_by_type(
-        &self,
-        session_id: &str,
-        event_type: &str,
-    ) -> Result<Option<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_latest_by_type(&conn, session_id, event_type)
     }
 
     /// Get the latest event of a specific type for one session-turn ordinal.
@@ -462,82 +431,6 @@ impl EventStore {
     pub(crate) fn get_unterminalized_turn_starts(&self) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_unterminalized_turn_starts(&conn)
-    }
-
-    /// Count events of a specific type in a session with `sequence > after_sequence`.
-    ///
-    /// `after_sequence = 0` counts all events of that type in the session
-    /// (sequence numbers start at 1). Used by auto-retain to count user
-    /// messages since the last retain boundary.
-    pub fn count_events_by_type_after_sequence(
-        &self,
-        session_id: &str,
-        event_type: &str,
-        after_sequence: i64,
-    ) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_by_type_after_sequence(&conn, session_id, event_type, after_sequence)
-    }
-
-    /// Get events by workspace and types (cross-session query).
-    pub fn get_events_by_workspace_and_types(
-        &self,
-        workspace_id: &str,
-        types: &[&str],
-        limit: Option<i64>,
-        offset: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_workspace_and_types(&conn, workspace_id, types, limit, offset)
-    }
-
-    /// Count events by workspace and types.
-    pub fn count_events_by_workspace_and_types(
-        &self,
-        workspace_id: &str,
-        types: &[&str],
-    ) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_by_workspace_and_types(&conn, workspace_id, types)
-    }
-
-    /// Get events across multiple workspaces by types.
-    pub fn get_events_by_workspaces_and_types(
-        &self,
-        workspace_ids: &[&str],
-        types: &[&str],
-        limit: Option<i64>,
-        offset: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_by_workspaces_and_types(&conn, workspace_ids, types, limit, offset)
-    }
-
-    /// Count events across multiple workspaces by types.
-    pub fn count_events_by_workspaces_and_types(
-        &self,
-        workspace_ids: &[&str],
-        types: &[&str],
-    ) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_by_workspaces_and_types(&conn, workspace_ids, types)
-    }
-
-    /// Get events of specific types across ALL workspaces (global query).
-    pub fn get_all_events_by_types(
-        &self,
-        types: &[&str],
-        limit: Option<i64>,
-        offset: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
-        let conn = self.conn()?;
-        EventRepo::get_all_by_types(&conn, types, limit, offset)
-    }
-
-    /// Count events of specific types across ALL workspaces (global query).
-    pub fn count_all_events_by_types(&self, types: &[&str]) -> Result<i64> {
-        let conn = self.conn()?;
-        EventRepo::count_all_by_types(&conn, types)
     }
 
     /// Count total events in a session.

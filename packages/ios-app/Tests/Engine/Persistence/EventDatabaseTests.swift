@@ -566,12 +566,6 @@ final class EventDatabaseTests: XCTestCase {
         ])
         XCTAssertTrue(startEvent.summary.contains("Opus 4"))
 
-        // Test config.model_switch summary
-        let switchEvent = SessionEvent(id: "e5", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "config.model_switch", timestamp: "2024-01-01T00:00:00Z", sequence: 5, payload: [
-            "previousModel": AnyCodable("claude-sonnet-4"),
-            "newModel": AnyCodable("claude-opus-4")
-        ])
-        XCTAssertTrue(switchEvent.summary.contains("→"))
     }
 
     // MARK: - Session Drafts Table

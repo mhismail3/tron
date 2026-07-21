@@ -2,7 +2,7 @@ import Foundation
 
 /// Event projections for transforming message events into ChatMessages.
 ///
-/// Projects: message.user, message.assistant, message.system
+/// Projects: message.user and message.assistant
 ///
 /// Note: The interleaved message.assistant transformation (preserving text/capability order)
 /// is handled separately in InterleavedContentProcessor.
@@ -67,19 +67,4 @@ enum MessageEventProjection {
         return message
     }
 
-    /// Transform message.system event into a ChatMessage.
-    ///
-    /// System messages are typically internal context setup and are not displayed.
-    static func transformSystemMessage(
-        _ payload: [String: AnyCodable],
-        timestamp: Date
-    ) -> ChatMessage? {
-        guard let parsed = SystemMessagePayload(from: payload) else { return nil }
-
-        return ChatMessage(
-            role: .system,
-            content: .text(parsed.content),
-            timestamp: timestamp
-        )
-    }
 }

@@ -29,7 +29,7 @@ use tracing::{instrument, trace};
 
 use super::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};
 use super::summarizer::Summarizer;
-use super::types::{CompactionPreview, CompactionResult, ExtractedData};
+use super::types::CompactionResult;
 
 // =============================================================================
 // Dependencies trait
@@ -182,63 +182,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         self.compute_split_point(&messages) > 0
     }
 
-    /// Generate a compaction preview without modifying state.
-    #[instrument(skip_all)]
-    pub async fn preview(
-        &self,
-        summarizer: &dyn Summarizer,
-    ) -> Result<CompactionPreview, Box<dyn std::error::Error + Send + Sync>> {
-        let tokens_before = self.message_only_tokens();
-        let messages = self.deps.get_messages();
-
-        let split = self.compute_split_point(&messages);
-        let to_summarize = &messages[..split];
-        let preserved = &messages[split..];
-
-        if to_summarize.is_empty() {
-            return Ok(CompactionPreview {
-                tokens_before,
-                tokens_after: tokens_before,
-                compression_ratio: 1.0,
-                preserved_messages: preserved.len(),
-                summarized_messages: 0,
-                preserved_turns: Self::count_real_turns(preserved),
-                summarized_turns: 0,
-                summary: String::new(),
-                extracted_data: None,
-            });
-        }
-
-        let summary_result = summarizer.summarize(to_summarize).await?;
-
-        let tokens_after =
-            self.estimate_tokens_after_compaction(&summary_result.narrative, preserved);
-
-        let compression_ratio = if tokens_before > 0 {
-            #[allow(clippy::cast_precision_loss)]
-            {
-                tokens_after as f64 / tokens_before as f64
-            }
-        } else {
-            1.0
-        };
-
-        let preserved_turns = Self::count_real_turns(preserved);
-        let summarized_turns = Self::count_real_turns(to_summarize);
-
-        Ok(CompactionPreview {
-            tokens_before,
-            tokens_after,
-            compression_ratio,
-            preserved_messages: preserved.len(),
-            summarized_messages: to_summarize.len(),
-            preserved_turns,
-            summarized_turns,
-            summary: summary_result.narrative,
-            extracted_data: Some(summary_result.extracted_data),
-        })
-    }
-
     /// Execute compaction and update messages.
     #[instrument(skip_all, fields(edited = edited_summary.is_some()))]
     pub async fn execute(
@@ -268,7 +211,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
                 summarized_turns: 0,
                 preserved_messages: preserved.len(),
                 summary: String::new(),
-                extracted_data: None,
             });
         }
 
@@ -286,21 +228,16 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             "Compaction: calling summarizer"
         );
 
-        // Generate or use edited summary
-        let summary: String;
-        let mut extracted_data: Option<ExtractedData> = None;
-
-        if let Some(edited) = edited_summary {
-            summary = edited.to_owned();
+        // Generate or use edited summary.
+        let summary = if let Some(edited) = edited_summary {
+            edited.to_owned()
         } else {
             let result = summarizer.summarize(to_summarize).await?;
-            summary = result.narrative;
-            extracted_data = Some(result.extracted_data);
-        }
+            result.narrative
+        };
 
         trace!(
             summary_length = summary.len(),
-            has_extracted_data = extracted_data.is_some(),
             "Compaction: summary generated"
         );
 
@@ -346,7 +283,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
                 summarized_turns,
                 preserved_messages: preserved.len(),
                 summary: String::new(),
-                extracted_data: None,
             });
         }
 
@@ -372,7 +308,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             summarized_turns,
             preserved_messages: preserved.len(),
             summary,
-            extracted_data,
         })
     }
 

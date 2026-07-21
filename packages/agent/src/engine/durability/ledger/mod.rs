@@ -51,6 +51,7 @@ pub(crate) fn retire_legacy_invocation_columns(
         "resource_lease_ids_json",
         "compensation_status",
         "produced_resource_refs_json",
+        "delivery_mode_json",
     ];
     let mut statement = transaction
         .prepare("PRAGMA table_info(engine_invocations)")
@@ -81,7 +82,6 @@ pub(crate) fn retire_legacy_invocation_columns(
         "trigger_id",
         "session_id",
         "workspace_id",
-        "delivery_mode_json",
         "idempotency_scope_kind",
         "idempotency_scope_value",
         "idempotency_key",

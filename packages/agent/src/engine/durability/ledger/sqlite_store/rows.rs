@@ -35,32 +35,31 @@ impl SqliteEngineLedgerStore {
             workspace_id: row
                 .get(11)
                 .map_err(|err| sqlite_err("inv.workspace", err))?,
-            delivery_mode_json: row.get(12).map_err(|err| sqlite_err("inv.delivery", err))?,
             idempotency_scope_kind: row
-                .get(13)
+                .get(12)
                 .map_err(|err| sqlite_err("inv.scope_kind", err))?,
             idempotency_scope_value: row
-                .get(14)
+                .get(13)
                 .map_err(|err| sqlite_err("inv.scope_value", err))?,
             idempotency_key: row
-                .get(15)
+                .get(14)
                 .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
             replayed_from: row
-                .get(16)
+                .get(15)
                 .map_err(|err| sqlite_err("inv.replayed_from", err))?,
             succeeded: row
-                .get(17)
+                .get(16)
                 .map_err(|err| sqlite_err("inv.succeeded", err))?,
             result_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(18).map_err(|err| sqlite_err("inv.result", err))?,
+                row.get(17).map_err(|err| sqlite_err("inv.result", err))?,
             )?,
             error_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(19).map_err(|err| sqlite_err("inv.error", err))?,
+                row.get(18).map_err(|err| sqlite_err("inv.error", err))?,
             )?,
             timestamp: row
-                .get(20)
+                .get(19)
                 .map_err(|err| sqlite_err("inv.timestamp", err))?,
         })
     }

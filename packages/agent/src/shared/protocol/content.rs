@@ -315,18 +315,6 @@ pub fn extract_text_from_user_content(content: &[UserContent]) -> String {
         .join("\n")
 }
 
-/// Extract text from capability result content blocks.
-pub fn extract_text_from_capability_result_content(content: &[CapabilityResultContent]) -> String {
-    content
-        .iter()
-        .filter_map(|c| match c {
-            CapabilityResultContent::Text { text } => Some(text.as_str()),
-            CapabilityResultContent::Image { .. } => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -555,18 +543,5 @@ mod tests {
     fn extract_text_from_user_content_empty() {
         let content: Vec<UserContent> = vec![];
         assert_eq!(extract_text_from_user_content(&content), "");
-    }
-
-    #[test]
-    fn extract_text_from_capability_result_content_mixed() {
-        let content = vec![
-            CapabilityResultContent::text("line1"),
-            CapabilityResultContent::image("d", "image/png"),
-            CapabilityResultContent::text("line2"),
-        ];
-        assert_eq!(
-            extract_text_from_capability_result_content(&content),
-            "line1\nline2"
-        );
     }
 }

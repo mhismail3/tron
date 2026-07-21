@@ -7,11 +7,10 @@ use crate::domains::session::event_store::errors::EventStoreError as E;
 use crate::engine::EngineError;
 use crate::shared::server::errors::{self as codes, CapabilityError};
 use crate::shared::server::failure::{
-    ENGINE_DELIVERY_MODE_NOT_ALLOWED, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID,
-    ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED,
-    ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
-    ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
-    ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory, FailureOrigin, RUNTIME_CANCELLED,
+    ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA,
+    ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION,
+    ENGINE_SCHEMA_VIOLATION, ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
+    FailureCategory, FailureOrigin, RUNTIME_CANCELLED,
 };
 
 fn assert_embedded_failure(
@@ -73,19 +72,6 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             },
             ENGINE_NAMESPACE_DENIED,
             FailureCategory::Auth,
-        ),
-        (
-            EngineError::UnsupportedDeliveryMode { mode: "enqueue" },
-            ENGINE_UNSUPPORTED_DELIVERY_MODE,
-            FailureCategory::InvalidRequest,
-        ),
-        (
-            EngineError::DeliveryModeNotAllowed {
-                function_id: "demo::run".to_owned(),
-                mode: "enqueue",
-            },
-            ENGINE_DELIVERY_MODE_NOT_ALLOWED,
-            FailureCategory::InvalidRequest,
         ),
         (
             EngineError::IdempotencyConflict {

@@ -63,19 +63,3 @@ struct CompactBoundaryPayload {
         self.preservedMessages = payload.int("preservedMessages")
     }
 }
-
-/// Payload for context.cleared event
-/// Server: ContextClearedEvent.payload
-struct ContextClearedPayload {
-    let tokensBefore: Int
-    let tokensAfter: Int
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let tokensBefore = payload.int("tokensBefore"),
-              let tokensAfter = payload.int("tokensAfter") else {
-            return nil
-        }
-        self.tokensBefore = tokensBefore
-        self.tokensAfter = tokensAfter
-    }
-}

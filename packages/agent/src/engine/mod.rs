@@ -66,10 +66,9 @@ pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payloa
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind,
-    DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
-    IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance,
-    ReplayBehavior, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind, WorkerLifecycleState,
-    WorkerRevision,
+    EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
+    IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope, WorkerDefinition,
+    WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
 
 #[cfg(test)]

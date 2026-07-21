@@ -299,7 +299,6 @@ fn trusted_agent_internal_child_context(
     context.actor_kind = crate::engine::ActorKind::System;
     context.parent_invocation_id = Some(invocation.id.clone());
     context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
-    context.delivery_mode = crate::engine::DeliveryMode::Sync;
     context
 }
 

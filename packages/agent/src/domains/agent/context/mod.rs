@@ -4,8 +4,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `context_manager` | Entry point — owns context lifecycle, compaction triggers, and manager dependency projections |
-//! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
+//! | `context_manager` | Entry point — owns context lifecycle and compaction dependency projection |
 //! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
 //! | `summarizer` | Summarizer trait and recovery implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
@@ -32,14 +31,13 @@
 //! proof failure restores the pre-compaction checkpoint instead of creating an
 //! unaudited boundary.
 //! The replaceable strategy seam is limited to the summarizer implementation:
-//! context snapshots, compaction actions, epoch records, audit refs, and
-//! provider-safe projections remain server-owned record-plane custody.
+//! compaction actions, epoch records, audit refs, and provider-safe projections
+//! remain server-owned record-plane custody.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;
 pub mod constants;
 pub mod context_manager;
-pub mod context_snapshot_builder;
 pub mod message_store;
 pub mod soul;
 pub mod summarizer;

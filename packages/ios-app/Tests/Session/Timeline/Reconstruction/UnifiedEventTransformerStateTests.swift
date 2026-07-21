@@ -33,142 +33,6 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
         XCTAssertEqual(state.totalTokenUsage.outputTokens, 50)
     }
 
-    func testReconstructSessionStateWithModelSwitch() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
-            rawEvent(type: "message.user", payload: ["content": AnyCodable("Switch to opus")], timestamp: timestamp(1)),
-            rawEvent(type: "config.model_switch", payload: [
-                "previousModel": AnyCodable("claude-sonnet-4"),
-                "newModel": AnyCodable("claude-opus-4")
-            ], timestamp: timestamp(2)),
-            rawEvent(type: "message.assistant", payload: ["content": AnyCodable([["type": "text", "text": "Now using Opus"] as [String: Any]])], timestamp: timestamp(3))
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.messages.count, 3) // user + model_switch + assistant
-        guard case .systemEvent(.modelChange(let from, let to)) = state.messages[1].content else {
-            XCTFail("Expected reconstructed model-change event")
-            return
-        }
-        XCTAssertEqual(from, "Sonnet 4")
-        XCTAssertEqual(to, "Opus 4")
-    }
-
-    // MARK: - Reasoning Level Reconstruction Tests
-
-    func testReconstructSessionStateWithReasoningLevel() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-opus-4-6")], timestamp: timestamp(0)),
-            rawEvent(type: "config.reasoning_level", payload: [
-                "previousLevel": AnyCodable("medium"),
-                "newLevel": AnyCodable("high")
-            ], timestamp: timestamp(1)),
-            rawEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], timestamp: timestamp(2)),
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.reasoningLevel, "high")
-    }
-
-    func testReconstructSessionStateReasoningLevelLatestWins() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-opus-4-6")], timestamp: timestamp(0)),
-            rawEvent(type: "config.reasoning_level", payload: [
-                "previousLevel": AnyCodable(nil as String?),
-                "newLevel": AnyCodable("medium")
-            ], timestamp: timestamp(1)),
-            rawEvent(type: "config.reasoning_level", payload: [
-                "previousLevel": AnyCodable("medium"),
-                "newLevel": AnyCodable("high")
-            ], timestamp: timestamp(2)),
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.reasoningLevel, "high")
-    }
-
-    func testReconstructSessionStateNoReasoningLevel() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertNil(state.reasoningLevel)
-    }
-
-    func testTransformReasoningLevelChange() {
-        let event = rawEvent(
-            type: "config.reasoning_level",
-            payload: [
-                "previousLevel": AnyCodable("medium"),
-                "newLevel": AnyCodable("high")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNotNil(message)
-        XCTAssertEqual(message?.role, .system)
-        if case .systemEvent(.reasoningLevelChange(let from, let to)) = message?.content {
-            XCTAssertEqual(from, "Medium")
-            XCTAssertEqual(to, "High")
-        } else {
-            XCTFail("Expected reasoning level change system event")
-        }
-    }
-
-    func testTransformReasoningLevelChangeFromNilReturnsNil() {
-        let event = rawEvent(
-            type: "config.reasoning_level",
-            payload: [
-                "previousLevel": AnyCodable(nil as String?),
-                "newLevel": AnyCodable("max")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Should not produce pill when previousLevel is null")
-    }
-
-    func testTransformReasoningLevelChangeSameLevelReturnsNil() {
-        let event = rawEvent(
-            type: "config.reasoning_level",
-            payload: [
-                "previousLevel": AnyCodable("high"),
-                "newLevel": AnyCodable("high")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Should not produce pill when levels are the same")
-    }
-
-    func testReasoningLevelChangeNotificationInReconstructedMessages() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-opus-4-6")], timestamp: timestamp(0)),
-            rawEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], timestamp: timestamp(1)),
-            rawEvent(type: "config.reasoning_level", payload: [
-                "previousLevel": AnyCodable("medium"),
-                "newLevel": AnyCodable("high")
-            ], timestamp: timestamp(2)),
-            rawEvent(type: "message.user", payload: ["content": AnyCodable("Think harder")], timestamp: timestamp(3)),
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        let reasoningMessages = state.messages.filter {
-            if case .systemEvent(.reasoningLevelChange) = $0.content { return true }
-            return false
-        }
-        XCTAssertEqual(reasoningMessages.count, 1)
-    }
-
     func testReconstructSessionStateWithTokenAccumulation() {
         let events = [
             rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
@@ -204,29 +68,6 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
         // Tokens should accumulate
         XCTAssertEqual(state.totalTokenUsage.inputTokens, 300)
         XCTAssertEqual(state.totalTokenUsage.outputTokens, 150)
-    }
-
-    func testReconstructSessionStateWithErrors() {
-        let events = [
-            rawEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0)),
-            rawEvent(type: "message.user", payload: ["content": AnyCodable("Do something")], timestamp: timestamp(1)),
-            rawEvent(type: "error.capability", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
-                "invocationId": AnyCodable("call_err1"),
-                "error": AnyCodable("Command failed")
-            ], timestamp: timestamp(2)),
-            rawEvent(type: "error.provider", payload: [
-                "provider": AnyCodable("anthropic"),
-                "error": AnyCodable("Rate limited"),
-                "category": AnyCodable("rate_limit"),
-                "retryable": AnyCodable(true)
-            ], timestamp: timestamp(3))
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        // user + error.capability + error.provider = 3 messages
-        XCTAssertEqual(state.messages.count, 3)
     }
 
     // MARK: - SessionEvent Overload Tests
@@ -281,7 +122,6 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
 
         let state = UnifiedEventTransformer.reconstructSessionState(from: [RawEvent]())
         XCTAssertEqual(state.messages.count, 0)
-        XCTAssertNil(state.reasoningLevel)
         XCTAssertEqual(state.totalTokenUsage.inputTokens, 0)
         XCTAssertEqual(state.lastTurnInputTokens, 0)
     }

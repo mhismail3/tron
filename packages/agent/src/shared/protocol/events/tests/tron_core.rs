@@ -151,21 +151,6 @@ fn tron_event_api_retry() {
 }
 
 #[test]
-fn is_stream_event_type_positive() {
-    assert!(is_stream_event_type("start"));
-    assert!(is_stream_event_type("text_delta"));
-    assert!(is_stream_event_type("done"));
-    assert!(is_stream_event_type("safety_block"));
-}
-
-#[test]
-fn is_stream_event_type_negative() {
-    assert!(!is_stream_event_type("agent_start"));
-    assert!(!is_stream_event_type("turn_end"));
-    assert!(!is_stream_event_type("unknown"));
-}
-
-#[test]
 fn base_event_now_has_timestamp() {
     let base = BaseEvent::now("s1");
     assert_eq!(base.session_id, "s1");

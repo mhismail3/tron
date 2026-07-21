@@ -6,7 +6,7 @@
 //! | [`document_extractor`] | Document text extraction helpers for protocol content |
 //! | [`events`] | Runtime event payloads and stream event DTOs |
 //! | [`messages`] | Chat message DTOs |
-//! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests, plus metadata-only reasoning/status evidence DTOs; redacted and bulk-projected before bounded persistence |
+//! | [`model_audit`] | Redacted, bounded provider request audits consumed by replay manifests |
 //! | [`model_capabilities`] | Model-facing capability result DTOs |
 
 pub mod content;

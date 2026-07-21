@@ -5,8 +5,8 @@
 //! records provider health. It also builds provider request audit payloads from
 //! the same stream options used to open the provider stream, redacts and bounds
 //! those payloads before persistence, projects bulk inline values without
-//! changing the provider request, attaches metadata-only reasoning/status
-//! evidence, and redacts provider-derived failure text. Provider requests never
+//! changing the provider request, and redacts provider-derived failure text.
+//! Provider requests never
 //! receive session-derived cache keys or other server-owned correlation ids.
 //! Agent loop code depends on this boundary instead of provider factories,
 //! provider traits, stream options, retry wrappers, or provider-native errors.
@@ -260,11 +260,6 @@ pub struct ModelResponseRequest {
     pub session_id: String,
     /// Optional provider-neutral reasoning level.
     pub reasoning_level: Option<ModelReasoningLevel>,
-    /// Runtime trace id used to join audit evidence back to replay.
-    pub trace_id: Option<String>,
-    /// Parent invocation id when this provider turn is nested under an engine
-    /// invocation.
-    pub parent_invocation_id: Option<String>,
     /// Cancellation token used while opening retryable streams.
     pub cancel: CancellationToken,
     /// Optional retry configuration for stream-open failures.
@@ -542,8 +537,6 @@ fn build_request_audit(
         capability_count,
         stream_options,
         provider_request,
-        request.trace_id.clone(),
-        request.parent_invocation_id.clone(),
     ))
 }
 

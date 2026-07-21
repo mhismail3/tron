@@ -104,12 +104,12 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 }
 
 /// Ensure `~/.tron/` has the primitive Tron Home layout.
-pub(crate) fn init_directories() -> Result<crate::shared::foundation::constitution::SeedReport> {
+pub(crate) fn init_directories() -> Result<()> {
     let home = crate::shared::foundation::paths::tron_home();
     init_directories_at(&home)
 }
 
-fn init_directories_at(home: &Path) -> Result<crate::shared::foundation::constitution::SeedReport> {
+fn init_directories_at(home: &Path) -> Result<()> {
     if let Some(retirement) = crate::domains::settings::LegacyProfileRetirement::plan(home)
         .map_err(anyhow::Error::msg)
         .context("Failed to inspect legacy profile settings")?

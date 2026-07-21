@@ -85,6 +85,7 @@ impl EngineHostHandle {
     }
 
     /// Subscribe directly to the engine stream store.
+    #[cfg(test)]
     pub async fn subscribe_stream(
         &self,
         subscription_id: String,
@@ -118,6 +119,7 @@ impl EngineHostHandle {
     }
 
     /// Poll the engine stream store.
+    #[cfg(test)]
     pub async fn poll_stream(
         &self,
         subscription_id: &str,
@@ -147,19 +149,6 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
             .poll_topic(topic, after, limit, actor)
-    }
-
-    /// Acknowledge delivered stream events and persist the subscription cursor.
-    pub async fn acknowledge_stream(
-        &self,
-        subscription_id: &str,
-        cursor: StreamCursor,
-    ) -> Result<EngineStreamSubscription> {
-        let store = self.inner.lock().await.primitives.streams.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .acknowledge(subscription_id, cursor)
     }
 
     /// Unsubscribe directly from the engine stream store.

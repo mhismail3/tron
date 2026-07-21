@@ -62,9 +62,6 @@ pub struct TokenTotals {
     pub cache_creation_tokens: i64,
 }
 
-/// Canonical token record with source, computed, metadata, and pricing fields.
-pub type TokenRecord = crate::domains::model::tokens::types::TokenRecord;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────

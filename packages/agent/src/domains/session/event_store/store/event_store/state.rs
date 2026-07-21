@@ -43,9 +43,7 @@ impl EventStore {
         validated_reconstruction(&events)
     }
 
-    /// Build full session state at the head event.
-    ///
-    /// Combines session metadata with reconstructed messages.
+    /// Build the runtime session state at the head event.
     pub fn get_state_at_head(&self, session_id: &str) -> Result<SessionState> {
         let conn = self.conn()?;
         let session = SessionRepo::get_by_id(&conn, session_id)?
@@ -57,21 +55,7 @@ impl EventStore {
         let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
         let events = event_rows_to_session_events(&conn, &ancestors)?;
         let reconstruction = validated_reconstruction(&events)?;
-        Ok(build_session_state(&session, head_id, reconstruction))
-    }
-
-    /// Build full session state at a specific event.
-    pub fn get_state_at(&self, session_id: &str, event_id: &str) -> Result<SessionState> {
-        let conn = self.conn()?;
-        let session = SessionRepo::get_by_id(&conn, session_id)?
-            .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_string()))?;
-        let ancestors = EventRepo::get_ancestors(&conn, event_id)?;
-        if ancestors.is_empty() {
-            return Err(EventStoreError::EventNotFound(event_id.to_string()));
-        }
-        let events = event_rows_to_session_events(&conn, &ancestors)?;
-        let reconstruction = validated_reconstruction(&events)?;
-        Ok(build_session_state(&session, event_id, reconstruction))
+        Ok(build_session_state(&session, reconstruction))
     }
 }
 
@@ -124,7 +108,7 @@ pub(super) fn event_rows_to_session_events(
 /// Reconstruct provider history and validate only events that survive its
 /// durable visibility rules.
 ///
-/// `message.deleted`, `compact.boundary`, and `context.cleared` can make older
+/// `message.deleted` and `compact.boundary` can make older
 /// message rows intentionally non-contributing. Message structural validation
 /// therefore runs after reconstruction identifies surviving source event IDs,
 /// but still validates every source row independently so same-role merging
@@ -241,15 +225,11 @@ fn validate_message_payload(
 
 pub(super) fn build_session_state(
     session: &SessionRow,
-    head_event_id: &str,
     reconstruction: ReconstructionResult,
 ) -> SessionState {
     use crate::domains::session::event_store::types::payloads::TokenUsage;
 
     SessionState {
-        session_id: session.id.clone(),
-        workspace_id: session.workspace_id.clone(),
-        head_event_id: head_event_id.to_string(),
         model: session.latest_model.clone(),
         working_directory: session.working_directory.clone(),
         messages_with_event_ids: reconstruction.messages_with_event_ids,
@@ -261,12 +241,6 @@ pub(super) fn build_session_state(
             ..Default::default()
         },
         turn_count: reconstruction.turn_count,
-        provider: None,
-        system_prompt: reconstruction.system_prompt,
-        reasoning_level: reconstruction.reasoning_level,
-        metadata: None,
         is_ended: session.ended_at.as_ref().map(|_| true),
-        branch: None,
-        timestamp: Some(session.last_activity_at.clone()),
     }
 }

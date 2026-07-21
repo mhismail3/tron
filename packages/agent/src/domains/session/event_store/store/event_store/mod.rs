@@ -24,7 +24,6 @@ mod locking;
 mod logs;
 mod session_lifecycle;
 mod state;
-mod trace_log;
 
 pub use logs::{ClientLogEntry, ClientLogIngestResult, LogEntry, LogSessionFilter, RecentLogQuery};
 

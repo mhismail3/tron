@@ -74,14 +74,14 @@ struct TurnGroupingTests {
     func sessionSetupInTurnZero() {
         let events = [
             makeEvent(type: "session.start", sequence: 1),
-            makeEvent(type: "metadata.update", sequence: 2),
+            makeEvent(type: "model.provider_request", sequence: 2),
             makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Hello")]),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
         #expect(groups.count == 2)
         #expect(groups[0].turnNumber == 0)
-        #expect(groups[0].events.count == 2) // session.start + metadata.update
+        #expect(groups[0].events.count == 2) // session.start + provider audit
         #expect(groups[1].turnNumber == 1)
         #expect(groups[1].events.count == 2) // message.user + message.assistant
     }
@@ -225,7 +225,7 @@ struct TurnGroupingTests {
         let events = [
             // Session setup
             makeEvent(type: "session.start", sequence: 1),
-            makeEvent(type: "metadata.update", sequence: 2),
+            makeEvent(type: "model.provider_request", sequence: 2),
             // Turn 1
             makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Create test files")]),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
@@ -246,7 +246,7 @@ struct TurnGroupingTests {
 
         #expect(groups.count == 3) // turn 0 (setup), turn 1, turn 2
 
-        // Turn 0: session.start + metadata.update
+        // Turn 0: session.start + provider audit
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2)
 
@@ -381,7 +381,7 @@ struct TurnGroupingTests {
         let events = [
             // Setup
             makeEvent(type: "session.start", sequence: 1),
-            makeEvent(type: "metadata.update", sequence: 2),
+            makeEvent(type: "model.provider_request", sequence: 2),
             // Cycle 1: turns 1-3
             makeEvent(type: "message.user", sequence: 3),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
@@ -552,7 +552,7 @@ struct TurnGroupingTests {
         let events = [
             // Session setup
             makeEvent(type: "session.start", sequence: 0),
-            makeEvent(type: "metadata.update", sequence: 1),
+            makeEvent(type: "model.provider_request", sequence: 1),
             // Prompt 1: 3 turns with capability invocations
             makeEvent(type: "message.user", sequence: 2, payload: ["content": AnyCodable("Ingest all of them into the knowledge base")]),
             makeEvent(type: "compact.boundary", sequence: 3),
@@ -584,7 +584,7 @@ struct TurnGroupingTests {
         // Turn 4-5: prompt 2 (user + 2 assistants + capability + result + lifecycle event)
         // Turn 6: prompt 3 (user + assistant)
         #expect(groups[0].turnNumber == 0)
-        #expect(groups[0].events.count == 2) // session.start + metadata.update
+        #expect(groups[0].events.count == 2) // session.start + provider audit
 
         // Prompt 1 turns
         #expect(groups[1].turnNumber == 1)

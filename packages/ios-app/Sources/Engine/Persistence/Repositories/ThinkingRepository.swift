@@ -115,7 +115,7 @@ final class ThinkingRepository: @unchecked Sendable {
         }
 
         // Handle message.assistant events with thinking in content blocks
-        if event.type == PersistedEventType.messageAssistant.rawValue {
+        if event.type == SessionEventType.messageAssistant.rawValue {
             guard let contentArray = event.payload["content"]?.value as? [[String: Any]] else {
                 return nil
             }
@@ -141,7 +141,7 @@ final class ThinkingRepository: @unchecked Sendable {
         // `ChatViewModel+TurnLifecycleContext.persistThinkingPayload` when a
         // turn finishes. These store the full thinking content flat under
         // `content` rather than nested in an assistant message's content blocks.
-        if event.type == PersistedEventType.streamThinkingComplete.rawValue {
+        if event.type == SessionEventType.streamThinkingComplete.rawValue {
             return event.payload.string("content")
         }
 

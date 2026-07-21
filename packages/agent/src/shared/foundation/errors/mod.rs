@@ -6,7 +6,6 @@
 //! - [`SessionError`]: Session lifecycle failures (create, resume, fork, run)
 //! - [`PersistenceError`]: Database/storage errors with table and operation context
 //! - [`CapabilityExecutionError`]: Capability invocation failures with capability id and call ID
-//! - [`ErrorCollector`]: Accumulates errors from fire-and-forget operations
 //!
 //! The error parsing utilities in [`parse`] classify raw error strings into
 //! categories. Provider-native failures stay under `domains::model` and cross
@@ -289,8 +288,6 @@ pub struct PersistenceError {
     pub code: String,
     /// Error severity.
     pub severity: ErrorSeverity,
-    /// Sanitized query for debugging.
-    pub query: Option<String>,
     /// Original cause.
     #[source]
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
@@ -311,7 +308,6 @@ impl PersistenceError {
             message: message.into(),
             code: format!("PERSISTENCE_{op_upper}_ERROR"),
             severity: ErrorSeverity::Error,
-            query: None,
             source: None,
         }
     }
@@ -320,13 +316,6 @@ impl PersistenceError {
     #[must_use]
     pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         self.source = Some(Box::new(source));
-        self
-    }
-
-    /// Set the sanitized query for debugging.
-    #[must_use]
-    pub fn with_query(mut self, query: impl Into<String>) -> Self {
-        self.query = Some(query.into());
         self
     }
 }
@@ -432,75 +421,6 @@ impl CapabilityResponseError {
             message: message.into(),
             source: None,
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ErrorCollector
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Collects errors from fire-and-forget operations without losing them.
-///
-/// Useful when running multiple tasks concurrently where each can fail
-/// independently, but you don't want to abort on the first failure.
-///
-/// # Example
-///
-/// ```
-/// use crate::shared::foundation::errors::ErrorCollector;
-///
-/// let mut collector = ErrorCollector::new();
-/// collector.collect("task 1 failed");
-/// collector.collect("task 2 failed");
-/// assert_eq!(collector.count(), 2);
-///
-/// let errors = collector.flush();
-/// assert_eq!(errors.len(), 2);
-/// assert_eq!(collector.count(), 0);
-/// ```
-#[derive(Debug, Default)]
-pub struct ErrorCollector {
-    errors: Vec<TronError>,
-}
-
-impl ErrorCollector {
-    /// Create a new empty collector.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Collect an error, wrapping it in [`TronError`] if needed.
-    pub fn collect(&mut self, error: impl Into<String>) {
-        self.errors.push(TronError::from_message(&error.into()));
-    }
-
-    /// Collect an existing [`TronError`].
-    pub fn collect_error(&mut self, error: TronError) {
-        self.errors.push(error);
-    }
-
-    /// Whether any errors have been collected.
-    #[must_use]
-    pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
-    }
-
-    /// Number of collected errors.
-    #[must_use]
-    pub fn count(&self) -> usize {
-        self.errors.len()
-    }
-
-    /// View collected errors.
-    #[must_use]
-    pub fn errors(&self) -> &[TronError] {
-        &self.errors
-    }
-
-    /// Get and clear all collected errors.
-    pub fn flush(&mut self) -> Vec<TronError> {
-        std::mem::take(&mut self.errors)
     }
 }
 

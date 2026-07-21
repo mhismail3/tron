@@ -15,10 +15,6 @@ pub const ENGINE_INVALID_ID: &str = "ENGINE_INVALID_ID";
 pub const ENGINE_INVALID_FUNCTION_ID: &str = "ENGINE_INVALID_FUNCTION_ID";
 /// Engine namespace authorization failure.
 pub const ENGINE_NAMESPACE_DENIED: &str = "ENGINE_NAMESPACE_DENIED";
-/// Engine delivery mode is not implemented.
-pub const ENGINE_UNSUPPORTED_DELIVERY_MODE: &str = "ENGINE_UNSUPPORTED_DELIVERY_MODE";
-/// Engine delivery mode is not allowed by a function definition.
-pub const ENGINE_DELIVERY_MODE_NOT_ALLOWED: &str = "ENGINE_DELIVERY_MODE_NOT_ALLOWED";
 /// Engine ledger or durable store operation failed.
 pub const ENGINE_LEDGER_FAILURE: &str = "ENGINE_LEDGER_FAILURE";
 /// Stored invocation failure replayed from the ledger.
@@ -226,9 +222,6 @@ pub struct FailureReferences {
     /// Session id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Durable source event id.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_event_id: Option<String>,
 }
 
 /// Canonical public failure envelope.

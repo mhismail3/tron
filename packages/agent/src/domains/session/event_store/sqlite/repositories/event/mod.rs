@@ -36,8 +36,6 @@ const EVENT_COLUMNS: &str = "\
     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, \
     model, latency_ms, stop_reason, has_thinking, provider_type, cost";
 
-const SQLITE_BIND_LIMIT: usize = 900;
-
 /// Options for listing events.
 #[derive(Default)]
 pub struct ListEventsOptions {

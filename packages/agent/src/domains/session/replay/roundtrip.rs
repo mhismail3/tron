@@ -44,8 +44,6 @@ pub(crate) struct ReplayRoundtripCounts {
     pub(crate) session_events: usize,
     /// Provider audit event count.
     pub(crate) provider_audits: usize,
-    /// Trace record count.
-    pub(crate) trace_records: usize,
     /// Engine idempotency entry count.
     pub(crate) engine_idempotency_entries: usize,
     /// Engine invocation count.
@@ -60,8 +58,6 @@ pub(crate) struct ReplayRoundtripCounts {
 pub(crate) struct ReplayRoundtripReferences {
     /// Provider audits whose event id resolves to a session event.
     pub(crate) provider_audit_event_refs: usize,
-    /// Trace records carrying request/result hashes in their trace JSON.
-    pub(crate) trace_hash_refs: usize,
     /// Idempotency entries carrying request and outcome hashes.
     pub(crate) idempotency_hash_refs: usize,
     /// Stream payload hashes and parent invocation references.
@@ -183,7 +179,6 @@ fn count_sections(sections: &Map<String, Value>) -> Result<ReplayRoundtripCounts
     Ok(ReplayRoundtripCounts {
         session_events: array(sections, "sessionEvents")?.len(),
         provider_audits: array(sections, "providerAudits")?.len(),
-        trace_records: array(sections, "traceRecords")?.len(),
         engine_idempotency_entries: array(sections, "engineIdempotencyEntries")?.len(),
         engine_invocations: array(sections, "engineInvocations")?.len(),
         engine_streams: array(sections, "engineStreams")?.len(),
@@ -196,7 +191,6 @@ fn validate_cross_record_references(
 ) -> Result<ReplayRoundtripReferences, CapabilityError> {
     let session_events = array(sections, "sessionEvents")?;
     let provider_audits = array(sections, "providerAudits")?;
-    let trace_records = array(sections, "traceRecords")?;
     let idempotency_entries = array(sections, "engineIdempotencyEntries")?;
     let invocations = array(sections, "engineInvocations")?;
     let streams = array(sections, "engineStreams")?;
@@ -232,36 +226,6 @@ fn validate_cross_record_references(
                 "provider audit references missing session event {event_id}"
             )),
             None => errors.push("provider audit is missing eventId".to_owned()),
-        }
-    }
-
-    for trace in trace_records {
-        if let Some(trace_session_id) = trace.get("sessionId").and_then(Value::as_str)
-            && trace_session_id != session_id
-        {
-            errors.push(format!(
-                "trace {} belongs to session {trace_session_id}",
-                display_id(trace)
-            ));
-        }
-        let metadata = trace
-            .get("recordJson")
-            .and_then(|record| record.get("metadata"))
-            .and_then(|metadata| metadata.get("dev.tron"));
-        match metadata {
-            Some(metadata)
-                if metadata
-                    .get("requestHash")
-                    .and_then(Value::as_str)
-                    .is_some()
-                    && trace_result_hash_present(trace, metadata) =>
-            {
-                refs.trace_hash_refs += 1;
-            }
-            _ => errors.push(format!(
-                "trace {} is missing requestHash/resultHash replay metadata",
-                display_id(trace)
-            )),
         }
     }
 
@@ -376,11 +340,6 @@ fn invocation_reference_key(invocation: &Value, key: &str) -> Option<String> {
         scope.get("kind")?.as_str()?,
         scope.get("value")?.as_str()?,
     ))
-}
-
-fn trace_result_hash_present(trace: &Value, metadata: &Value) -> bool {
-    let status = trace.get("status").and_then(Value::as_str);
-    status == Some("running") || metadata.get("resultHash").and_then(Value::as_str).is_some()
 }
 
 fn array<'a>(

@@ -28,11 +28,10 @@ mod tron;
 mod tests;
 
 pub use capability::{CapabilityEventIdentity, CapabilityInvocationSummary};
-pub use factory::{
-    agent_end_event, agent_ready_event, agent_start_event, error_event,
-    session_processing_changed_event, turn_failed_event,
-};
-pub use stream::{AssistantMessage, RetryErrorInfo, StreamEvent, is_stream_event_type};
+#[cfg(test)]
+pub use factory::{agent_end_event, agent_ready_event, agent_start_event};
+pub use factory::{error_event, turn_failed_event};
+pub use stream::{AssistantMessage, RetryErrorInfo, StreamEvent};
 #[cfg(test)]
 pub(crate) use tron::VARIANT_COUNT;
 pub use tron::{BaseEvent, CompactionReason, TronEvent};

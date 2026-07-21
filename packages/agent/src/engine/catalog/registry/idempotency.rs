@@ -11,7 +11,7 @@ use crate::engine::durability::ledger::{
 use crate::engine::invocation::model::{Invocation, InvocationResult};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::types::{
-    FunctionDefinition, IdempotencyScope, LedgerKind, ReplayBehavior, VisibilityScope,
+    FunctionDefinition, IdempotencyScope, ReplayBehavior, VisibilityScope,
 };
 
 /// Idempotency decision for an invocation before the handler or built-in runs.
@@ -222,16 +222,6 @@ impl LiveCatalog {
         let Some(key) = &invocation.causal_context.idempotency_key else {
             return Ok(None);
         };
-        if !matches!(
-            contract.ledger_kind,
-            LedgerKind::InMemory | LedgerKind::EngineLedger
-        ) {
-            return Err(EngineError::PolicyViolation(format!(
-                "idempotency ledger {:?} is not executable in phase 1",
-                contract.ledger_kind
-            )));
-        }
-
         let scope = idempotency_scope_value(&contract.dedupe_scope, invocation)?;
         Ok(Some(IdempotencyReservation {
             key: IdempotencyKey {

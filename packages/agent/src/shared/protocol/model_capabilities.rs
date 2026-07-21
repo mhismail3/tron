@@ -76,22 +76,6 @@ pub struct CapabilityResult {
     pub stop_turn: Option<bool>,
 }
 
-/// ModelCapability category for grouping.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilityCategory {
-    /// File system operations.
-    Filesystem,
-    /// Shell/command execution.
-    Shell,
-    /// Search operations.
-    Search,
-    /// Network/HTTP operations.
-    Network,
-    /// Custom/user-defined.
-    Custom,
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Factory helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,17 +236,5 @@ mod tests {
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["details"]["bytes_written"], 42);
         assert_eq!(json["stopTurn"], true);
-    }
-
-    #[test]
-    fn capability_category_serde() {
-        assert_eq!(
-            serde_json::to_string(&CapabilityCategory::Filesystem).unwrap(),
-            "\"filesystem\""
-        );
-        assert_eq!(
-            serde_json::to_string(&CapabilityCategory::Shell).unwrap(),
-            "\"shell\""
-        );
     }
 }

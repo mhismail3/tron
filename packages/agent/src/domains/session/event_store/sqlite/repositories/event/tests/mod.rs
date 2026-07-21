@@ -1,6 +1,5 @@
 use super::*;
 mod append_order_counters;
-mod pagination_filters;
 mod payload_blob_resolution;
 mod reconstruction_state;
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;

@@ -143,20 +143,6 @@ impl OllamaModelInfo {
     }
 }
 
-/// All Ollama models serialized for the `model.list` API, sorted by `sort_order`.
-///
-/// This is the static (sync) version — all models are listed without availability info.
-/// Prefer [`all_ollama_models_api_json_with_availability`] when an async context is available.
-#[cfg(test)]
-pub fn all_ollama_models_api_json() -> Vec<serde_json::Value> {
-    let mut entries: Vec<_> = OLLAMA_MODELS.iter().collect();
-    entries.sort_by_key(|(_, info)| info.sort_order);
-    entries
-        .into_iter()
-        .map(|(id, info)| info.to_api_json(id))
-        .collect()
-}
-
 /// All Ollama models with live availability status from the local Ollama server.
 ///
 /// Queries `GET /api/tags` to discover which models are actually pulled.
@@ -309,15 +295,5 @@ mod tests {
         // Thinking is always-on but not configurable — no reasoning picker
         assert_eq!(j["supportsReasoning"], false);
         assert!(j.get("reasoningLevels").is_none());
-    }
-
-    #[test]
-    fn all_ollama_models_api_json_sorted() {
-        let models = all_ollama_models_api_json();
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[0]["id"], "gemma4:e4b");
-        assert_eq!(models[0]["sortOrder"], 0);
-        assert_eq!(models[1]["id"], "gemma4:26b");
-        assert_eq!(models[1]["sortOrder"], 1);
     }
 }

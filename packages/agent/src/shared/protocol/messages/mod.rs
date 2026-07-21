@@ -74,36 +74,6 @@ impl CapabilityInvocationDraft {
     }
 }
 
-/// Normalize capability arguments from canonical `arguments`.
-#[must_use]
-pub fn normalize_capability_arguments(block: &Value) -> Map<String, Value> {
-    if let Some(args) = block.get("arguments").and_then(Value::as_object) {
-        return args.clone();
-    }
-    Map::new()
-}
-
-/// Normalize capability result ID — handles both `capability_invocation_id` and `invocationId`.
-#[must_use]
-pub fn normalize_capability_result_id(block: &Value) -> String {
-    block
-        .get("capability_invocation_id")
-        .or_else(|| block.get("invocationId"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_owned()
-}
-
-/// Normalize error flag — handles both `is_error` and `isError`.
-#[must_use]
-pub fn normalize_is_error(block: &Value) -> bool {
-    block
-        .get("is_error")
-        .or_else(|| block.get("isError"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Token and cost tracking
 // ─────────────────────────────────────────────────────────────────────────────
@@ -385,14 +355,6 @@ impl Message {
     }
 }
 
-/// Extract capability invocation blocks from assistant content.
-pub fn extract_capability_invocations(content: &[AssistantContent]) -> Vec<&AssistantContent> {
-    content
-        .iter()
-        .filter(|c| c.is_capability_invocation())
-        .collect()
-}
-
 /// Extract text from assistant content blocks.
 #[must_use]
 pub fn extract_assistant_text(content: &[AssistantContent]) -> String {
@@ -425,48 +387,9 @@ pub struct Context {
     /// Compact projection of agent-authored state from the primitive state store.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_state_context: Option<String>,
-    /// Memory prompt inclusion audit/status text. This carries refs and counts,
-    /// never retained memory body content.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_prompt_context: Option<String>,
     /// Server origin (e.g. `"localhost:9847"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_origin: Option<String>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Type guard helpers for untyped values
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Check if a JSON value is an API-format `capability_result` block.
-#[must_use]
-pub fn is_provider_capability_result_block(block: &Value) -> bool {
-    block.get("type").and_then(Value::as_str) == Some("capability_result")
-        && block
-            .get("capability_invocation_id")
-            .and_then(Value::as_str)
-            .is_some()
-}
-
-/// Check if a JSON value is an internal-format `capability_result` block.
-#[must_use]
-pub fn is_internal_capability_result_block(block: &Value) -> bool {
-    block.get("type").and_then(Value::as_str) == Some("capability_result")
-        && block.get("invocationId").and_then(Value::as_str).is_some()
-}
-
-/// Check if a JSON value is any `capability_result` block (API or internal format).
-#[must_use]
-pub fn is_any_capability_result_block(block: &Value) -> bool {
-    is_provider_capability_result_block(block) || is_internal_capability_result_block(block)
-}
-
-/// Check if a JSON value is an API-format `capability_invocation` block.
-#[must_use]
-pub fn is_provider_capability_invocation_block(block: &Value) -> bool {
-    block.get("type").and_then(Value::as_str) == Some("capability_invocation")
-        && block.get("id").and_then(Value::as_str).is_some()
-        && block.get("arguments").is_some()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

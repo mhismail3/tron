@@ -1,30 +1,19 @@
 //! Event type definitions for the Tron event sourcing system.
 //!
-//! - [`EventType`]: 24-variant enum of primitive loop event discriminators
-//!   (count regression-guarded by the `ALL_EVENT_TYPES.len() == 24` assertion
-//!   in `generated.rs` tests and synchronized with the README Event System
-//!   section).
+//! - [`EventType`]: durable primitive-loop event discriminators.
 //! - [`SessionEvent`]: Flat struct with base fields + opaque `payload` JSON.
-//! - [`SessionEventPayload`]: Typed payload access via [`SessionEvent::typed_payload()`].
-//! - [`payloads`]: Typed payload structs for each event type domain.
-//! - [`state`]: Session state, workspace, and search result types.
-
-// `macros` must come first so the `define_events!` macro is available to
-// subsequent modules.
-#[macro_use]
-mod macros;
+//! - [`payloads`]: Token totals and the two payload validators used before
+//!   capability-invocation persistence.
+//! - [`state`]: reconstructed messages and runtime session state.
 
 pub mod base;
 mod generated;
 pub mod payloads;
 pub mod state;
 #[cfg(test)]
-mod tests;
+mod state_tests;
 
 pub use base::SessionEvent;
-pub use generated::{ALL_EVENT_TYPES, EventType, SessionEventPayload};
-pub use payloads::{TokenRecord, TokenTotals, TokenUsage};
-pub use state::{
-    Branch, BranchRef, ForkRef, Message, MessageWithEventId, SessionMetadata, SessionState,
-    SessionSummary, Workspace,
-};
+pub use generated::EventType;
+pub use payloads::{TokenTotals, TokenUsage};
+pub use state::{Message, MessageWithEventId, SessionState};

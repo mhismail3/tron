@@ -125,7 +125,7 @@
 //! Unit tests live beside each concern; cross-domain replay, migration,
 //! provider-tool, transport, and client proofs live under `packages/agent/tests`.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 
 use crate::domains::registration::worker::{
@@ -190,8 +190,6 @@ pub(crate) fn registration(
             .as_object()
             .cloned()
             .unwrap_or_default();
-        let _ = metadata.insert("workerKernel".to_owned(), Value::Bool(true));
-        let _ = metadata.insert("trustedLocalKernel".to_owned(), Value::Bool(true));
         let operation = registration
             .definition
             .id
@@ -210,7 +208,6 @@ pub(crate) fn registration(
                 Value::String(descriptor.group.as_str().to_owned()),
             );
             let _ = metadata.insert("capabilityOrder".to_owned(), Value::from(descriptor.order));
-            let _ = metadata.insert("contextPrimerLevel".to_owned(), json!("primitive"));
         }
         registration.definition.metadata = Value::Object(metadata);
     }

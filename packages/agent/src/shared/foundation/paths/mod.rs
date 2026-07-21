@@ -42,22 +42,6 @@ pub mod dirs {
     pub const JOURNALS: &str = "journals";
     // ── Under workspace/ ──
 
-    /// Active project spaces.
-    pub const PROJECTS: &str = "projects";
-    /// Analysis, research, and investigation reports.
-    pub const REPORTS: &str = "reports";
-    /// Rendered pages displayed in the app.
-    pub const RENDERS: &str = "renders";
-    /// Throwaway output and intermediate results.
-    pub const SCRATCH: &str = "scratch";
-    /// Saved screenshots from the computer-use capability.
-    pub const SCREENSHOTS: &str = "screenshots";
-    /// Experimental semi-long-lived spaces before promotion.
-    pub const LABS: &str = "labs";
-    /// Retired work material.
-    pub const ARCHIVE: &str = "archive";
-    /// Workspace-local curated wiki/research experiment.
-    pub const KNOWLEDGE: &str = "knowledge";
     /// Workspace-local credential vault.
     pub const VAULT: &str = "vault";
     /// Approved local worker packages and launchable worker bundles.

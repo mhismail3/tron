@@ -22,19 +22,8 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
 
     func testEveryRenderablePersistedEventHasAWorkingReconstructionFixture() {
         let fixtures = renderableEventFixtures()
-        let renderableTypes = PersistedEventType.allCases.filter(\.rendersAsChatMessage)
-        let missingFixtures = renderableTypes
-            .filter { fixtures[$0] == nil }
-            .map(\.rawValue)
-            .sorted()
-
-        XCTAssertTrue(
-            missingFixtures.isEmpty,
-            "Missing reconstruction fixtures for renderable persisted event types: \(missingFixtures)"
-        )
-
-        for (offset, eventType) in renderableTypes.enumerated() {
-            guard let payload = fixtures[eventType] else { continue }
+        for (offset, fixture) in fixtures.enumerated() {
+            let (eventType, payload) = fixture
             let event = RawEvent(
                 id: "fixture-\(eventType.rawValue)",
                 parentId: nil,
@@ -57,10 +46,8 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
 
     func testEveryStandaloneRenderableEventReconstructsInSessionState() {
         let fixtures = renderableEventFixtures()
-        let standaloneRenderableTypes = PersistedEventType.allCases.filter {
-            $0.rendersAsChatMessage &&
-            $0 != .capabilityInvocationStarted &&
-            $0 != .capabilityInvocationCompleted
+        let standaloneRenderableTypes = fixtures.keys.filter {
+            $0 != .capabilityInvocationStarted && $0 != .capabilityInvocationCompleted
         }
 
         for (offset, eventType) in standaloneRenderableTypes.enumerated() {
@@ -88,53 +75,37 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
         }
     }
 
-    func testEveryPersistedEventTypeHasExplicitReconstructionDisposition() {
+    func testEveryCachedEventTypeHasExplicitReconstructionDisposition() {
         let rendered = Set(renderableEventFixtures().keys)
-        let stateHandled: Set<PersistedEventType> = [
+        let stateHandled: Set<SessionEventType> = [
             .messageDeleted,
-            .configReasoningLevel,
             .compactBoundary
         ]
-        let consumedThroughAssistantMessage: Set<PersistedEventType> = [
+        let consumedThroughAssistantMessage: Set<SessionEventType> = [
             .capabilityInvocationStarted,
             .capabilityInvocationCompleted,
             .streamThinkingComplete
         ]
-        let streamingReplayOnly: Set<PersistedEventType> = [
-            .streamTextDelta,
-            .streamThinkingDelta,
-            .streamTurnStart
-        ]
-        let intentionallyNoStateImpact: Set<PersistedEventType> = [
+        let intentionallyNoStateImpact: Set<SessionEventType> = [
             // Session lifecycle/tree facts stay in server reconstruction metadata,
             // CachedSession, or raw durable diagnostics rather than mounted state.
             .sessionStart,
             .sessionEnd,
             .sessionFork,
-            .sessionBranch,
-            // These durable rows remain available for diagnostics, but they do
-            // not rebuild a second client-owned turn/file/metadata projection.
+            // Turn boundaries and provider audits remain available for
+            // diagnostics but do not rebuild timeline messages.
+            .streamTurnStart,
             .streamTurnEnd,
-            .fileRead,
-            .fileWrite,
-            .fileEdit,
-            .metadataUpdate,
-            .metadataTag,
-            // Provider request audit rows are diagnostics for the server-side
-            // model call and do not rebuild chat or session state.
-            .modelProviderRequest,
-            // Prompt/process events do not currently restore
-            // user-visible chat or mounted reconstruction fields.
-            .capabilityRunStatus,
-            .configPromptUpdate
+            .modelProviderRequest
         ]
 
         let accounted = rendered
             .union(stateHandled)
             .union(consumedThroughAssistantMessage)
-            .union(streamingReplayOnly)
             .union(intentionallyNoStateImpact)
-        let missing = Set(PersistedEventType.allCases)
+        let expected = Set(SessionEventType.serverDurableCases)
+            .union([.streamThinkingComplete])
+        let missing = expected
             .subtracting(accounted)
             .map(\.rawValue)
             .sorted()

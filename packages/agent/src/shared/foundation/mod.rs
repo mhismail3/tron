@@ -3,7 +3,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`constants`] | Shared compile-time constants |
-//! | [`constitution`] | Tron Home layout recovery and seed report |
+//! | [`constitution`] | Tron Home layout recovery |
 //! | [`errors`] | Shared error taxonomy and parsing |
 //! | [`ids`] | Branded IDs used across domains and protocol payloads |
 //! | [`paths`] | Canonical filesystem paths |

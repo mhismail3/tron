@@ -16,6 +16,5 @@ pub use registry::{
     strip_provider_prefix,
 };
 pub use types::{
-    ModelCapabilities, ModelCategory, ModelInfo, ModelTier, Provider, calculate_cost,
-    format_context_window, format_model_pricing,
+    ModelInfo, ModelTier, Provider, calculate_cost, format_context_window, format_model_pricing,
 };

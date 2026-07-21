@@ -1,7 +1,7 @@
 //! Engine substrate registration and invocation checks.
 //!
 //! This layer protects primitive runtime integrity: idempotency, schemas,
-//! delivery modes, visibility, and routability. It does not encode product
+//! visibility, and routability. It does not encode product
 //! prompt policy.
 //!
 //! INVARIANT: internal catalog visibility is derived from the authenticated
@@ -12,7 +12,7 @@ use crate::engine::invocation::model::{CausalContext, Invocation};
 
 use super::errors::{EngineError, Result};
 use super::schema;
-use super::types::{DeliveryMode, FunctionDefinition, VisibilityScope};
+use super::types::{FunctionDefinition, VisibilityScope};
 
 /// Validate a function definition before registration.
 pub fn validate_function_registration(function: &FunctionDefinition) -> Result<()> {
@@ -22,13 +22,6 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             function.id
         )));
     }
-    if function.allowed_delivery_modes.is_empty() {
-        return Err(EngineError::PolicyViolation(format!(
-            "function {} must allow at least one delivery mode",
-            function.id
-        )));
-    }
-
     if let Some(schema) = &function.request_schema {
         schema::validate_schema_definition(&function.id, "request", schema)?;
     }
@@ -41,11 +34,6 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
 
 /// Validate invocation policy.
 pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocation) -> Result<()> {
-    if invocation.delivery_mode != DeliveryMode::Sync {
-        return Err(EngineError::UnsupportedDeliveryMode {
-            mode: invocation.delivery_mode.as_str(),
-        });
-    }
     validate_invocation_contract(function, invocation)
 }
 
@@ -59,16 +47,6 @@ fn validate_invocation_contract(
             "function {} is not visible to actor {}",
             function.id, invocation.causal_context.actor_id
         )));
-    }
-
-    if !function
-        .allowed_delivery_modes
-        .contains(&invocation.delivery_mode)
-    {
-        return Err(EngineError::DeliveryModeNotAllowed {
-            function_id: function.id.to_string(),
-            mode: invocation.delivery_mode.as_str(),
-        });
     }
 
     if !function.health.is_routable() {

@@ -70,55 +70,49 @@ struct SessionEvent: Identifiable, Codable, EventTransformable, Sendable {
     }
 }
 
-/// Known session event types
-enum SessionEventType: String, Codable, Sendable {
+/// Event rows that can exist in the client cache.
+///
+/// `serverDurableCases` mirrors the Rust session log. The client also stores a
+/// local `stream.thinking_complete` projection so expanded reasoning survives
+/// app restarts; it is not a server event.
+enum SessionEventType: String, Codable, Sendable, CaseIterable {
     case sessionStart = "session.start"
     case sessionEnd = "session.end"
     case sessionFork = "session.fork"
-    case sessionBranch = "session.branch"
-
     case messageUser = "message.user"
     case messageAssistant = "message.assistant"
-    case messageSystem = "message.system"
 
     case modelProviderRequest = "model.provider_request"
 
     case capabilityInvocationStarted = "capability.invocation.started"
     case capabilityInvocationCompleted = "capability.invocation.completed"
 
-    case streamTextDelta = "stream.text_delta"
-    case streamThinkingDelta = "stream.thinking_delta"
+    /// Client-local completed-thinking cache row.
     case streamThinkingComplete = "stream.thinking_complete"
     case streamTurnStart = "stream.turn_start"
     case streamTurnEnd = "stream.turn_end"
 
-    case configModelSwitch = "config.model_switch"
-    case configPromptUpdate = "config.prompt_update"
-    case configReasoningLevel = "config.reasoning_level"
-
-    // Message operations
     case messageDeleted = "message.deleted"
-
     case compactBoundary = "compact.boundary"
-
-    // Context
-    case contextCleared = "context.cleared"
-
-    case metadataUpdate = "metadata.update"
-    case metadataTag = "metadata.tag"
-
-    case fileRead = "file.read"
-    case fileWrite = "file.write"
-    case fileEdit = "file.edit"
-
-    case errorAgent = "error.agent"
-    case errorCapability = "error.capability"
-    case errorProvider = "error.provider"
-
-    // Turn events
     case turnFailed = "turn.failed"
 
     case unknown
+
+    static let serverDurableCases: [SessionEventType] = [
+        .sessionStart,
+        .sessionEnd,
+        .sessionFork,
+        .messageUser,
+        .messageAssistant,
+        .modelProviderRequest,
+        .messageDeleted,
+        .capabilityInvocationStarted,
+        .capabilityInvocationCompleted,
+        .streamTurnStart,
+        .streamTurnEnd,
+        .compactBoundary,
+        .turnFailed
+    ]
 }
 
 // MARK: - Sync State

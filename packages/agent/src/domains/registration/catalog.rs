@@ -23,15 +23,6 @@ pub enum TransportIdempotencyMode {
     ExplicitRequired,
 }
 
-impl TransportIdempotencyMode {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::NotRequired => "not_required",
-            Self::ExplicitRequired => "explicit_required",
-        }
-    }
-}
-
 /// Canonical server capability contract.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapabilitySpec {
@@ -52,8 +43,6 @@ pub struct CapabilitySpec {
     /// Public transport idempotency mode when this function is exposed through
     /// an engine protocol message.
     pub idempotency_mode: TransportIdempotencyMode,
-    /// Domain module/group provenance.
-    pub domain_module: &'static str,
     /// Strict request schema owned by the domain contract.
     pub request_schema: Option<serde_json::Value>,
     /// Strict response schema owned by the domain contract.

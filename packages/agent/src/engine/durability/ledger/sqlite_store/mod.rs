@@ -279,11 +279,11 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                    (invocation_id, function_id, worker_id, function_revision,
                     catalog_revision, actor_id, actor_kind_json, trace_id,
                     parent_invocation_id, trigger_id,
-                    session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
+                    session_id, workspace_id, idempotency_scope_kind,
                     idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                     result_json, error_json, timestamp)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                 params![
                     record.invocation_id.as_str(),
                     record.function_id.as_str(),
@@ -300,7 +300,6 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     record.trigger_id.as_ref().map(TriggerId::as_str),
                     record.session_id.as_deref(),
                     record.workspace_id.as_deref(),
-                    to_json_string("append_invocation.delivery_mode", &record.delivery_mode)?,
                     record
                         .idempotency_scope
                         .as_ref()
@@ -345,7 +344,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 "SELECT invocation_id, function_id, worker_id, function_revision,
                         catalog_revision, actor_id, actor_kind_json, trace_id,
                         parent_invocation_id, trigger_id,
-                        session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
+                        session_id, workspace_id, idempotency_scope_kind,
                         idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                         result_json, error_json, timestamp
                  FROM engine_invocations
@@ -372,7 +371,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 "SELECT invocation_id, function_id, worker_id, function_revision,
                         catalog_revision, actor_id, actor_kind_json, trace_id,
                         parent_invocation_id, trigger_id,
-                        session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
+                        session_id, workspace_id, idempotency_scope_kind,
                         idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                         result_json, error_json, timestamp
                  FROM engine_invocations

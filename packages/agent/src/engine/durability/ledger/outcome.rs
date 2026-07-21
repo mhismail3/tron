@@ -65,16 +65,6 @@ impl StoredEngineError {
                     "functionId": function_id,
                 }),
             },
-            EngineError::UnsupportedDeliveryMode { mode } => Self {
-                kind: "unsupported_delivery_mode".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({ "mode": mode }),
-            },
-            EngineError::DeliveryModeNotAllowed { function_id, mode } => Self {
-                kind: "delivery_mode_not_allowed".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({ "functionId": function_id, "mode": mode }),
-            },
             EngineError::IdempotencyConflict {
                 function_id,
                 key,

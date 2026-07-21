@@ -153,30 +153,6 @@ pub struct RetryErrorInfo {
 // Type guards
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Stream event type strings.
-const STREAM_EVENT_TYPES: &[&str] = &[
-    "start",
-    "text_start",
-    "text_delta",
-    "text_end",
-    "thinking_start",
-    "thinking_delta",
-    "thinking_end",
-    "capability_invocation_start",
-    "capability_invocation_delta",
-    "capability_invocation_end",
-    "done",
-    "error",
-    "retry",
-    "safety_block",
-];
-
-/// Check if a type string is a stream event type.
-#[must_use]
-pub fn is_stream_event_type(type_str: &str) -> bool {
-    STREAM_EVENT_TYPES.contains(&type_str)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// An assistant message (used in [`StreamEvent::Done`]).

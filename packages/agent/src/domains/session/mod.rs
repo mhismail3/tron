@@ -12,8 +12,8 @@
 //! | `lifecycle` | Create, delete, fork, archive, and lifecycle operation wrappers. |
 //! | `query` | Resume, list, head/state/history, export, and replay manifest operation wrappers. |
 //! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
-//! | `replay` | Canonical `tron.replay.v1` manifest export, hashing, idempotency refs, and offline roundtrip harness. |
-//! | `event_store` | Durable event/session/blob/log/trace storage and reconstruction primitives. |
+//! | `replay` | Canonical `tron.replay.v2` manifest export, hashing, idempotency refs, and offline roundtrip harness. |
+//! | `event_store` | Durable event/session/blob/log storage and reconstruction primitives. |
 //!
 //! ## Invariants
 //!

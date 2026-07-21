@@ -386,50 +386,6 @@ mod tests {
     }
 
     #[test]
-    fn reconstruct_ignores_structurally_invalid_message_before_context_clear() {
-        let store = make_store();
-        let session = store
-            .create_session("test-model", "/tmp", Some("test"), None)
-            .unwrap();
-        store
-            .append(&AppendOptions {
-                session_id: &session.session.id,
-                event_type: EventType::MessageUser,
-                payload: serde_json::json!({"content": 42}),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-        store
-            .append(&AppendOptions {
-                session_id: &session.session.id,
-                event_type: EventType::ContextCleared,
-                payload: serde_json::json!({
-                    "tokensBefore": 100,
-                    "tokensAfter": 0,
-                    "reason": "test"
-                }),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-        store
-            .append(&AppendOptions {
-                session_id: &session.session.id,
-                event_type: EventType::MessageUser,
-                payload: serde_json::json!({"content": "visible after clear"}),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-
-        let state = reconstruct(&store, &session.session.id)
-            .expect("cleared malformed content cannot reach provider history");
-        assert_eq!(state.messages.len(), 1);
-        assert!(state.messages[0].is_user());
-    }
-
-    #[test]
     fn reconstruct_rejects_malformed_persisted_capability_completion() {
         let store = make_store();
         let session = store

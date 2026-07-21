@@ -12,8 +12,5 @@ pub use catalog::{
     FunctionHealth, FunctionRevision, Provenance, VisibilityScope, WorkerRevision,
 };
 pub use function::FunctionDefinition;
-pub use function::{
-    DeliveryMode, EffectClass, IdempotencyContract, IdempotencyKeySource, IdempotencyScope,
-    LedgerKind, ReplayBehavior, RiskLevel,
-};
+pub use function::{EffectClass, IdempotencyContract, IdempotencyScope, ReplayBehavior, RiskLevel};
 pub use worker::{WorkerDefinition, WorkerKind, WorkerLifecycleState};

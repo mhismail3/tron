@@ -33,8 +33,10 @@ use crate::engine::durability::ledger::EngineLedgerStore;
 use crate::engine::durability::ledger::{
     IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
+#[cfg(test)]
+use crate::engine::durability::streams::EngineStreamSubscription;
 use crate::engine::durability::streams::{
-    EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
+    EngineStreamPage, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
 use crate::engine::invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationResult,
@@ -42,9 +44,9 @@ use crate::engine::invocation::model::{
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, WorkerId};
 use crate::engine::kernel::types::{
-    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, DeliveryMode,
-    EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    Provenance, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
+    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, EffectClass,
+    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract, Provenance,
+    RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
 };
 use crate::engine::kernel::{policy, schema};
 use crate::engine::primitives;

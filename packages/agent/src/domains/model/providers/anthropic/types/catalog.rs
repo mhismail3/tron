@@ -11,8 +11,6 @@ use std::sync::LazyLock;
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ClaudeModelInfo {
-    /// Human-readable name.
-    pub name: &'static str,
     /// Short name for compact display.
     pub short_name: &'static str,
     /// Model family.
@@ -145,7 +143,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-7",
         ClaudeModelInfo {
-            name: "Claude Opus 4.7",
             short_name: "Opus 4.7",
             family: "Claude 4.7",
             context_window: 1_000_000,
@@ -177,7 +174,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-6",
         ClaudeModelInfo {
-            name: "Claude Opus 4.6",
             short_name: "Opus 4.6",
             family: "Claude 4.6",
             context_window: 1_000_000,
@@ -209,7 +205,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-sonnet-4-6",
         ClaudeModelInfo {
-            name: "Claude Sonnet 4.6",
             short_name: "Sonnet 4.6",
             family: "Claude 4.6",
             context_window: 1_000_000,
@@ -241,7 +236,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-5-20251101",
         ClaudeModelInfo {
-            name: "Claude Opus 4.5",
             short_name: "Opus 4.5",
             family: "Claude 4.5",
             context_window: 200_000,
@@ -272,7 +266,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-sonnet-4-5-20250929",
         ClaudeModelInfo {
-            name: "Claude Sonnet 4.5",
             short_name: "Sonnet 4.5",
             family: "Claude 4.5",
             context_window: 200_000,
@@ -303,7 +296,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-haiku-4-5-20251001",
         ClaudeModelInfo {
-            name: "Claude Haiku 4.5",
             short_name: "Haiku 4.5",
             family: "Claude 4.5",
             context_window: 200_000,
@@ -335,7 +327,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-1-20250805",
         ClaudeModelInfo {
-            name: "Claude Opus 4.1",
             short_name: "Opus 4.1",
             family: "Claude 4.1",
             context_window: 200_000,
@@ -367,7 +358,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-opus-4-20250514",
         ClaudeModelInfo {
-            name: "Claude Opus 4",
             short_name: "Opus 4",
             family: "Claude 4",
             context_window: 200_000,
@@ -398,7 +388,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-sonnet-4-20250514",
         ClaudeModelInfo {
-            name: "Claude Sonnet 4",
             short_name: "Sonnet 4",
             family: "Claude 4",
             context_window: 200_000,
@@ -430,7 +419,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-3-7-sonnet-20250219",
         ClaudeModelInfo {
-            name: "Claude 3.7 Sonnet",
             short_name: "Sonnet 3.7",
             family: "Claude 3.7",
             context_window: 200_000,
@@ -462,7 +450,6 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let _ = m.insert(
         "claude-3-haiku-20240307",
         ClaudeModelInfo {
-            name: "Claude 3 Haiku",
             short_name: "Haiku 3",
             family: "Claude 3",
             context_window: 200_000,

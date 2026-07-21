@@ -6,7 +6,6 @@ use super::*;
 use crate::domains::session::event_store::identity::{
     EventIdentity, SessionCreationIdentity, SessionIdentity, WorkspaceIdentity,
 };
-use crate::domains::session::event_store::{AGENT_TRACE_VERSION, AgentTraceRecord};
 use crate::domains::session::event_store::{
     AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
 };
@@ -92,45 +91,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
             EventIdentity::new("evt_provider_audit", "2026-06-09T12:00:03Z"),
         )
         .expect("provider audit");
-
-    for id in ["trace-b", "trace-a"] {
-        harness
-            .event_store
-            .append_trace_record(&AgentTraceRecord {
-                id: id.to_owned(),
-                trace_id: "trace-shared".to_owned(),
-                invocation_id: format!("inv-{id}"),
-                parent_invocation_id: None,
-                provider_invocation_id: None,
-                session_id: Some(session_id.clone()),
-                workspace_id: Some(workspace_id.clone()),
-                turn: Some(1),
-                model_primitive_name: "execute".to_owned(),
-                operation: "observe".to_owned(),
-                status: "ok".to_owned(),
-                timestamp: "2026-06-09T12:00:04Z".to_owned(),
-                completed_at: Some("2026-06-09T12:00:05Z".to_owned()),
-                duration_ms: Some(1),
-                record_json: json!({
-                    "version": AGENT_TRACE_VERSION,
-                    "id": id,
-                    "metadata": {
-                        "dev.tron": {
-                            "traceId": "trace-shared",
-                            "invocationId": format!("inv-{id}"),
-                            "sessionId": session_id.clone(),
-                            "operation": "observe",
-                            "status": "ok",
-                            "request": {"traceRecord": id},
-                            "requestHash": format!("request-hash-{id}"),
-                            "result": {"traceRecord": id, "ok": true},
-                            "resultHash": format!("result-hash-{id}"),
-                        }
-                    }
-                }),
-            })
-            .expect("trace record");
-    }
 
     harness
         .engine_host
@@ -221,13 +181,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     let provider_audits = first["sections"]["providerAudits"].as_array().unwrap();
     assert_eq!(provider_audits.len(), 1);
     assert_eq!(provider_audits[0]["eventId"], "evt_provider_audit");
-
-    let traces = first["sections"]["traceRecords"].as_array().unwrap();
-    let trace_ids = traces
-        .iter()
-        .map(|record| record["id"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(trace_ids, ["trace-a", "trace-b"]);
 
     let streams = first["sections"]["engineStreams"].as_array().unwrap();
     assert_eq!(streams.len(), 1);

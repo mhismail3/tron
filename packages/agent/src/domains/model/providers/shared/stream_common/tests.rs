@@ -277,26 +277,6 @@ fn finish_capability_invocation_malformed_args_emits_error() {
     }
 }
 
-#[test]
-fn finish_capability_invocation_with_thought_signature() {
-    let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
-    let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
-    let args: Map<String, serde_json::Value> = serde_json::from_str(r#"{"cmd":"ls"}"#).unwrap();
-    let events = acc.finish_capability_invocation_with("call_1", args, Some("sig-abc".into()));
-    match &events[0] {
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        } => {
-            assert_eq!(
-                capability_invocation.thought_signature.as_deref(),
-                Some("sig-abc")
-            );
-        }
-        _ => panic!("expected CapabilityInvocationDraftEnd"),
-    }
-}
-
 // ── close_thinking / close_text ─────────────────────────────────
 
 #[test]
@@ -407,15 +387,6 @@ fn capability_invocations_returns_active_calls() {
     let _ = acc.finish_capability_invocation("a");
     assert_eq!(acc.capability_invocations().len(), 1);
     assert_eq!(acc.capability_invocations()[0].id, "b");
-}
-
-#[test]
-fn capability_invocation_mut_returns_mutable_ref() {
-    let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
-    let tc = acc.capability_invocation_mut("call_1").unwrap();
-    tc.args.push_str("modified");
-    assert_eq!(acc.capability_invocations()[0].args, "modified");
 }
 
 // ── full lifecycle ──────────────────────────────────────────────

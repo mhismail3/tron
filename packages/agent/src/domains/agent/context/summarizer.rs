@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::messages::{Message, UserMessageContent};
 
-use super::types::{ExtractedData, SummaryResult};
+use super::types::SummaryResult;
 
 // =============================================================================
 // Summarizer Trait
@@ -60,7 +60,6 @@ impl Summarizer for KeywordSummarizer {
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut user_messages = Vec::new();
         let mut files_modified = Vec::new();
-        let mut topics = Vec::new();
         let mut model_capability_names = Vec::new();
 
         for msg in messages {
@@ -91,14 +90,7 @@ impl Summarizer for KeywordSummarizer {
                                     }
                                 }
                             }
-                            AssistantContent::Text { text } => {
-                                if let Some(first_sentence) = text.split('.').next() {
-                                    let topic = truncate(first_sentence.trim(), 80);
-                                    if !topic.is_empty() && !topics.contains(&topic) {
-                                        topics.push(topic);
-                                    }
-                                }
-                            }
+                            AssistantContent::Text { .. } => {}
                             AssistantContent::Thinking { .. } => {}
                         }
                     }
@@ -125,20 +117,7 @@ impl Summarizer for KeywordSummarizer {
             parts.join(" ")
         };
 
-        Ok(SummaryResult {
-            narrative,
-            extracted_data: ExtractedData {
-                current_goal: user_messages.first().cloned().unwrap_or_default(),
-                completed_steps: Vec::new(),
-                pending_tasks: Vec::new(),
-                key_decisions: Vec::new(),
-                files_modified,
-                topics_discussed: topics,
-                user_preferences: Vec::new(),
-                important_context: Vec::new(),
-                thinking_insights: Vec::new(),
-            },
-        })
+        Ok(SummaryResult { narrative })
     }
 }
 
@@ -171,8 +150,6 @@ fn user_content_text(content: &UserMessageContent) -> String {
 mod tests {
     use super::*;
     use crate::shared::protocol::content::UserContent;
-    use serde_json::json;
-
     #[test]
     fn truncate_bounds_long_string() {
         let result = truncate("hello world", 8);
@@ -190,35 +167,6 @@ mod tests {
         let result = summarizer.summarize(&messages).await.unwrap();
         assert!(!result.narrative.is_empty());
         assert!(result.narrative.contains("1 requests"));
-    }
-
-    #[tokio::test]
-    async fn keyword_summarizer_extracts_files() {
-        let summarizer = KeywordSummarizer;
-        let mut args = serde_json::Map::new();
-        let _ = args.insert("file_path".into(), json!("/src/login.rs"));
-        let messages = vec![
-            Message::user("Fix the login"),
-            Message::Assistant {
-                content: vec![AssistantContent::CapabilityInvocation {
-                    id: "tc-1".into(),
-                    name: "inspect".into(),
-                    arguments: args,
-                    thought_signature: None,
-                }],
-                usage: None,
-                cost: None,
-                stop_reason: None,
-                thinking: None,
-            },
-        ];
-        let result = summarizer.summarize(&messages).await.unwrap();
-        assert!(
-            result
-                .extracted_data
-                .files_modified
-                .contains(&"/src/login.rs".to_string())
-        );
     }
 
     #[tokio::test]

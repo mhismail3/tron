@@ -36,81 +36,6 @@ fn get_session_message_previews_basic() {
     );
 }
 
-// ── Batch event queries ───────────────────────────────────────────
-
-#[test]
-fn get_events_by_ids_basic() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None)
-        .unwrap();
-    let evt = store
-        .append(&AppendOptions {
-            session_id: &cr.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Hello"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let ids = [cr.root_event.id.as_str(), evt.id.as_str()];
-    let result = store.get_events_by_ids(&ids).unwrap();
-    assert_eq!(result.len(), 2);
-    assert!(result.contains_key(&cr.root_event.id));
-    assert!(result.contains_key(&evt.id));
-}
-
-#[test]
-fn get_events_by_sessions_and_types_returns_all_matching_events() {
-    let store = setup();
-    let first = store
-        .create_session("claude-opus-4-6", "/tmp/project-a", None, None)
-        .unwrap();
-    let second = store
-        .create_session("claude-opus-4-6", "/tmp/project-b", None, None)
-        .unwrap();
-
-    let first_user = store
-        .append(&AppendOptions {
-            session_id: &first.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "first"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    let _ = store
-        .append(&AppendOptions {
-            session_id: &first.session.id,
-            event_type: EventType::MessageAssistant,
-            payload: serde_json::json!({"content": "reply"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    let second_user = store
-        .append(&AppendOptions {
-            session_id: &second.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "second"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let events = store
-        .get_events_by_sessions_and_types(
-            &[&first.session.id, &second.session.id],
-            &["message.user"],
-        )
-        .unwrap();
-
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].id, first_user.id);
-    assert_eq!(events[1].id, second_user.id);
-}
-
 #[test]
 fn get_events_by_type_basic() {
     let store = setup();
@@ -191,41 +116,6 @@ fn turn_queries_use_denormalized_session_ordinals() {
         Some(first_start.id)
     );
     assert_eq!(second_start.turn, Some(21));
-}
-
-#[test]
-fn get_events_by_workspace_and_types_cross_session() {
-    let store = setup();
-    let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None)
-        .unwrap();
-    let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None)
-        .unwrap();
-
-    store
-        .append(&AppendOptions {
-            session_id: &cr1.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "A"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    store
-        .append(&AppendOptions {
-            session_id: &cr2.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "B"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let result = store
-        .get_events_by_workspace_and_types(&cr1.session.workspace_id, &["message.user"], None, None)
-        .unwrap();
-    assert_eq!(result.len(), 2);
 }
 
 #[test]
@@ -454,7 +344,6 @@ fn get_state_at_head_basic() {
         .unwrap();
 
     let state = store.get_state_at_head(&cr.session.id).unwrap();
-    assert_eq!(state.session_id, cr.session.id);
     assert_eq!(state.model, "claude-opus-4-6");
     assert_eq!(state.working_directory, "/tmp/project");
     assert_eq!(state.messages_with_event_ids.len(), 2);
@@ -474,40 +363,6 @@ fn get_state_at_head_ended_session() {
 
     let state = store.get_state_at_head(&cr.session.id).unwrap();
     assert_eq!(state.is_ended, Some(true));
-}
-
-#[test]
-fn get_state_at_specific_event() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None)
-        .unwrap();
-    let user_evt = store
-        .append(&AppendOptions {
-            session_id: &cr.session.id,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Hello"}),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-    store
-        .append(&AppendOptions {
-            session_id: &cr.session.id,
-            event_type: EventType::MessageAssistant,
-            payload: serde_json::json!({
-                "content": [{"type": "text", "text": "Hi"}],
-                "turn": 1,
-            }),
-            parent_id: None,
-            sequence: None,
-        })
-        .unwrap();
-
-    let state = store.get_state_at(&cr.session.id, &user_evt.id).unwrap();
-    assert_eq!(state.head_event_id, user_evt.id);
-    assert_eq!(state.messages_with_event_ids.len(), 1);
-    assert_eq!(state.messages_with_event_ids[0].message.role, "user");
 }
 
 #[test]

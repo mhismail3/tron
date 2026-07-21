@@ -11,9 +11,7 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyScope,
-};
+use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 /// Runtime metadata key carrying the trusted session working directory.
 ///
@@ -74,8 +72,6 @@ pub struct CausalContext {
     pub catalog_revision: CatalogRevision,
     /// Trigger id, if trigger-caused.
     pub trigger_id: Option<TriggerId>,
-    /// Delivery mode.
-    pub delivery_mode: DeliveryMode,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
     /// Engine-internal runtime metadata. This is not model-supplied payload and
@@ -97,7 +93,6 @@ impl CausalContext {
             workspace_id: None,
             catalog_revision: CatalogRevision(0),
             trigger_id: None,
-            delivery_mode: DeliveryMode::Sync,
             idempotency_key: None,
             runtime_metadata: BTreeMap::new(),
         }
@@ -186,8 +181,6 @@ pub struct Invocation {
     pub id: InvocationId,
     /// Target function id.
     pub function_id: FunctionId,
-    /// Delivery mode.
-    pub delivery_mode: DeliveryMode,
     /// Payload.
     pub payload: Value,
     /// Causal context.
@@ -205,18 +198,9 @@ impl Invocation {
         Self {
             id: InvocationId::generate(),
             function_id,
-            delivery_mode: DeliveryMode::Sync,
             payload,
             causal_context,
         }
-    }
-
-    /// Set delivery mode.
-    #[must_use]
-    pub fn with_delivery_mode(mut self, mode: DeliveryMode) -> Self {
-        self.delivery_mode = mode;
-        self.causal_context.delivery_mode = mode;
-        self
     }
 }
 
@@ -338,8 +322,6 @@ pub struct InvocationRecord {
     pub session_id: Option<String>,
     /// Workspace scope active when the invocation completed.
     pub workspace_id: Option<String>,
-    /// Delivery mode.
-    pub delivery_mode: DeliveryMode,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
     /// Concrete idempotency scope.
@@ -388,7 +370,6 @@ impl InvocationRecord {
             trigger_id: invocation.causal_context.trigger_id.clone(),
             session_id: invocation.causal_context.session_id.clone(),
             workspace_id: invocation.causal_context.workspace_id.clone(),
-            delivery_mode: invocation.delivery_mode,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
             idempotency_scope,
             replayed_from: result.replayed_from.clone(),
@@ -449,7 +430,6 @@ mod tests {
         let invocation = Invocation {
             id: InvocationId::new("inv-fixed").unwrap(),
             function_id: FunctionId::new("demo::echo").unwrap(),
-            delivery_mode: DeliveryMode::Sync,
             payload: serde_json::json!({"input": "hello"}),
             causal_context,
         };

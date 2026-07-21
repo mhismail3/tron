@@ -278,10 +278,8 @@ mod tests {
             AgentDeps {
                 responder,
                 context_manager: ContextManager::new(ContextManagerConfig {
-                    model: "mock".into(),
                     system_prompt: Some("You are helpful.".into()),
                     working_directory: None,
-                    capabilities: vec![],
                     compaction: crate::domains::agent::context::types::CompactionConfig::default(),
                 }),
                 compaction_trigger_config:

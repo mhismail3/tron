@@ -362,17 +362,6 @@ impl Orchestrator {
         self.retain_in_flight.contains_key(session_id)
     }
 
-    /// Get a cloned reference to a session's sequence counter.
-    ///
-    /// Returns `None` if the counter was never initialized for this session.
-    /// The returned `Arc<AtomicI64>` can be passed to agents and held across
-    /// async boundaries without holding a DashMap lock.
-    pub fn get_sequence_counter(&self, session_id: &str) -> Option<Arc<AtomicI64>> {
-        self.sequence_counters
-            .get(session_id)
-            .map(|entry| Arc::clone(entry.value()))
-    }
-
     // ── Per-session compaction handlers ──
 
     /// Register a compaction handler for a session.
@@ -387,6 +376,7 @@ impl Orchestrator {
     }
 
     /// Get the compaction handler for a session (if an agent is active).
+    #[cfg(test)]
     pub fn get_compaction_handler(&self, session_id: &str) -> Option<Arc<CompactionHandler>> {
         self.compaction_handlers
             .get(session_id)

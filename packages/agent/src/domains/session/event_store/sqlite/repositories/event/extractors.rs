@@ -6,7 +6,6 @@ pub(crate) fn extract_role(event: &SessionEvent) -> Option<String> {
     match event.event_type {
         EventType::MessageUser => Some("user".to_string()),
         EventType::MessageAssistant => Some("assistant".to_string()),
-        EventType::MessageSystem => Some("system".to_string()),
         EventType::CapabilityInvocationCompleted => Some("capability".to_string()),
         _ => None,
     }

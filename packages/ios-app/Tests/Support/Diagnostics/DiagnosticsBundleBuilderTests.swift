@@ -41,7 +41,7 @@ struct DiagnosticsBundleBuilderTests {
             parentId: nil,
             sessionId: "session-raw",
             workspaceId: "workspace-raw",
-            type: "error.capability",
+            type: "turn.failed",
             timestamp: "2026-04-29T21:00:00Z",
             sequence: 2,
             payload: [

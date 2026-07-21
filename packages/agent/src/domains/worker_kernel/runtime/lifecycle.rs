@@ -383,9 +383,6 @@ impl WorkerRuntime {
             "workerDynamic": true,
             "workerRouting": active.bundle.routing,
             "workerProvenance": active.bundle.provenance,
-            "workerHealth": active.summary.health,
-            "trustedLocalKernel": true,
-            "contextPrimerLevel": "relevant",
         });
         self.host
             .register_function(

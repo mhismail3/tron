@@ -10,8 +10,8 @@ use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use crate::engine::kernel::types::{
-    CatalogChange, CatalogChangeClass, CatalogRevision, CatalogSubjectKind, DeliveryMode,
-    FunctionRevision, IdempotencyScope, VisibilityScope,
+    CatalogChange, CatalogChangeClass, CatalogRevision, CatalogSubjectKind, FunctionRevision,
+    IdempotencyScope, VisibilityScope,
 };
 
 pub(super) const SQLITE_SCHEMA: &str = r#"
@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   trigger_id               TEXT,
   session_id               TEXT,
   workspace_id             TEXT,
-  delivery_mode_json       TEXT NOT NULL,
   idempotency_scope_kind   TEXT,
   idempotency_scope_value  TEXT,
   idempotency_key          TEXT,
@@ -128,7 +127,6 @@ pub(super) struct RawInvocationRow {
     pub(super) trigger_id: Option<String>,
     pub(super) session_id: Option<String>,
     pub(super) workspace_id: Option<String>,
-    pub(super) delivery_mode_json: String,
     pub(super) idempotency_scope_kind: Option<String>,
     pub(super) idempotency_scope_value: Option<String>,
     pub(super) idempotency_key: Option<String>,
@@ -198,10 +196,6 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
         trigger_id: row.trigger_id.map(TriggerId::new).transpose()?,
         session_id: row.session_id,
         workspace_id: row.workspace_id,
-        delivery_mode: from_json_string::<DeliveryMode>(
-            "invocation.delivery_mode",
-            &row.delivery_mode_json,
-        )?,
         idempotency_key: row.idempotency_key,
         idempotency_scope: match (row.idempotency_scope_kind, row.idempotency_scope_value) {
             (Some(kind), Some(value)) => Some(IdempotencyScope::new(kind, value)),

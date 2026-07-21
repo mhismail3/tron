@@ -43,65 +43,6 @@ fn capability_invocation_serde_roundtrip() {
     assert_eq!(tc, back);
 }
 
-// -- normalize helpers --
-
-#[test]
-fn normalize_capability_arguments_requires_arguments() {
-    let v = json!({"input": {"a": 1}});
-    let args = normalize_capability_arguments(&v);
-    assert!(args.is_empty());
-}
-
-#[test]
-fn normalize_capability_arguments_from_arguments() {
-    let v = json!({"arguments": {"b": 2}});
-    let args = normalize_capability_arguments(&v);
-    assert_eq!(args["b"], 2);
-}
-
-#[test]
-fn normalize_capability_arguments_empty() {
-    let v = json!({});
-    let args = normalize_capability_arguments(&v);
-    assert!(args.is_empty());
-}
-
-#[test]
-fn normalize_capability_result_id_api_format() {
-    let v = json!({"capability_invocation_id": "tc-1"});
-    assert_eq!(normalize_capability_result_id(&v), "tc-1");
-}
-
-#[test]
-fn normalize_capability_result_id_internal_format() {
-    let v = json!({"invocationId": "tc-2"});
-    assert_eq!(normalize_capability_result_id(&v), "tc-2");
-}
-
-#[test]
-fn normalize_capability_result_id_missing() {
-    let v = json!({});
-    assert_eq!(normalize_capability_result_id(&v), "");
-}
-
-#[test]
-fn normalize_is_error_api_format() {
-    let v = json!({"is_error": true});
-    assert!(normalize_is_error(&v));
-}
-
-#[test]
-fn normalize_is_error_internal_format() {
-    let v = json!({"isError": true});
-    assert!(normalize_is_error(&v));
-}
-
-#[test]
-fn normalize_is_error_default_false() {
-    let v = json!({});
-    assert!(!normalize_is_error(&v));
-}
-
 // -- TokenUsage --
 
 #[test]
@@ -244,32 +185,6 @@ fn message_serde_roundtrip() {
 // -- extract helpers --
 
 #[test]
-fn extract_capability_invocations_from_content() {
-    let content = vec![
-        AssistantContent::text("text"),
-        AssistantContent::CapabilityInvocation {
-            id: "tc-1".into(),
-            name: "execute".into(),
-            arguments: Map::new(),
-            thought_signature: None,
-        },
-        AssistantContent::Thinking {
-            thinking: "hmm".into(),
-            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
-            signature: None,
-        },
-        AssistantContent::CapabilityInvocation {
-            id: "tc-2".into(),
-            name: "inspect".into(),
-            arguments: Map::new(),
-            thought_signature: None,
-        },
-    ];
-    let tcs = extract_capability_invocations(&content);
-    assert_eq!(tcs.len(), 2);
-}
-
-#[test]
 fn extract_assistant_text_from_content() {
     let content = vec![
         AssistantContent::text("first"),
@@ -282,49 +197,6 @@ fn extract_assistant_text_from_content() {
         AssistantContent::text("second"),
     ];
     assert_eq!(extract_assistant_text(&content), "first\nsecond");
-}
-
-// -- Type guard functions --
-
-#[test]
-fn is_provider_capability_result_block_positive() {
-    let v =
-        json!({"type": "capability_result", "capability_invocation_id": "tc-1", "content": "ok"});
-    assert!(is_provider_capability_result_block(&v));
-}
-
-#[test]
-fn is_provider_capability_result_block_negative() {
-    let v = json!({"type": "capability_result", "invocationId": "tc-1", "content": "ok"});
-    assert!(!is_provider_capability_result_block(&v));
-}
-
-#[test]
-fn is_internal_capability_result_block_positive() {
-    let v = json!({"type": "capability_result", "invocationId": "tc-1", "content": "ok"});
-    assert!(is_internal_capability_result_block(&v));
-}
-
-#[test]
-fn is_any_capability_result_block_both_formats() {
-    let api =
-        json!({"type": "capability_result", "capability_invocation_id": "tc-1", "content": "ok"});
-    let internal = json!({"type": "capability_result", "invocationId": "tc-1", "content": "ok"});
-    assert!(is_any_capability_result_block(&api));
-    assert!(is_any_capability_result_block(&internal));
-}
-
-#[test]
-fn is_provider_capability_invocation_block_positive() {
-    let v =
-        json!({"type": "capability_invocation", "id": "tc-1", "name": "execute", "arguments": {}});
-    assert!(is_provider_capability_invocation_block(&v));
-}
-
-#[test]
-fn is_provider_capability_invocation_block_negative_missing_arguments() {
-    let v = json!({"type": "capability_invocation", "id": "tc-1", "name": "execute"});
-    assert!(!is_provider_capability_invocation_block(&v));
 }
 
 // -- Context --
@@ -345,7 +217,6 @@ fn context_serde_roundtrip() {
         capabilities: None,
         working_directory: Some("/tmp".into()),
         agent_state_context: None,
-        memory_prompt_context: None,
         server_origin: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();

@@ -130,7 +130,6 @@ pub(super) fn same_meta_function_contract(
         && existing.effect_class == expected.effect_class
         && existing.risk_level == expected.risk_level
         && existing.idempotency == expected.idempotency
-        && existing.allowed_delivery_modes == expected.allowed_delivery_modes
         && existing.health == expected.health
         && existing.provenance == expected.provenance
         && existing.metadata == expected.metadata
@@ -197,7 +196,6 @@ fn invoke_schema() -> Value {
         "properties": {
             "functionId": {"type": "string"},
             "payload": {},
-            "deliveryMode": {"type": "string", "enum": ["sync"]},
             "idempotencyKey": {"type": "string"}
         }
     })
@@ -306,15 +304,12 @@ pub(super) fn delegated_child_invocation(invocation: &Invocation) -> Result<Invo
         .get("payload")
         .cloned()
         .unwrap_or(Value::Null);
-    let delivery_mode = optional_delivery_mode(invocation.payload.get("deliveryMode"))?
-        .unwrap_or(DeliveryMode::Sync);
     let idempotency_key = optional_string(invocation.payload.get("idempotencyKey"))?;
 
     let mut child_context = invocation.causal_context.clone();
     child_context.parent_invocation_id = Some(invocation.id.clone());
     child_context.idempotency_key = idempotency_key;
-    child_context.delivery_mode = delivery_mode;
-    Ok(Invocation::new_sync(target_id, payload, child_context).with_delivery_mode(delivery_mode))
+    Ok(Invocation::new_sync(target_id, payload, child_context))
 }
 
 pub(super) fn error_value(error: &EngineError) -> Value {
@@ -473,19 +468,6 @@ pub(super) fn optional_health(value: Option<&Value>) -> Result<Option<FunctionHe
         .transpose()
 }
 
-pub(super) fn optional_delivery_mode(value: Option<&Value>) -> Result<Option<DeliveryMode>> {
-    value
-        .map(|value| {
-            value
-                .as_str()
-                .ok_or_else(|| {
-                    EngineError::PolicyViolation("deliveryMode must be a string".to_owned())
-                })
-                .and_then(parse_delivery_mode)
-        })
-        .transpose()
-}
-
 fn parse_visibility(value: &str) -> Result<VisibilityScope> {
     match value {
         "internal" => Ok(VisibilityScope::Internal),
@@ -538,15 +520,6 @@ fn parse_health(value: &str) -> Result<FunctionHealth> {
         "unknown" => Ok(FunctionHealth::Unknown),
         _ => Err(EngineError::PolicyViolation(format!(
             "unsupported health {value}"
-        ))),
-    }
-}
-
-fn parse_delivery_mode(value: &str) -> Result<DeliveryMode> {
-    match value {
-        "sync" => Ok(DeliveryMode::Sync),
-        _ => Err(EngineError::PolicyViolation(format!(
-            "unsupported delivery mode {value}"
         ))),
     }
 }

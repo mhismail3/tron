@@ -632,7 +632,6 @@ indexes and durable operational history.
 | `storage_metadata` | storage subsystem metadata |
 | `storage_payload_refs` | payload ownership references |
 | `storage_retention_runs` | retention-run evidence |
-| `trace_records` | cross-invocation causal trace records |
 | `workspaces` | workspace metadata |
 
 ### Worker database
@@ -683,23 +682,23 @@ Worker live topics are:
   rollback, retirement, purge, engine stop/resume, failure, and related state;
 - `worker.invocations` — started/completed/failed invocation summaries.
 
-The session log has **24 typed event variants**:
+The durable session log has **13 event variants**. Live-only deltas, progress,
+context notices, and errors remain transport events and are not duplicated as
+unwritten storage contracts:
 
 | Concern | Event types |
 |---|---|
 | session | `session.start`, `session.end`, `session.fork` |
-| messages | `message.user`, `message.assistant`, `message.system`, `message.deleted` |
+| messages | `message.user`, `message.assistant`, `message.deleted` |
 | model | `model.provider_request` |
-| provider tools | `capability.invocation.started`, `capability.invocation.completed`, `capability.invocation.progress` |
-| streaming | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
-| context | `compact.boundary`, `compact.summary_staging`, `context.cleared` |
-| metadata | `metadata.update`, `metadata.tag` |
-| failures | `error.agent`, `error.capability`, `error.provider`, `turn.failed` |
+| provider tools | `capability.invocation.started`, `capability.invocation.completed` |
+| turns | `stream.turn_start`, `stream.turn_end`, `turn.failed` |
+| context | `compact.boundary` |
 
-The historical `capability.invocation.*` and `error.capability` names describe
-generic provider tool-call conversation evidence; they do not restore the
-removed authorization plane. Removed governance-domain stream topics and
-schemas are not retained through adapters.
+The historical `capability.invocation.*` names describe generic provider
+tool-call conversation evidence; they do not restore the removed authorization
+plane. Removed governance-domain stream topics and schemas are not retained
+through adapters.
 
 ## iOS Client
 
@@ -728,9 +727,11 @@ Conversational creation remains the authoring interface; the client does not
 contain a bundle editor. The Mac package is a server supervisor/pairing shell,
 so iOS is the only current operational engine client requiring the console.
 
-Compaction and clear events are direct durable session boundaries. The client
-renders those events without a parallel context-control resource client or
-Session Briefing sheet.
+Compaction is a direct durable session boundary. Context clearing is a live
+transport event; the resulting context size is reflected by later session/token
+truth rather than an unwritten `context.cleared` storage row. The client renders
+both without a parallel context-control resource client or Session Briefing
+sheet.
 
 Settings exposes the Logs sheet in every iOS build configuration from its toolbar.
 While connected, Tron automatically ingests deduplicated client logs into the

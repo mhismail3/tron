@@ -77,7 +77,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
             "subscribe",
             "latest_cursor",
             "unsubscribe",
-            "acknowledge",
             "poll",
             "list_by_session",
             "stream_scope_visible",

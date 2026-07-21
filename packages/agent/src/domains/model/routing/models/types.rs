@@ -102,53 +102,6 @@ pub struct ModelInfo {
     pub release_date: Option<String>,
 }
 
-/// Model capabilities for runtime feature detection.
-#[derive(Clone, Debug, Default)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct ModelCapabilities {
-    /// Supports extended thinking (Anthropic).
-    pub supports_thinking: bool,
-    /// Supports adaptive thinking (Anthropic Opus 4.6).
-    pub supports_adaptive_thinking: bool,
-    /// Supports effort levels (Anthropic).
-    pub supports_effort: bool,
-    /// Available effort levels.
-    pub effort_levels: Vec<String>,
-    /// Default effort level.
-    pub default_effort_level: Option<String>,
-    /// Supports reasoning (`OpenAI`).
-    pub supports_reasoning: bool,
-    /// Available reasoning efforts.
-    pub reasoning_levels: Vec<String>,
-    /// Default reasoning effort.
-    pub default_reasoning_level: Option<String>,
-    /// Supports Gemini thinking levels (Gemini 3).
-    pub supports_thinking_levels: bool,
-    /// Available thinking levels (Gemini).
-    pub thinking_levels: Vec<String>,
-    /// Default thinking level (Gemini).
-    pub default_thinking_level: Option<String>,
-    /// Supports capability invocation.
-    pub supports_capabilities: bool,
-    /// Supports image inputs.
-    pub supports_images: bool,
-    /// Maximum output tokens.
-    pub max_output: u64,
-    /// Context window size.
-    pub context_window: u64,
-}
-
-/// Grouping of models by category for UI display.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ModelCategory {
-    /// Category name (e.g., `"Latest"`, `"Retired"`).
-    pub name: String,
-    /// Category description.
-    pub description: String,
-    /// Models in this category.
-    pub models: Vec<ModelInfo>,
-}
-
 /// Calculate the cost in USD for a given model and token counts.
 #[allow(clippy::cast_precision_loss)]
 pub fn calculate_cost(

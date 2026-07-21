@@ -93,13 +93,6 @@ impl MessageStore {
         &self.messages
     }
 
-    /// Clear all messages from the store.
-    pub fn clear(&mut self) {
-        self.arc_snapshot = None;
-        self.messages.clear();
-        self.token_cache.clear();
-    }
-
     /// Get a shared reference-counted snapshot of messages (amortized zero-copy).
     ///
     /// Builds the `Arc<[Message]>` on first call, then returns cached clones
@@ -130,13 +123,12 @@ impl MessageStore {
         self.token_cache.get(index).copied()
     }
 
-    /// Get current message count.
+    #[cfg(test)]
     #[must_use]
     pub fn len(&self) -> usize {
         self.messages.len()
     }
 
-    /// Returns `true` if the store contains no messages.
     #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -296,21 +288,6 @@ mod tests {
         assert_eq!(store.as_slice().len(), 1);
     }
 
-    // -- clear --
-
-    #[test]
-    fn clear_removes_all_messages() {
-        let mut store = MessageStore::new();
-        store.add(Message::user("Message 1"));
-        store.add(Message::user("Message 2"));
-
-        store.clear();
-
-        assert!(store.is_empty());
-        assert_eq!(store.len(), 0);
-        assert_eq!(store.get_tokens(), 0);
-    }
-
     // -- get_tokens --
 
     #[test]
@@ -368,26 +345,6 @@ mod tests {
         let cached = store.get_cached_tokens(0);
         assert!(cached.is_some());
         assert!(cached.unwrap() > 0);
-    }
-
-    // -- len / is_empty --
-
-    #[test]
-    fn len_tracks_add_and_clear() {
-        let mut store = MessageStore::new();
-        assert_eq!(store.len(), 0);
-        assert!(store.is_empty());
-
-        store.add(Message::user("One"));
-        assert_eq!(store.len(), 1);
-        assert!(!store.is_empty());
-
-        store.add(Message::user("Two"));
-        assert_eq!(store.len(), 2);
-
-        store.clear();
-        assert_eq!(store.len(), 0);
-        assert!(store.is_empty());
     }
 
     // -- token cache correctness --
@@ -449,16 +406,6 @@ mod tests {
         let arc2 = store.as_arc();
         assert!(!Arc::ptr_eq(&arc1, &arc2));
         assert_eq!(arc2.len(), 1);
-    }
-
-    #[test]
-    fn as_arc_invalidated_by_clear() {
-        let mut store = MessageStore::new();
-        store.add(Message::user("Hello"));
-        let _arc1 = store.as_arc();
-        store.clear();
-        let arc2 = store.as_arc();
-        assert!(arc2.is_empty());
     }
 
     #[test]

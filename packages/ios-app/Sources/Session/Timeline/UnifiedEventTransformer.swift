@@ -7,7 +7,6 @@ import Foundation
 /// presentation state that `ChatViewModel` mounts after reconstruction.
 struct ReconstructedState {
     var messages: [ChatMessage] = []
-    var reasoningLevel: String? = nil
     var totalTokenUsage = TokenUsage(
         inputTokens: 0,
         outputTokens: 0,
@@ -111,14 +110,14 @@ struct UnifiedEventTransformer {
         for event in sorted {
             // Skip capability.invocation.started, capability.invocation.completed, and stream.thinking_complete —
             // all are processed via message.assistant content blocks
-            if event.type == PersistedEventType.capabilityInvocationStarted.rawValue ||
-               event.type == PersistedEventType.capabilityInvocationCompleted.rawValue ||
-               event.type == PersistedEventType.streamThinkingComplete.rawValue {
+            if event.type == SessionEventType.capabilityInvocationStarted.rawValue ||
+               event.type == SessionEventType.capabilityInvocationCompleted.rawValue ||
+               event.type == SessionEventType.streamThinkingComplete.rawValue {
                 continue
             }
 
             // message.assistant: process content blocks in order (preserves interleaving)
-            if event.type == PersistedEventType.messageAssistant.rawValue {
+            if event.type == SessionEventType.messageAssistant.rawValue {
                 var interleaved = InterleavedContentProcessor.transform(
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
@@ -157,13 +156,10 @@ struct UnifiedEventTransformer {
         payload: [String: AnyCodable],
         eventId: String? = nil
     ) -> ChatMessage? {
-        guard let eventType = PersistedEventType(rawValue: type) else {
+        guard let eventType = SessionEventType(rawValue: type), eventType != .unknown else {
             logger.warning("Unknown persisted event type: \(type)", category: .events)
             return nil
         }
-
-        // Skip events that don't render as chat messages
-        guard eventType.rendersAsChatMessage else { return nil }
 
         let ts = parseTimestamp(timestamp)
 
@@ -172,26 +168,12 @@ struct UnifiedEventTransformer {
             return MessageEventProjection.transformUserMessage(payload, timestamp: ts)
         case .messageAssistant:
             return MessageEventProjection.transformAssistantMessage(payload, timestamp: ts)
-        case .messageSystem:
-            return MessageEventProjection.transformSystemMessage(payload, timestamp: ts)
         case .capabilityInvocationStarted:
             return CapabilityInvocationEventProjection.transformInvocationStarted(payload, timestamp: ts)
         case .capabilityInvocationCompleted:
             return CapabilityInvocationEventProjection.transformInvocationCompleted(payload, timestamp: ts)
-        case .configModelSwitch:
-            return ConfigEventProjection.transformModelSwitch(payload, timestamp: ts)
-        case .configReasoningLevel:
-            return ConfigEventProjection.transformReasoningLevelChange(payload, timestamp: ts)
-        case .errorAgent:
-            return ErrorEventProjection.transformAgentError(payload, timestamp: ts)
-        case .errorCapability:
-            return ErrorEventProjection.transformCapabilityError(payload, timestamp: ts)
-        case .errorProvider:
-            return ErrorEventProjection.transformProviderError(payload, timestamp: ts)
         case .turnFailed:
             return ErrorEventProjection.transformTurnFailed(payload, timestamp: ts)
-        case .contextCleared:
-            return SystemEventProjection.transformContextCleared(payload, timestamp: ts)
         case .compactBoundary:
             return SystemEventProjection.transformCompactBoundary(payload, timestamp: ts)
         default:
@@ -220,11 +202,11 @@ struct UnifiedEventTransformer {
     static func buildCapabilityInvocationMaps<E: EventTransformable>(from events: [E]) -> CapabilityInvocationMapResult {
         var result = CapabilityInvocationMapResult()
         for event in events {
-            if event.type == PersistedEventType.capabilityInvocationStarted.rawValue,
+            if event.type == SessionEventType.capabilityInvocationStarted.rawValue,
                let payload = CapabilityInvocationStartedPayload(from: event.payload) {
                 result.startedInvocations[payload.invocationId] = payload
             }
-            if event.type == PersistedEventType.capabilityInvocationCompleted.rawValue,
+            if event.type == SessionEventType.capabilityInvocationCompleted.rawValue,
                let payload = CapabilityInvocationCompletedPayload(from: event.payload) {
                 result.completedInvocations[payload.invocationId] = payload
             }
@@ -277,20 +259,16 @@ extension UnifiedEventTransformer {
         // would incorrectly interleave parent and forked events
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
-        // PASS 1: Collect capability invocation maps (shared), plus deleted event IDs and config state (reconstruct-only).
+        // PASS 1: Collect capability invocation maps and deleted event IDs.
         let maps = buildCapabilityInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
 
         var deletedEventIds = Set<String>()
         for event in sorted {
-            if event.type == PersistedEventType.messageDeleted.rawValue,
+            if event.type == SessionEventType.messageDeleted.rawValue,
                let payload = MessageDeletedPayload(from: event.payload) {
                 deletedEventIds.insert(payload.targetEventId)
-            }
-            if event.type == PersistedEventType.configReasoningLevel.rawValue {
-                let payload = ReasoningLevelPayload(from: event.payload)
-                state.reasoningLevel = payload.newLevel
             }
         }
 
@@ -299,7 +277,7 @@ extension UnifiedEventTransformer {
             if deletedEventIds.contains(event.id) {
                 continue
             }
-            guard let eventType = PersistedEventType(rawValue: event.type) else { continue }
+            guard let eventType = SessionEventType(rawValue: event.type), eventType != .unknown else { continue }
 
             switch eventType {
             case .capabilityInvocationCompleted, .capabilityInvocationStarted, .streamThinkingComplete:
@@ -328,10 +306,7 @@ extension UnifiedEventTransformer {
                     state.lastTurnInputTokens = record.computed.contextWindowTokens
                 }
 
-            case .messageUser, .messageSystem,
-                 .configModelSwitch, .configReasoningLevel,
-                 .contextCleared,
-                 .errorAgent, .errorCapability, .errorProvider, .turnFailed:
+            case .messageUser, .turnFailed:
                 if var message = transformPersistedEvent(event) {
                     if eventType == .messageUser {
                         message.eventId = event.id

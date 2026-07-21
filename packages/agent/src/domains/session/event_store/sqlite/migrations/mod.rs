@@ -112,11 +112,6 @@ pub fn current_version(conn: &Connection) -> Result<u32> {
     Ok(version)
 }
 
-/// Return the latest migration version defined in code.
-pub fn latest_version() -> u32 {
-    MIGRATIONS.last().map_or(0, |m| m.version)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal
 // ─────────────────────────────────────────────────────────────────────────────

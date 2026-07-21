@@ -107,7 +107,6 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
     assert_eq!(records[0].trace_id, trace("trace"));
     assert_eq!(records[0].parent_invocation_id, Some(parent));
     assert_eq!(records[0].trigger_id, Some(trigger));
-    assert_eq!(records[0].delivery_mode, DeliveryMode::Sync);
     assert_eq!(records[0].catalog_revision, catalog.revision());
     assert_eq!(records[0].function_revision, FunctionRevision(1));
     assert!(records[0].succeeded);
@@ -363,17 +362,6 @@ async fn invocation_returns_structured_errors() {
             kind: "function",
             ..
         })
-    ));
-
-    let unsupported = catalog
-        .invoke_sync(
-            Invocation::new_sync(fid("alpha::read"), json!({}), causal())
-                .with_delivery_mode(DeliveryMode::Void),
-        )
-        .await;
-    assert!(matches!(
-        unsupported.error,
-        Some(EngineError::UnsupportedDeliveryMode { mode: "void" })
     ));
 
     let handler_failure = catalog

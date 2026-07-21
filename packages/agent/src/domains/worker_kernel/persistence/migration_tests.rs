@@ -201,7 +201,7 @@ fn assert_migrated_state(database: &Path, root: &Path) {
     let report: Value =
         serde_json::from_slice(&fs::read(root.join(IMPORT_REPORT_FILE)).unwrap()).unwrap();
     assert_eq!(report["format"], IMPORT_FORMAT);
-    assert_eq!(report["schemaVersion"], 2);
+    assert_eq!(report["schemaVersion"], 3);
     assert_eq!(report["sourceCounts"]["resources"], 2);
     assert_eq!(report["sourceCounts"]["invocations"], 1);
     assert_eq!(report["importedCandidates"].as_array().unwrap().len(), 1);

@@ -381,8 +381,8 @@ mod tests {
         let direct = store
             .append(&AppendOptions {
                 session_id: sid,
-                event_type: EventType::MetadataUpdate,
-                payload: serde_json::json!({"key": "title", "newValue": "test"}),
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "test"}),
                 parent_id: None,
                 sequence: None,
             })
@@ -415,8 +415,8 @@ mod tests {
         let error = persister
             .append_with_runtime_sequence(
                 &session.session.id,
-                EventType::MetadataUpdate,
-                serde_json::json!({"key": "never"}),
+                EventType::MessageUser,
+                serde_json::json!({"content": "never"}),
                 Some(&counter),
             )
             .expect_err("exhausted sequence must fail closed");

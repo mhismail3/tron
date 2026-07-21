@@ -4,9 +4,6 @@
 //! and a `payload` stored as opaque [`serde_json::Value`]. This matches
 //! the TypeScript storage format exactly for DTO parity.
 //!
-//! Typed access to the payload is opt-in via [`SessionEvent::typed_payload()`],
-//! which dispatches on [`EventType`] and deserializes into the appropriate
-//! payload struct.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,7 +16,6 @@ use super::generated::EventType;
 /// etc.) at the top level and a `payload` JSON object. The payload is stored
 /// as opaque `serde_json::Value` for exact DTO parity.
 ///
-/// Use [`typed_payload()`](Self::typed_payload) for compile-time-safe payload access.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEvent {

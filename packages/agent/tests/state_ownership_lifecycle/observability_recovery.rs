@@ -275,10 +275,9 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
     );
     for required in [
         "REPLAY_MANIFEST_FORMAT",
-        "\"tron.replay.v1\"",
+        "\"tron.replay.v2\"",
         "get_events_by_session",
         "resolve_event_payloads",
-        "list_trace_records_for_replay",
         "provider_audits",
         "engine_idempotency_entries",
         "engine_invocations",

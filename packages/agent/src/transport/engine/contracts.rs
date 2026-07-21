@@ -12,14 +12,6 @@ use crate::engine::{
     EffectClass, EngineError, IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 
-const PUBLIC_ENGINE_TRANSPORT_METHODS: &[&str] =
-    &["discover", "inspect", "watch", "invoke", "promote"];
-
-/// Public `/engine` client protocol methods.
-pub fn public_engine_transport_methods() -> impl Iterator<Item = &'static str> {
-    PUBLIC_ENGINE_TRANSPORT_METHODS.iter().copied()
-}
-
 /// Build and validate the public `/engine` client protocol method set.
 pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
     let specs = vec![
@@ -96,7 +88,6 @@ fn public_spec(
     CapabilityContract::new(method, "engine", effect, risk)
         .function_id(function_id)
         .domain_worker("engine")
-        .domain_module("transport::engine::socket")
 }
 
 #[cfg(test)]

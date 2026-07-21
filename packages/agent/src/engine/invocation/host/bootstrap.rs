@@ -36,6 +36,7 @@ impl EngineHost {
 
     /// Wrap an existing catalog and bootstrap engine transport functions.
     #[cfg(test)]
+    #[cfg(test)]
     pub(in crate::engine) fn from_catalog(catalog: LiveCatalog) -> Result<Self> {
         Self::from_catalog_and_primitives(catalog, PrimitiveStores::in_memory())
     }
@@ -158,7 +159,6 @@ fn same_primitive_function_contract(
         && existing.effect_class == expected.effect_class
         && existing.risk_level == expected.risk_level
         && existing.idempotency == expected.idempotency
-        && existing.allowed_delivery_modes == expected.allowed_delivery_modes
         && existing.health == expected.health
         && existing.provenance == expected.provenance
         && existing.metadata == expected.metadata

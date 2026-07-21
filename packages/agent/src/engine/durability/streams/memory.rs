@@ -116,29 +116,6 @@ impl InMemoryEngineStreamStore {
             .collect()
     }
 
-    /// Advance a subscription cursor after client delivery.
-    pub fn acknowledge(
-        &mut self,
-        subscription_id: &str,
-        cursor: StreamCursor,
-    ) -> Result<EngineStreamSubscription> {
-        let Some(subscription) = self.subscriptions.get_mut(subscription_id) else {
-            return Err(EngineError::NotFound {
-                kind: "stream_subscription",
-                id: subscription_id.to_owned(),
-            });
-        };
-        if !subscription.active {
-            return Err(EngineError::PolicyViolation(format!(
-                "stream subscription {subscription_id} is inactive"
-            )));
-        }
-        if subscription.cursor < cursor {
-            subscription.cursor = cursor;
-        }
-        Ok(subscription.clone())
-    }
-
     /// Poll a subscription after a cursor.
     pub fn poll(
         &self,

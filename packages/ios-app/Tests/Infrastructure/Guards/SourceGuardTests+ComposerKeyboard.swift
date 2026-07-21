@@ -212,7 +212,9 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let receiverStart = try #require(source.range(of: ".onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage))"))
-        let receiverEnd = try #require(source[receiverStart.upperBound...].range(of: ".onAppear"))
+        let receiverEnd = try #require(
+            source[receiverStart.upperBound...].range(of: ".onChange(of: scenePhase)")
+        )
         let receiverSource = String(source[receiverStart.lowerBound..<receiverEnd.lowerBound])
 
         #expect(

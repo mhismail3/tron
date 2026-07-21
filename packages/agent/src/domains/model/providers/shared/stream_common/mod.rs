@@ -280,31 +280,6 @@ impl StreamAccumulator {
         }]
     }
 
-    /// Finish a capability invocation with pre-parsed arguments and optional thought signature.
-    #[cfg(test)]
-    pub fn finish_capability_invocation_with(
-        &mut self,
-        id: &str,
-        arguments: Map<String, serde_json::Value>,
-        thought_signature: Option<String>,
-    ) -> Vec<StreamEvent> {
-        let pos = self
-            .capability_invocations
-            .iter()
-            .position(|tc| tc.id == id);
-        let Some(idx) = pos else {
-            return vec![];
-        };
-        let tc = self.capability_invocations.remove(idx);
-        let mut capability_invocation = CapabilityInvocationDraft::new(tc.id, tc.name, arguments);
-        if let Some(sig) = thought_signature {
-            capability_invocation = capability_invocation.with_thought_signature(&sig);
-        }
-        vec![StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        }]
-    }
-
     /// Emit `ThinkingEnd` if thinking was started, closing the thinking block.
     ///
     /// Returns the event with accumulated thinking text and optional signature.
@@ -369,17 +344,6 @@ impl StreamAccumulator {
     #[cfg(test)]
     pub fn capability_invocations(&self) -> &[CapabilityInvocationAccumulator] {
         &self.capability_invocations
-    }
-
-    /// Get a mutable reference to a capability invocation by ID.
-    #[cfg(test)]
-    pub fn capability_invocation_mut(
-        &mut self,
-        id: &str,
-    ) -> Option<&mut CapabilityInvocationAccumulator> {
-        self.capability_invocations
-            .iter_mut()
-            .find(|tc| tc.id == id)
     }
 
     /// Set input and output token counts.

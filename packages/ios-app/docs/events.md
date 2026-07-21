@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-17 (registry-owned dispatch; source/client stream-loss recovery; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
+> Last verified: 2026-07-21 (registry-owned live dispatch; 13-event durable server catalog; client-local completed-thinking row; source/client stream-loss recovery; response-complete finality; canonical-failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -155,11 +155,11 @@ objects.
 The live `error` plugin and `agent.turn_failed` plugin do not synthesize
 placeholder codes, messages, turns, or recoverability. If the current server
 payload omits required failure fields, the plugin transform drops the malformed
-event. Persisted `error.*` and `turn.failed` projections, provider error pills,
-session summaries, expanded event content, and capability error rows prefer the
-server envelope whenever it is present. Cancellation presentation is selected
-only from the canonical cancellation code/category, never from an abort RPC or
-client-authored error string.
+event. `turn.failed` is the durable failed-turn record; individual capability
+failures remain in `capability.invocation.completed`. The client does not retain
+unwritten `error.agent`, `error.capability`, or `error.provider` storage cases.
+Cancellation presentation is selected only from the canonical cancellation
+code/category, never from an abort RPC or client-authored error string.
 
 Local reachability and pairing failures may still be classified locally when no
 server response exists. Server-authored categories, retryability,
@@ -209,11 +209,14 @@ context-window value; the coordinator does not pass a duplicate token snapshot.
 messages from `SessionEvent` rows. Engine reconstruction helpers own persisted
 event decoding support; the transformer is Session-owned because it projects
 durable events into chat timeline state. Its transient reconstruction result
-contains only messages, the latest reasoning level, accumulated token usage,
-and the last context size. Capability lifecycle rows are joined into their
-rendered assistant content; compact boundaries retain their rendered message
-and update the context size. Session lifecycle, turn, file, metadata, and tag
-rows remain available as durable diagnostics without creating parallel mounted
+contains only messages, accumulated token usage, and the last context size.
+`SessionEventType.serverDurableCases` mirrors the server's 13-event storage
+contract. The only additional cached type is the explicitly client-local
+`stream.thinking_complete` row used to retain expanded thinking across app
+restarts. Capability lifecycle rows are joined into their rendered assistant
+content; compact boundaries retain their rendered message and update the
+context size. Session lifecycle, turn boundaries, and provider-request audits
+remain available as durable diagnostics without creating parallel mounted
 client state.
 Capability identity fields stay primitive: model primitive, operation,
 trace/root invocation ids, theme color, and presentation hints. Reconstruction
