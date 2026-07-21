@@ -15,6 +15,7 @@
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
 //! | `persistence` | Canonical bundles, snapshot-first legacy-state retirement, index reconstruction, and durable operational ledgers |
+//! | `core_proposals` | Isolated Git worktree proposals, bounded test evidence, and recorded conversational approval |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
 //! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, supervision, and primitive session-metadata actuation |
