@@ -1,45 +1,45 @@
-//! Capability contracts owned by the agent domain worker.
+//! Function contracts owned by the agent domain worker.
 
 use serde_json::json;
 
-use crate::domains::registration::catalog::CapabilitySpec;
-use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
-    EffectClass, FunctionVisibility, IdempotencyContract, Result as EngineResult, RiskLevel,
+    EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract,
+    Result as EngineResult, RiskLevel,
 };
 
 pub(crate) const RUNTIME_STREAM_TOPIC: &str = "agent.runtime";
 
-/// Canonical capability contracts exposed by this domain worker.
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+/// Canonical function contracts exposed by this domain worker.
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     let mut specs = vec![
-        CapabilityContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High)
+        FunctionContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
             .response_schema(agent_prompt_response_schema())
             .idempotency(IdempotencyContract::session())
             .build()?,
-        CapabilityContract::new("agent::abort", "agent", EffectClass::ReversibleSideEffect, RiskLevel::High)
+        FunctionContract::new("agent::abort", "agent", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::session())
             .build()?,
-        CapabilityContract::new("agent::abort_invocation", "agent", EffectClass::ReversibleSideEffect, RiskLevel::Medium)
+        FunctionContract::new("agent::abort_invocation", "agent", EffectClass::ReversibleSideEffect, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"invocationId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","invocationId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::session())
             .build()?,
-        CapabilityContract::new("agent::status", "agent", EffectClass::PureRead, RiskLevel::Low)
+        FunctionContract::new("agent::status", "agent", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?
     ];
-    specs.extend(hidden_capabilities()?);
+    specs.extend(internal_function_definitions()?);
     Ok(specs)
 }
 
-fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+fn internal_function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new(
+        FunctionContract::new(
             "agent::prompt_apply",
             "agent",
             EffectClass::ExternalSideEffect,
@@ -50,7 +50,7 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .response_schema(agent_prompt_response_schema())
         .idempotency(IdempotencyContract::session())
         .build()?,
-        CapabilityContract::new(
+        FunctionContract::new(
             "agent::run_turn",
             "agent",
             EffectClass::ExternalSideEffect,
@@ -99,10 +99,10 @@ mod tests {
 
     #[test]
     fn agent_contract_exposes_only_prompt_transport_and_hidden_runtime() {
-        let specs = capabilities().expect("agent contracts");
+        let specs = function_definitions().expect("agent contracts");
         let ids = specs
             .iter()
-            .map(|spec| spec.function_id.as_str())
+            .map(|definition| definition.id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(
             ids,
@@ -119,11 +119,11 @@ mod tests {
 
     #[test]
     fn prompt_contracts_admit_only_affirmative_acknowledgements() {
-        let specs = capabilities().expect("agent contracts");
+        let specs = function_definitions().expect("agent contracts");
         for function_id in ["agent::prompt", "agent::prompt_apply", "agent::run_turn"] {
             let spec = specs
                 .iter()
-                .find(|spec| spec.function_id.as_str() == function_id)
+                .find(|definition| definition.id.as_str() == function_id)
                 .expect("prompt capability should be registered");
             let schema = spec
                 .response_schema

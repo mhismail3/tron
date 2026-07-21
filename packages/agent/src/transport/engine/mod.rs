@@ -14,7 +14,6 @@ pub mod socket;
 
 use serde_json::Value;
 
-use crate::domains::registration::catalog;
 use crate::engine::{ActorKind, CausalContext, FunctionId, Invocation, InvocationId, TraceId};
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
@@ -121,7 +120,7 @@ fn transport_causal_context(
         _ => TraceId::generate(),
     };
     let mut causal_context = CausalContext::new(
-        catalog::actor_id("engine-client").map_err(engine_error_to_capability_error)?,
+        crate::engine::ActorId::new("engine-client").map_err(engine_error_to_capability_error)?,
         ActorKind::Client,
         trace_id,
     );

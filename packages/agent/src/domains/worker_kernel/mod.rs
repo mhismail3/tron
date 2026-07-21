@@ -186,7 +186,7 @@ pub(crate) fn registration(
     )
     .map_err(crate::engine::EngineError::HandlerFailed)?;
     let mut functions = handlers::bind_functions(
-        contract::capabilities()?,
+        contract::function_definitions()?,
         handlers::Deps {
             runtime: Arc::clone(&runtime),
         },

@@ -69,5 +69,5 @@ pub(crate) fn function_registrations(
 ) -> crate::engine::Result<Vec<crate::domains::registration::composition::DomainFunctionRegistration>>
 {
     let domain_deps = Deps::from_engine(deps);
-    handlers::bind_functions(contract::capabilities()?, domain_deps)
+    handlers::bind_functions(contract::function_definitions()?, domain_deps)
 }

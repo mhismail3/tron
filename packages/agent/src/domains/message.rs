@@ -5,13 +5,14 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::registration::bindings::operation_bindings;
-use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
-use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::contract::FunctionContract;
 use crate::domains::session::event_store::EventStore;
-use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
+use crate::engine::{
+    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
+};
 use crate::shared::server::errors;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::opt_string;
@@ -38,12 +39,12 @@ impl Deps {
 pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    bind_functions(capabilities()?, Deps::from_engine(deps))
+    bind_functions(function_definitions()?, Deps::from_engine(deps))
 }
 
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new(
+        FunctionContract::new(
             "message::delete",
             "message",
             EffectClass::IrreversibleSideEffect,

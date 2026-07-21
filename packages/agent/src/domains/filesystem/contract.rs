@@ -7,9 +7,10 @@
 
 use serde_json::json;
 
-use crate::domains::registration::catalog::{CapabilitySpec, TransportIdempotencyMode};
-use crate::domains::registration::contract::CapabilityContract;
-use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
+use crate::domains::registration::contract::FunctionContract;
+use crate::engine::{
+    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
+};
 
 use super::WORKER;
 
@@ -17,9 +18,9 @@ pub(super) const GET_HOME_FUNCTION: &str = "filesystem::get_home";
 pub(super) const LIST_DIR_FUNCTION: &str = "filesystem::list_dir";
 pub(super) const CREATE_DIR_FUNCTION: &str = "filesystem::create_dir";
 
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new(
+        FunctionContract::new(
             GET_HOME_FUNCTION,
             WORKER,
             EffectClass::PureRead,
@@ -55,7 +56,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             }
         }))
         .build()?,
-        CapabilityContract::new(
+        FunctionContract::new(
             LIST_DIR_FUNCTION,
             WORKER,
             EffectClass::PureRead,
@@ -99,7 +100,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             }
         }))
         .build()?,
-        CapabilityContract::new(
+        FunctionContract::new(
             CREATE_DIR_FUNCTION,
             WORKER,
             EffectClass::IdempotentWrite,
@@ -126,7 +127,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             }
         }))
         .idempotency(IdempotencyContract::profile())
-        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .build()?,
     ])
 }

@@ -80,7 +80,7 @@ impl Deps {
 pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    bind_functions(contract::capabilities()?, Deps::from_engine(deps))
+    bind_functions(contract::function_definitions()?, Deps::from_engine(deps))
 }
 
 use lifecycle::{

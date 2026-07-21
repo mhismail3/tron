@@ -11,15 +11,16 @@
 //! dependency or storage-state container.
 
 use crate::domains::registration::bindings::operation_bindings;
-use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
-use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::contract::FunctionContract;
 use crate::domains::session::event_store::{
     ClientLogEntry, EventStore, LogEntry, LogSessionFilter, RecentLogQuery,
 };
-use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
+use crate::engine::{
+    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
+};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::map_event_store_error;
 use crate::shared::server::errors::CapabilityError;
@@ -33,15 +34,15 @@ use std::sync::Arc;
 pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    bind_functions(capabilities()?, Arc::clone(&deps.event_store))
+    bind_functions(function_definitions()?, Arc::clone(&deps.event_store))
 }
 
 const DEFAULT_RECENT_LIMIT: u32 = 200;
 const MAX_RECENT_LIMIT: u32 = 1_000;
 
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new(
+        FunctionContract::new(
             "logs::ingest",
             "logs",
             EffectClass::AppendOnlyEvent,
@@ -50,7 +51,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .response_schema(json!({"additionalProperties":false,"properties":{"inserted":{"type":"integer"},"success":{"type":"boolean"}},"required":["success","inserted"],"type":"object"}))
         .idempotency(IdempotencyContract::profile())
         .build()?,
-        CapabilityContract::new(
+        FunctionContract::new(
             "logs::recent",
             "logs",
             EffectClass::PureRead,

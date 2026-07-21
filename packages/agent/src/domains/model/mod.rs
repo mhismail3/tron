@@ -34,7 +34,7 @@ use crate::domains::registration::composition::{
 pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    let model_specs = contract::capabilities()?;
+    let model_definitions = contract::function_definitions()?;
     let domain_deps = Deps::from_engine(deps);
-    handlers::model::bind_functions(model_specs, domain_deps)
+    handlers::model::bind_functions(model_definitions, domain_deps)
 }

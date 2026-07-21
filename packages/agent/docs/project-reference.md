@@ -66,7 +66,10 @@ and—only for direct workers—the worker id, immutable version, routing phrase
 update time, and compact provenance. Function contracts do not carry declared
 stream topics: durable stream publication is owned directly by the emitters
 that perform it. Startup composes one flat executable function set; there is no
-parallel domain-module owner record. This removes magic-key discovery and
+parallel domain-module owner record. Each source contract builds the exact
+engine function definition once; handler binding derives the local operation
+key from that canonical identity. There is no intermediate capability catalog
+or unused transport-policy declaration. This removes magic-key discovery and
 prevents unproduced flags or test fixtures from changing production routing.
 Calls emitted together by a provider execute concurrently. The dispatcher and
 individual implementations own actual queueing and concurrency ceilings; the

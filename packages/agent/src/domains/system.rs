@@ -5,12 +5,11 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::registration::bindings::operation_bindings;
-use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
-use crate::domains::registration::contract::CapabilityContract;
-use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
+use crate::domains::registration::contract::FunctionContract;
+use crate::engine::{EffectClass, FunctionDefinition, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
@@ -36,14 +35,14 @@ impl Deps {
 pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
-    bind_functions(capabilities()?, Deps::from_engine(deps))
+    bind_functions(function_definitions()?, Deps::from_engine(deps))
 }
 
 use crate::shared::server::protocol as engine_transport_protocol;
 
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new(
+        FunctionContract::new(
             "system::ping",
             "system",
             EffectClass::PureRead,
@@ -51,7 +50,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(json!({"additionalProperties":false,"properties":{"clientVersion":{"type":"string"},"protocolVersion":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["protocolVersion"],"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"compatible":{"type":"boolean"},"minClientProtocolVersion":{"type":"integer"},"pong":{"type":"boolean"},"serverProtocolVersion":{"type":"integer"},"serverVersion":{"type":"string"},"timestamp":{"type":"string"}},"required":["pong","timestamp","serverVersion","serverProtocolVersion","minClientProtocolVersion","compatible"],"type":"object"}))
         .build()?,
-        CapabilityContract::new(
+        FunctionContract::new(
             "system::get_info",
             "system",
             EffectClass::PureRead,
@@ -149,10 +148,10 @@ mod tests {
         let expected = BTreeSet::from(["activeSessions", "uptime", "version"]);
         assert_eq!(actual, expected);
 
-        let contract = capabilities()
+        let contract = function_definitions()
             .expect("system contracts")
             .into_iter()
-            .find(|spec| spec.operation_key == "get_info")
+            .find(|definition| definition.id.as_str() == "system::get_info")
             .expect("system info contract");
         let schema = contract.response_schema.expect("response schema");
         let properties = schema["properties"]
@@ -167,10 +166,10 @@ mod tests {
             json!(["version", "uptime", "activeSessions"])
         );
 
-        let function_ids = capabilities()
+        let function_ids = function_definitions()
             .expect("system contracts")
             .into_iter()
-            .map(|spec| spec.function_id.to_string())
+            .map(|definition| definition.id.to_string())
             .collect::<BTreeSet<_>>();
         assert_eq!(
             function_ids,

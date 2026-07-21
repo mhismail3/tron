@@ -5,9 +5,8 @@
 //! Persistent behavior is registered dynamically from filesystem-owned worker
 //! bundles; there is no module manifest, proposal, binding, scheduler, legacy
 //! worker-lifecycle, or `capability::execute` registration plane.
-//! The complete production composition validates function ownership,
-//! and canonical identity uniqueness before either registration path mutates
-//! the engine catalog. The worker runtime returns one
+//! The complete production composition validates canonical identity uniqueness
+//! before either registration path mutates the engine catalog. The worker runtime returns one
 //! activation token so transport setup starts its lifecycle observer only after
 //! registration. That observer always runs; the editable autonomous-worker
 //! setting controls dispatch and the provider tool surface live rather than
@@ -18,9 +17,16 @@
 //! Domain method names are internal operation keys for service routing only.
 //! Only canonical function ids are registered. Every handler binding is owned
 //! by a domain contract; composition has no hidden-operation exceptions.
+//!
+//! ## Submodules
+//!
+//! | Module | Responsibility |
+//! |--------|----------------|
+//! | `contract` | Build the exact engine definition owned by each domain. |
+//! | `bindings` | Validate one-to-one handler coverage and wrap local handlers. |
+//! | `composition` | Narrow startup dependencies and carry executable registrations. |
 
 pub(crate) mod bindings;
-pub(crate) mod catalog;
 pub(crate) mod composition;
 pub(crate) mod contract;
 

@@ -5,12 +5,12 @@ use crate::domains::worker_kernel::types::{
 
 #[test]
 fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
-    let specs = capabilities().expect("worker-kernel contracts");
-    let surface = specs
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let surface = definitions
         .iter()
-        .find(|spec| spec.function_id.as_str() == ENGINE_SURFACE_SNAPSHOT_FUNCTION)
+        .find(|definition| definition.id.as_str() == ENGINE_SURFACE_SNAPSHOT_FUNCTION)
         .expect("surface snapshot contract");
-    assert_eq!(surface.operation_key, "surface_snapshot");
+    assert_eq!(surface.id.as_str(), ENGINE_SURFACE_SNAPSHOT_FUNCTION);
     assert_eq!(surface.effect_class, EffectClass::PureRead);
     assert!(
         core_primitives()
@@ -27,10 +27,10 @@ fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
 
 #[test]
 fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
-    let upsert = capabilities()
+    let upsert = function_definitions()
         .unwrap()
         .into_iter()
-        .find(|spec| spec.function_id.as_str() == "worker_kernel::upsert")
+        .find(|definition| definition.id.as_str() == "worker_kernel::upsert")
         .expect("worker upsert contract");
     let schema = upsert.request_schema.expect("upsert request schema");
     let bundle = &schema["properties"]["bundle"];
@@ -78,33 +78,17 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .iter()
             .any(|field| field == "checksum")
     );
-    assert!(
-        upsert
-            .description
-            .as_deref()
-            .unwrap_or_default()
-            .contains("complete authoring contract")
-    );
-    assert!(
-        upsert
-            .description
-            .as_deref()
-            .unwrap_or_default()
-            .contains("../dependencies/<name>")
-    );
+    assert!(upsert.description.contains("complete authoring contract"));
+    assert!(upsert.description.contains("../dependencies/<name>"));
     assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
     assert!(
         upsert
             .description
-            .as_deref()
-            .unwrap_or_default()
             .contains("instead of reading and echoing files")
     );
     assert!(
         upsert
             .description
-            .as_deref()
-            .unwrap_or_default()
             .contains("never injects an event envelope")
     );
     assert!(
@@ -186,10 +170,10 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
             ..
         }
     ));
-    let upsert = capabilities()
+    let upsert = function_definitions()
         .unwrap()
         .into_iter()
-        .find(|spec| spec.function_id.as_str() == "worker_kernel::upsert")
+        .find(|definition| definition.id.as_str() == "worker_kernel::upsert")
         .expect("worker upsert contract");
     let request_schema = upsert.request_schema.expect("upsert request schema");
     crate::engine::validate_engine_schema_payload(
@@ -210,28 +194,22 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
 
 #[test]
 fn permanent_worker_purge_is_explicitly_irreversible() {
-    let purge = capabilities()
+    let purge = function_definitions()
         .unwrap()
         .into_iter()
-        .find(|spec| spec.function_id.as_str() == "worker_kernel::purge")
+        .find(|definition| definition.id.as_str() == "worker_kernel::purge")
         .expect("worker purge contract");
     assert_eq!(purge.effect_class, EffectClass::IrreversibleSideEffect);
     assert_eq!(purge.risk_level, RiskLevel::Critical);
-    assert!(
-        purge
-            .description
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Permanently purge")
-    );
+    assert!(purge.description.contains("Permanently purge"));
 }
 
 #[test]
 fn direct_text_search_contract_exposes_shutdown_safe_ceilings() {
-    let search = capabilities()
+    let search = function_definitions()
         .unwrap()
         .into_iter()
-        .find(|spec| spec.function_id.as_str() == "worker_kernel::filesystem_search_text")
+        .find(|definition| definition.id.as_str() == "worker_kernel::filesystem_search_text")
         .expect("direct text search contract");
     let schema = search.request_schema.expect("text search request schema");
     assert_eq!(
@@ -242,25 +220,19 @@ fn direct_text_search_contract_exposes_shutdown_safe_ceilings() {
         schema["properties"]["maxWalkEntries"]["maximum"],
         MAX_TEXT_SEARCH_WALK_ENTRIES
     );
-    assert!(
-        search
-            .description
-            .as_deref()
-            .unwrap_or_default()
-            .contains("shutdown responsive")
-    );
+    assert!(search.description.contains("shutdown responsive"));
 }
 
 #[test]
 fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
-    let specs = capabilities().expect("worker-kernel contracts");
+    let definitions = function_definitions().expect("worker-kernel contracts");
     for descriptor in core_primitives() {
         let function_id = format!("worker_kernel::{}", descriptor.operation_key);
-        let spec = specs
+        let definition = definitions
             .iter()
-            .find(|spec| spec.function_id.as_str() == function_id)
+            .find(|definition| definition.id.as_str() == function_id)
             .unwrap_or_else(|| panic!("missing contract for {}", descriptor.model_name));
-        let response = spec
+        let response = definition
             .response_schema
             .as_ref()
             .unwrap_or_else(|| panic!("missing response schema for {}", descriptor.model_name));

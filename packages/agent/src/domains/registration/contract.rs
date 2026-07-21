@@ -1,78 +1,49 @@
-//! Generic capability-contract builders.
+//! Domain-owned function contract construction.
 //!
-//! Domain contracts are the primitive manifest for retained in-process workers:
-//! they declare the canonical function id, schema, and risk/effect contract.
-//!
-//! Domain `contract.rs` files own their function inventory, schemas, risk, and
-//! idempotency. This module contains only method-agnostic construction helpers
-//! used to turn those local records into engine definitions.
+//! Source domains declare one function contract. Building it produces the exact
+//! [`FunctionDefinition`] registered with the engine; handler binding derives
+//! the local operation key from the canonical function id. Startup retains no
+//! second capability catalog or transport-policy mirror.
 
 use serde_json::Value;
 
-use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
     Result as EngineResult, RiskLevel, WorkerId,
 };
 
-/// Fully-owned contract record supplied by one source domain.
-pub(crate) struct CapabilityContract {
-    /// Stable operation key used by the owning domain handler.
-    pub(crate) operation_key: String,
-    /// Stable canonical function id.
-    pub(crate) function_id: &'static str,
-    /// Worker that owns the registered function.
-    pub(crate) owner_worker: &'static str,
-    /// Effect class enforced by the engine.
-    pub(crate) effect_class: EffectClass,
-    /// Risk classification.
-    pub(crate) risk_level: RiskLevel,
-    /// Catalog visibility.
-    pub(crate) visibility: FunctionVisibility,
-    /// Transport-level idempotency mode for engine client protocol bindings.
-    pub(crate) idempotency_mode: TransportIdempotencyMode,
-    /// Strict request schema.
-    pub(crate) request_schema: Option<Value>,
-    /// Strict response schema.
-    pub(crate) response_schema: Option<Value>,
-    /// Mutating idempotency contract.
-    pub(crate) idempotency: Option<IdempotencyContract>,
-    /// Human-readable discovery description.
-    pub(crate) description: Option<&'static str>,
+/// Fluent source-domain builder for one executable engine function.
+pub(crate) struct FunctionContract {
+    function_id: &'static str,
+    owner_worker: &'static str,
+    effect_class: EffectClass,
+    risk_level: RiskLevel,
+    visibility: FunctionVisibility,
+    request_schema: Option<Value>,
+    response_schema: Option<Value>,
+    idempotency: Option<IdempotencyContract>,
+    description: Option<&'static str>,
 }
 
-impl CapabilityContract {
-    /// Create a domain-owned capability contract with common defaults.
+impl FunctionContract {
+    /// Create a domain-owned function contract with common defaults.
     pub(crate) fn new(
-        method: &'static str,
+        function_id: &'static str,
         owner_worker: &'static str,
         effect_class: EffectClass,
         risk_level: RiskLevel,
     ) -> Self {
-        let operation_key = method
-            .rsplit_once("::")
-            .map(|(_, key)| key)
-            .unwrap_or(method)
-            .to_string();
         Self {
-            operation_key,
-            function_id: method,
+            function_id,
             owner_worker,
             effect_class,
             risk_level,
             visibility: FunctionVisibility::Public,
-            idempotency_mode: TransportIdempotencyMode::NotRequired,
             request_schema: None,
             response_schema: None,
             idempotency: None,
             description: None,
         }
-    }
-
-    /// Set transport idempotency mode.
-    pub(crate) fn idempotency_mode(mut self, mode: TransportIdempotencyMode) -> Self {
-        self.idempotency_mode = mode;
-        self
     }
 
     /// Set engine visibility.
@@ -99,50 +70,36 @@ impl CapabilityContract {
         self
     }
 
-    /// Attach mutating idempotency metadata.
+    /// Attach the executable idempotency contract for a mutating function.
     pub(crate) fn idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
         self
     }
 
-    /// Convert the local domain record to the aggregate catalog shape.
-    pub(crate) fn build(self) -> EngineResult<CapabilitySpec> {
-        Ok(CapabilitySpec {
-            operation_key: self.operation_key,
-            function_id: FunctionId::new(self.function_id)?,
-            owner_worker: WorkerId::new(self.owner_worker)?,
-            effect_class: self.effect_class,
-            risk_level: self.risk_level,
-            visibility: self.visibility,
-            idempotency_mode: self.idempotency_mode,
-            request_schema: self.request_schema,
-            response_schema: self.response_schema,
-            idempotency: self.idempotency,
-            description: self.description,
-        })
+    /// Validate identities and build the exact engine definition.
+    pub(crate) fn build(self) -> EngineResult<FunctionDefinition> {
+        let function_id = FunctionId::new(self.function_id)?;
+        let description = self
+            .description
+            .map(str::to_owned)
+            .unwrap_or_else(|| function_id.as_str().to_owned());
+        let mut definition = FunctionDefinition::new(
+            function_id,
+            WorkerId::new(self.owner_worker)?,
+            description,
+            self.visibility,
+            self.effect_class,
+        )
+        .with_risk(self.risk_level);
+        if let Some(contract) = self.idempotency {
+            definition = definition.with_idempotency(contract);
+        }
+        if let Some(schema) = self.request_schema {
+            definition = definition.with_request_schema(schema);
+        }
+        if let Some(schema) = self.response_schema {
+            definition = definition.with_response_schema(schema);
+        }
+        Ok(definition)
     }
-}
-
-/// Build an engine function definition from one domain-owned contract.
-pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> FunctionDefinition {
-    let mut definition = FunctionDefinition::new(
-        spec.function_id.clone(),
-        spec.owner_worker.clone(),
-        spec.description.map(str::to_owned).unwrap_or_else(|| {
-            format!("Canonical domain capability {}", spec.function_id.as_str())
-        }),
-        spec.visibility.clone(),
-        spec.effect_class,
-    )
-    .with_risk(spec.risk_level);
-    if let Some(contract) = &spec.idempotency {
-        definition = definition.with_idempotency(contract.clone());
-    }
-    if let Some(schema) = &spec.request_schema {
-        definition = definition.with_request_schema(schema.clone());
-    }
-    if let Some(schema) = &spec.response_schema {
-        definition = definition.with_response_schema(schema.clone());
-    }
-    definition
 }

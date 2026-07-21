@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 
-use crate::domains::registration::catalog::{CapabilitySpec, TransportIdempotencyMode};
-use crate::domains::registration::contract::CapabilityContract;
-use crate::engine::{EffectClass, FunctionVisibility, IdempotencyContract, RiskLevel};
+use crate::domains::registration::contract::FunctionContract;
+use crate::engine::{
+    EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract, RiskLevel,
+};
 
 const WORKER: &str = "worker_kernel";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
@@ -229,7 +230,7 @@ pub(crate) fn core_primitive_for_operation(
         .find(|descriptor| descriptor.operation_key == operation_key)
 }
 
-pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
+pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
     specs.push(spec(
         "worker_kernel::filesystem_read",
@@ -466,7 +467,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         "Stop or resume all persistent worker dispatch for this engine.",
     )?);
     specs.push(
-        CapabilityContract::new(
+        FunctionContract::new(
             ENGINE_SURFACE_SNAPSHOT_FUNCTION,
             "engine",
             EffectClass::PureRead,
@@ -509,7 +510,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .build()?,
     );
     specs.push(
-        CapabilityContract::new(
+        FunctionContract::new(
             "worker_kernel::inbox_attach",
             WORKER,
             EffectClass::IdempotentWrite,
@@ -518,12 +519,11 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .request_schema(json!({"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":32},"relevanceQuery":{"type":"string"}}}))
         .response_schema(open_response())
         .idempotency(IdempotencyContract::profile())
-        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .description("Claim notable unseen worker inbox observations for transient session context.")
         .build()?,
     );
     specs.push(
-        CapabilityContract::new(
+        FunctionContract::new(
             "worker_kernel::webhook_invoke",
             WORKER,
             EffectClass::ExternalSideEffect,
@@ -532,7 +532,6 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .request_schema(json!({"type":"object","additionalProperties":false,"required":["workerId","triggerId","token","input","idempotencyKey"],"properties":{"workerId":{"type":"string"},"triggerId":{"type":"string"},"token":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"}}}))
         .response_schema(open_response())
         .idempotency(IdempotencyContract::profile())
-        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .description("Authenticated local webhook dispatch into the persistent worker runtime.")
         .build()?,
     );
@@ -545,15 +544,13 @@ fn spec(
     risk: RiskLevel,
     request: Value,
     description: &'static str,
-) -> crate::engine::Result<CapabilitySpec> {
-    let mut contract = CapabilityContract::new(function, WORKER, effect, risk)
+) -> crate::engine::Result<FunctionDefinition> {
+    let mut contract = FunctionContract::new(function, WORKER, effect, risk)
         .request_schema(request)
         .response_schema(response_schema(function))
         .description(description);
     if effect.requires_idempotency() {
-        contract = contract
-            .idempotency(IdempotencyContract::session())
-            .idempotency_mode(TransportIdempotencyMode::ExplicitRequired);
+        contract = contract.idempotency(IdempotencyContract::session());
     }
     contract.build()
 }

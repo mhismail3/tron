@@ -1,19 +1,20 @@
-//! Capability contracts owned by the model domain worker.
+//! Function contracts owned by the model domain worker.
 
 use serde_json::json;
 
-use crate::domains::registration::catalog::CapabilitySpec;
-use crate::domains::registration::contract::CapabilityContract;
-use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
+use crate::domains::registration::contract::FunctionContract;
+use crate::engine::{
+    EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
+};
 
-/// Canonical capability contracts exposed by this domain worker.
-pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+/// Canonical function contracts exposed by this domain worker.
+pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     Ok(vec![
-        CapabilityContract::new("model::list", "model", EffectClass::PureRead, RiskLevel::Low)
+        FunctionContract::new("model::list", "model", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"models":{"items":{"additionalProperties":true,"type":"object"},"type":"array"}},"required":["models"],"type":"object"}))
             .build()?,
-        CapabilityContract::new("model::switch", "model", EffectClass::ReversibleSideEffect, RiskLevel::High)
+        FunctionContract::new("model::switch", "model", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","model"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"newModel":{"type":"string"},"previousModel":{"type":"string"}},"required":["previousModel","newModel"],"type":"object"}))
             .idempotency(IdempotencyContract::session())
@@ -29,10 +30,10 @@ mod tests {
 
     #[test]
     fn list_request_contains_only_client_owned_correlation() {
-        let list = capabilities()
+        let list = function_definitions()
             .expect("model contracts")
             .into_iter()
-            .find(|spec| spec.function_id.as_str() == "model::list")
+            .find(|definition| definition.id.as_str() == "model::list")
             .expect("model list contract");
         let properties = list.request_schema.expect("request schema")["properties"]
             .as_object()

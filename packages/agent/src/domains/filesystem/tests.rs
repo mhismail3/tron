@@ -8,10 +8,10 @@ use super::*;
 
 #[test]
 fn fixed_contract_is_exactly_the_three_workspace_picker_operations() {
-    let functions = contract::capabilities()
+    let functions = contract::function_definitions()
         .expect("workspace contracts")
         .into_iter()
-        .map(|spec| spec.function_id.as_str().to_owned())
+        .map(|definition| definition.id.as_str().to_owned())
         .collect::<Vec<_>>();
     assert_eq!(
         functions,
