@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::kernel::ids::ActorId;
 
 /// Context of the actor performing discovery or invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorContext {
     /// Actor id.
     pub actor_id: ActorId,

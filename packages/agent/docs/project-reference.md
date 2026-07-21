@@ -69,6 +69,10 @@ prevents unproduced flags or test fixtures from changing production routing.
 Calls emitted together by a provider execute concurrently. The dispatcher and
 individual implementations own actual queueing and concurrency ceilings; the
 agent loop has no metadata-driven serialized-wave mode.
+The live function catalog is rebuilt at startup and is not itself a wire or
+persistence format. Function definitions and setup-only policy types therefore
+do not carry inert serialization contracts; durable idempotency and stream
+records retain their explicit codecs.
 
 ### Primitive admission rule
 

@@ -318,7 +318,7 @@ pub(crate) async fn resolve_tool_surface(
                 selection_reason,
                 relevance_score: rank.relevance_score,
                 completed_runs: rank.completed_runs,
-                health: serialized_key(&function.health),
+                health: function.health.as_str().to_owned(),
             })
         })
         .collect::<Vec<_>>();
@@ -365,9 +365,9 @@ pub(crate) async fn resolve_tool_surface(
                 .clone()
                 .unwrap_or_else(|| serde_json::json!({"type":"object"})),
             output_schema: function.response_schema.clone(),
-            effect_class: serialized_key(&function.effect_class),
+            effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
-            health: serialized_key(&function.health),
+            health: function.health.as_str().to_owned(),
             exposed: true,
             worker_id: direct_worker
                 .as_ref()
@@ -443,9 +443,9 @@ pub(crate) async fn fixed_tool_inventory(
                 .clone()
                 .unwrap_or_else(|| serde_json::json!({"type":"object"})),
             output_schema: function.response_schema.clone(),
-            effect_class: serialized_key(&function.effect_class),
+            effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
-            health: serialized_key(&function.health),
+            health: function.health.as_str().to_owned(),
             exposed,
             worker_id: None,
             worker_version: None,
@@ -454,13 +454,6 @@ pub(crate) async fn fixed_tool_inventory(
         });
     }
     Ok(tools)
-}
-
-fn serialized_key<T: Serialize>(value: &T) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(ToOwned::to_owned))
-        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 fn surface_hash(tools: &[SurfaceToolSnapshot]) -> Result<String, String> {

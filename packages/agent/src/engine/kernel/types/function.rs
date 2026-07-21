@@ -7,7 +7,7 @@ use super::{FunctionHealth, FunctionRevision, FunctionVisibility};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
 
 /// Side-effect class of a function.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectClass {
     /// Reads without mutation.
     PureRead,
@@ -37,11 +37,24 @@ impl EffectClass {
     pub fn requires_idempotency(self) -> bool {
         self.is_mutating()
     }
+
+    /// Stable operator-facing name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PureRead => "PureRead",
+            Self::DeterministicCompute => "DeterministicCompute",
+            Self::IdempotentWrite => "IdempotentWrite",
+            Self::AppendOnlyEvent => "AppendOnlyEvent",
+            Self::ReversibleSideEffect => "ReversibleSideEffect",
+            Self::ExternalSideEffect => "ExternalSideEffect",
+            Self::IrreversibleSideEffect => "IrreversibleSideEffect",
+        }
+    }
 }
 
-/// Risk level for discovery and policy, including its stable lowercase
-/// persistence, policy-hash, and catalog spelling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Risk level for discovery and operator evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RiskLevel {
     /// Low-risk capability.
     Low,
@@ -90,7 +103,7 @@ impl ReplayBehavior {
 }
 
 /// Idempotency contract required for mutating agent-visible functions.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdempotencyContract {
     /// Dedupe scope.
     pub dedupe_scope: DedupeScope,
@@ -119,7 +132,7 @@ impl IdempotencyContract {
 }
 
 /// Extent within which an idempotency key is unique.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DedupeScope {
     /// Unique within the invocation's session.
     Session,
@@ -149,7 +162,7 @@ impl IdempotencyScope {
 
 /// Typed model-tool projection attached only to functions intended for a
 /// provider request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelToolContract {
     /// Stable model-facing tool name.
     pub name: String,
@@ -166,7 +179,7 @@ pub struct ModelToolContract {
 }
 
 /// Typed routing evidence for a persistent worker's direct model tool.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DirectWorkerToolContract {
     /// Stable worker id.
     pub worker_id: String,
@@ -185,7 +198,7 @@ pub struct DirectWorkerToolContract {
 }
 
 /// Function catalog definition.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FunctionDefinition {
     /// Function id.
     pub id: FunctionId,
