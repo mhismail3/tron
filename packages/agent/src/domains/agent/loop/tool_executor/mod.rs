@@ -5,7 +5,7 @@
 //! idempotency metadata. Direct kernel functions and active workers own their
 //! request/response schemas and reliability contracts at registration.
 //!
-//! Durable capability lifecycle ownership stays in the turn runner. When a
+//! Durable model-tool lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
 //! primitive result; the turn runner persists and broadcasts row-backed
 //! `capability.invocation.started` / `completed` events so live clients and
@@ -87,7 +87,7 @@ fn direct_tool_idempotency_key(
     format!("model-tool:{}", hex::encode(Sha256::digest(material)))
 }
 
-fn primitive_capability_identity(
+fn primitive_tool_identity(
     model_primitive_name: &str,
     _arguments: &Value,
     trace_id: Option<&TraceId>,
@@ -101,7 +101,7 @@ fn primitive_capability_identity(
     }
 }
 
-fn capability_identity_from_result(
+fn tool_identity_from_result(
     model_primitive_name: &str,
     base_identity: &CapabilityEventIdentity,
     result: &CapabilityResult,
@@ -140,7 +140,7 @@ fn capability_identity_from_result(
     }
 }
 
-fn redacted_capability_result(result: &CapabilityResult) -> CapabilityResult {
+fn redacted_tool_result(result: &CapabilityResult) -> CapabilityResult {
     let content = match &result.content {
         CapabilityResultBody::Text(text) => {
             CapabilityResultBody::Text(redact_sensitive_content(text))
@@ -166,7 +166,7 @@ fn redacted_capability_result(result: &CapabilityResult) -> CapabilityResult {
     }
 }
 
-fn capability_failure_details(
+fn tool_failure_details(
     failure: &mut FailureEnvelope,
     model_primitive_name: &str,
     provider_invocation_id: &str,
@@ -201,7 +201,7 @@ fn capability_failure_details(
     failure.references.parent_invocation_id = parent_invocation_id.map(|id| id.as_str().to_owned());
 }
 
-fn capability_failure_result(
+fn tool_failure_result(
     mut failure: FailureEnvelope,
     model_primitive_name: &str,
     provider_invocation_id: &str,
@@ -210,7 +210,7 @@ fn capability_failure_result(
     parent_invocation_id: Option<&InvocationId>,
     extra: Option<Value>,
 ) -> CapabilityResult {
-    capability_failure_details(
+    tool_failure_details(
         &mut failure,
         model_primitive_name,
         provider_invocation_id,
@@ -222,7 +222,7 @@ fn capability_failure_result(
     failure_result(&failure)
 }
 
-pub struct CapabilityInvocationExecutionContext<'a> {
+pub struct ToolExecutionContext<'a> {
     pub primitive_surface: &'a ResolvedPrimitiveSurface,
     pub emitter: &'a Arc<EventEmitter>,
     pub cancel: &'a CancellationToken,
@@ -231,7 +231,7 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     /// Whether the executor should emit transient lifecycle events itself.
     ///
     /// Turn-runner callers with a session event persister set this to `false`
-    /// because durable capability lifecycle events are broadcast from persisted
+    /// because durable model-tool lifecycle events are broadcast from persisted
     /// rows using persisted row sequences.
     pub emit_lifecycle_events: bool,
     pub turn: i64,
@@ -251,11 +251,11 @@ pub struct CapabilityInvocationExecutionContext<'a> {
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
 #[instrument(skip_all, fields(model_primitive_name = capability_invocation.name, session_id))]
-pub async fn execute_capability_invocation(
+pub async fn execute_tool(
     capability_invocation: &CapabilityInvocationDraft,
     session_id: &str,
     working_directory: &str,
-    ctx: &CapabilityInvocationExecutionContext<'_>,
+    ctx: &ToolExecutionContext<'_>,
 ) -> CapabilityInvocationExecutionResult {
     let start = Instant::now();
     let invocation_id = capability_invocation.id.clone();
@@ -266,17 +266,17 @@ pub async fn execute_capability_invocation(
         .targets_by_name
         .get(&model_primitive_name)
     else {
-        error!(model_primitive_name, "capability primitive not found");
+        error!(model_primitive_name, "model tool not found");
         let failure = FailureEnvelope::new(
             CAPABILITY_PRIMITIVE_NOT_FOUND,
             FailureCategory::NotFound,
-            format!("Capability primitive not found: {model_primitive_name}"),
+            format!("Model tool not found: {model_primitive_name}"),
             false,
             true,
             FailureOrigin::Capability,
         );
         return CapabilityInvocationExecutionResult {
-            result: capability_failure_result(
+            result: tool_failure_result(
                 failure,
                 &model_primitive_name,
                 &invocation_id,
@@ -290,7 +290,7 @@ pub async fn execute_capability_invocation(
     };
 
     let effective_args = Value::Object(capability_invocation.arguments.clone());
-    let primitive_identity = primitive_capability_identity(
+    let primitive_identity = primitive_tool_identity(
         &model_primitive_name,
         &effective_args,
         ctx.trace_id,
@@ -309,7 +309,7 @@ pub async fn execute_capability_invocation(
         emit(ctx, started);
         debug!(
             model_primitive_name,
-            invocation_id, session_id, "capability invocation started"
+            invocation_id, session_id, "model tool invocation started"
         );
     }
 
@@ -328,7 +328,7 @@ pub async fn execute_capability_invocation(
             true,
             FailureOrigin::Capability,
         );
-        capability_failure_result(
+        tool_failure_result(
             failure,
             &model_primitive_name,
             &invocation_id,
@@ -338,7 +338,7 @@ pub async fn execute_capability_invocation(
             None,
         )
     } else {
-        execute_capability_primitive_via_engine(
+        execute_tool_via_engine(
             ctx.engine_host,
             engine_target,
             &model_primitive_name,
@@ -359,19 +359,19 @@ pub async fn execute_capability_invocation(
     };
 
     let duration_ms = duration_ceil_ms(start.elapsed());
-    let resolved_identity = capability_identity_from_result(
+    let resolved_identity = tool_identity_from_result(
         &model_primitive_name,
         &primitive_identity,
         &capability_result,
     );
 
-    metrics::counter!("capability_invocations_total", "capability" => model_primitive_name.clone())
+    metrics::counter!("model_tool_invocations_total", "tool" => model_primitive_name.clone())
         .increment(1);
-    metrics::histogram!("capability_invocation_duration_seconds", "capability" => model_primitive_name.clone())
+    metrics::histogram!("model_tool_invocation_duration_seconds", "tool" => model_primitive_name.clone())
         .record(start.elapsed().as_secs_f64());
 
     if ctx.emit_lifecycle_events {
-        let event_result = redacted_capability_result(&capability_result);
+        let event_result = redacted_tool_result(&capability_result);
         let completed = TronEvent::CapabilityInvocationCompleted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             invocation_id: invocation_id.clone(),
@@ -382,7 +382,7 @@ pub async fn execute_capability_invocation(
             capability_identity: resolved_identity,
         };
         emit(ctx, completed);
-        debug!(capability = %model_primitive_name, duration_ms, "capability invocation completed");
+        debug!(capability = %model_primitive_name, duration_ms, "model tool invocation completed");
     }
 
     CapabilityInvocationExecutionResult {
@@ -391,7 +391,7 @@ pub async fn execute_capability_invocation(
     }
 }
 
-fn emit(ctx: &CapabilityInvocationExecutionContext<'_>, event: TronEvent) {
+fn emit(ctx: &ToolExecutionContext<'_>, event: TronEvent) {
     if let Some(counter) = ctx.sequence_counter {
         let _ = ctx.emitter.emit_sequenced(event, counter);
     } else {
@@ -404,7 +404,7 @@ fn with_agent_working_directory(context: CausalContext, working_directory: &str)
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_capability_primitive_via_engine(
+async fn execute_tool_via_engine(
     engine_host: &EngineHostHandle,
     target: &PrimitiveExecutionTarget,
     model_primitive_name: &str,
@@ -433,7 +433,7 @@ async fn execute_capability_primitive_via_engine(
                     false,
                     FailureOrigin::Engine,
                 );
-                return capability_failure_result(
+                return tool_failure_result(
                     failure,
                     model_primitive_name,
                     invocation_id,
@@ -460,7 +460,7 @@ async fn execute_capability_primitive_via_engine(
     let actor_id = match ActorId::new(actor_identity) {
         Ok(id) => id,
         Err(error) => {
-            return capability_failure_result(
+            return tool_failure_result(
                 engine_error_to_failure(&error),
                 model_primitive_name,
                 invocation_id,
@@ -500,7 +500,7 @@ async fn execute_capability_primitive_via_engine(
     let result = match result {
         Ok(result) => result,
         Err(error) => {
-            return capability_failure_result(
+            return tool_failure_result(
                 engine_error_to_failure(&error),
                 model_primitive_name,
                 invocation_id,
@@ -521,7 +521,7 @@ async fn execute_capability_primitive_via_engine(
         failure.references.invocation_id = result_invocation_id
             .as_ref()
             .map(|id| id.as_str().to_owned());
-        return capability_failure_result(
+        return tool_failure_result(
             failure,
             model_primitive_name,
             invocation_id,
@@ -535,7 +535,7 @@ async fn execute_capability_primitive_via_engine(
         let mut failure = FailureEnvelope::new(
             CAPABILITY_ENGINE_RESULT_MISSING,
             FailureCategory::Capability,
-            format!("Engine capability invocation returned no result for {function_id}"),
+            format!("Engine tool invocation returned no result for {function_id}"),
             false,
             false,
             FailureOrigin::Capability,
@@ -544,7 +544,7 @@ async fn execute_capability_primitive_via_engine(
         failure.references.invocation_id = result_invocation_id
             .as_ref()
             .map(|id| id.as_str().to_owned());
-        return capability_failure_result(
+        return tool_failure_result(
             failure,
             model_primitive_name,
             invocation_id,
@@ -554,7 +554,7 @@ async fn execute_capability_primitive_via_engine(
             Some(json!({ "primitiveTargetId": function_id.to_string() })),
         );
     };
-    // Worker outputs are typed domain values, never an implicit capability
+    // Worker outputs are typed domain values, never an implicit tool
     // envelope. Always preserve the exact value as details and serialize it for
     // the provider result channel; otherwise a worker whose schema happens to
     // contain `content` or `details` would be misinterpreted by the engine.

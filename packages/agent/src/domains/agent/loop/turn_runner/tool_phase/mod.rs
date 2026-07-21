@@ -1,4 +1,4 @@
-//! Capability invocation phase for one agent turn.
+//! Model-tool execution phase for one agent turn.
 //!
 //! This module persists provider-requested direct-tool executions, dispatches
 //! kernel or worker functions with Agent identity, and writes the
@@ -13,7 +13,7 @@
 //! Executed and skipped completion payloads are collected in provider-request
 //! order and commit as one terminal batch; no completion is broadcast when any
 //! row in that batch fails. A direct operation may return a one-time credential
-//! to the active model turn, but capability arguments, result content, and
+//! to the active model turn, but tool arguments, result content, and
 //! details are redacted before any durable row or lifecycle broadcast is built.
 //! Provider-requested calls in one batch execute concurrently; worker/kernel
 //! implementations own their real queueing and concurrency ceilings. There is
@@ -23,12 +23,12 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::agent::r#loop::capability_invocation_executor;
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
+use crate::domains::agent::r#loop::tool_executor;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::session::event_store::EventType;
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
@@ -38,7 +38,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace, warn};
 
-pub(super) struct CapabilityInvocationPhaseParams<'a> {
+pub(super) struct ToolPhaseParams<'a> {
     pub turn: u32,
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
@@ -59,13 +59,13 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
 }
 
 #[derive(Default)]
-pub(super) struct CapabilityInvocationPhaseOutcome {
+pub(super) struct ToolPhaseOutcome {
     pub capability_invocations_executed: usize,
     pub interrupted: bool,
     pub error: Option<RuntimeError>,
 }
 
-struct ExecutedCapabilityInvocation {
+struct ExecutedToolInvocation {
     result: CapabilityInvocationExecutionResult,
     provider_text: String,
 }
@@ -127,20 +127,18 @@ fn provider_result_text(
     }
 }
 
-pub(super) async fn execute_capability_invocation_phase(
-    params: CapabilityInvocationPhaseParams<'_>,
-) -> CapabilityInvocationPhaseOutcome {
+pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhaseOutcome {
     if params.stream_result.capability_invocations.is_empty() {
         trace!(
-            component = "agent.capability",
-            agent_event = "capability_phase_skipped",
+            component = "agent.tool",
+            agent_event = "tool_phase_skipped",
             session_id = params.session_id,
             run_id = params.run_id.unwrap_or("none"),
             trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
             turn = params.turn,
-            "agent capability phase skipped"
+            "agent tool phase skipped"
         );
-        return CapabilityInvocationPhaseOutcome {
+        return ToolPhaseOutcome {
             interrupted: params.cancel.is_cancelled(),
             ..Default::default()
         };
@@ -150,14 +148,14 @@ pub(super) async fn execute_capability_invocation_phase(
     let mut started_payloads =
         Vec::with_capacity(params.stream_result.capability_invocations.len());
     info!(
-        component = "agent.capability",
-        agent_event = "capability_phase_started",
+        component = "agent.tool",
+        agent_event = "tool_phase_started",
         session_id = params.session_id,
         run_id = params.run_id.unwrap_or("none"),
         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
         turn = params.turn,
         invocation_count = params.stream_result.capability_invocations.len(),
-        "agent capability phase started"
+        "agent tool phase started"
     );
     for capability_invocation in &params.stream_result.capability_invocations {
         let mut payload = json!({
@@ -204,7 +202,7 @@ pub(super) async fn execute_capability_invocation_phase(
                     error = %error,
                     "failed to atomically persist capability starts; skipping execution"
                 );
-                return CapabilityInvocationPhaseOutcome {
+                return ToolPhaseOutcome {
                     error: Some(error),
                     ..Default::default()
                 };
@@ -218,7 +216,7 @@ pub(super) async fn execute_capability_invocation_phase(
             );
         }
         trace!(
-            component = "agent.capability",
+            component = "agent.tool",
             agent_event = "capability_invocation_starts_persisted",
             session_id = params.session_id,
             run_id = params.run_id.unwrap_or("none"),
@@ -238,7 +236,7 @@ pub(super) async fn execute_capability_invocation_phase(
         params.parent_invocation_id,
     );
     info!(
-        component = "agent.capability",
+        component = "agent.tool",
         agent_event = "capability_invocation_batch_emitted",
         session_id = params.session_id,
         run_id = params.run_id.unwrap_or("none"),
@@ -248,7 +246,7 @@ pub(super) async fn execute_capability_invocation_phase(
         "capability invocation batch emitted"
     );
 
-    let mut results: Vec<Option<ExecutedCapabilityInvocation>> =
+    let mut results: Vec<Option<ExecutedToolInvocation>> =
         (0..params.stream_result.capability_invocations.len())
             .map(|_| None)
             .collect();
@@ -272,27 +270,26 @@ pub(super) async fn execute_capability_invocation_phase(
             .iter()
             .enumerate()
             .map(|(idx, capability_invocation)| {
-                let capability_ctx =
-                    capability_invocation_executor::CapabilityInvocationExecutionContext {
-                        primitive_surface: params.primitive_surface,
-                        emitter: params.emitter,
-                        cancel: params.cancel,
-                        workspace_id: params.workspace_id,
-                        sequence_counter: params.sequence_counter,
-                        emit_lifecycle_events: params.persister.is_none(),
-                        turn: i64::from(params.turn),
-                        invocation_abort_registry: params.invocation_abort_registry,
-                        engine_host: params.engine_host,
-                        run_id: params.run_id,
-                        trace_id: params.trace_id,
-                        parent_invocation_id: params.parent_invocation_id,
-                        worker_causal_depth: params.worker_causal_depth,
-                        origin_worker_id: params.origin_worker_id,
-                    };
+                let tool_ctx = tool_executor::ToolExecutionContext {
+                    primitive_surface: params.primitive_surface,
+                    emitter: params.emitter,
+                    cancel: params.cancel,
+                    workspace_id: params.workspace_id,
+                    sequence_counter: params.sequence_counter,
+                    emit_lifecycle_events: params.persister.is_none(),
+                    turn: i64::from(params.turn),
+                    invocation_abort_registry: params.invocation_abort_registry,
+                    engine_host: params.engine_host,
+                    run_id: params.run_id,
+                    trace_id: params.trace_id,
+                    parent_invocation_id: params.parent_invocation_id,
+                    worker_causal_depth: params.worker_causal_depth,
+                    origin_worker_id: params.origin_worker_id,
+                };
                 let working_dir = working_dir.as_str();
                 async move {
                     info!(
-                        component = "agent.capability",
+                        component = "agent.tool",
                         agent_event = "capability_invocation_execute_started",
                         session_id = params.session_id,
                         run_id = params.run_id.unwrap_or("none"),
@@ -301,18 +298,18 @@ pub(super) async fn execute_capability_invocation_phase(
                         invocation_id = %capability_invocation.id,
                         primitive_name = %capability_invocation.name,
                         direct_tool = %capability_invocation.name,
-                        "capability invocation execution started"
+                        "tool execution started"
                     );
-                    let result = capability_invocation_executor::execute_capability_invocation(
+                    let result = tool_executor::execute_tool(
                         capability_invocation,
                         params.session_id,
                         working_dir,
-                        &capability_ctx,
+                        &tool_ctx,
                     )
                     .await;
                     let provider_text = provider_result_text(&result.result);
                     info!(
-                        component = "agent.capability",
+                        component = "agent.tool",
                         agent_event = "capability_invocation_execute_completed",
                         session_id = params.session_id,
                         run_id = params.run_id.unwrap_or("none"),
@@ -323,7 +320,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         direct_tool = %capability_invocation.name,
                         duration_ms = result.duration_ms,
                         is_error = result.result.is_error.unwrap_or(false),
-                        "capability invocation execution completed"
+                        "tool execution completed"
                     );
 
                     let completion_payload = params.persister.map(|_| {
@@ -339,7 +336,7 @@ pub(super) async fn execute_capability_invocation_phase(
 
                     (
                         idx,
-                        ExecutedCapabilityInvocation {
+                        ExecutedToolInvocation {
                             result,
                             provider_text,
                         },
@@ -361,22 +358,22 @@ pub(super) async fn execute_capability_invocation_phase(
             session_id = params.session_id,
             turn = params.turn,
             error = %error,
-            "capability completion batch failed; terminalizing durable starts"
+            "tool completion batch failed; terminalizing durable starts"
         );
         let error = match persist_failed_completion_batch(&params, &results) {
             Ok(()) => error,
             Err(repair_error) => RuntimeError::Persistence(format!(
-                "capability completion batch failed ({error}); durable terminal repair also failed ({repair_error})"
+                "tool completion batch failed ({error}); durable terminal repair also failed ({repair_error})"
             )),
         };
-        return CapabilityInvocationPhaseOutcome {
+        return ToolPhaseOutcome {
             interrupted,
             error: Some(error),
             ..Default::default()
         };
     }
 
-    process_capability_results(results, params, interrupted).await
+    process_tool_results(results, params, interrupted).await
 }
 
 fn executed_completion_payload(
@@ -429,7 +426,7 @@ fn executed_completion_payload(
 
 fn record_skipped_invocations(
     indices: &[usize],
-    params: &CapabilityInvocationPhaseParams<'_>,
+    params: &ToolPhaseParams<'_>,
     completion_payloads: &mut [Option<Value>],
     reason: &str,
     code: &str,
@@ -474,7 +471,7 @@ fn record_skipped_invocations(
 }
 
 fn persist_completion_batch(
-    params: &CapabilityInvocationPhaseParams<'_>,
+    params: &ToolPhaseParams<'_>,
     completion_payloads: Vec<Option<Value>>,
 ) -> Result<(), RuntimeError> {
     if params.persister.is_none() {
@@ -486,8 +483,7 @@ fn persist_completion_batch(
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| {
             RuntimeError::Persistence(
-                "capability phase ended without terminalizing every requested invocation"
-                    .to_owned(),
+                "tool phase ended without terminalizing every requested invocation".to_owned(),
             )
         })?;
     debug_assert_eq!(payloads.len(), expected_count);
@@ -495,8 +491,8 @@ fn persist_completion_batch(
 }
 
 fn persist_failed_completion_batch(
-    params: &CapabilityInvocationPhaseParams<'_>,
-    results: &[Option<ExecutedCapabilityInvocation>],
+    params: &ToolPhaseParams<'_>,
+    results: &[Option<ExecutedToolInvocation>],
 ) -> Result<(), RuntimeError> {
     let Some(_) = params.persister else {
         return Ok(());
@@ -545,7 +541,7 @@ fn persist_failed_completion_batch(
 }
 
 fn persist_and_broadcast_completion_payloads(
-    params: &CapabilityInvocationPhaseParams<'_>,
+    params: &ToolPhaseParams<'_>,
     payloads: &[Value],
 ) -> Result<(), RuntimeError> {
     let Some(persister) = params.persister else {
@@ -571,12 +567,12 @@ fn persist_and_broadcast_completion_payloads(
     Ok(())
 }
 
-async fn process_capability_results(
-    mut results: Vec<Option<ExecutedCapabilityInvocation>>,
-    params: CapabilityInvocationPhaseParams<'_>,
+async fn process_tool_results(
+    mut results: Vec<Option<ExecutedToolInvocation>>,
+    params: ToolPhaseParams<'_>,
     interrupted: bool,
-) -> CapabilityInvocationPhaseOutcome {
-    let mut outcome = CapabilityInvocationPhaseOutcome {
+) -> ToolPhaseOutcome {
+    let mut outcome = ToolPhaseOutcome {
         interrupted,
         ..Default::default()
     };
@@ -590,7 +586,7 @@ async fn process_capability_results(
         let Some(executed) = results[idx].take() else {
             continue;
         };
-        let ExecutedCapabilityInvocation {
+        let ExecutedToolInvocation {
             result: exec_result,
             provider_text,
         } = executed;
@@ -607,15 +603,15 @@ async fn process_capability_results(
     }
 
     info!(
-        component = "agent.capability",
-        agent_event = "capability_phase_completed",
+        component = "agent.tool",
+        agent_event = "tool_phase_completed",
         session_id = params.session_id,
         run_id = params.run_id.unwrap_or("none"),
         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
         turn = params.turn,
         executed_count = outcome.capability_invocations_executed,
         interrupted = outcome.interrupted,
-        "agent capability phase completed"
+        "agent tool phase completed"
     );
     outcome
 }

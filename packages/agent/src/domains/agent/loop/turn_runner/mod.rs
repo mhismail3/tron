@@ -1,18 +1,18 @@
-//! Turn runner — orchestrates a single turn: context → stream → capabilities → events.
+//! Turn runner — orchestrates a single turn: context → stream → tools → events.
 //!
-//! Capability result content is the only provider-portable channel back into
+//! Tool-result content is the only provider-portable channel back into
 //! the model. Engine/UI/audit metadata stays in `details`, but model-facing
 //! `execute` observations are projected into result text by
-//! `capability_invocations::projection` so every provider can reason about
-//! direct primitive results without gaining a second capability API. Every
+//! `tool_phase::projection` so every provider can reason about
+//! direct primitive results without gaining a second tool API. Every
 //! provider turn resolves its tool surface from a bounded evolving intent query
 //! containing the current user request, visible assistant plan, tool names and
 //! arguments, and text results; binary data and hidden thinking are excluded.
 
-mod capability_invocations;
 mod failure;
 mod params;
 mod persistence;
+mod tool_phase;
 mod turn_context;
 
 use std::sync::Arc;
@@ -28,7 +28,6 @@ use crate::shared::server::failure::{
 use metrics::{counter, histogram};
 use tracing::{error, info, instrument, trace, warn};
 
-use self::capability_invocations::CapabilityInvocationPhaseParams;
 use self::failure::{emit_turn_failure, terminalize_interrupted_turn};
 pub use self::params::TurnParams;
 pub(crate) use self::persistence::emit_persisted_capability_invocation_completed;
@@ -38,6 +37,7 @@ use self::persistence::{
     emit_response_complete, emit_turn_end, emit_turn_start, persist_completed_assistant_message,
     persist_model_provider_request_audit,
 };
+use self::tool_phase::ToolPhaseParams;
 use self::turn_context::{build_turn_context, worker_relevance_query};
 use crate::domains::agent::r#loop::errors::StopReason;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
@@ -856,27 +856,25 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         run_context.parent_invocation_id.as_ref(),
     );
 
-    let invocation_phase = capability_invocations::execute_capability_invocation_phase(
-        CapabilityInvocationPhaseParams {
-            turn,
-            stream_result: &stream_result,
-            context_manager,
-            primitive_surface: &primitive_surface,
-            session_id,
-            emitter,
-            cancel,
-            workspace_id,
-            persister,
-            sequence_counter,
-            invocation_abort_registry,
-            engine_host,
-            run_id: run_context.run_id.as_deref(),
-            trace_id: run_context.engine_trace_id.as_ref(),
-            parent_invocation_id: run_context.parent_invocation_id.as_ref(),
-            worker_causal_depth: run_context.worker_causal_depth,
-            origin_worker_id: run_context.origin_worker_id.as_deref(),
-        },
-    )
+    let invocation_phase = tool_phase::execute_tool_phase(ToolPhaseParams {
+        turn,
+        stream_result: &stream_result,
+        context_manager,
+        primitive_surface: &primitive_surface,
+        session_id,
+        emitter,
+        cancel,
+        workspace_id,
+        persister,
+        sequence_counter,
+        invocation_abort_registry,
+        engine_host,
+        run_id: run_context.run_id.as_deref(),
+        trace_id: run_context.engine_trace_id.as_ref(),
+        parent_invocation_id: run_context.parent_invocation_id.as_ref(),
+        worker_causal_depth: run_context.worker_causal_depth,
+        origin_worker_id: run_context.origin_worker_id.as_deref(),
+    })
     .await;
 
     if let Some(error) = invocation_phase.error {

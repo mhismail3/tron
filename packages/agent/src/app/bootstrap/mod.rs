@@ -213,7 +213,7 @@ pub(crate) fn init_database(
     Ok((pool, db_path, db_lock))
 }
 
-/// Initialize the server-owned live capability engine host.
+/// Initialize the server-owned live typed-function engine host.
 pub(crate) fn init_engine_host(db_path: &Path) -> Result<crate::engine::EngineHostHandle> {
     crate::engine::EngineHostHandle::open_sqlite(db_path).with_context(|| {
         format!(

@@ -299,7 +299,7 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
         )
         .expect("persist assistant invocation");
 
-    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+    let outcome = execute_tool_phase(ToolPhaseParams {
         turn: 1,
         stream_result: &stream_result,
         context_manager: &mut context_manager,
@@ -398,7 +398,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         }),
     ]);
 
-    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+    let outcome = execute_tool_phase(ToolPhaseParams {
         turn: 7,
         stream_result: &stream_result,
         context_manager: &mut context_manager,
@@ -571,7 +571,7 @@ async fn parent_cancellation_during_parallel_capability_batch_marks_active_turn_
         ]),
     )]);
 
-    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+    let outcome = execute_tool_phase(ToolPhaseParams {
         turn: 8,
         stream_result: &stream_result,
         context_manager: &mut context_manager,
@@ -620,7 +620,7 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
         Map::new(),
     )]);
 
-    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+    let outcome = execute_tool_phase(ToolPhaseParams {
         turn: 1,
         stream_result: &stream_result,
         context_manager: &mut context_manager,
@@ -687,7 +687,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
         ),
     ]);
 
-    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+    let outcome = execute_tool_phase(ToolPhaseParams {
         turn: 9,
         stream_result: &stream_result,
         context_manager: &mut context_manager,

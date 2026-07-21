@@ -973,7 +973,7 @@ real ownership split rather than a budget increase.
 - Canonical worker store and concern modules: `packages/agent/src/domains/worker_kernel/persistence/store/`
 - Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface.rs`
 - Provider schema adaptation: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
-- Trusted-local execution: `packages/agent/src/domains/agent/loop/capability_invocation_executor/`
+- Trusted-local execution: `packages/agent/src/domains/agent/loop/tool_executor/`
 - Engine settings: `packages/agent/src/domains/settings/config/types/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
 - iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift` and `EngineProtocolTypes+WorkerKernel.swift`

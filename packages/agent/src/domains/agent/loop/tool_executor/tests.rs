@@ -44,8 +44,8 @@ fn execution_context<'a>(
     cancel: &'a CancellationToken,
     aborts: &'a InvocationAbortRegistry,
     host: &'a EngineHostHandle,
-) -> CapabilityInvocationExecutionContext<'a> {
-    CapabilityInvocationExecutionContext {
+) -> ToolExecutionContext<'a> {
+    ToolExecutionContext {
         primitive_surface: surface,
         emitter,
         cancel,
@@ -75,7 +75,7 @@ fn transient_capability_result_copy_is_redacted_without_mutating_provider_result
         is_error: None,
     };
 
-    let redacted = redacted_capability_result(&result);
+    let redacted = redacted_tool_result(&result);
 
     assert!(!serde_json::to_string(&redacted).unwrap().contains(token));
     assert_eq!(redacted.details.as_ref().unwrap()["token"], "****");
@@ -92,7 +92,7 @@ async fn unknown_direct_tool_fails_before_engine_execution() {
     let context = execution_context(&surface, &emitter, &cancel, &aborts, &host);
     let call = CapabilityInvocationDraft::new("call-unknown", "missing_tool", Map::new());
 
-    let result = execute_capability_invocation(&call, "session-test", "/tmp", &context).await;
+    let result = execute_tool(&call, "session-test", "/tmp", &context).await;
 
     assert_eq!(
         result.result.details.as_ref().unwrap()["failure"]["code"],
@@ -159,7 +159,7 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         Map::from_iter([("value".to_owned(), json!("hello"))]),
     );
 
-    let result = execute_capability_invocation(&call, "direct-session", "/tmp", &context).await;
+    let result = execute_tool(&call, "direct-session", "/tmp", &context).await;
 
     assert_eq!(result.result.is_error, None);
     assert_eq!(result.result.details.as_ref().unwrap()["typed"], "ok");
@@ -191,8 +191,7 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         "direct_test",
         Map::from_iter([("value".to_owned(), json!("from worker"))]),
     );
-    let worker_result =
-        execute_capability_invocation(&worker_call, "direct-session", "/tmp", &context).await;
+    let worker_result = execute_tool(&worker_call, "direct-session", "/tmp", &context).await;
     assert_eq!(worker_result.result.is_error, None);
     let invocation = captured.lock().clone().expect("captured worker invocation");
     assert_eq!(invocation.causal_context.actor_kind, ActorKind::Worker);
@@ -213,7 +212,7 @@ async fn cancelled_direct_tool_returns_the_canonical_cancelled_failure() {
     let context = execution_context(&surface, &emitter, &cancel, &aborts, &host);
     let call = CapabilityInvocationDraft::new("cancelled", "missing_tool", Map::new());
 
-    let result = execute_capability_invocation(&call, "session-test", "/tmp", &context).await;
+    let result = execute_tool(&call, "session-test", "/tmp", &context).await;
 
     // Resolution precedes execution cancellation, so an absent tool remains a
     // not-found failure and does not create an abort-registry entry.

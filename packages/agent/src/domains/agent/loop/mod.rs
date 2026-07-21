@@ -41,7 +41,6 @@
 
 #![deny(unsafe_code)]
 
-pub mod capability_invocation_executor;
 pub mod compaction_handler;
 pub mod errors;
 pub mod event_emitter;
@@ -51,6 +50,7 @@ pub mod primitive_surface;
 mod stream_message;
 pub mod stream_processor;
 mod stream_state;
+pub mod tool_executor;
 pub mod tron_agent;
 pub mod turn_runner;
 pub(crate) mod types;

@@ -173,7 +173,7 @@ pub struct ServerRuntimeContext {
     pub session_manager: Arc<SessionManager>,
     /// Event store for direct event queries.
     pub event_store: Arc<EventStore>,
-    /// Shared live capability engine host.
+    /// Shared live typed-function engine host.
     pub engine_host: EngineHostHandle,
     /// Path to the sparse engine settings file.
     pub settings_path: PathBuf,
