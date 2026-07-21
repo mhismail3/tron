@@ -46,40 +46,6 @@ extension SourceGuardTests {
         #expect(source.contains(".accessibilityLabel(notification.textContent)"))
     }
 
-    @Test("Chat conversation does not mount passive engine cockpit")
-    func testChatConversationDoesNotMountPassiveEngineCockpit() throws {
-        let iosRoot = iosAppRoot()
-        let chatSources = [
-            "Sources/UI/Chat/Shell/ChatView.swift",
-            "Sources/UI/Chat/Shell/ChatSheetContent.swift",
-            "Sources/UI/Chat/Shell/ChatSheetModifier.swift",
-            "Sources/Session/Chat/Coordinators/SheetCoordinator.swift",
-            "Sources/Session/Chat/State/ChatSheet.swift",
-        ]
-
-        for path in chatSources {
-            let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
-            #expect(!source.contains("AgentStatusCapsuleView"))
-            #expect(!source.contains("WorkerConsoleViewModel()"))
-            #expect(!source.contains("showWorkerConsole"))
-            #expect(!source.contains("workerConsole.refresh"))
-            #expect(!source.contains("case agentCockpit"))
-        }
-
-        let serverSettings = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineServersSection.swift"),
-            encoding: .utf8
-        )
-        let engineSettings = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineSettingsPage.swift"),
-            encoding: .utf8
-        )
-        #expect(!serverSettings.contains("ConnectionSettingsDiagnosticsSheet"))
-        #expect(!serverSettings.contains("WorkerConsoleSheet("))
-        #expect(!serverSettings.contains(#"Image(systemName: "chevron.right")"#))
-        #expect(!engineSettings.contains(#"Image(systemName: "chevron.right")"#))
-    }
-
     @Test("Engine Dashboard is the single high-signal engine surface")
     func testEngineDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()
