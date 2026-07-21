@@ -105,24 +105,6 @@ struct WorkerKernelClientTests {
                     fixedToolCount: 28,
                     projectedWorkerCount: 1,
                     availableWorkerCount: 3,
-                    tools: [
-                        EngineSurfaceToolDTO(
-                            modelName: "worker_research",
-                            functionId: "worker_kernel::dynamic_research",
-                            functionRevision: 2,
-                            ownerWorker: "worker_kernel",
-                            description: "Research recent sources",
-                            inputSchema: AnyCodable(["type": "object"]),
-                            outputSchema: AnyCodable(["type": "object"]),
-                            effectClass: "ExternalSideEffect",
-                            risk: "high",
-                            exposed: true,
-                            workerId: "research",
-                            workerVersion: "v2",
-                            primitiveGroup: nil,
-                            selectionReason: "relevance"
-                        )
-                    ],
                     availableWorkers: [
                         AvailableWorkerToolDTO(
                             workerId: "research",
@@ -148,7 +130,6 @@ struct WorkerKernelClientTests {
         )
 
         #expect(snapshot.surface.catalogRevision == 42)
-        #expect(snapshot.surface.tools.first?.selectionReason == "relevance")
         #expect(snapshot.surface.availableWorkers.first?.projected == true)
         #expect(snapshot.fixedTools.first?.primitiveGroup == "host")
         #expect(snapshot.activeEngineHooks.first?.workerId == "summary-worker")

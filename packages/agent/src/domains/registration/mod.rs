@@ -404,6 +404,7 @@ mod tests {
         assert_eq!(value["surface"]["fixedToolCount"], 28);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
+        assert!(value["surface"].get("tools").is_none());
         assert!(value["workers"].is_array());
 
         let surface =

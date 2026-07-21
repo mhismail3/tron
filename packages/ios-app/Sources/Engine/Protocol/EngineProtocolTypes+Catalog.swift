@@ -44,7 +44,6 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
     let fixedToolCount: UInt64
     let projectedWorkerCount: UInt64
     let availableWorkerCount: UInt64
-    let tools: [EngineSurfaceToolDTO]
     let availableWorkers: [AvailableWorkerToolDTO]
 }
 

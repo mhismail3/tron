@@ -138,7 +138,6 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                 fixedToolCount: 28,
                 projectedWorkerCount: 1,
                 availableWorkerCount: 1,
-                tools: [],
                 availableWorkers: [
                     AvailableWorkerToolDTO(
                         workerId: "research",

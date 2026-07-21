@@ -131,13 +131,14 @@ protocol error. There is no nested child-invocation response envelope.
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
 non-model-facing `engine::surface_snapshot` read with optional session context.
 Strongly typed catalog DTOs expose the complete executable fixed-tool
-inventory, catalog revision, surface hash, exact selected surface,
-function/worker versions, every published worker's promoted/projected state,
-selection evidence, and canonical worker inventory. The server does not send a
-separately maintained description of its own source architecture. UI code does not
-reconstruct model visibility from raw catalog `[AnyCodable]` entries. The exact
-`surface.tools` projection is kept distinct from fixed/published inventories;
-when autonomy is off, fixed tools remain inspectable but explicitly unexposed.
+inventory, catalog revision, surface hash/counts, function/worker versions,
+every published worker's promoted/projected state, selection evidence, and
+canonical worker inventory. The server does not send a separately maintained
+description of its own source architecture. UI code does not reconstruct model
+visibility from raw catalog `[AnyCodable]` entries. Exact selected tool
+contracts remain internal to the provider request; the dashboard receives
+their surface evidence without duplicating the fixed schemas it already owns.
+When autonomy is off, fixed tools remain inspectable but explicitly unexposed.
 The dashboard renders fixed-function ownership and worker routing reason, score,
 and completed-run evidence; the same bounded routing evidence reaches the model
 in the per-turn surface primer without changing catalog revisions after a run.

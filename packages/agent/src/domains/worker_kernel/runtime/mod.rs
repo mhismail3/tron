@@ -212,7 +212,14 @@ impl WorkerRuntime {
             "dispatchStopped": self.store.stop_all()?,
             "activeEngineHooks": self.engine_hook_inventory()?,
             "fixedTools": fixed_tools,
-            "surface": surface,
+            "surface": {
+                "catalogRevision": surface.catalog_revision,
+                "surfaceHash": surface.surface_hash,
+                "fixedToolCount": surface.fixed_tool_count,
+                "projectedWorkerCount": surface.projected_worker_count,
+                "availableWorkerCount": surface.available_worker_count,
+                "availableWorkers": surface.available_workers,
+            },
             "workers": self.store.list(true)?,
         }))
     }

@@ -303,14 +303,13 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "surface":{
                     "type":"object",
                     "additionalProperties":false,
-                    "required":["catalogRevision","surfaceHash","fixedToolCount","projectedWorkerCount","availableWorkerCount","tools","availableWorkers"],
+                    "required":["catalogRevision","surfaceHash","fixedToolCount","projectedWorkerCount","availableWorkerCount","availableWorkers"],
                     "properties":{
                         "catalogRevision":{"type":"integer"},
                         "surfaceHash":{"type":"string"},
                         "fixedToolCount":{"type":"integer"},
                         "projectedWorkerCount":{"type":"integer"},
                         "availableWorkerCount":{"type":"integer"},
-                        "tools":{"type":"array"},
                         "availableWorkers":{"type":"array"}
                     }
                 },

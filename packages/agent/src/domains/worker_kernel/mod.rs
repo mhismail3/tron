@@ -77,11 +77,12 @@
 //! narrow deterministic recovery path in the kernel so compaction, background
 //! context, and tool projection cannot depend recursively on their own policy
 //! worker.
-//! The authenticated `engine::surface_snapshot` read returns that same
-//! provider-neutral projection, every published worker's projection status,
+//! The authenticated `engine::surface_snapshot` read returns the selected
+//! surface revision/hash/counts, every published worker's projection status,
 //! the complete fixed-tool inventory, and canonical engine worker summaries;
-//! it is not itself model vocabulary. The snapshot reports executable runtime
-//! facts rather than a separately maintained description of the source tree.
+//! exact provider contracts are not duplicated into the client response. It is
+//! not itself model vocabulary and reports executable runtime facts rather than
+//! a separately maintained description of the source tree.
 //! Fixed inventory remains inspectable while autonomy is off and marks each
 //! tool unexposed, so operator introspection never masquerades as provider
 //! availability.

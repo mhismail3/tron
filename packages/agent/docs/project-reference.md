@@ -447,6 +447,11 @@ immediate post-upsert availability. Exact arguments and execution mechanics
 live in typed tool contracts, so adding or changing a worker updates the native
 provider surface without editing a second instructional catalog.
 
+The authenticated Engine Dashboard snapshot carries fixed-tool schemas once,
+plus the selected-surface revision/hash/counts and compact worker-routing
+evidence. The provider-only selected tool contracts are not duplicated into the
+client payload.
+
 ### Host primitives
 
 | Model tool | Engine owner | Purpose |

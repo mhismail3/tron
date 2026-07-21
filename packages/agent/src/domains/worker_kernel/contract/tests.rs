@@ -23,6 +23,11 @@ fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
         schema["properties"]["surface"]["additionalProperties"],
         false
     );
+    assert!(
+        schema["properties"]["surface"]["properties"]
+            .as_object()
+            .is_some_and(|properties| !properties.contains_key("tools"))
+    );
 }
 
 #[test]
