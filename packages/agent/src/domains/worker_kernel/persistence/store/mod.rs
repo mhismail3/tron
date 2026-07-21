@@ -272,7 +272,7 @@ impl WorkerStore {
                 ",
             )
             .map_err(|error| format!("initialize worker database: {error}"))?;
-        super::migration::rebuild_indexes(&self.root, &self.database)?;
+        super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }
 

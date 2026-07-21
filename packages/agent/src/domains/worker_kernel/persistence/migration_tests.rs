@@ -1,6 +1,10 @@
 use super::*;
 
-use crate::domains::worker_kernel::types::{BUNDLE_SCHEMA, SourceProvenance, WorkerRunner};
+use std::path::PathBuf;
+
+use crate::domains::worker_kernel::types::{
+    BUNDLE_SCHEMA, SourceProvenance, WorkerRunner, WorkerTrigger,
+};
 use crate::shared::storage::StorePayloadOptions;
 
 fn complete_bundle() -> WorkerBundle {

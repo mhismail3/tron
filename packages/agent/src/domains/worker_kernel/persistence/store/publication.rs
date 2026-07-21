@@ -284,7 +284,7 @@ impl WorkerStore {
             .map_err(|error| format!("commit worker publish: {error}"))?;
         if let Err(error) = write_pointer(&state_path, &state) {
             let cleanup = version_cleanup.cleanup_now();
-            let recovery = super::super::migration::rebuild_indexes(&self.root, &self.database);
+            let recovery = super::super::rebuild::rebuild_indexes(&self.root, &self.database);
             let cleanup_evidence = cleanup
                 .err()
                 .map(|cleanup_error| format!("; candidate cleanup also failed: {cleanup_error}"))

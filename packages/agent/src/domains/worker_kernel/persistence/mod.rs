@@ -12,10 +12,22 @@
 //!
 //! Callers use [`WorkerStore`] and the narrow startup/offline snapshot
 //! functions re-exported here.
-//! Store concern modules and their scenario tests live under `store/`, adjacent
-//! to their single state owner without inflating one production file.
+//!
+//! ## Ownership
+//!
+//! - `filesystem` owns the one canonical atomic-JSON and immutable-tree hash
+//!   implementation used by publication and reconstruction.
+//! - `rebuild` projects canonical bundles into disposable SQLite indexes.
+//! - `migration` is the explicit, one-time importer/retirement boundary for
+//!   pre-worker profiles; it is not a steady-state compatibility adapter.
+//! - `snapshot` creates and restores verified profile snapshots.
+//! - `store` owns canonical publication plus durable invocation, inbox,
+//!   trigger, health, and audit ledgers. Its concern modules and scenario tests
+//!   live beside that single state owner.
 
+mod filesystem;
 mod migration;
+mod rebuild;
 mod snapshot;
 mod store;
 
