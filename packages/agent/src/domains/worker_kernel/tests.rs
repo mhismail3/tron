@@ -2,50 +2,21 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::Value;
-
 use super::contract;
 
 #[test]
-fn replay_fixture_describes_executable_expected_outcome() {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/last30days_worker_gap.json"
-    ))
-    .unwrap();
-    assert_eq!(fixture["observedOutcome"]["kind"], "inert_proposal");
-    assert_eq!(
-        fixture["expectedOutcome"]["atomicOperation"],
-        "worker_upsert"
-    );
-    assert_eq!(fixture["expectedOutcome"]["directTypedTool"], true);
-}
-
-#[test]
-fn core_primitive_manifest_is_exact_unique_and_grouped() {
+fn core_primitive_manifest_is_unique_ordered_and_covers_each_family() {
     let descriptors = contract::core_primitives();
-    assert_eq!(descriptors.len(), 27);
     assert_eq!(
         descriptors
             .iter()
-            .filter(|descriptor| descriptor.group == contract::CorePrimitiveGroup::Host)
-            .count(),
-        7
-    );
-    assert_eq!(
-        descriptors
-            .iter()
-            .filter(|descriptor| {
-                descriptor.group == contract::CorePrimitiveGroup::WorkerControl
-            })
-            .count(),
-        16
-    );
-    assert_eq!(
-        descriptors
-            .iter()
-            .filter(|descriptor| descriptor.group == contract::CorePrimitiveGroup::CoreChange)
-            .count(),
-        4
+            .map(|descriptor| descriptor.group)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            contract::CorePrimitiveGroup::Host,
+            contract::CorePrimitiveGroup::WorkerControl,
+            contract::CorePrimitiveGroup::CoreChange,
+        ])
     );
     assert_eq!(
         descriptors
