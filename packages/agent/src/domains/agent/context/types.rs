@@ -1,9 +1,9 @@
 //! Primitive context management types.
 //!
 //! These types describe the bare agent loop context: soul/system prompt,
-//! provider-visible capabilities, environment metadata, messages, and compaction
-//! state. Behavior instructions learned by the agent live in agent-owned state,
-//! not in separate context planes.
+//! provider-visible direct tools, environment metadata, messages, and
+//! compaction state. Persistent adaptation belongs to worker bundles rather
+//! than a separate generic prompt-state plane.
 
 use serde::{Deserialize, Serialize};
 

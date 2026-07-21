@@ -10,7 +10,6 @@ fn simple_context() -> Context {
         messages: vec![Message::user("hello")].into(),
         capabilities: None,
         working_directory: None,
-        agent_state_context: None,
         server_origin: None,
     }
 }
@@ -205,34 +204,6 @@ fn system_prompt_no_prefix_none_when_empty() {
 }
 
 #[test]
-fn system_prompt_no_prefix_with_volatile_has_two_tiers() {
-    let ctx = Context {
-        system_prompt: Some("You are helpful.".into()),
-        agent_state_context: Some("state".into()),
-        ..Default::default()
-    };
-    let system = build_system_prompt(&ctx, None).unwrap();
-    let blocks = system.as_array().unwrap();
-
-    // No OAuth prefix block
-    assert_ne!(blocks[0]["text"], OAUTH_SYSTEM_PROMPT_PREFIX);
-
-    // Should have cache_control with 1h on last stable, 5m on last volatile
-    let has_1h = blocks
-        .iter()
-        .any(|b| b["cache_control"]["ttl"].as_str() == Some("1h"));
-    let has_default = blocks.iter().any(|b| {
-        b.get("cache_control").is_some()
-            && (b["cache_control"].get("ttl").is_none() || b["cache_control"]["ttl"].is_null())
-    });
-    assert!(has_1h, "Should have 1h cache on stable content");
-    assert!(
-        has_default,
-        "Should have default (5m) cache on volatile content"
-    );
-}
-
-#[test]
 fn system_prompt_with_prefix_returns_array() {
     let ctx = simple_context();
     let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX));
@@ -255,31 +226,6 @@ fn system_prompt_with_prefix_has_cache_control() {
     // Last block should have cache_control
     let last = blocks.last().unwrap();
     assert!(last.get("cache_control").is_some());
-}
-
-#[test]
-fn system_prompt_with_prefix_volatile_has_two_cache_tiers() {
-    let ctx = Context {
-        system_prompt: Some("You are helpful.".into()),
-        agent_state_context: Some("state".into()),
-        ..Default::default()
-    };
-    let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX)).unwrap();
-    let blocks = system.as_array().unwrap();
-
-    // Should have cache_control with 1h on last stable, 5m on last volatile
-    let has_1h = blocks
-        .iter()
-        .any(|b| b["cache_control"]["ttl"].as_str() == Some("1h"));
-    let has_default = blocks.iter().any(|b| {
-        b.get("cache_control").is_some()
-            && (b["cache_control"].get("ttl").is_none() || b["cache_control"]["ttl"].is_null())
-    });
-    assert!(has_1h, "Should have 1h cache on stable content");
-    assert!(
-        has_default,
-        "Should have default (5m) cache on volatile content"
-    );
 }
 
 // ── ID mapping ───────────────────────────────────────────────────────

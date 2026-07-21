@@ -213,33 +213,6 @@ fn system_param_oauth_has_prefix() {
 }
 
 #[test]
-fn system_param_oauth_cache_breakpoints_stable_and_volatile() {
-    let mut config = oauth_config();
-    config.provider_settings.system_prompt_prefix = Some("Prefix".into());
-    let provider = AnthropicProvider::new(config);
-    let ctx = Context {
-        system_prompt: Some("System".into()),
-        agent_state_context: Some("State".into()),
-        ..Context::default()
-    };
-    let param = provider.build_system_param(&ctx).unwrap();
-    let blocks: Vec<Value> = serde_json::from_value(param).unwrap();
-
-    // Prefix + system (stable) + agent state (volatile)
-    assert_eq!(blocks.len(), 3);
-
-    // Breakpoint 2: last stable block (index 1 = system) -> 1h
-    assert_eq!(blocks[1]["cache_control"]["ttl"], "1h");
-
-    // Breakpoint 3: last volatile block (index 2 = state) -> ephemeral (no ttl)
-    assert_eq!(blocks[2]["cache_control"]["type"], "ephemeral");
-    assert!(
-        blocks[2]["cache_control"].get("ttl").is_none()
-            || blocks[2]["cache_control"]["ttl"].is_null()
-    );
-}
-
-#[test]
 fn system_param_oauth_only_stable() {
     let provider = AnthropicProvider::new(oauth_config());
     let ctx = Context {

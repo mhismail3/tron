@@ -1080,31 +1080,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_with_agent_state_context() {
-        let (mut agent, _journal) = make_agent();
-        let broadcast = Arc::new(EventEmitter::new());
-
-        let ctx = RunContext {
-            agent_state_context: Some("agent-owned note".into()),
-            ..run_context()
-        };
-
-        let result = run_agent(&mut agent, "Use state", ctx, &broadcast, None).await;
-        assert_eq!(result.stop_reason, StopReason::EndTurn);
-    }
-
-    #[tokio::test]
-    async fn run_agent_without_agent_state_context() {
-        let (mut agent, _journal) = make_agent();
-        let broadcast = Arc::new(EventEmitter::new());
-
-        let ctx = RunContext { ..run_context() };
-
-        let result = run_agent(&mut agent, "No state", ctx, &broadcast, None).await;
-        assert_eq!(result.stop_reason, StopReason::EndTurn);
-    }
-
-    #[tokio::test]
     async fn run_agent_does_not_publish_agent_end() {
         let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());

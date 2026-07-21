@@ -216,7 +216,6 @@ fn context_serde_roundtrip() {
         messages: vec![Message::user("hi")].into(),
         capabilities: None,
         working_directory: Some("/tmp".into()),
-        agent_state_context: None,
         server_origin: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();

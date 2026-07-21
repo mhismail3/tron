@@ -106,9 +106,6 @@ pub struct RunContext {
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
-    /// Compact projection of agent-owned state loaded through engine state primitives.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_state_context: Option<String>,
     /// Override user message content (e.g., multimodal blocks with images).
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
@@ -289,20 +286,17 @@ mod tests {
     #[test]
     fn run_context_default() {
         let ctx = RunContext::default();
-        assert!(ctx.agent_state_context.is_none());
         assert!(ctx.reasoning_level.is_none());
     }
 
     #[test]
     fn run_context_serde_roundtrip() {
         let ctx = RunContext {
-            agent_state_context: Some("state ctx".into()),
             reasoning_level: Some(ReasoningLevel::High),
             ..Default::default()
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: RunContext = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.agent_state_context.as_deref(), Some("state ctx"));
         assert_eq!(back.reasoning_level, Some(ReasoningLevel::High));
     }
 

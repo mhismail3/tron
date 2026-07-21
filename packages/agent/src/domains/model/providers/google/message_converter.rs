@@ -287,7 +287,6 @@ mod tests {
             system_prompt: None,
             capabilities: None,
             working_directory: None,
-            agent_state_context: None,
             server_origin: None,
         }
     }

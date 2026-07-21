@@ -13,7 +13,7 @@ use crate::domains::model::responder::ModelResponder;
 pub struct TurnParams<'a> {
     /// Current turn number (1-indexed).
     pub turn: u32,
-    /// Context manager owning messages, agent state summaries, and token tracking.
+    /// Context manager owning messages, compaction state, and token tracking.
     pub context_manager: &'a mut ContextManager,
     /// Model responder for streaming.
     pub responder: &'a Arc<dyn ModelResponder>,
@@ -25,7 +25,7 @@ pub struct TurnParams<'a> {
     pub emitter: &'a Arc<EventEmitter>,
     /// Cancellation token for aborting the turn.
     pub cancel: &'a tokio_util::sync::CancellationToken,
-    /// Run-scoped context for reasoning level, trace ids, and agent-owned state.
+    /// Run-scoped context for reasoning level, causal trace ids, and attachments.
     pub run_context: &'a RunContext,
     /// Optional event persister for inline event storage.
     pub persister: Option<&'a EventPersister>,

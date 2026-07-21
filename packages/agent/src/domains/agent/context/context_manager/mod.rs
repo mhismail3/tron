@@ -221,7 +221,6 @@ impl ContextManager {
             messages: Arc::default(),
             capabilities: None,
             working_directory: Some(self.get_working_directory().to_owned()),
-            agent_state_context: None,
             server_origin: None,
         }
     }

@@ -385,7 +385,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // 3. Build context (base from CM, external fields from RunContext/params)
     let mut context = build_turn_context(
         context_manager,
-        run_context,
         server_origin,
         primitive_surface.capabilities.clone(),
     );

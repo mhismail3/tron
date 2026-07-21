@@ -5,7 +5,6 @@ use tracing::{info, trace, warn};
 
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
 use super::completion::{PromptRunCompletion, finalize_prompt_run, publish_terminal_lifecycle};
-use super::context::load_agent_state_context;
 use super::{
     PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, SessionTitleGenerationRequest,
     ShutdownCancelForwarder, build_user_content_override, build_user_event_payload,
@@ -206,18 +205,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         .flatten()
         .map(|session| session.workspace_id)
         .filter(|id| !id.is_empty());
-    let agent_state_context =
-        load_agent_state_context(&engine_host, &session_id, resolved_workspace_id.as_deref()).await;
-    trace!(
-        component = "agent.runtime",
-        agent_event = "agent_state_context_loaded",
-        session_id = %session_id,
-        run_id = %run_id,
-        workspace_id = resolved_workspace_id.as_deref().unwrap_or("none"),
-        has_agent_state_context = agent_state_context.is_some(),
-        "agent state context loaded"
-    );
-
     let messages = state.messages.clone();
     let initial_turn_offset = match resolve_turn_offset(&event_store, &session_id, state.turn_count)
     {
@@ -309,7 +296,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         reasoning_level: reasoning_level.and_then(|level| {
             crate::domains::agent::r#loop::types::ReasoningLevel::from_str_canonical(&level)
         }),
-        agent_state_context,
         user_content_override,
         run_id: Some(run_id.clone()),
         engine_trace_id: engine_causality

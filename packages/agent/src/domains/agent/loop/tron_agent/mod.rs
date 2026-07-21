@@ -157,7 +157,6 @@ impl TronAgent {
             model = %self.config.model,
             max_turns = self.config.max_turns,
             user_content_kind,
-            has_agent_state_context = ctx.agent_state_context.is_some(),
             "agent run started"
         );
 

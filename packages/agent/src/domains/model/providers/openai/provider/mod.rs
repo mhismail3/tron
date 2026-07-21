@@ -13,8 +13,8 @@
 //!
 //! # Context Injection
 //!
-//! Context parts (agent instruction, agent-owned state, environment, and direct
-//! typed-tool guidance) are compiled into the Responses `instructions` field.
+//! Context parts (agent instruction, environment, and direct typed-tool
+//! guidance) are compiled into the Responses `instructions` field.
 //! The `input` array carries only conversation and provider tool-result items.
 
 use async_trait::async_trait;

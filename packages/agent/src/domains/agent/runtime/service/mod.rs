@@ -49,7 +49,6 @@ use crate::engine::{CausalContext, FunctionId, InvocationId};
 
 mod agent_build;
 mod completion;
-mod context;
 mod deps;
 mod events;
 mod execute;

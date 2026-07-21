@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::domains::model::providers::shared::compose_context_parts_grouped;
+use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
@@ -324,11 +324,9 @@ pub fn build_system_prompt_for_provider(context: &Context, prefix: Option<&str>)
 /// When `prefix` is `Some`, it is prepended as the first block (e.g. OAuth identification).
 /// When `prefix` is `None` and there is no content, returns `None`.
 ///
-/// Cache breakpoints:
-/// - Breakpoint 2: Last stable instruction block -> 1h TTL
-/// - Breakpoint 3: Last volatile state block -> 5m TTL (default)
+/// The last instruction block receives a 1h cache breakpoint.
 fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value> {
-    let grouped = compose_context_parts_grouped(context);
+    let context_parts = compose_context_parts(context);
 
     let mut blocks: Vec<SystemPromptBlock> = Vec::new();
 
@@ -340,13 +338,7 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
         0
     };
 
-    // Stable instruction parts: cache at 1h.
-    for part in &grouped.stable {
-        blocks.push(SystemPromptBlock::text(part));
-    }
-
-    // Volatile state parts: cache at 5m.
-    for part in &grouped.volatile {
+    for part in &context_parts {
         blocks.push(SystemPromptBlock::text(part));
     }
 
@@ -360,24 +352,7 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
             cache_type: "ephemeral".into(),
             ttl: None,
         });
-    } else if !grouped.volatile.is_empty() {
-        // Has volatile content — 1h on last stable, 5m on last volatile
-        let last_stable_idx = prefix_offset + grouped.stable.len();
-        if last_stable_idx > prefix_offset && last_stable_idx <= blocks.len() {
-            blocks[last_stable_idx - 1].cache_control = Some(CacheControl {
-                cache_type: "ephemeral".into(),
-                ttl: Some("1h".into()),
-            });
-        }
-        // 5m on last volatile (last block)
-        if let Some(last) = blocks.last_mut() {
-            last.cache_control = Some(CacheControl {
-                cache_type: "ephemeral".into(),
-                ttl: None,
-            });
-        }
-    } else if !grouped.stable.is_empty() {
-        // Only stable content — 1h on last block
+    } else if !context_parts.is_empty() {
         if let Some(last) = blocks.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),

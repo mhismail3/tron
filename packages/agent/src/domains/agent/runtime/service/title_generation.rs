@@ -186,7 +186,6 @@ async fn generate_title(
             messages: Arc::from(vec![Message::user(prompt)]),
             capabilities: None,
             working_directory: Some(working_dir.to_owned()),
-            agent_state_context: None,
             server_origin: Some(server_origin.to_owned()),
         },
         session_id: session_id.to_owned(),
