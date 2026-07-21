@@ -15,8 +15,8 @@
 //!   sentinel is materialized rather than discarded.
 //!
 //! - **`run/.onboarded`** sentinel at [`crate::shared::foundation::paths::onboarded_marker_path()`].
-//!   Empty marker file. Touched by the Mac wizard at the end of its
-//!   install flow OR on the first successful engine auth. The
+//!   Empty marker file owned and atomically written by the Mac wizard at the
+//!   end of its install flow. The
 //!   `system::get_info` capability returns `paired: true` once it exists so iOS
 //!   can detect "this server has already been paired with someone."
 //!
@@ -33,8 +33,7 @@
 //!   canonical auth-file lock. They therefore serialize with provider token
 //!   refresh, OAuth login, and other auth writers across processes. Concurrent
 //!   reads see a consistent snapshot via the atomic rename.
-//! - Sentinel creation is idempotent: `mark_onboarded` on an existing
-//!   marker is a no-op, never an error.
+//! - The Rust server reads but never writes the Mac-owned onboarding sentinel.
 //!
 #![deny(unsafe_code)]
 
@@ -134,25 +133,6 @@ pub fn rotate_bearer_token(path: &Path) -> io::Result<String> {
 /// is the entire signal — the file's contents are deliberately empty.
 pub fn is_onboarded(path: &Path) -> bool {
     path.exists()
-}
-
-/// Create the first-run sentinel marker at `path`. Idempotent: a no-op
-/// if the file already exists.
-///
-/// Touched by the Mac wizard at the end of its install flow and (TBD
-/// in Phase 3) on the first successful iOS bearer auth.
-pub fn mark_onboarded(path: &Path) -> io::Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "onboarded marker path has no parent directory",
-        )
-    })?;
-    std::fs::create_dir_all(parent)?;
-    std::fs::write(path, b"")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -515,37 +495,8 @@ mod tests {
     #[test]
     fn is_onboarded_true_when_marker_present() {
         let (_dir, path) = temp_marker_path();
-        mark_onboarded(&path).expect("mark");
+        std::fs::write(&path, b"").expect("Mac-owned marker fixture");
         assert!(is_onboarded(&path));
-    }
-
-    #[test]
-    fn mark_onboarded_creates_empty_file() {
-        let (_dir, path) = temp_marker_path();
-        mark_onboarded(&path).expect("mark");
-        assert!(path.exists());
-        let contents = std::fs::read(&path).expect("read");
-        assert!(
-            contents.is_empty(),
-            "sentinel must be an empty file (existence is the only signal)"
-        );
-    }
-
-    #[test]
-    fn mark_onboarded_is_idempotent() {
-        let (_dir, path) = temp_marker_path();
-        mark_onboarded(&path).expect("first");
-        mark_onboarded(&path).expect("second");
-        assert!(is_onboarded(&path));
-    }
-
-    #[test]
-    fn mark_onboarded_creates_parent_directory() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let nested = dir.path().join("nested/internal/run/.onboarded");
-        assert!(!nested.parent().unwrap().exists());
-        mark_onboarded(&nested).expect("mark with missing parent");
-        assert!(nested.exists());
     }
 
     // ── Path helpers ──

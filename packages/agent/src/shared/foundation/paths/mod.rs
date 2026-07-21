@@ -220,8 +220,7 @@ pub fn auth_lock_path_for_home(home: &Path) -> PathBuf {
 /// `~/.tron/internal/run/.onboarded` — first-run sentinel marker.
 ///
 /// See [`files::ONBOARDED_MARKER`] for purpose. Existence-checked by
-/// `system.getInfo` to populate the `paired` field; created by the Mac
-/// wizard or [`crate::app::lifecycle::onboarding::mark_onboarded`].
+/// `system.getInfo` to populate the `paired` field; the Mac wizard owns writes.
 pub fn onboarded_marker_path() -> PathBuf {
     run_dir().join(files::ONBOARDED_MARKER)
 }
