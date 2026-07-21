@@ -4,6 +4,8 @@
 //! backend owns rebuildable routing indexes plus durable operational ledgers.
 //! Database and snapshot implementation types stay private to this module;
 //! callers use [`WorkerStore`] and the snapshot functions re-exported here.
+//! Store concern modules and their scenario tests live under `store/`, adjacent
+//! to their single state owner without inflating one production file.
 
 mod migration;
 mod snapshot;

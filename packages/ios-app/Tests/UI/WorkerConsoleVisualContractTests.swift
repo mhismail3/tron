@@ -33,9 +33,14 @@ struct WorkerConsoleVisualContractTests {
     private func dashboardSource() throws -> String {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let sourceDirectory = testDirectory
-            .appendingPathComponent("../../../Sources/UI/WorkerConsole")
+            .appendingPathComponent("../../Sources/UI/WorkerConsole")
             .standardizedFileURL
-        return try ["WorkerConsoleViews.swift", "EngineDashboardViews.swift"]
+        return try [
+            "WorkerConsoleViews.swift",
+            "WorkerDetailSheet.swift",
+            "WorkerConsoleComponents.swift",
+            "EngineDashboardViews.swift",
+        ]
             .map { sourceDirectory.appendingPathComponent($0) }
             .map { try String(contentsOf: $0, encoding: .utf8) }
             .joined(separator: "\n")

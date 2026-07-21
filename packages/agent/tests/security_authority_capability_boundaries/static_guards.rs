@@ -125,7 +125,12 @@ fn sacb_trusted_local_context_is_observation_not_grant_ceremony() {
 
 #[test]
 fn sacb_worker_runtime_uses_reliability_controls_not_permissions() {
-    let workers = read_repo_file("packages/agent/src/domains/worker_kernel/runtime.rs");
+    let workers = [
+        "packages/agent/src/domains/worker_kernel/runtime/activation.rs",
+        "packages/agent/src/domains/worker_kernel/runtime/invocation.rs",
+    ]
+    .map(read_repo_file)
+    .join("\n");
     for required in [
         "CausalContext::trusted_local(",
         "ActorKind::Worker",

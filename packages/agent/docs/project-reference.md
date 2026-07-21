@@ -60,6 +60,33 @@ tests do not maintain parallel name lists. Every fixed primitive rejects
 undeclared top-level input and output fields; closed response contracts keep
 provider observations small and mechanically dependable.
 
+### Primitive admission rule
+
+A fixed model tool is admitted only when it passes one of two tests:
+
+1. **Kernel custody:** only the compiled engine can own the canonical state or
+   protected transition. Worker version activation, routing, stop/rollback,
+   credential rotation, and approved live-tree application are in this class;
+   implementing them as workers would require a worker to bootstrap or mutate
+   the substrate that defines the worker itself.
+2. **Material execution leverage:** a high-frequency operation is theoretically
+   expressible through `process_run`, but a direct typed form materially
+   improves model success and runtime reliability. The filesystem primitives
+   add bounded reads/listing/search, exact stale-write detection, atomic
+   publication, and closed evidence. `web_fetch` adds URL validation, response
+   ceilings, and source provenance. They are ergonomic primitives, not new
+   semantic product policy.
+
+This admits the current 7/16/4 grouping without pretending the smallest
+possible tool count is the objective. It rejects fixed web search providers,
+transcription, memory policy, notifications, repository workflows, content
+analysis, and other task semantics: those belong in workers. The deterministic
+weighted worker ranker is the bootstrap fallback needed before any worker is
+available; stronger embedding or model-based semantic routing is intentionally
+a future worker developed through real sessions, not another mandatory kernel
+service. No primitive is added merely because it is convenient, and no direct
+tool is collapsed merely to make the manifest numerically smaller.
+
 ## Autonomy Modes
 
 `autonomousWorkers` is a profile setting.
@@ -792,9 +819,15 @@ leave empty shells and speculative single-file folders cannot accumulate again.
 It also requires every Rust source or test file to have an adjacent module
 owner, preventing a deleted registration edge from leaving compilationally
 invisible source behind. Generated build trees are deliberately outside this
-source-ownership contract and may be recreated by their toolchains.
+source-ownership contract and may be recreated by their toolchains. A focused
+size ratchet keeps each worker-kernel production file under 1,000 lines, allows
+the cohesive versioned migration boundary up to 1,100, and keeps every Engine
+Dashboard Swift file under 600; growth beyond those ceilings requires another
+real ownership split rather than a budget increase.
 
 - Worker kernel: `packages/agent/src/domains/worker_kernel/`
+- Worker runtime state owner and concern modules: `packages/agent/src/domains/worker_kernel/runtime/`
+- Canonical worker store and concern modules: `packages/agent/src/domains/worker_kernel/persistence/store/`
 - Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface.rs`
 - Provider schema adaptation: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
 - Trusted-local execution: `packages/agent/src/domains/agent/loop/capability_invocation_executor/`

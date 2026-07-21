@@ -11,13 +11,13 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `contract` | Fixed direct worker-management contracts |
+//! | `contract` | Fixed direct worker-management contracts and their adjacent contract tests |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
 //! | `persistence` | Canonical bundles, snapshots, index reconstruction, and durable operational ledgers |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
-//! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
+//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, supervision, and their stateless support/tests |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //!

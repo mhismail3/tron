@@ -181,3 +181,50 @@ fn every_rust_source_file_has_a_module_owner() {
         "Rust files must be reachable from an adjacent module owner; orphaned files: {orphaned:#?}"
     );
 }
+
+#[test]
+fn worker_kernel_and_dashboard_files_stay_concern_sized() {
+    let mut rust_files = Vec::new();
+    rust_source_files(
+        &repo_path("packages/agent/src/domains/worker_kernel"),
+        &mut rust_files,
+    );
+    let mut oversized = Vec::new();
+    for file in rust_files {
+        let relative = relative(&file);
+        if relative.ends_with("tests.rs")
+            || relative.contains("/tests/")
+            || relative.ends_with("/tests.rs")
+        {
+            continue;
+        }
+        let limit = if relative.ends_with("/persistence/migration.rs") {
+            // The one versioned, transactional retirement/import boundary is
+            // cohesive but still explicitly capped.
+            1_100
+        } else {
+            1_000
+        };
+        let lines = std::fs::read_to_string(&file).unwrap().lines().count();
+        if lines > limit {
+            oversized.push(format!("{relative}: {lines} > {limit}"));
+        }
+    }
+
+    let dashboard = repo_path("packages/ios-app/Sources/UI/WorkerConsole");
+    for entry in std::fs::read_dir(dashboard).unwrap() {
+        let file = entry.unwrap().path();
+        if file.extension().and_then(|extension| extension.to_str()) != Some("swift") {
+            continue;
+        }
+        let lines = std::fs::read_to_string(&file).unwrap().lines().count();
+        if lines > 600 {
+            oversized.push(format!("{}: {lines} > 600", relative(&file)));
+        }
+    }
+
+    assert!(
+        oversized.is_empty(),
+        "worker-kernel and Engine Dashboard files must retain one inspectable concern: {oversized:#?}"
+    );
+}

@@ -224,7 +224,10 @@ closed. The dashboard uses
 the same selected typography, semantic color tokens, liquid-glass section
 fills, compact inline sheet chrome, status hierarchy, and progressive evidence
 disclosure as the rest of Tron; raw schemas and durable payloads are supporting
-detail rather than the page's primary visual hierarchy. It provides:
+detail rather than the page's primary visual hierarchy. The dashboard shell,
+worker-detail workflow, reusable worker evidence components, and compiled-engine
+cards are separate files under the same feature owner; no all-in-one view file
+owns both navigation and every evidence renderer. It provides:
 
 - Overview, Core, Workers, and Activity modes in one compact cockpit;
 - the compiled kernel/product-boundary component map and selected session's

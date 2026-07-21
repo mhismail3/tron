@@ -290,8 +290,13 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "replay manifest durable evidence missing `{required}`"
         );
     }
-    let worker_store =
-        read_repo_file("packages/agent/src/domains/worker_kernel/persistence/store.rs");
+    let worker_store = [
+        "packages/agent/src/domains/worker_kernel/persistence/store/mod.rs",
+        "packages/agent/src/domains/worker_kernel/persistence/store/invocations.rs",
+        "packages/agent/src/domains/worker_kernel/persistence/store/tests.rs",
+    ]
+    .map(read_repo_file)
+    .join("\n");
     for required in [
         "CREATE TABLE IF NOT EXISTS worker_invocations",
         "CREATE TABLE IF NOT EXISTS worker_inbox",

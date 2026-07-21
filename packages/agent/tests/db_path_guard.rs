@@ -254,9 +254,18 @@ fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
 
 #[test]
 fn project_reference_worker_table_catalog_matches_worker_store() {
-    let source_tables = sqlite_table_names(&read_repo_file(
-        "packages/agent/src/domains/worker_kernel/persistence/store.rs",
-    ));
+    let store_root = repo_root().join("packages/agent/src/domains/worker_kernel/persistence/store");
+    let mut store_sources = Vec::new();
+    collect_text_files(&store_root, &mut store_sources);
+    let source_tables: BTreeSet<_> = store_sources
+        .into_iter()
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("rs"))
+        .flat_map(|path| {
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            sqlite_table_names(&source)
+        })
+        .collect();
     assert!(!source_tables.is_empty(), "worker store declares no tables");
     assert_eq!(
         project_reference_table_names("Worker database"),
