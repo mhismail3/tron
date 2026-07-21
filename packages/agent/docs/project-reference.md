@@ -714,8 +714,9 @@ workers, including conventional host tool locations hidden by LaunchAgents.
 Patch text is preserved exactly through the operation boundary, including the
 terminal newline required by standard unified diffs.
 
-Failure removes the temporary worktree/branch and does not retain a proposal.
-Creation never modifies the running tree or binary.
+Failure removes the temporary worktree, branch, and proposal directory and does
+not retain an inert proposal shell. Creation never modifies the running tree or
+binary.
 
 `core_proposal_apply` accepts a proposal id plus session and message ids. It
 loads that later persisted event and requires a user-authored message created

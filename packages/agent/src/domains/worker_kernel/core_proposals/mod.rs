@@ -76,7 +76,7 @@ impl CoreProposalService {
             "codex/core-proposal-{}",
             &proposal_id[proposal_id.len() - 12..]
         );
-        run_git(
+        if let Err(error) = run_git(
             &repository,
             &[
                 "worktree",
@@ -88,7 +88,12 @@ impl CoreProposalService {
             ],
             None,
         )
-        .await?;
+        .await
+        {
+            let cleanup =
+                cleanup_failed_worktree(&repository, &proposal_dir, &worktree, &branch).await;
+            return Err(with_cleanup_evidence(error, cleanup));
+        }
         let prepared = async {
             run_git(
                 &worktree,
@@ -123,8 +128,9 @@ impl CoreProposalService {
         let (test_output, commit) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                cleanup_failed_worktree(&repository, &worktree, &branch).await;
-                return Err(error);
+                let cleanup =
+                    cleanup_failed_worktree(&repository, &proposal_dir, &worktree, &branch).await;
+                return Err(with_cleanup_evidence(error, cleanup));
             }
         };
         let proposal = CoreProposal {
@@ -343,6 +349,13 @@ fn bounded(mut value: String, max: usize) -> String {
         value.push_str("\n[truncated]");
     }
     value
+}
+
+fn with_cleanup_evidence(error: String, cleanup: Result<(), String>) -> String {
+    match cleanup {
+        Ok(()) => error,
+        Err(cleanup) => format!("{error}; failed proposal cleanup: {cleanup}"),
+    }
 }
 
 #[cfg(test)]
@@ -589,7 +602,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_core_patch_tests_leave_no_branch_or_worktree() {
+    async fn failed_core_patch_tests_leave_no_proposal_directory_branch_or_worktree() {
         let repository = repository();
         let home = tempfile::tempdir().unwrap();
         let context = crate::shared::server::test_support::make_test_context();
@@ -609,6 +622,11 @@ mod tests {
 
         assert!(error.contains("tests failed"));
         assert!(service.list().unwrap().is_empty());
+        assert!(
+            fs::read_dir(&service.root).unwrap().next().is_none(),
+            "failed proposal left an orphan under {}",
+            service.root.display()
+        );
         assert_eq!(
             git(
                 repository.path(),
@@ -619,6 +637,9 @@ mod tests {
         assert_eq!(
             fs::read_to_string(repository.path().join("value.txt")).unwrap(),
             "before\n"
+        );
+        assert!(
+            !git(repository.path(), &["worktree", "list", "--porcelain"]).contains("core-proposal")
         );
     }
 }

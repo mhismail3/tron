@@ -10,7 +10,12 @@ use crate::domains::worker_kernel::process::{
     ProcessTree, trusted_local_command_path, wait_with_bounded_output,
 };
 
-pub(super) async fn cleanup_failed_worktree(repository: &Path, worktree: &Path, branch: &str) {
+pub(super) async fn cleanup_failed_worktree(
+    repository: &Path,
+    proposal_dir: &Path,
+    worktree: &Path,
+    branch: &str,
+) -> Result<(), String> {
     let _ = run_git(
         repository,
         &[
@@ -22,7 +27,69 @@ pub(super) async fn cleanup_failed_worktree(repository: &Path, worktree: &Path, 
         None,
     )
     .await;
-    let _ = run_git(repository, &["branch", "-D", branch], None).await;
+    let _ = if worktree.exists() {
+        std::fs::remove_dir_all(worktree)
+    } else {
+        Ok(())
+    };
+    let _ = run_git(repository, &["worktree", "prune"], None).await;
+    let branch_ref = format!("refs/heads/{branch}");
+    if run_git(
+        repository,
+        &["show-ref", "--verify", "--quiet", &branch_ref],
+        None,
+    )
+    .await
+    .is_ok()
+    {
+        let _ = run_git(repository, &["branch", "-D", branch], None).await;
+    }
+    let _ = if proposal_dir.exists() {
+        std::fs::remove_dir_all(proposal_dir)
+    } else {
+        Ok(())
+    };
+
+    let mut failures = Vec::new();
+    if worktree.exists() {
+        failures.push(format!(
+            "core proposal worktree still exists at {}",
+            worktree.display()
+        ));
+    }
+    if proposal_dir.exists() {
+        failures.push(format!(
+            "core proposal directory still exists at {}",
+            proposal_dir.display()
+        ));
+    }
+    match run_git(repository, &["worktree", "list", "--porcelain"], None).await {
+        Ok(list) if worktree_is_registered(&list, worktree) => failures.push(format!(
+            "core proposal worktree remains registered at {}",
+            worktree.display()
+        )),
+        Ok(_) => {}
+        Err(error) => failures.push(format!("verify core proposal worktree cleanup: {error}")),
+    }
+    match run_git(repository, &["branch", "--list", branch], None).await {
+        Ok(branches) if !branches.trim().is_empty() => {
+            failures.push(format!("core proposal branch still exists: {branch}"));
+        }
+        Ok(_) => {}
+        Err(error) => failures.push(format!("verify core proposal branch cleanup: {error}")),
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+fn worktree_is_registered(list: &str, worktree: &Path) -> bool {
+    let expected = worktree.to_string_lossy();
+    list.lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|registered| registered == expected)
 }
 
 pub(super) async fn git_state_path(repository: &Path, state: &str) -> Result<PathBuf, String> {

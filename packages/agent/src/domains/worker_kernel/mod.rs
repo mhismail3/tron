@@ -155,7 +155,9 @@
 //! Core proposal diffs retain exact text/newlines; purge is irreversible while retirement remains recoverable.
 //! Core proposal approval rejects negated or ambiguous messages. A failed
 //! approved cherry-pick is aborted and verified back at its original commit
-//! before the proposal remains in the tested state.
+//! before the proposal remains in the tested state. Failed proposal creation
+//! removes its worktree, branch, and proposal directory; no inert proposal
+//! shell is retained.
 //!
 //! ## Test Ownership
 //!
