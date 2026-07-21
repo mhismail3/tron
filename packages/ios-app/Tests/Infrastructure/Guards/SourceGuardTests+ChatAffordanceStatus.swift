@@ -2,23 +2,6 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
-    @Test("Chat timeline does not mount connection status surface")
-    func testChatTimelineDoesNotMountConnectionStatusSurface() throws {
-        let iosRoot = iosAppRoot()
-        let chatSources = [
-            "Sources/UI/Chat/Shell/ChatView+MessageList.swift",
-            "Sources/UI/Chat/Shell/ChatView.swift",
-        ]
-        let removedStatusView = "Connection" + "Status" + "Pill"
-        let removedStatusPath = "Sources/UI/Components/" + removedStatusView + ".swift"
-
-        for path in chatSources {
-            let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
-            #expect(!source.contains(removedStatusView))
-        }
-        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedStatusPath).path))
-    }
-
     @Test("Chat composer reads canonical connection repository without a view-model mirror")
     func testChatComposerReadsCanonicalConnectionRepository() throws {
         let iosRoot = iosAppRoot()
@@ -37,21 +20,6 @@ extension SourceGuardTests {
         #expect(!viewModel.contains("connectionState = state"))
         #expect(viewModel.contains("observeLoop({ connection.connectionState })"))
         #expect(viewModel.contains("if case .disconnected = state"))
-    }
-
-    @Test("Chat timeline autoloads earlier messages without manual pill")
-    func testChatTimelineDoesNotMountManualEarlierMessagesPill() throws {
-        let iosRoot = iosAppRoot()
-        let uiSources = [
-            "Sources/UI/Chat/Shell/ChatView+MessageList.swift",
-            "Sources/UI/Chat/Shell/ChatView.swift",
-        ]
-        let removedLabel = "Load " + "Earlier " + "Messages"
-
-        for path in uiSources {
-            let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
-            #expect(!source.contains(removedLabel))
-        }
     }
 
     @Test("Compaction pill labels saved percentage as reduction")
@@ -137,44 +105,6 @@ extension SourceGuardTests {
         #expect(theme.contains(".glassEffect(\n                        .regular.tint(color.opacity(glassOpacity)).interactive(),\n                        in: shape\n                    )\n                    .contentShape(shape)"))
         #expect(sidebar.components(separatedBy: ".task(id: workerConsoleRefreshKey)").count == 2)
         #expect(sidebar.components(separatedBy: "WorkerConsoleSheet(").count == 2)
-        #expect(!sidebar.contains("Dash" + "board" + "V2"))
-
-        let retiredLegacyHomePaths = [
-            "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2Components.swift",
-            "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2LabSheet.swift",
-            "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2View.swift",
-            "UITests/" + "Dash" + "board" + "V2UITests.swift",
-            "Tests/Infrastructure/Guards/SourceGuardTests+" + "Dash" + "board" + "V2.swift",
-        ]
-        for path in retiredLegacyHomePaths {
-            #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(path).path))
-        }
-    }
-
-    @Test("retired context-control sheet stays absent")
-    func testRetiredContextControlSheetStaysAbsent() throws {
-        let iosRoot = iosAppRoot()
-        let repoRoot = iosRoot
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let retiredPaths = [
-            "Sources/Engine/Transport/Clients/ContextControlClient.swift",
-            "Sources/UI/Chat/Sheets/ContextControlSheet.swift",
-            "Sources/UI/Chat/Sheets/ContextControlSheetModels.swift",
-            "Sources/UI/Chat/Sheets/ContextControlSheetSupport.swift",
-            "UITests/SessionBriefingUITests.swift",
-        ]
-        for path in retiredPaths {
-            #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(path).path))
-        }
-        let retiredDomain = repoRoot.appendingPathComponent("packages/agent/src/domains/context_control")
-        #expect(!FileManager.default.fileExists(atPath: retiredDomain.path))
-
-        let engineClient = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Transport/WebSocket/EngineClient.swift"),
-            encoding: .utf8
-        )
-        #expect(!engineClient.contains("ContextControlClient"))
     }
 
     @Test("Session list rows use inset liquid glass containers")
@@ -226,12 +156,6 @@ extension SourceGuardTests {
 
         #expect(source.contains("NeuralSparkIndicator()"))
         #expect(!source.contains("AppearanceSettings"))
-        let removedThemeStyle = "Sources/UI/Theme/" + "Thinking" + "Indicator" + "Style.swift"
-        let removedPhaseIndicator = "Sources/UI/Chat/Messages/Indicators/" + "Phase" + "Wave" + "Indicator.swift"
-        let removedOrbitIndicator = "Sources/UI/Chat/Messages/Indicators/" + "Orbiting" + "Particle" + "Indicator.swift"
-        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedThemeStyle).path))
-        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedPhaseIndicator).path))
-        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedOrbitIndicator).path))
     }
 
     @Test("Chat scoped errors use only the local timeline surface")

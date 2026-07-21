@@ -252,7 +252,7 @@ mod tests {
         }
     }
 
-    // ── Phase 1: Filter invalid & deduplicate ────────────────────────────
+    // ── Filter invalid blocks and deduplicate ───────────────────────────
 
     #[test]
     fn empty_messages_filtered() {
@@ -340,7 +340,7 @@ mod tests {
         }
     }
 
-    // ── Phase 2-3: Synthetic capability results ────────────────────────────────
+    // ── Insert synthetic capability results ─────────────────────────────
 
     #[test]
     fn unmatched_capability_invocation_gets_synthetic_result() {
@@ -398,7 +398,7 @@ mod tests {
         assert!(result[4].is_capability_result());
     }
 
-    // ── Phase 4: First message must be user ──────────────────────────────
+    // ── Ensure the first message is user-authored ────────────────────────
 
     #[test]
     fn first_message_assistant_gets_user_prepended() {

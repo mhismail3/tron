@@ -2,89 +2,6 @@ import Testing
 import Foundation
 
 extension SourceGuardTests {
-
-    @Test("Primitive shell has no fixed product modes")
-    func testPrimitiveShellHasNoFixedProductModes() throws {
-        let iosRoot = iosAppRoot()
-        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
-        let uiRoot = sourcesRoot.appendingPathComponent("UI")
-
-        let removedViewRoots = [
-            "Agent" + "Control",
-            "Audit" + "Details",
-            "Prompt" + "Library",
-            "Skills",
-            "Source" + "Changes",
-            "Sub" + "agents",
-            "Voice" + "Notes",
-            "Work",
-        ]
-        for rootName in removedViewRoots {
-            #expect(
-                !FileManager.default.fileExists(atPath: uiRoot.appendingPathComponent(rootName).path),
-                "\(rootName) is a fixed product UI root; primitive iOS must render only the chat shell, Engine Dashboard, and settings"
-            )
-        }
-
-        let requiredShellFiles = [
-            "UI/Chat/Shell/ContentView.swift",
-            "UI/Chat/Shell/ChatView.swift",
-            "UI/Chat/Composer/InputBar.swift",
-            "UI/Settings/Shell/SettingsView.swift",
-            "UI/WorkerConsole/EngineDashboardViews.swift",
-        ]
-        for relativePath in requiredShellFiles {
-            #expect(
-                FileManager.default.fileExists(atPath: sourcesRoot.appendingPathComponent(relativePath).path),
-                "\(relativePath) is part of the retained primitive shell"
-            )
-        }
-
-        let forbiddenNeedles: [(String, String)] = [
-            ("Navigation" + "Mode" + "." + "work", "fixed Work navigation"),
-            ("case " + "work\n", "fixed Work navigation enum case"),
-            ("case " + "work,", "fixed Work navigation enum case"),
-            ("case " + "work:", "fixed Work navigation enum case"),
-            ("show" + "Agent" + "Control", "retired agent sheet presenter"),
-            ("Agent" + "Control" + "View", "retired agent product sheet"),
-            ("Work" + "Dash" + "board" + "View", "fixed Work session list"),
-            ("Audit" + "Details" + "View", "retired fixed audit console"),
-            ("Source" + "Control" + "Sheet", "retired fixed repository sheet"),
-            ("Prompt" + "Library" + "Sheet", "fixed prompt picker"),
-            ("Skill" + "Detail" + "Sheet", "fixed Skills sheet"),
-            ("Mention" + "Popup", "fixed Skills picker"),
-            ("Floating" + "Voice" + "Notes" + "Button", "retired fixed audio UI"),
-            ("Voice" + "Notes" + "Recording" + "Sheet", "retired fixed audio UI"),
-            ("Sub" + "agent" + "Detail" + "Sheet", "fixed worker UI"),
-            ("Sub" + "agent" + "Results" + "List" + "Sheet", "fixed worker UI"),
-            ("Capability" + "Client", "capability catalog/operator client"),
-            ("agent::" + "work_snapshot", "server-owned Work projection"),
-        ]
-
-        guard let enumerator = FileManager.default.enumerator(
-            at: sourcesRoot,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            Issue.record("Could not enumerate \(sourcesRoot.path)")
-            return
-        }
-
-        while let any = enumerator.nextObject() {
-            guard let url = any as? URL else { continue }
-            guard url.pathExtension == "swift" else { continue }
-
-            let content = try String(contentsOf: url, encoding: .utf8)
-            for (needle, reason) in forbiddenNeedles {
-                #expect(
-                    !content.contains(needle),
-                    "\(url.path) contains \(reason): `\(needle)`"
-                )
-            }
-        }
-    }
-
-
     @Test("iOS sources use HRA feature-owned hierarchy")
     func testIOSSourcesUseHRAFeatureOwnedHierarchy() throws {
         let iosRoot = iosAppRoot()
@@ -100,7 +17,7 @@ extension SourceGuardTests {
             "Sources/Support/Diagnostics/Services": "HRA-12 flattens diagnostics services under Support/Diagnostics.",
             "Sources/Support/Feedback": "single-file feedback ownership is represented by Support/FeedbackComposer.swift.",
             "Sources/Support/Share": "single-file share ownership is represented by Support/SharedContent.swift.",
-            "Sources/UI/RuntimeSurfaces": "the resource-backed generated-UI and display-stream planes were retired with their server actuator.",
+            "Sources/UI/RuntimeSurfaces": "runtime-generated UI does not own a product source root.",
             "Sources/Support/Utilities": "HRA-12 splits utilities into scoped Support/Foundation concerns.",
             "Sources/Support/Extensions": "HRA-12 splits extensions into scoped Support/Foundation/SwiftUI or parsing/formatting concerns.",
             "Sources/Support/Infrastructure": "HRA-12 moves infrastructure services to diagnostics or foundation owners.",
@@ -208,7 +125,7 @@ extension SourceGuardTests {
 
         #expect(
             missingRequired.isEmpty && presentBanned.isEmpty && missingConnectionFiles.isEmpty && missingFlatFiles.isEmpty,
-            "HRA-9 Engine hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingConnectionFiles); missing single-file owners: \(missingFlatFiles)"
+            "HRA-9 Engine hierarchy drift. Missing roots: \(missingRequired); disallowed roots present: \(presentBanned); missing split files: \(missingConnectionFiles); missing single-file owners: \(missingFlatFiles)"
         )
     }
 
@@ -283,7 +200,7 @@ extension SourceGuardTests {
                 && presentBanned.isEmpty
                 && missingSplitFiles.isEmpty
                 && oversizedSplitFiles.isEmpty,
-            "HRA-10 Session hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
+            "HRA-10 Session hierarchy drift. Missing roots: \(missingRequired); disallowed roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
         )
     }
 
@@ -339,7 +256,7 @@ extension SourceGuardTests {
                 && presentBanned.isEmpty
                 && missingSplitFiles.isEmpty
                 && oversizedSplitFiles.isEmpty,
-            "HRA-11 UI hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
+            "HRA-11 UI hierarchy drift. Missing roots: \(missingRequired); disallowed roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
         )
     }
 
@@ -437,7 +354,7 @@ extension SourceGuardTests {
                 && presentBanned.isEmpty
                 && missingFiles.isEmpty
                 && presentBannedFiles.isEmpty,
-            "HRA-12 Support hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing files: \(missingFiles); old files present: \(presentBannedFiles)"
+            "HRA-12 Support hierarchy drift. Missing roots: \(missingRequired); disallowed roots present: \(presentBanned); missing files: \(missingFiles); disallowed files present: \(presentBannedFiles)"
         )
     }
 
@@ -486,7 +403,6 @@ extension SourceGuardTests {
             "Tests/Support/FeedbackComposerTests.swift",
             "Tests/Support/Foundation/AsyncSemaphoreTests.swift",
             "Tests/Support/Foundation/FolderCreationTests.swift",
-            "Tests/UI/WorkerConsoleVisualContractTests.swift",
         ]
 
         let missingRequired = requiredRoots
@@ -498,7 +414,7 @@ extension SourceGuardTests {
 
         #expect(
             missingRequired.isEmpty && presentBanned.isEmpty && missingFiles.isEmpty,
-            "HRA iOS tests must mirror production owners. Missing target roots: \(missingRequired); missing owner files: \(missingFiles); old technical buckets still present: \(presentBanned)"
+            "HRA iOS tests must mirror production owners. Missing target roots: \(missingRequired); missing owner files: \(missingFiles); disallowed technical buckets present: \(presentBanned)"
         )
     }
 

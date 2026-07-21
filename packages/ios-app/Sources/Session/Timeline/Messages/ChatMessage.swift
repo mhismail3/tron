@@ -15,8 +15,7 @@ struct ChatMessage: Identifiable, Equatable {
     /// Files attached to this message (unified model - images, PDFs, documents)
     var attachments: [Attachment]?
 
-    // MARK: - Enriched Metadata (Phase 1)
-    // These fields come from server-side event store enhancements
+    // MARK: - Server Metadata
 
     /// Model that generated this response (e.g., "claude-sonnet-4-20250514")
     var model: String?

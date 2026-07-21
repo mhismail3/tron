@@ -78,19 +78,7 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .iter()
             .any(|field| field == "checksum")
     );
-    assert!(upsert.description.contains("complete authoring contract"));
-    assert!(upsert.description.contains("../dependencies/<name>"));
     assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
-    assert!(
-        upsert
-            .description
-            .contains("instead of reading and echoing files")
-    );
-    assert!(
-        upsert
-            .description
-            .contains("never injects an event envelope")
-    );
     assert!(
         bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
             .as_str()

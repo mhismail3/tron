@@ -23,8 +23,7 @@
 //! 4. `agent::prompt_apply` acquires the session run guard and starts
 //!    `agent::run_turn`.
 //! 5. The turn runner builds provider input from session state and supplies
-//!    direct typed kernel tools plus a compact relevant-worker projection. It
-//!    never supplies the removed `capability::execute` wrapper.
+//!    direct typed kernel tools plus a compact relevant-worker projection.
 //! 6. Provider tool calls are written as session truth and invoked as typed
 //!    engine invocations with Agent identity. An agent-runner child also
 //!    inherits its parent worker's causal depth, and the executor copies that

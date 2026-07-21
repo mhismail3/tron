@@ -510,8 +510,8 @@ fn prepare_worker_first_retirement_with_fault(
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| format!("begin worker-first retirement transaction: {error}"))?;
-    crate::engine::durability::ledger::retire_legacy_idempotency_replay_column(&transaction)?;
-    crate::engine::durability::ledger::migrate_profile_idempotency_scope(&transaction)?;
+    crate::engine::retire_legacy_idempotency_replay_column(&transaction)?;
+    crate::engine::migrate_profile_idempotency_scope(&transaction)?;
     report.invocation_ledger_rebuilt =
         crate::engine::retire_legacy_invocation_columns(&transaction)?;
     report.catalog_changes_retired = retire_legacy_catalog_changes(&transaction)?;

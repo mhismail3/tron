@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Session Event Expanded Content
 
 extension SessionEvent {
-    /// Extended content for expanded view (Phase 3 enhanced)
+    /// Extended content for expanded view.
     var expandedContent: String? {
         switch eventType {
         case .messageUser:

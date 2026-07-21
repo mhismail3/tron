@@ -21,7 +21,7 @@ use crate::engine::kernel::types::{CatalogRevision, IdempotencyScope};
 
 mod rows;
 
-/// SQLite-backed engine ledger store for isolated WP2 tests and future host wiring.
+/// SQLite-backed durable engine ledger.
 pub struct SqliteEngineLedgerStore {
     conn: Connection,
 }

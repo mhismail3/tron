@@ -1,7 +1,7 @@
 //! Primitive context manager.
 //!
-//! The manager owns only loop infrastructure: message history, the audited soul
-//! prompt, provider-visible capability schemas for accounting, environment
+//! The manager owns only loop infrastructure: message history, the minimal
+//! behavioral seed, provider-visible tool schemas for accounting, environment
 //! metadata, token estimates, and compaction state.
 
 use std::sync::Arc;

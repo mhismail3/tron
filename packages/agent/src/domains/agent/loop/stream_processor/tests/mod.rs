@@ -297,11 +297,11 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
     let thinking = "Inspect the current capability state.";
     let arguments = {
         let mut args = serde_json::Map::new();
-        let _ = args.insert("operation".into(), serde_json::json!("catalog_search"));
+        let _ = args.insert("query".into(), serde_json::json!("workers"));
         args
     };
     let capability_invocation =
-        CapabilityInvocationDraft::new("call_after_thinking", "execute", arguments.clone());
+        CapabilityInvocationDraft::new("call_after_thinking", "lookup", arguments.clone());
     let provider_events = vec![
         StreamEvent::Start,
         StreamEvent::ThinkingStart,
@@ -311,11 +311,11 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
         },
         StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: "call_after_thinking".into(),
-            name: "execute".into(),
+            name: "lookup".into(),
         },
         StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "call_after_thinking".into(),
-            arguments_delta: r#"{"operation":"catalog_search"}"#.into(),
+            arguments_delta: r#"{"query":"workers"}"#.into(),
         },
         StreamEvent::CapabilityInvocationDraftEnd {
             capability_invocation: capability_invocation.clone(),
@@ -335,7 +335,7 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
                     },
                     AssistantContent::CapabilityInvocation {
                         id: "call_after_thinking".into(),
-                        name: "execute".into(),
+                        name: "lookup".into(),
                         arguments,
                         thought_signature: None,
                     },

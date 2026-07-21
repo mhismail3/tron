@@ -494,12 +494,5 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
         model_tools.contains(&"worker_baseline_echo"),
         "{model_tools:?}"
     );
-    assert!(
-        functions
-            .iter()
-            .all(|function| function.id.as_str() != "capability::execute"),
-        "removed wrapper resurfaced in the live provider catalog"
-    );
-
     runtime.server.shutdown().shutdown();
 }

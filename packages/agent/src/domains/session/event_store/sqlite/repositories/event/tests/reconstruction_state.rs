@@ -139,7 +139,7 @@ fn has_events_before_empty_session() {
     assert!(!EventRepo::has_events_before(&conn, "sess_1", 100).unwrap());
 }
 
-// ── Phase 6 edge case tests ──
+// ── Edge case tests ──
 
 #[test]
 fn get_latest_events_limit_zero_returns_empty() {

@@ -291,7 +291,7 @@ fn mixed_text_and_tool_calls_preserved() {
     assert_eq!(result[0].tool_calls.as_ref().unwrap().len(), 1);
 }
 
-// ── Phase 1: Arguments serialize as JSON objects ─────────────────────
+// ── Arguments serialize as JSON objects ──────────────────────────────
 
 #[test]
 fn capability_invocation_arguments_serialize_as_object() {
@@ -430,7 +430,7 @@ fn multiple_tool_calls_arguments_all_objects() {
     }
 }
 
-// ── Phase 2: Tool results use tool_name ─────────────────────────────
+// ── Tool results use tool_name ───────────────────────────────────────
 
 #[test]
 fn capability_result_has_tool_name() {
@@ -654,7 +654,7 @@ fn capability_result_orphaned_id_unknown_marker() {
     assert_eq!(result[0].tool_name, Some("unknown".into()));
 }
 
-// ── Phase 3: Edge case verification ─────────────────────────────────
+// ── Edge case verification ───────────────────────────────────────────
 
 #[test]
 fn assistant_only_tool_calls_no_text() {

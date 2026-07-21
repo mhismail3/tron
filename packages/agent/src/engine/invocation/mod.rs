@@ -22,10 +22,9 @@
 //!
 //! - Invocation IDs and causal context are created before dispatch and copied
 //!   into the durable record.
-//! - Local agent and worker paths carry their concrete actor identity; there is
-//!   no synthetic trust marker or permission token in causal context.
-//! - Working directory, advertised surface pins, and causal depth are typed
-//!   execution inputs; there is no extensible string metadata bag.
+//! - Local agent and worker paths carry their concrete actor identity.
+//! - Working directory, advertised surface pins, and causal depth are closed
+//!   typed execution inputs.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
 //! - Model-originated direct calls carry the advertised function revision and,

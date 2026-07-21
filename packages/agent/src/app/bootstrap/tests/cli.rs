@@ -86,7 +86,7 @@ fn shutdown_signal_surface_includes_process_manager_stop_signal() {
 
 // ── CLI subcommand dispatch ──────────────────────────────────────────
 //
-// These tests cover Phase 2.7 — the `tron auth rotate` surface. The
+// These tests cover the `tron auth rotate` surface. The
 // goal is twofold: (a) the clap parse tree exists exactly as documented,
 // and (b) the dispatch helper writes a fresh token to disk and prints
 // it on stdout. The end-to-end path uses the public `onboarding`

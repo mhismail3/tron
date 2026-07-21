@@ -3,7 +3,7 @@ import Foundation
 /// Pure-value parser for `tron://pair?host=…&port=…&token=…` deep-links.
 ///
 /// Used by:
-///   - the iOS Pairing onboarding step (Phase 4) when the QR scanner
+///   - the iOS Pairing onboarding step when the QR scanner
 ///     surfaces a captured payload,
 ///   - the universal-paste path on every text field of the pairing form
 ///     (so a user can paste the full link into any field and have it

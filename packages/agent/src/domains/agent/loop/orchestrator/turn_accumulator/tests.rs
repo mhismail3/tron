@@ -243,7 +243,7 @@ fn to_json_produces_expected_format() {
     assert!(sequence.is_array());
 }
 
-// ── ContentSequenceItem::to_json key tests (Phase 1 fix) ──
+// ── ContentSequenceItem::to_json key tests ──
 
 #[test]
 fn to_json_text_uses_text_key() {
@@ -288,7 +288,7 @@ fn to_json_capability_ref_uses_snake_case_type() {
     assert_eq!(json["invocationId"], "tc_1");
 }
 
-// ── Streaming output tests (Phase 2) ──
+// ── Streaming output tests ──
 
 #[test]
 fn capability_streaming_output_accumulates() {

@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Session Event Summary
 
 extension SessionEvent {
-    /// Human-readable summary of the event (Phase 3 enhanced)
+    /// Human-readable summary of the event.
     var summary: String {
         switch eventType {
         case .sessionStart:

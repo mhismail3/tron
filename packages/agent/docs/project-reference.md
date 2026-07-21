@@ -2,9 +2,7 @@
 
 > Last verified: 2026-07-20 on `codex/worker-first-autonomy-poc`.
 
-This document describes the active worker-first implementation. Git history is
-the record of the removed capability-governance and module-proposal system; it
-is not an active compatibility contract.
+This document describes the active worker-first implementation.
 
 ## Product Model
 
@@ -17,7 +15,8 @@ parallel engine model.
 The POC optimizes for one outcome: when a user or agent identifies reusable
 behavior, Tron can turn it into working persistent behavior immediately. A
 complete worker is created or improved through one `worker_upsert` operation.
-There is no later install, binding, grant, promotion, or lifecycle actuator.
+Successful activation publishes its version, triggers, routing, and direct tool
+as one atomic state change.
 
 ## Fixed Kernel
 
@@ -38,19 +37,19 @@ The authenticated `filesystem` product domain contains only the three iOS
 workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Its old
 parallel agent read/search/diff/write toolbox and resource-backed patch-preview
 workflow were deleted; model filesystem work has one owner in the seven direct
-worker-kernel host primitives.
+worker-kernel filesystem/process/network primitives. Session title mutation is
+the eighth host primitive and owns durable session metadata rather than host
+I/O.
 
-Higher-level behavior belongs in a worker bundle. The fixed tree no longer
-contains module proposal/validation/install/dependency/lifecycle/runtime
-planes, capability binding and shadow routing, procedural candidates,
-metadata-only schedules, the old worker lifecycle, fixed media/notification
-delivery planes, fixed transcription, or the `capability::execute` wrapper.
-Speech-to-text may return only as a worker authored and validated through real
-use; it is not a fixed domain, settings policy, sidecar, or client feature.
+Higher-level behavior belongs in worker bundles. The fixed tree owns the model
+loop, authenticated product transport, durable custody, direct host actuators,
+worker execution, and isolated core-change approval. New product behaviors,
+including speech-to-text, are authored and validated as workers through real
+use.
 
 The engine still uses generic words such as “capability invocation” in provider
-tool-call events and client rendering. Those names describe the model protocol;
-they do not imply the removed authorization or operation-catalog system.
+tool-call events and client rendering. Those names are provider-protocol
+vocabulary for typed tool calls.
 
 The model-facing fixed surface currently has 28 direct primitives grouped as
 eight host operations, sixteen worker-control operations, and four core-change
@@ -115,8 +114,8 @@ tool is collapsed merely to make the manifest numerically smaller.
 - It defaults to `false`. The agent remains conversational and
   explains that autonomous action can be enabled in Settings.
 - With the setting enabled, accepted user sessions and workers are trusted
-  local operators. Direct host and worker calls do not derive, mint, inspect,
-  or consume per-call capability grants.
+  local operators. Direct host and worker calls carry actor, session, trace,
+  version, and idempotency evidence into the engine.
 - Changes apply to the running engine without a server restart. Disabling
   hides the fixed worker primitives, unregisters direct worker tools, cancels
   active execution, and stops resident services while preserving canonical
@@ -384,12 +383,17 @@ When autonomy is enabled, fixed kernel operations are direct typed tools. There
 is no wrapper operation field. `worker_upsert` publishes the complete bundle
 schema—including every runner, trigger, dependency lock, named-secret binding,
 test, health check, provenance record, and routing field—to the model. Its tool
-description includes command-runner I/O and automatic checksum locking, and
-states the deterministic `files/` and `../dependencies/<name>` layout. The
-optional `sourceDirectory` transport imports an already-authored local tree;
-provider guidance tells the model not to read those files back just to echo them
-through tool JSON and explicitly forbids searching the source tree or user home
-for private authoring examples.
+description owns command-runner I/O, automatic checksum locking, and the
+deterministic `files/` and `../dependencies/<name>` layout. The optional
+`sourceDirectory` transport imports an already-authored local tree without
+requiring its contents to be copied through tool JSON.
+
+Prompt ownership follows the same boundary. The static agent seed is a short
+statement of behavioral intent. Provider request guidance contributes only the
+current direct-tool inventory, strict-schema reminder, discovery path, and
+immediate post-upsert availability. Exact arguments and execution mechanics
+live in typed tool contracts, so adding or changing a worker updates the native
+provider surface without editing a second instructional catalog.
 
 ### Host primitives
 
@@ -402,6 +406,7 @@ for private authoring examples.
 | `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
 | `web_fetch` | `worker_kernel::web_fetch` | Explicit HTTP(S) fetch that stops reading at its content ceiling and returns provenance |
+| `session_set_title` | `worker_kernel::session_set_title` | Durable title update for the current session |
 
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
@@ -579,14 +584,12 @@ Runtime state and idempotency have closed profile/session scopes, while stream
 delivery has closed system/session visibility. Unknown persisted values fail
 closed. This keeps admission, duplicate suppression, state, and delivery from
 becoming another synthetic authorization model.
-The generic function-definition provenance record was removed because no
-runtime consumed it; executable worker bundles retain the source revisions and
-checksums that actually support inspection, ranking, recovery, and audit.
+Executable worker bundles retain source revisions and checksums for inspection,
+ranking, recovery, and audit.
 
 Attaching unseen worker inbox results is an engine-owned session projection,
 not an agent action. It runs under the internal runtime identity while retaining
-the session and parent trace as provenance, so background-result delivery cannot
-silently depend on an agent grant or fail internal visibility checks.
+the session and parent trace as provenance.
 
 The remaining boundaries are practical:
 
@@ -648,7 +651,7 @@ Messages containing negation or rejection language do not count as approval.
 Only then is the proposal commit cherry-picked into the named repository. A
 conflicting cherry-pick is aborted and the original live-tree commit is
 verified before the proposal remains `tested`. The approval message is recorded
-directly; no capability grant is minted.
+directly with the proposal evidence.
 
 ## State Snapshot and Legacy Import
 
@@ -773,10 +776,8 @@ unwritten storage contracts:
 | turns | `stream.turn_start`, `stream.turn_end`, `turn.failed` |
 | context | `compact.boundary` |
 
-The historical `capability.invocation.*` names describe generic provider
-tool-call conversation evidence; they do not restore the removed authorization
-plane. Removed governance-domain stream topics and schemas are not retained
-through adapters.
+The `capability.invocation.*` names describe generic provider tool-call
+conversation evidence.
 
 ## iOS Client
 
@@ -827,7 +828,7 @@ Deterministic tests cover:
 
 - real authenticated WebSocket startup, session reconstruction, settings,
   worker activation, lifecycle events, client connectivity, direct provider
-  tools, and continued absence of `capability::execute`;
+  tools, and the exact typed primitive surface;
 - atomic publication, failed candidates, immutable hashes, overlap, rollback,
   retirement, purge, and reconstruction;
 - command, agent, and resident-service runners;

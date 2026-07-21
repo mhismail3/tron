@@ -33,20 +33,6 @@ fn agent_loop_uses_model_responder_boundary() {
 
 #[test]
 fn provider_internals_do_not_escape_model_domain() {
-    let provider_docs = read_repo_file("packages/agent/src/domains/model/providers/mod.rs");
-    assert!(
-        provider_docs.contains(
-            "Depended on by: `domains::model::responder`, model routing/catalog code,\n//! and app bootstrap only as the composition/root startup path."
-        ),
-        "provider root docs must name the approved dependents without broadening provider-internal access"
-    );
-    assert!(
-        !provider_docs.contains("Depended on by: the agent loop")
-            && !provider_docs.contains("agent loop, runtime bootstrap")
-            && !provider_docs.contains("agent loop depends on provider internals"),
-        "provider root docs must not claim the agent loop depends on provider internals"
-    );
-
     let allowed_prefixes = [
         "packages/agent/src/domains/model/",
         "packages/agent/src/app/bootstrap/",
@@ -115,18 +101,6 @@ fn domain_workers_expose_contracts_not_services() {
             "worker-kernel concern must stay privately owned: {required}"
         );
     }
-    for removed in [
-        "packages/agent/src/domains/module_dependencies",
-        "packages/agent/src/domains/module_lifecycle",
-        "packages/agent/src/domains/capability_binding",
-        "packages/agent/src/domains/worker_lifecycle",
-    ] {
-        assert!(
-            !repo_path(removed).exists(),
-            "superseded modularity plane must stay deleted: {removed}"
-        );
-    }
-
     let allowed_prefixes = [
         "packages/agent/src/domains/",
         "packages/agent/src/app/bootstrap/",

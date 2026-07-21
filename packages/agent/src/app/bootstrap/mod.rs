@@ -381,12 +381,12 @@ fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronSe
 }
 
 pub(crate) async fn run_server(args: Cli) -> Result<()> {
-    // Phase 1: Pre-database filesystem operations
+    // Establish filesystem and transport credentials before opening storage.
     init_directories()?;
     let bearer_token_path = crate::app::lifecycle::onboarding::bearer_token_path();
     let _bearer_token = initialize_bearer_token_at(&bearer_token_path)?;
 
-    // Phase 2: Database and logging
+    // Open durable storage and observability.
     // _db_lock is bound for the lifetime of main(); dropping it releases the
     // process-level lock on the event-store DB. Keep in scope explicitly so
     // compilation fails if it's ever moved out without an equivalent guard.
@@ -439,10 +439,10 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;
 
-    // Phase 3: Core services (orchestrator, providers, primitive agent deps)
+    // Construct model and session services.
     let services = init_services(event_store, &settings).await?;
 
-    // Phase 4: Runtime context
+    // Assemble the shared runtime context.
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_stream_events = services.orchestrator.clone();
     let settings_runtime_for_watcher = settings_runtime.clone();
@@ -454,7 +454,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         origin.clone(),
     );
 
-    // Phase 5: Build and start server
+    // Register the function surface before accepting connections.
     let bind_host_label = args.host.clone();
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = crate::app::health::metrics::install_recorder();
@@ -477,7 +477,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     );
     let stream_event_pump_handle = tokio::spawn(pump.run());
 
-    // Phase 6: Background tasks and bind
+    // Start supervised background work and bind the listener.
     spawn_background_tasks(&session_manager_for_startup, &server);
     server
         .shutdown()

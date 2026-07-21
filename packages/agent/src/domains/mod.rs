@@ -1,11 +1,9 @@
 //! Worker-first domain boundary.
 //!
-//! The fixed source tree retains only session/model execution, authenticated
-//! product infrastructure, durable event/state custody, and the autonomous
-//! worker kernel. Proposal-only modules, capability routing, procedural
-//! candidates, metadata schedulers, and the legacy worker lifecycle are not
-//! compiled or registered. New higher-level behavior belongs in persistent
-//! worker bundles under the engine-global worker store.
+//! The fixed source tree owns session/model execution, authenticated product
+//! infrastructure, durable event/state custody, and the autonomous worker
+//! kernel. Higher-level adaptive behavior belongs in persistent worker bundles
+//! under the engine-global worker store.
 //!
 //! ## Fixed domains
 //!
@@ -23,8 +21,8 @@
 //!
 //! Model-visible actions are direct typed worker-kernel functions or enabled
 //! persistent workers. Local calls execute directly with concrete actor
-//! identity and do not derive per-call authority grants or trust markers.
-//! Remote transport authentication remains a transport concern. Source changes
+//! identity and causal evidence. Remote transport authentication remains a
+//! transport concern. Source changes
 //! remain isolated core proposals until a later explicit user message approves
 //! application.
 

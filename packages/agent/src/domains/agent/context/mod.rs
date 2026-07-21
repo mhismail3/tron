@@ -20,10 +20,12 @@
 //!
 //! ## Key Invariant
 //!
-//! The model-facing prompt begins with the static soul seed and the current
-//! direct-tool surface. Durable worker state reaches the model only through
-//! explicit worker results and inbox context; the context manager does not
-//! maintain a parallel generic state-prompt channel.
+//! The model-facing prompt begins with a concise behavioral seed and the
+//! current direct-tool surface. The seed owns only durable behavioral intent;
+//! live tool identity belongs to provider schemas, and exact authoring
+//! mechanics belong to each tool contract. Durable worker state reaches the
+//! model only through explicit worker results and inbox context; the context
+//! manager does not maintain a parallel generic state-prompt channel.
 //! Compaction uses token pressure to decide when to compact context, and only
 //! commits when an older message window can be summarized and the result
 //! reduces the durable context. Runtime compaction also requires the loop

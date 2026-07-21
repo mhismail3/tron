@@ -111,9 +111,8 @@ fn build_request_compiles_primitive_context_into_instructions() {
     assert!(instructions.contains("Server: localhost:9847"));
     assert!(instructions.contains("Current working directory: /workspace"));
     assert!(instructions.contains("Available Direct Tools"));
-    assert!(instructions.contains("There is no `capability::execute` wrapper"));
+    assert!(instructions.contains("Call the typed tools listed below directly"));
     assert!(instructions.contains("worker_upsert"));
-    assert!(instructions.contains("execute"));
 
     assert_eq!(request.input.len(), 1);
     match &request.input[0] {

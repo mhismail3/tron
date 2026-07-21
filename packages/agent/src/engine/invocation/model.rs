@@ -236,7 +236,7 @@ impl InvocationResult {
     }
 }
 
-/// Durable shape of an invocation attempt in the Phase 1 in-memory ledger.
+/// Durable shape of an invocation attempt.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InvocationRecord {
     /// Invocation id.

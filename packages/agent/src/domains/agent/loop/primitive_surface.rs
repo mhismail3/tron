@@ -1,7 +1,6 @@
 //! Live host projection for the primitive provider surface.
 //!
-//! Providers see only direct typed kernel and persistent-worker functions.
-//! The removed `capability::execute` wrapper is never projected.
+//! Providers see direct typed kernel and persistent-worker functions.
 
 use std::collections::BTreeMap;
 

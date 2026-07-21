@@ -448,22 +448,11 @@ fn direct_guidance_describes_worker_first_execution() {
 
     for required in [
         "Available Direct Tools",
-        "capability::execute",
         "Follow each tool's JSON schema exactly",
         "worker_discover",
         "worker_upsert",
         "becomes callable immediately",
-        "complete authoring contract",
-        "pass `sourceDirectory`",
-        "not read files back merely to echo them",
-        "never search Tron's source tree or the user home",
-        "receive typed JSON on stdin",
-        "../dependencies/N",
-        "omit checksum",
-        "reliability evidence",
-        "not permission ceremony",
-        "Core source changes must remain isolated proposals",
-        "explicit user approval",
+        "follow that tool's contract",
     ] {
         assert!(
             result.contains(required),
@@ -473,27 +462,13 @@ fn direct_guidance_describes_worker_first_execution() {
 }
 
 #[test]
-fn direct_guidance_omits_operation_catalog_ceremony() {
+fn direct_guidance_stays_compact() {
     let result = generate_capability_instruction_text(&[]);
 
     assert!(
-        result.len() < 4_000,
+        result.len() < 1_500,
         "provider guidance should stay concise"
     );
-    for stale_guidance in [
-        "Use only",
-        "catalog_search",
-        "catalog_inspect",
-        "Set operation to exactly one of",
-        "idempotencyKey",
-        "allowedCapabilities",
-        "authority grant",
-    ] {
-        assert!(
-            !result.contains(stale_guidance),
-            "stale authority guidance remains: {stale_guidance:?}"
-        );
-    }
 }
 
 // ── normalize_schema_for_openai ──────────────────────────────────

@@ -9,7 +9,7 @@ const SUPPORTED_TYPES: &[&str] = &[
     "array", "boolean", "integer", "null", "number", "object", "string",
 ];
 
-/// Validate that a schema only uses the subset enforced by Phase 1.
+/// Validate that a schema only uses the enforced subset.
 pub fn validate_schema_definition(
     function_id: &FunctionId,
     direction: &'static str,
@@ -18,7 +18,7 @@ pub fn validate_schema_definition(
     validate_schema_node(function_id, direction, schema, "$")
 }
 
-/// Validate a payload against the supported Phase 1 schema subset.
+/// Validate a payload against the enforced schema subset.
 pub fn validate_payload(
     function_id: &FunctionId,
     direction: &'static str,
@@ -683,7 +683,7 @@ mod tests {
             "additionalProperties": false,
             "required": ["operation", "limit"],
             "properties": {
-                "operation": {"type": "string", "const": "catalog_search"},
+                "operation": {"type": "string", "const": "lookup"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500}
             }
         });
@@ -692,7 +692,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_inspect", "limit": 10}),
+            &json!({"operation": "inspect", "limit": 10}),
         )
         .unwrap_err();
         assert!(wrong_operation.to_string().contains("does not match const"));
@@ -701,7 +701,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_search", "limit": 0}),
+            &json!({"operation": "lookup", "limit": 0}),
         )
         .unwrap_err();
         assert!(below.to_string().contains("below minimum 1"));
@@ -710,7 +710,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_search", "limit": 501}),
+            &json!({"operation": "lookup", "limit": 501}),
         )
         .unwrap_err();
         assert!(above.to_string().contains("exceeds maximum 500"));
@@ -719,7 +719,7 @@ mod tests {
             &function_id(),
             "request",
             &schema,
-            &json!({"operation": "catalog_search", "limit": 500}),
+            &json!({"operation": "lookup", "limit": 500}),
         )
         .unwrap();
     }

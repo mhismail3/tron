@@ -136,25 +136,15 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         You are Tron, an AI coding assistant running in Tron's primitive loop.\n\
         \n\
         ## Available Direct Tools\n\
-        Call the typed tools listed below directly. There is no `capability::execute` wrapper:\n\
+        Call the typed tools listed below directly:\n\
         \n\
         {tool_list}\n\
         \n\
         ## Typed Execution\n\
         1. Follow each tool's JSON schema exactly and use returned ids and versions verbatim.\n\
         2. Use `worker_discover` when a relevant persistent worker is not in the live set.\n\
-        3. Use `worker_upsert` once with a complete bundle when durable adaptation is useful; a \
-        successful worker becomes callable immediately. Its schema is the complete authoring \
-        contract; author and test source in a temporary directory, pass `sourceDirectory`, and do \
-        not read files back merely to echo them into JSON; never search Tron's source tree or the \
-        user home for private examples.\n\
-        4. Command-worker files run from `files/`, receive typed JSON on stdin, and return JSON on \
-        stdout. A dependency named N is fetched to `../dependencies/N`, and its install command \
-        runs there before smoke tests. Pin its revision exactly; omit checksum when `worker_upsert` \
-        should fetch and seal it.\n\
-        5. Treat failures, health, provenance, hashes, and inbox records as reliability evidence, \
-        not permission ceremony.\n\
-        6. Core source changes must remain isolated proposals until a later explicit user approval.",
+        3. A successful `worker_upsert` becomes callable immediately; follow that tool's contract \
+        for authoring and activation.",
         tool_list = tool_descriptions.join("\n"),
     )
 }

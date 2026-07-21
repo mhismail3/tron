@@ -31,8 +31,8 @@
 //! - [`engine::socket::run_engine_ws_session`] owns one live WebSocket session,
 //!   subscriptions, request/response writes, and socket closure.
 //! - [`runtime::setup::register_server_domains_for_runtime_context`] registers
-//!   retained domain workers and canonical functions during async app startup,
-//!   then activates domain lifecycle tasks.
+//!   canonical domain functions during async app startup, then activates
+//!   domain lifecycle tasks.
 //! - [`runtime::setup::register_server_domains_for_context`] remains the
 //!   single-threaded setup/test fixture entrypoint with the same ordering.
 //!
@@ -61,8 +61,8 @@
 //!
 //! Socket/session behavior lives under `transport/engine/socket/tests.rs`.
 //! Runtime stream behavior lives under the corresponding transport tests.
-//! Protocol parity and removed-surface
-//! assertions belong in the static integration targets under
+//! Protocol parity and architectural boundary assertions belong in the
+//! integration targets under
 //! `packages/agent/tests/`.
 
 pub mod engine;

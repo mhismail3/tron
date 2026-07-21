@@ -361,7 +361,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "predecessorWorkerId":{"type":"string"}
             }
         }),
-        "Create or improve a persistent worker in one atomic validate, test, activate operation. This schema is the complete authoring contract: do not search Tron's files for private examples. Author source in a temporary directory and pass sourceDirectory instead of reading and echoing files into the call. Command runners and smoke/health commands start in files/, read typed JSON from stdin, and emit JSON on stdout; fetched dependency <name> is available at ../dependencies/<name>, and its optional install command runs inside that dependency directory first. A dependency may omit checksum; this operation fetches it and seals the actual digest into the immutable bundle. Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them, and Tron never injects an event envelope.",
+        "Create or improve a persistent worker in one atomic validate, test, activate operation. Author source in a temporary directory and pass sourceDirectory instead of echoing files into the call. Command runners and smoke/health commands start in files/, read typed JSON from stdin, and emit JSON on stdout; fetched dependency <name> is available at ../dependencies/<name>, and its optional install command runs inside that dependency directory first. A dependency may omit checksum; this operation fetches it and seals the actual digest into the immutable bundle. Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them.",
     )?);
     specs.push(spec(
         "worker_kernel::discover",

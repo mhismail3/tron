@@ -2,8 +2,8 @@
 //!
 //! This crate-private fabric provides typed invocation, durable state and
 //! events and authenticated transport primitives. Autonomous workers are
-//! owned by domains::worker_kernel; model-facing calls use those direct typed
-//! functions and never pass through an operation wrapper.
+//! owned by domains::worker_kernel; model-facing calls use direct typed
+//! functions.
 //!
 //! ## Boundaries
 //!
@@ -39,10 +39,13 @@ pub(crate) mod kernel;
 pub(crate) mod primitives;
 
 pub use catalog::discovery::{ActorContext, ActorKind};
-pub(crate) use durability::ledger::retire_legacy_invocation_columns;
 pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
+};
+pub(crate) use durability::ledger::{
+    migrate_profile_idempotency_scope, retire_legacy_idempotency_replay_column,
+    retire_legacy_invocation_columns,
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub use durability::state::{EngineStateEntry, EngineStateScope};

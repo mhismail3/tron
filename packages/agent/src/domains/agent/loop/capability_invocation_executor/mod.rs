@@ -1,11 +1,9 @@
 //! Direct model-tool executor for the worker-first surface.
 //!
-//! Accepted local agent calls enter the engine directly with Agent identity;
-//! this path does not derive, mint, inspect, or consume capability grants or a
-//! synthetic trust marker. The engine still records actor, session, trace,
-//! parent, and deterministic idempotency metadata. Direct kernel functions and
-//! active workers own their request/response schemas and reliability contracts
-//! at registration.
+//! Accepted local agent calls enter the engine directly with Agent identity.
+//! The engine records actor, session, trace, parent, and deterministic
+//! idempotency metadata. Direct kernel functions and active workers own their
+//! request/response schemas and reliability contracts at registration.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the

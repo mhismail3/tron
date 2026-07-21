@@ -3,8 +3,7 @@
 //! This module registers the small trusted-local worker-first kernel and the
 //! product infrastructure still needed by authenticated clients and sessions.
 //! Persistent behavior is registered dynamically from filesystem-owned worker
-//! bundles; there is no module manifest, proposal, binding, scheduler, legacy
-//! worker-lifecycle, or `capability::execute` registration plane.
+//! bundles, while this module composes only executable source-owned functions.
 //! The complete production composition validates canonical identity uniqueness
 //! before either registration path mutates the engine catalog. The worker runtime returns one
 //! activation token so transport setup starts its lifecycle observer only after
