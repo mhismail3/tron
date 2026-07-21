@@ -9,10 +9,9 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::invocation::model::{InProcessFunctionHandler, InvocationRecord};
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
+use crate::engine::kernel::ids::{FunctionId, WorkerId};
 use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition,
-    WorkerDefinition,
+    CatalogChange, CatalogRevision, FunctionDefinition, WorkerDefinition,
 };
 
 mod authorization;
@@ -41,23 +40,11 @@ struct FunctionEntry {
     volatile: bool,
 }
 
-struct TriggerTypeEntry {
-    definition: TriggerTypeDefinition,
-    volatile: bool,
-}
-
-struct TriggerEntry {
-    definition: TriggerDefinition,
-    volatile: bool,
-}
-
 /// In-memory live catalog.
 pub struct LiveCatalog {
     revision: CatalogRevision,
     workers: BTreeMap<WorkerId, WorkerEntry>,
     functions: BTreeMap<FunctionId, FunctionEntry>,
-    trigger_types: BTreeMap<TriggerTypeId, TriggerTypeEntry>,
-    triggers: BTreeMap<TriggerId, TriggerEntry>,
     ledger: Box<dyn EngineLedgerStore>,
     grants: Arc<StdMutex<EngineGrantStoreBackend>>,
 }
@@ -76,8 +63,6 @@ impl LiveCatalog {
             revision: CatalogRevision(0),
             workers: BTreeMap::new(),
             functions: BTreeMap::new(),
-            trigger_types: BTreeMap::new(),
-            triggers: BTreeMap::new(),
             ledger,
             grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
                 InMemoryEngineGrantStore::new(),

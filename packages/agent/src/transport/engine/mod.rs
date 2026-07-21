@@ -2,8 +2,8 @@
 //!
 //! Protocol-specific transports translate their wire request into
 //! [`EngineTransportRequest`] and then call [`dispatch_engine_transport_request`].
-//! The envelope contains engine concepts only: target function, trigger,
-//! payload, actor, authority, trace, optional session/workspace scope, and
+//! The envelope contains engine concepts only: target function, payload,
+//! actor, trace, optional session/workspace scope, and
 //! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 //!
@@ -19,10 +19,7 @@ use serde_json::Value;
 
 use crate::domains::registration::catalog;
 use crate::domains::registration::catalog::TransportIdempotencyMode;
-use crate::engine::{
-    ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, InvocationId, TraceId,
-    TriggerDispatchRequest, TriggerId,
-};
+use crate::engine::{ActorKind, CausalContext, FunctionId, Invocation, InvocationId, TraceId};
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
@@ -64,8 +61,6 @@ pub struct EngineTransportRequest {
     pub public_method: String,
     /// Canonical target function id selected by the transport binding.
     pub function_id: FunctionId,
-    /// Trigger id responsible for this invocation.
-    pub trigger_id: TriggerId,
     /// Payload delivered to the engine function.
     pub payload: Value,
     /// Causal authority and trace metadata for the engine invocation.
@@ -136,36 +131,25 @@ pub fn build_engine_transport_request(
         transport: "engine_ws".to_owned(),
         public_method: input.public_method,
         function_id: spec.function_id,
-        trigger_id: contracts::engine_ws_trigger_id_for_method(spec.operation_key.as_str())
-            .map_err(engine_error_to_capability_error)?,
         payload,
         causal_context,
     }))
 }
 
-/// Dispatch one protocol-neutral transport envelope through the trigger runtime.
+/// Dispatch one protocol-neutral transport envelope directly to its canonical
+/// engine function.
 pub async fn dispatch_engine_transport_request(
     ctx: &ServerRuntimeContext,
     envelope: EngineTransportRequest,
 ) -> Result<Value, CapabilityError> {
-    let causal_context = envelope.causal_context;
-    let actor_id = causal_context.actor_id.clone();
-    let actor_kind = causal_context.actor_kind;
-    let authority_scopes = causal_context.authority_scopes.clone();
-    let trace_id = Some(causal_context.trace_id.clone());
-    let session_id = causal_context.session_id.clone();
-    let workspace_id = causal_context.workspace_id.clone();
-    let idempotency_key = causal_context.idempotency_key.clone();
-    let mut dispatch =
-        TriggerDispatchRequest::new(envelope.trigger_id, envelope.payload, actor_id, actor_kind);
-    dispatch.authority_scopes = authority_scopes;
-    dispatch.runtime_metadata = causal_context.runtime_metadata.clone();
-    dispatch.trace_id = trace_id;
-    dispatch.session_id = session_id;
-    dispatch.workspace_id = workspace_id;
-    dispatch.idempotency_key = idempotency_key;
-
-    let result = EngineTriggerRuntime::dispatch(&ctx.engine_host, dispatch).await;
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            envelope.function_id,
+            envelope.payload,
+            envelope.causal_context,
+        ))
+        .await;
     crate::shared::server::error_mapping::result_to_capability_value(result)
 }
 

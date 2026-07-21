@@ -14,15 +14,12 @@
 //! even if they carry the raw string.
 
 use crate::engine::catalog::discovery::{ActorContext, ActorKind};
-use crate::engine::invocation::model::{
-    CausalContext, Invocation, RUNTIME_METADATA_TRIGGER_DEPTH, RUNTIME_METADATA_TRIGGER_PATH,
-};
+use crate::engine::invocation::model::{CausalContext, Invocation};
 
 use super::errors::{EngineError, Result};
 use super::schema;
 use super::types::{
-    CompensationKind, DeliveryMode, EffectClass, FunctionDefinition, RiskLevel, TriggerDefinition,
-    TriggerTypeDefinition, VisibilityScope,
+    CompensationKind, DeliveryMode, EffectClass, FunctionDefinition, RiskLevel, VisibilityScope,
 };
 
 /// Delegation-only authority scope used by engine internals to execute hidden
@@ -112,83 +109,9 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
     Ok(())
 }
 
-/// Validate a trigger definition before registration.
-pub fn validate_trigger_registration(
-    trigger: &TriggerDefinition,
-    trigger_type: &TriggerTypeDefinition,
-    function: &FunctionDefinition,
-) -> Result<()> {
-    if !trigger_type
-        .allowed_delivery_modes
-        .contains(&trigger.delivery_mode)
-    {
-        return Err(EngineError::DeliveryModeNotAllowed {
-            function_id: function.id.to_string(),
-            mode: trigger.delivery_mode.as_str(),
-        });
-    }
-    if !function
-        .allowed_delivery_modes
-        .contains(&trigger.delivery_mode)
-    {
-        return Err(EngineError::DeliveryModeNotAllowed {
-            function_id: function.id.to_string(),
-            mode: trigger.delivery_mode.as_str(),
-        });
-    }
-    if trigger.delivery_mode == DeliveryMode::Void && !is_void_loss_tolerant_target(function) {
-        return Err(EngineError::PolicyViolation(format!(
-            "Void trigger delivery for {} requires explicit loss-tolerant target metadata",
-            function.id
-        )));
-    }
-    Ok(())
-}
-
-fn is_void_loss_tolerant_target(function: &FunctionDefinition) -> bool {
-    let explicitly_loss_tolerant = function
-        .metadata
-        .pointer("/delivery/voidLossTolerant")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    explicitly_loss_tolerant
-        && matches!(
-            function.effect_class,
-            EffectClass::PureRead
-                | EffectClass::DeterministicCompute
-                | EffectClass::AppendOnlyEvent
-        )
-        && function.risk_level <= RiskLevel::Low
-}
-
 /// Validate invocation policy.
 pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocation) -> Result<()> {
     if invocation.delivery_mode != DeliveryMode::Sync {
-        return Err(EngineError::UnsupportedDeliveryMode {
-            mode: invocation.delivery_mode.as_str(),
-        });
-    }
-    validate_invocation_contract(function, invocation)
-}
-
-/// Validate a trigger runtime target invocation.
-pub(in crate::engine) fn validate_trigger_target_invocation(
-    function: &FunctionDefinition,
-    invocation: &Invocation,
-) -> Result<()> {
-    if invocation.delivery_mode == DeliveryMode::Void {
-        if !is_trigger_void_invocation(invocation) {
-            return Err(EngineError::UnsupportedDeliveryMode {
-                mode: invocation.delivery_mode.as_str(),
-            });
-        }
-        if !is_void_loss_tolerant_target(function) {
-            return Err(EngineError::PolicyViolation(format!(
-                "Void trigger delivery for {} requires explicit loss-tolerant target metadata",
-                function.id
-            )));
-        }
-    } else if invocation.delivery_mode != DeliveryMode::Sync {
         return Err(EngineError::UnsupportedDeliveryMode {
             mode: invocation.delivery_mode.as_str(),
         });
@@ -233,19 +156,6 @@ fn validate_invocation_contract(
     }
 
     Ok(())
-}
-
-fn is_trigger_void_invocation(invocation: &Invocation) -> bool {
-    invocation.delivery_mode == DeliveryMode::Void
-        && invocation.causal_context.trigger_id.is_some()
-        && invocation
-            .causal_context
-            .runtime_metadata(RUNTIME_METADATA_TRIGGER_DEPTH)
-            .is_some()
-        && invocation
-            .causal_context
-            .runtime_metadata(RUNTIME_METADATA_TRIGGER_PATH)
-            .is_some()
 }
 
 /// Whether a function is visible to the actor for discovery.

@@ -492,7 +492,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         server.shutdown().token(),
     );
     let stream_event_pump_handle = tokio::spawn(pump.run());
-    crate::transport::runtime::EngineRuntimeServices::start(&server);
 
     // Phase 6: Background tasks and bind
     spawn_background_tasks(&session_manager_for_startup, &server);

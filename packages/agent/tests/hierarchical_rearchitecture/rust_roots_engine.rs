@@ -129,7 +129,6 @@ fn rust_engine_subsystem_roots_are_owned() {
         "packages/agent/src/engine/catalog/registry/mod.rs",
         "packages/agent/src/engine/durability/mod.rs",
         "packages/agent/src/engine/durability/ledger/mod.rs",
-        "packages/agent/src/engine/durability/queue/mod.rs",
         "packages/agent/src/engine/durability/resources/store/mod.rs",
         "packages/agent/src/engine/invocation/mod.rs",
         "packages/agent/src/engine/invocation/host/mod.rs",
@@ -137,11 +136,9 @@ fn rust_engine_subsystem_roots_are_owned() {
         "packages/agent/src/engine/kernel/types/mod.rs",
         "packages/agent/src/engine/kernel/types/catalog.rs",
         "packages/agent/src/engine/kernel/types/function.rs",
-        "packages/agent/src/engine/kernel/types/trigger.rs",
         "packages/agent/src/engine/kernel/types/worker.rs",
         "packages/agent/src/engine/primitives/resource/mod.rs",
         "packages/agent/src/engine/primitives/ui/mod.rs",
-        "packages/agent/src/engine/runtime/mod.rs",
     ];
     let banned_paths = [
         "packages/agent/src/engine/capabilities.rs",

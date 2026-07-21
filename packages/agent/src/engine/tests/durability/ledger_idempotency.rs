@@ -52,7 +52,7 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
 }
 
 #[test]
-fn sqlite_engine_ledger_removes_superseded_external_catalog_tables() {
+fn sqlite_engine_ledger_removes_superseded_catalog_and_queue_tables() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tron.sqlite");
     {
@@ -61,13 +61,26 @@ fn sqlite_engine_ledger_removes_superseded_external_catalog_tables() {
             .connection()
             .execute_batch(
                 "CREATE TABLE engine_catalog_workers (worker_id TEXT PRIMARY KEY);\
-                 CREATE TABLE engine_catalog_functions (function_id TEXT PRIMARY KEY);",
+                 CREATE TABLE engine_catalog_functions (function_id TEXT PRIMARY KEY);\
+                 CREATE TABLE engine_queue_items (queue_item_id TEXT PRIMARY KEY);\
+                 INSERT INTO storage_payload_refs (\
+                   id, owner_kind, owner_id, field_name, payload_hash, payload_preview,\
+                   payload_size_bytes, payload_kind, redaction_level, retention_class, created_at\
+                 ) VALUES (\
+                   'legacy-queue-ref', 'engine_queue_item', 'legacy-queue-item', 'payload',\
+                   'legacy-hash', '{}', 2, 'json', 'none', 'durable',\
+                   '2026-01-01T00:00:00Z'\
+                 );",
             )
             .unwrap();
     }
 
     let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-    for removed in ["engine_catalog_workers", "engine_catalog_functions"] {
+    for removed in [
+        "engine_catalog_workers",
+        "engine_catalog_functions",
+        "engine_queue_items",
+    ] {
         let present = store
             .connection()
             .query_row(
@@ -78,9 +91,21 @@ fn sqlite_engine_ledger_removes_superseded_external_catalog_tables() {
             .unwrap();
         assert!(
             !present,
-            "superseded catalog table must be dropped: {removed}"
+            "superseded engine table must be dropped: {removed}"
         );
     }
+    let queue_refs = store
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM storage_payload_refs WHERE owner_kind = 'engine_queue_item'",
+            [],
+            |row| row.get::<_, usize>(0),
+        )
+        .unwrap();
+    assert_eq!(
+        queue_refs, 0,
+        "superseded queue payload refs must be removed"
+    );
 }
 
 #[test]
@@ -223,43 +248,6 @@ fn sqlite_engine_ledger_blobs_large_results_but_replays_public_value() {
         .unwrap();
     assert_eq!(refs, 1);
     assert_eq!(blobs, 1);
-}
-
-#[test]
-fn sqlite_queue_blobs_large_payload_but_claim_returns_original_payload() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("tron.sqlite");
-    let large = json!({"items": vec!["queued"; 2048]});
-    let mut store = super::queue::SqliteEngineQueueStore::open(&db_path).unwrap();
-    let item = store
-        .enqueue(super::queue::EnqueueInvocation {
-            queue: "agent".to_owned(),
-            function_id: fid("agent::run_turn"),
-            payload: large.clone(),
-            actor_id: actor("agent"),
-            actor_kind: ActorKind::Agent,
-            authority_grant_id: Some(grant("grant")),
-            authority_scopes: vec!["agent.run".to_owned()],
-            runtime_metadata: Default::default(),
-            trace_id: TraceId::generate(),
-            parent_invocation_id: None,
-            trigger_id: None,
-            session_id: Some("session-queue".to_owned()),
-            workspace_id: Some("workspace-queue".to_owned()),
-            idempotency_key: Some("queue-key".to_owned()),
-        })
-        .unwrap();
-    let stored: String = store
-        .connection()
-        .query_row(
-            "SELECT payload_json FROM engine_queue_items WHERE receipt_id = ?1",
-            [item.receipt_id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(stored.contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY));
-    let claimed = store.claim("agent", "test", 1000).unwrap().unwrap();
-    assert_eq!(claimed.payload, large);
 }
 
 #[test]

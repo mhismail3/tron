@@ -1,7 +1,7 @@
 //! Catalog primitive worker contracts.
 //!
 //! Read-only catalog surfaces are system-visible and gated by `catalog.read`
-//! so operator clients can project live worker/function/trigger state without
+//! so operator clients can project live worker/function state without
 //! owning catalog mutations.
 
 use serde_json::{Value, json};
@@ -20,17 +20,15 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
         catalog_read(
             LIST_FUNCTION,
-            "list live catalog functions, workers, triggers, and trigger types",
+            "list live catalog functions and workers",
             list_schema(),
             json!({
                 "type": "object",
-                "required": ["functions", "workers", "triggers", "triggerTypes"],
+                "required": ["functions", "workers"],
                 "additionalProperties": false,
                 "properties": {
                     "functions": {"type": "array"},
-                    "workers": {"type": "array"},
-                    "triggers": {"type": "array"},
-                    "triggerTypes": {"type": "array"}
+                    "workers": {"type": "array"}
                 }
             }),
         ),
@@ -105,7 +103,7 @@ fn inspect_schema() -> Value {
         "required": ["kind", "id"],
         "additionalProperties": false,
         "properties": {
-            "kind": {"type": "string", "enum": ["function", "worker", "trigger_type", "trigger"]},
+            "kind": {"type": "string", "enum": ["function", "worker"]},
             "id": {"type": "string"}
         }
     })

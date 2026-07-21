@@ -7,7 +7,7 @@ use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::WorkerId;
 use crate::engine::kernel::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogSubjectKind, FunctionDefinition,
-    Provenance, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
+    Provenance, VisibilityScope, WorkerDefinition,
 };
 
 #[derive(Clone)]
@@ -68,28 +68,6 @@ pub(super) fn function_change_subject(definition: &FunctionDefinition) -> Catalo
     )
 }
 
-pub(super) fn trigger_type_change_subject(
-    definition: &TriggerTypeDefinition,
-) -> CatalogChangeSubject {
-    provenance_subject(
-        definition.id.to_string(),
-        CatalogSubjectKind::TriggerType,
-        definition.visibility.clone(),
-        &definition.provenance,
-        Some(definition.owner_worker.clone()),
-    )
-}
-
-pub(super) fn trigger_change_subject(definition: &TriggerDefinition) -> CatalogChangeSubject {
-    provenance_subject(
-        definition.id.to_string(),
-        CatalogSubjectKind::Trigger,
-        definition.visibility.clone(),
-        &definition.provenance,
-        Some(definition.owner_worker.clone()),
-    )
-}
-
 fn provenance_subject(
     id: String,
     kind: CatalogSubjectKind,
@@ -115,12 +93,6 @@ fn catalog_change_class(kind: &CatalogChangeKind) -> CatalogChangeClass {
         | CatalogChangeKind::FunctionRegistered
         | CatalogChangeKind::FunctionUnregistered => CatalogChangeClass::Availability,
         CatalogChangeKind::FunctionUpdated => CatalogChangeClass::Contract,
-        CatalogChangeKind::TriggerTypeRegistered
-        | CatalogChangeKind::TriggerTypeUpdated
-        | CatalogChangeKind::TriggerTypeUnregistered
-        | CatalogChangeKind::TriggerRegistered
-        | CatalogChangeKind::TriggerUpdated
-        | CatalogChangeKind::TriggerUnregistered => CatalogChangeClass::Trigger,
         CatalogChangeKind::VisibilityChanged => CatalogChangeClass::Visibility,
         CatalogChangeKind::HealthChanged => CatalogChangeClass::Health,
     }

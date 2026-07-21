@@ -2,7 +2,6 @@ use super::*;
 
 use rusqlite::{Connection, params};
 
-use crate::engine::durability::queue::SqliteEngineQueueStore;
 use crate::engine::durability::resources::SqliteEngineResourceStore;
 use crate::engine::durability::state::SqliteEngineStateStore;
 
@@ -29,13 +28,6 @@ fn drifted_storage_path(dir: &tempfile::TempDir, name: &str) -> std::path::PathB
 fn ledger_error(path: std::path::PathBuf) -> EngineError {
     match SqliteEngineLedgerStore::open(&path) {
         Ok(_) => panic!("ledger constructor accepted drifted shared storage schema"),
-        Err(error) => error,
-    }
-}
-
-fn queue_error(path: std::path::PathBuf) -> EngineError {
-    match SqliteEngineQueueStore::open(&path) {
-        Ok(_) => panic!("queue constructor accepted drifted shared storage schema"),
         Err(error) => error,
     }
 }
@@ -71,12 +63,6 @@ fn sqlite_durability_constructors_create_shared_storage_metadata_first() {
     }
     assert_storage_generation(&ledger_path);
 
-    let queue_path = dir.path().join("queue.sqlite");
-    {
-        let _store = SqliteEngineQueueStore::open(&queue_path).unwrap();
-    }
-    assert_storage_generation(&queue_path);
-
     let stream_path = dir.path().join("stream.sqlite");
     {
         let _store = SqliteEngineStreamStore::open(&stream_path).unwrap();
@@ -102,9 +88,6 @@ fn sqlite_durability_constructors_refuse_shared_storage_schema_drift() {
 
     let ledger = ledger_error(drifted_storage_path(&dir, "ledger-drift.sqlite"));
     assert!(ledger.to_string().contains("storage schema drift"));
-
-    let queue = queue_error(drifted_storage_path(&dir, "queue-drift.sqlite"));
-    assert!(queue.to_string().contains("storage schema drift"));
 
     let stream = stream_error(drifted_storage_path(&dir, "stream-drift.sqlite"));
     assert!(stream.to_string().contains("storage schema drift"));

@@ -229,7 +229,6 @@ fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
         "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
         "packages/agent/src/shared/storage/schema.rs",
         "packages/agent/src/engine/durability/ledger/sqlite_codec.rs",
-        "packages/agent/src/engine/durability/queue/sqlite_store.rs",
         "packages/agent/src/engine/durability/streams/sqlite_store.rs",
         "packages/agent/src/engine/durability/state.rs",
         "packages/agent/src/engine/durability/resources/store/sqlite_codec.rs",

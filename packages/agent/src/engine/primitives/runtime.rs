@@ -13,16 +13,12 @@ use crate::engine::durability::resources::{
 };
 use crate::engine::invocation::model::{CausalContext, Invocation};
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::types::{
-    FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
-};
+use crate::engine::kernel::types::{FunctionDefinition, VisibilityScope, WorkerDefinition};
 
 /// Narrow host interface required by host-dispatched primitive workers.
 pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn discover_functions(&self, query: &FunctionQuery) -> Vec<FunctionDefinition>;
     fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition>;
-    fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition>;
-    fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition>;
     fn inspect_catalog_item(&self, invocation: &Invocation) -> Result<Value>;
     fn watch_catalog_snapshot_base(&self, invocation: &Invocation) -> Result<Value>;
     fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
@@ -85,8 +81,6 @@ fn catalog_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Res
     Ok(json!({
         "functions": host.discover_functions(&query),
         "workers": host.visible_workers(&actor),
-        "triggers": host.visible_triggers(&actor),
-        "triggerTypes": host.visible_trigger_types(&actor),
     }))
 }
 
@@ -111,8 +105,6 @@ fn catalog_watch_snapshot(
         "snapshot": {
             "functions": host.discover_functions(&query),
             "workers": host.visible_workers(&actor),
-            "triggers": host.visible_triggers(&actor),
-            "triggerTypes": host.visible_trigger_types(&actor),
         },
         "currentRevision": response.get("currentRevision").cloned().unwrap_or(Value::Null),
         "nextRevision": response.get("nextRevision").cloned().unwrap_or(Value::Null),

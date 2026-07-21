@@ -117,7 +117,6 @@ async fn boot_server_with_config_and_autonomy(
         .build_recorder()
         .handle();
     let server = Arc::new(TronServer::new(config, runtime_context, metrics_handle));
-    tron::transport::runtime::EngineRuntimeServices::start(&server);
     let (addr, server_handle) = server.listen().await.unwrap();
 
     TestServer {

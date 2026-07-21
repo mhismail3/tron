@@ -55,13 +55,12 @@ impl EngineHostHandle {
         &self,
         session_id: &str,
     ) -> Result<crate::engine::durability::replay::EngineReplaySnapshot> {
-        let (invocations, idempotency_entries, streams, queue) = {
+        let (invocations, idempotency_entries, streams) = {
             let host = self.inner.lock().await;
             (
                 host.catalog.ledger_invocations_by_session(session_id)?,
                 host.catalog.ledger_idempotency_by_session(session_id)?,
                 host.primitives.streams.clone(),
-                host.primitives.queue.clone(),
             )
         };
 
@@ -69,16 +68,10 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
             .list_by_session(session_id)?;
-        let queue_items = queue
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .list_by_session(session_id)?;
-
         Ok(crate::engine::durability::replay::EngineReplaySnapshot {
             invocations,
             idempotency_entries,
             streams: stream_events,
-            queue_items,
         })
     }
 
@@ -371,139 +364,5 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
             .active_subscription_ids()
-    }
-
-    /// Enqueue directly into the engine queue store.
-    pub async fn enqueue_invocation(&self, request: EnqueueInvocation) -> Result<EngineQueueItem> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .enqueue(request)
-    }
-
-    /// Claim a queue item.
-    pub async fn claim_queue_item(
-        &self,
-        queue: &str,
-        lease_owner: &str,
-        lease_ms: i64,
-    ) -> Result<Option<EngineQueueItem>> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .claim(queue, lease_owner, lease_ms)
-    }
-
-    /// Claim a queue item by receipt.
-    pub async fn claim_queue_item_by_receipt(
-        &self,
-        receipt_id: &str,
-        lease_owner: &str,
-        lease_ms: i64,
-    ) -> Result<Option<EngineQueueItem>> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .claim_by_receipt(receipt_id, lease_owner, lease_ms)
-    }
-
-    /// Complete a queue item.
-    pub async fn complete_queue_item(&self, receipt_id: &str) -> Result<bool> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .complete(receipt_id)
-    }
-
-    /// Complete a queue item and append an attempt record.
-    pub async fn complete_queue_item_with_attempt(
-        &self,
-        receipt_id: &str,
-        attempt: EngineQueueAttemptRecord,
-    ) -> Result<bool> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .complete_with_attempt(receipt_id, attempt)
-    }
-
-    /// Fail a queue item.
-    pub async fn fail_queue_item(
-        &self,
-        receipt_id: &str,
-        max_attempts: u32,
-        backoff_ms: i64,
-    ) -> Result<bool> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .fail(receipt_id, max_attempts, backoff_ms)
-    }
-
-    /// Fail a queue item and append an attempt record.
-    pub async fn fail_queue_item_with_attempt(
-        &self,
-        receipt_id: &str,
-        max_attempts: u32,
-        backoff_ms: i64,
-        attempt: EngineQueueAttemptRecord,
-    ) -> Result<bool> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .fail_with_attempt(receipt_id, max_attempts, backoff_ms, attempt)
-    }
-
-    /// Inspect a queue item by receipt.
-    pub async fn get_queue_item(&self, receipt_id: &str) -> Result<Option<EngineQueueItem>> {
-        let store = self.inner.lock().await.primitives.queue.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .get(receipt_id)
-    }
-
-    /// Record a trigger handoff that enqueued the target invocation.
-    pub async fn record_enqueued_invocation(
-        &self,
-        invocation: Invocation,
-        item: &EngineQueueItem,
-    ) -> InvocationResult {
-        let mut host = self.inner.lock().await;
-        let Some(function) = host.catalog.function(&invocation.function_id).cloned() else {
-            let result = InvocationResult::error(
-                &invocation,
-                WorkerId::new("missing").expect("valid static id"),
-                FunctionRevision(0),
-                host.catalog.revision(),
-                EngineError::NotFound {
-                    kind: "function",
-                    id: invocation.function_id.to_string(),
-                },
-            );
-            return host
-                .catalog
-                .record_invocation_result(&invocation, result, None);
-        };
-        let result = InvocationResult::success(
-            &invocation,
-            function.owner_worker.clone(),
-            function.revision,
-            host.catalog.revision(),
-            json!({
-                "queued": true,
-                "receiptId": item.receipt_id,
-                "queue": item.queue,
-            }),
-        );
-        host.catalog
-            .record_invocation_result(&invocation, result, None)
     }
 }

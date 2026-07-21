@@ -433,31 +433,13 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
 }
 
 #[test]
-fn unregister_function_removes_targeting_triggers_and_revisions_remain_monotonic() {
+fn unregister_function_removes_the_function_and_advances_revision() {
     let mut catalog = LiveCatalog::new();
     catalog
         .register_worker(worker("w1", "alpha"), true)
         .unwrap();
     catalog
         .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
-        .unwrap();
-    catalog
-        .register_trigger_type(
-            TriggerTypeDefinition::new(TriggerTypeId::new("cron").unwrap(), wid("w1"), "cron"),
-            true,
-        )
-        .unwrap();
-    catalog
-        .register_trigger(
-            TriggerDefinition::new(
-                TriggerId::new("t1").unwrap(),
-                wid("w1"),
-                TriggerTypeId::new("cron").unwrap(),
-                fid("alpha::read"),
-                grant("grant"),
-            ),
-            true,
-        )
         .unwrap();
     let before = catalog.revision();
 
@@ -466,17 +448,8 @@ fn unregister_function_removes_targeting_triggers_and_revisions_remain_monotonic
         .unwrap();
 
     assert!(catalog.function(&fid("alpha::read")).is_none());
-    assert!(
-        catalog
-            .inspect_trigger(&TriggerId::new("t1").unwrap())
-            .is_err()
-    );
-    assert_eq!(catalog.revision().0, before.0 + 2);
+    assert_eq!(catalog.revision().0, before.0 + 1);
     let changes = catalog.ledger_catalog_changes().unwrap();
-    assert_eq!(
-        changes[changes.len() - 2].kind,
-        CatalogChangeKind::TriggerUnregistered
-    );
     assert_eq!(
         changes.last().unwrap().kind,
         CatalogChangeKind::FunctionUnregistered

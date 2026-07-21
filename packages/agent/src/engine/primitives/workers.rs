@@ -20,9 +20,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
     Ok(vec![
         primitive_worker(STREAM_WORKER_ID, WorkerKind::Stream)?,
         primitive_worker(STATE_WORKER_ID, WorkerKind::State)?,
-        primitive_worker(QUEUE_WORKER_ID, WorkerKind::Queue)?,
         resource_worker,
-        primitive_worker(TRIGGER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
@@ -36,9 +34,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     let mut registrations = Vec::new();
     registrations.extend(stream::registrations(stores)?);
     registrations.extend(state::registrations(stores)?);
-    registrations.extend(queue::registrations(stores)?);
     registrations.extend(resource::registrations(stores)?);
-    registrations.extend(trigger::registrations(stores)?);
     registrations.extend(grant::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(ui::registrations()?);

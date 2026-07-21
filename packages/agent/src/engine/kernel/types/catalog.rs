@@ -26,7 +26,6 @@ macro_rules! revision_type {
 
 revision_type!(CatalogRevision);
 revision_type!(FunctionRevision);
-revision_type!(TriggerRevision);
 revision_type!(WorkerRevision);
 
 /// Visibility scope for catalog entries.
@@ -83,10 +82,6 @@ pub enum CatalogSubjectKind {
     Worker,
     /// Function catalog entry.
     Function,
-    /// Trigger type catalog entry.
-    TriggerType,
-    /// Trigger catalog entry.
-    Trigger,
 }
 
 impl CatalogSubjectKind {
@@ -96,8 +91,6 @@ impl CatalogSubjectKind {
         match self {
             Self::Worker => "worker",
             Self::Function => "function",
-            Self::TriggerType => "trigger_type",
-            Self::Trigger => "trigger",
         }
     }
 }
@@ -109,8 +102,6 @@ pub enum CatalogChangeClass {
     Availability,
     /// Function contract changed.
     Contract,
-    /// Trigger or trigger-type topology changed.
-    Trigger,
     /// Visibility/promotion changed.
     Visibility,
     /// Health changed.
@@ -124,7 +115,6 @@ impl CatalogChangeClass {
         match self {
             Self::Availability => "availability",
             Self::Contract => "contract",
-            Self::Trigger => "trigger",
             Self::Visibility => "visibility",
             Self::Health => "health",
         }
@@ -175,18 +165,6 @@ pub enum CatalogChangeKind {
     FunctionUpdated,
     /// Function unregistered.
     FunctionUnregistered,
-    /// Trigger type was registered.
-    TriggerTypeRegistered,
-    /// Trigger type contract or metadata changed.
-    TriggerTypeUpdated,
-    /// Trigger type unregistered.
-    TriggerTypeUnregistered,
-    /// Trigger was registered.
-    TriggerRegistered,
-    /// Trigger config or metadata changed.
-    TriggerUpdated,
-    /// Trigger unregistered.
-    TriggerUnregistered,
     /// Catalog entry visibility changed.
     VisibilityChanged,
     /// Catalog entry health changed.

@@ -3,7 +3,7 @@
 //! Replay v1 is an audit/reconstruction snapshot. It reads durable session and
 //! engine records, including idempotency entries, resolves stored JSON payload
 //! references, computes byte-stable hashes with sorted object keys, and never
-//! invokes providers, tools, queues, streams, files, processes, or resource
+//! invokes providers, tools, streams, files, processes, or resource
 //! mutations. The sibling roundtrip harness accepts only a manifest value and
 //! recomputes hashes/cross-record references offline.
 
@@ -19,9 +19,8 @@ use crate::domains::session::event_store::{
     AgentTraceRecord, EventRow, EventStore, ListEventsOptions, SessionRow,
 };
 use crate::engine::{
-    EngineError, EngineHostHandle, EngineQueueItem, EngineReplaySnapshot, EngineStreamEvent,
-    IdempotencyEntry, IdempotencyScope, IdempotencyStatus, InvocationRecord, ReplayBehavior,
-    StoredInvocationOutcome,
+    EngineError, EngineHostHandle, EngineReplaySnapshot, EngineStreamEvent, IdempotencyEntry,
+    IdempotencyScope, IdempotencyStatus, InvocationRecord, ReplayBehavior, StoredInvocationOutcome,
 };
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_failure;
@@ -146,11 +145,6 @@ fn build_manifest_value(
         .into_iter()
         .map(ReplayStreamEvent::from_event)
         .collect::<Result<Vec<_>, _>>()?;
-    let engine_queue_items = engine_snapshot
-        .queue_items
-        .into_iter()
-        .map(ReplayQueueItem::from_item)
-        .collect::<Result<Vec<_>, _>>()?;
     let sections = ReplaySections {
         session: session_snapshot.session,
         session_events: session_snapshot.events,
@@ -159,7 +153,6 @@ fn build_manifest_value(
         engine_idempotency_entries,
         engine_invocations,
         engine_streams,
-        engine_queue_items,
     };
     let section_hashes = ReplaySectionHashes::from_sections(&sections)?;
     let manifest_without_hash = ReplayManifestWithoutHash {
@@ -208,7 +201,6 @@ struct ReplaySections {
     engine_idempotency_entries: Vec<ReplayIdempotencyEntry>,
     engine_invocations: Vec<ReplayInvocationRecord>,
     engine_streams: Vec<ReplayStreamEvent>,
-    engine_queue_items: Vec<ReplayQueueItem>,
 }
 
 #[derive(Debug, Serialize)]
@@ -221,7 +213,6 @@ struct ReplaySectionHashes {
     engine_idempotency_entries: String,
     engine_invocations: String,
     engine_streams: String,
-    engine_queue_items: String,
 }
 
 impl ReplaySectionHashes {
@@ -234,7 +225,6 @@ impl ReplaySectionHashes {
             engine_idempotency_entries: canonical_hash(&sections.engine_idempotency_entries)?,
             engine_invocations: canonical_hash(&sections.engine_invocations)?,
             engine_streams: canonical_hash(&sections.engine_streams)?,
-            engine_queue_items: canonical_hash(&sections.engine_queue_items)?,
         })
     }
 }
@@ -447,21 +437,6 @@ impl ReplayStreamEvent {
             event,
             payload_hash,
         })
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ReplayQueueItem {
-    #[serde(flatten)]
-    item: EngineQueueItem,
-    payload_hash: String,
-}
-
-impl ReplayQueueItem {
-    fn from_item(item: EngineQueueItem) -> Result<Self, CapabilityError> {
-        let payload_hash = canonical_hash(&item.payload)?;
-        Ok(Self { item, payload_hash })
     }
 }
 

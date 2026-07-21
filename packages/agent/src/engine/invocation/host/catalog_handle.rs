@@ -107,77 +107,6 @@ impl EngineHostHandle {
             .unregister_function(id, owner)
     }
 
-    /// Register or update a trigger type through the host boundary.
-    pub async fn register_trigger_type(
-        &self,
-        definition: TriggerTypeDefinition,
-        volatile: bool,
-    ) -> Result<()> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .register_trigger_type(definition, volatile)
-    }
-
-    /// Register or update a trigger type during single-threaded setup.
-    pub fn register_trigger_type_for_setup(
-        &self,
-        definition: TriggerTypeDefinition,
-        volatile: bool,
-    ) -> Result<()> {
-        self.inner
-            .try_lock()
-            .map_err(|_| {
-                EngineError::PolicyViolation(
-                    "engine host is busy during trigger-type setup".to_owned(),
-                )
-            })?
-            .catalog
-            .register_trigger_type(definition, volatile)
-    }
-
-    /// Register or update a trigger through the host boundary.
-    pub async fn register_trigger(
-        &self,
-        definition: TriggerDefinition,
-        volatile: bool,
-    ) -> Result<TriggerRevision> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .register_trigger(definition, volatile)
-    }
-
-    /// Register or update a trigger during single-threaded setup.
-    pub fn register_trigger_for_setup(
-        &self,
-        definition: TriggerDefinition,
-        volatile: bool,
-    ) -> Result<TriggerRevision> {
-        self.inner
-            .try_lock()
-            .map_err(|_| {
-                EngineError::PolicyViolation("engine host is busy during trigger setup".to_owned())
-            })?
-            .catalog
-            .register_trigger(definition, volatile)
-    }
-
-    /// Unregister a trigger through the host boundary.
-    pub async fn unregister_trigger(
-        &self,
-        id: &TriggerId,
-        owner_worker: &WorkerId,
-    ) -> Result<bool> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .unregister_trigger(id, owner_worker)
-    }
-
     /// Discover visible functions through the host boundary.
     pub async fn discover(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
         self.inner.lock().await.catalog.discover_functions(query)
@@ -222,26 +151,6 @@ impl EngineHostHandle {
     /// Return whether a worker is a volatile runtime registration.
     pub async fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
         self.inner.lock().await.catalog.worker_is_volatile(id)
-    }
-
-    /// Inspect a trigger through the host boundary.
-    pub async fn inspect_trigger(&self, id: &TriggerId) -> Result<TriggerDefinition> {
-        self.inner.lock().await.catalog.inspect_trigger(id)
-    }
-
-    /// List triggers visible to an actor through the host boundary.
-    pub async fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition> {
-        self.inner.lock().await.visible_triggers(actor)
-    }
-
-    /// Inspect a trigger type through the host boundary.
-    pub async fn inspect_trigger_type(&self, id: &TriggerTypeId) -> Result<TriggerTypeDefinition> {
-        self.inner.lock().await.catalog.inspect_trigger_type(id)
-    }
-
-    /// List trigger types visible to an actor through the host boundary.
-    pub async fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition> {
-        self.inner.lock().await.visible_trigger_types(actor)
     }
 
     /// Watch catalog changes through the host boundary.

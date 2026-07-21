@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -12,8 +11,8 @@ use crate::domains::session::event_store::{
     AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
 };
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, EnqueueInvocation,
-    FunctionId, Invocation, PublishStreamEvent, TraceId, VisibilityScope,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
+    PublishStreamEvent, TraceId, VisibilityScope,
 };
 
 struct ReplayHarness {
@@ -162,9 +161,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .await
         .expect("other stream event");
 
-    enqueue_for_session(&harness.engine_host, "beta", &session_id, &workspace_id).await;
-    enqueue_for_session(&harness.engine_host, "alpha", &session_id, &workspace_id).await;
-
     let result = harness
         .engine_host
         .invoke(Invocation::new_sync(
@@ -241,16 +237,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     assert_eq!(streams[0]["payload"], json!({"stream": 1}));
     assert_eq!(streams[0]["payloadHash"].as_str().unwrap().len(), 64);
 
-    let queue_items = first["sections"]["engineQueueItems"].as_array().unwrap();
-    let queue_names = queue_items
-        .iter()
-        .map(|item| item["queue"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(queue_names, ["alpha", "beta"]);
-    for item in queue_items {
-        assert_eq!(item["payloadHash"].as_str().unwrap().len(), 64);
-    }
-
     let idempotency_entries = first["sections"]["engineIdempotencyEntries"]
         .as_array()
         .unwrap();
@@ -300,39 +286,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     );
     assert_eq!(roundtrip.counts.engine_idempotency_entries, 1);
     assert_eq!(roundtrip.counts.engine_invocations, 2);
-    assert_eq!(roundtrip.counts.engine_queue_items, 2);
-}
-
-async fn enqueue_for_session(
-    engine_host: &EngineHostHandle,
-    queue: &str,
-    session_id: &str,
-    workspace_id: &str,
-) {
-    engine_host
-        .enqueue_invocation(EnqueueInvocation {
-            queue: queue.to_owned(),
-            function_id: FunctionId::new("state::get").unwrap(),
-            payload: json!({
-                "scope": "session",
-                "sessionId": session_id,
-                "namespace": "replay",
-                "key": "marker"
-            }),
-            actor_id: actor_id("actor-queue"),
-            actor_kind: ActorKind::System,
-            authority_grant_id: Some(grant_id("grant-queue")),
-            authority_scopes: vec!["state.read".to_owned()],
-            runtime_metadata: BTreeMap::new(),
-            trace_id: trace_id(&format!("{queue}-trace")),
-            parent_invocation_id: None,
-            trigger_id: None,
-            session_id: Some(session_id.to_owned()),
-            workspace_id: Some(workspace_id.to_owned()),
-            idempotency_key: Some(format!("{queue}-key")),
-        })
-        .await
-        .expect("queue item");
 }
 
 fn actor_id(value: &str) -> ActorId {

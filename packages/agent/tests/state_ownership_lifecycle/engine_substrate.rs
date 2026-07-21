@@ -75,49 +75,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
         );
     }
 
-    let queue = read_repo_file("packages/agent/src/engine/durability/queue/mod.rs");
-    for required in [
-        "pub enum QueueItemStatus",
-        "Ready",
-        "Leased",
-        "Completed",
-        "Cancelled",
-        "DeadLettered",
-        "pub struct EngineQueueAttemptRecord",
-        "resource_lease_ids",
-        "compensation_status",
-        "compensation_id",
-    ] {
-        assert!(
-            queue.contains(required),
-            "engine queue model lifecycle missing `{required}`"
-        );
-    }
-    for path in [
-        "packages/agent/src/engine/durability/queue/memory.rs",
-        "packages/agent/src/engine/durability/queue/sqlite_store.rs",
-    ] {
-        let source = read_repo_file(path);
-        for required in [
-            "QueueItemStatus::Ready",
-            "QueueItemStatus::Leased",
-            "QueueItemStatus::Completed",
-            "QueueItemStatus::Cancelled",
-            "QueueItemStatus::DeadLettered",
-            "lease_owner = None",
-            "lease_expires_at = None",
-            "attempt_records.push",
-            "list_by_session",
-        ] {
-            assert!(source.contains(required), "{path} missing `{required}`");
-        }
-    }
-    let sqlite_queue = read_repo_file("packages/agent/src/engine/durability/queue/sqlite_store.rs");
-    assert!(
-        sqlite_queue.contains("attempt_records_json"),
-        "SQLite queue store must persist attempt records"
-    );
-
     let resources = read_repo_file("packages/agent/src/engine/durability/resources/store/mod.rs");
     for required in [
         "register_type",
@@ -196,7 +153,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
             "fn sqlite(path: &std::path::Path) -> Result<Self>",
             "SqliteEngineStreamStore::open(path)?",
             "SqliteEngineStateStore::open(path)?",
-            "SqliteEngineQueueStore::open(path)?",
             "SqliteEngineResourceLeaseStore::open(path)?",
             "SqliteEngineResourceStore::open(path)?",
             "SqliteEngineGrantStore::open(path)?",

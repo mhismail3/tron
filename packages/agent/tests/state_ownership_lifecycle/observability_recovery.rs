@@ -283,7 +283,6 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
         "engine_idempotency_entries",
         "engine_invocations",
         "engine_streams",
-        "engine_queue_items",
         "replay_hash",
     ] {
         assert!(

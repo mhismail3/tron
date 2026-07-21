@@ -25,7 +25,6 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "TronServer::new",
             "register_server_domains_for_runtime_context",
             "EngineStreamEventPump::new",
-            "EngineRuntimeServices::start",
             "spawn_background_tasks",
             "spawn_watcher",
             "server.listen()",
@@ -274,33 +273,11 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
         "detached blocking tasks must register with the shutdown coordinator"
     );
 
-    let runtime = read_repo_file("packages/agent/src/transport/runtime/mod.rs");
-    for required in [
-        "EngineRuntimeServices",
-        "shutdown.register_task(tokio::spawn(service.run()))",
-    ] {
-        assert!(
-            runtime.contains(required),
-            "Engine runtime service ownership missing `{required}`"
-        );
-    }
-    for (path, owner) in [(
-        "packages/agent/src/transport/runtime/queue_drainer.rs",
-        "queue drainer",
-    )] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains("CancellationToken") && source.contains("cancel.cancelled()"),
-            "{owner} must select on its shutdown cancellation token"
-        );
-    }
-
     let bootstrap = read_repo_file("packages/agent/src/app/bootstrap/mod.rs");
     for required in [
         "spawn_background_tasks",
         "server.shutdown().register_task(eviction_task)",
         "register_blocking_supervisor_shutdown(server.shutdown())",
-        "EngineRuntimeServices::start(&server)",
         "register_task(profile_runtime_for_watcher.spawn_watcher",
     ] {
         assert!(

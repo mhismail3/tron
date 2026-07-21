@@ -337,36 +337,6 @@ impl EngineHost {
                 }
                 json!(definition)
             }
-            "trigger_type" => {
-                let definition = self
-                    .catalog
-                    .inspect_trigger_type(&TriggerTypeId::new(id)?)?;
-                if !is_visibility_visible(
-                    &definition.visibility,
-                    definition.provenance.session_id.as_deref(),
-                    definition.provenance.workspace_id.as_deref(),
-                    &actor,
-                ) {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "trigger type {id} is not visible"
-                    )));
-                }
-                json!(definition)
-            }
-            "trigger" => {
-                let definition = self.catalog.inspect_trigger(&TriggerId::new(id)?)?;
-                if !is_visibility_visible(
-                    &definition.visibility,
-                    definition.provenance.session_id.as_deref(),
-                    definition.provenance.workspace_id.as_deref(),
-                    &actor,
-                ) {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "trigger {id} is not visible"
-                    )));
-                }
-                json!(definition)
-            }
             _ => {
                 return Err(EngineError::PolicyViolation(format!(
                     "unsupported inspect kind {kind}"
@@ -472,36 +442,6 @@ impl EngineHost {
                     &worker.visibility,
                     worker.provenance.session_id.as_deref(),
                     worker.provenance.workspace_id.as_deref(),
-                    actor,
-                )
-            })
-            .collect()
-    }
-
-    pub(super) fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition> {
-        self.catalog
-            .triggers()
-            .into_iter()
-            .filter(|trigger| {
-                is_visibility_visible(
-                    &trigger.visibility,
-                    trigger.provenance.session_id.as_deref(),
-                    trigger.provenance.workspace_id.as_deref(),
-                    actor,
-                )
-            })
-            .collect()
-    }
-
-    pub(super) fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition> {
-        self.catalog
-            .trigger_types()
-            .into_iter()
-            .filter(|trigger_type| {
-                is_visibility_visible(
-                    &trigger_type.visibility,
-                    trigger_type.provenance.session_id.as_deref(),
-                    trigger_type.provenance.workspace_id.as_deref(),
                     actor,
                 )
             })

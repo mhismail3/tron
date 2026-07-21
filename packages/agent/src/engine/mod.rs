@@ -12,10 +12,9 @@
 //! |--------|----------------------|
 //! | catalog | Live typed function/worker definitions and discovery |
 //! | invocation | Typed dispatch, schemas, causal traces, and ledgers |
-//! | durability | SQLite/in-memory state, queues, streams, and resources |
+//! | durability | SQLite/in-memory state, streams, and resources |
 //! | authority | Foundational grant/lease records for authenticated boundaries |
 //! | primitives | Generic resource, state, stream, and transport primitives |
-//! | runtime | Low-level trigger dispatch support |
 //!
 //! ## Invariants
 //!
@@ -24,7 +23,7 @@
 //!   observable evidence, and grant-id columns persist SQL `NULL`.
 //! - Remote clients and external transports remain authenticated.
 //! - Requests and responses are validated against the registered JSON schemas.
-//! - Durable mutation and queue delivery retain idempotency and causal truth.
+//! - Durable mutation and invocation delivery retain idempotency and causal truth.
 //! - Product scheduling, worker lifecycle, version switching, inbox delivery,
 //!   and loop suppression belong to the worker kernel, not parallel engine
 //!   proposal or metadata planes.
@@ -42,7 +41,6 @@ pub(crate) mod durability;
 pub(crate) mod invocation;
 pub(crate) mod kernel;
 pub(crate) mod primitives;
-pub(crate) mod runtime;
 
 pub use authority::compensation::{EngineCompensationRecord, EngineCompensationStatus};
 pub use authority::grants::{
@@ -54,11 +52,6 @@ pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
-};
-pub use durability::queue::{
-    EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EnqueueInvocation,
-    MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_LIST_PAGE_SIZE, MAX_QUEUE_PAYLOAD_BYTES,
-    QueueAttemptOutcome, QueueItemStatus,
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub(crate) use durability::resources::CONTEXT_CONTROL_ACTION_PAYLOAD_SCHEMA_VERSION;
@@ -102,8 +95,7 @@ pub use invocation::model::{
 };
 pub use kernel::errors::{EngineError, Result};
 pub use kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
 };
 pub use kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payload;
@@ -114,10 +106,8 @@ pub use kernel::types::{
     DurableOutputContract, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
     IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance,
     ReplayBehavior, ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel,
-    TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
-    WorkerKind, WorkerLifecycleState, WorkerRevision,
+    VisibilityScope, WorkerDefinition, WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
-pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 
 /// Return whether a grant id is one of the engine-owned bootstrap roots.
 #[must_use]

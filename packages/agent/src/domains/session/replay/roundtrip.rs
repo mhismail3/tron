@@ -3,7 +3,7 @@
 //! The verifier rebuilds a session audit summary from one manifest value,
 //! recomputes section hashes and the overall replay hash, and validates
 //! cross-record references. It deliberately has no event-store, engine, model,
-//! tool, file, process, queue, stream, or resource handles, so it cannot perform
+//! tool, file, process, stream, or resource handles, so it cannot perform
 //! provider re-contact or side effects while proving replay integrity.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -52,8 +52,6 @@ pub(crate) struct ReplayRoundtripCounts {
     pub(crate) engine_invocations: usize,
     /// Engine stream row count.
     pub(crate) engine_streams: usize,
-    /// Engine queue row count.
-    pub(crate) engine_queue_items: usize,
 }
 
 /// Cross-record reference proof reconstructed by the offline harness.
@@ -66,8 +64,6 @@ pub(crate) struct ReplayRoundtripReferences {
     pub(crate) trace_hash_refs: usize,
     /// Idempotency entries carrying request and outcome hashes.
     pub(crate) idempotency_hash_refs: usize,
-    /// Queue payload hashes and attempt invocation references.
-    pub(crate) queue_hash_refs: usize,
     /// Stream payload hashes and parent invocation references.
     pub(crate) stream_hash_refs: usize,
     /// Invocation result hashes and idempotency references.
@@ -191,7 +187,6 @@ fn count_sections(sections: &Map<String, Value>) -> Result<ReplayRoundtripCounts
         engine_idempotency_entries: array(sections, "engineIdempotencyEntries")?.len(),
         engine_invocations: array(sections, "engineInvocations")?.len(),
         engine_streams: array(sections, "engineStreams")?.len(),
-        engine_queue_items: array(sections, "engineQueueItems")?.len(),
     })
 }
 
@@ -205,7 +200,6 @@ fn validate_cross_record_references(
     let idempotency_entries = array(sections, "engineIdempotencyEntries")?;
     let invocations = array(sections, "engineInvocations")?;
     let streams = array(sections, "engineStreams")?;
-    let queue_items = array(sections, "engineQueueItems")?;
 
     let session_event_ids = session_events
         .iter()
@@ -339,33 +333,6 @@ fn validate_cross_record_references(
             }
         }
         refs.invocation_hash_refs += 1;
-    }
-
-    for item in queue_items {
-        if item.get("payloadHash").and_then(Value::as_str).is_none() {
-            errors.push(format!(
-                "queue item {} is missing payloadHash",
-                display_id(item)
-            ));
-        }
-        for attempt in item
-            .get("attemptRecords")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            for field in ["resultInvocationId", "replayedFromInvocationId"] {
-                if let Some(invocation_id) = attempt.get(field).and_then(Value::as_str)
-                    && !invocation_ids.contains(invocation_id)
-                {
-                    errors.push(format!(
-                        "queue item {} attempt references missing invocation {invocation_id}",
-                        display_id(item)
-                    ));
-                }
-            }
-        }
-        refs.queue_hash_refs += 1;
     }
 
     for stream in streams {

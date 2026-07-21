@@ -1,17 +1,15 @@
 //! Engine type contracts grouped by kernel concern.
 //!
 //! `catalog` owns revision counters, visibility, provenance, and change
-//! metadata; `worker`, `function`, and `trigger` own the catalog definitions
-//! for those concrete subjects.
+//! metadata; `worker` and `function` own the concrete catalog definitions.
 
 mod catalog;
 mod function;
-mod trigger;
 mod worker;
 
 pub use catalog::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind,
-    FunctionHealth, FunctionRevision, Provenance, TriggerRevision, VisibilityScope, WorkerRevision,
+    FunctionHealth, FunctionRevision, Provenance, VisibilityScope, WorkerRevision,
 };
 pub use function::FunctionDefinition;
 pub use function::{
@@ -20,5 +18,4 @@ pub use function::{
     IdempotencyScope, LedgerKind, ReplayBehavior, ResourceLeaseFailureBehavior,
     ResourceLeaseRequirement, RiskLevel,
 };
-pub use trigger::{TriggerDefinition, TriggerTypeDefinition};
 pub use worker::{WorkerDefinition, WorkerKind, WorkerLifecycleState};

@@ -19,7 +19,6 @@ pub(in crate::engine::tests) use crate::engine::durability::ledger::{
     IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
     SqliteEngineLedgerStore, StoredInvocationOutcome,
 };
-pub(in crate::engine::tests) use crate::engine::durability::queue;
 pub(in crate::engine::tests) use crate::engine::durability::streams::SqliteEngineStreamStore;
 pub(in crate::engine::tests) use crate::engine::invocation::host::{self, EngineHost};
 pub(in crate::engine::tests) use crate::engine::invocation::model::{
@@ -28,21 +27,19 @@ pub(in crate::engine::tests) use crate::engine::invocation::model::{
 pub(in crate::engine::tests) use crate::engine::kernel::errors::{EngineError, Result};
 pub(in crate::engine::tests) use crate::engine::kernel::ids;
 pub(in crate::engine::tests) use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
     AuthorityRequirement, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,
     DurableOutputContract, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
     IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance,
-    ReplayBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
-    VisibilityScope, WorkerDefinition, WorkerKind,
+    ReplayBehavior, ResourceLeaseRequirement, RiskLevel, VisibilityScope, WorkerDefinition,
+    WorkerKind,
 };
 pub(in crate::engine::tests) use crate::engine::{
-    CatalogWatchRequest, EngineHostHandle, EngineQueueDrainer, EngineResourceLeaseStatus,
-    EngineTriggerRuntime, PublishStreamEvent, StreamActorScope, StreamCursor,
-    TriggerDispatchRequest,
+    CatalogWatchRequest, EngineHostHandle, EngineResourceLeaseStatus, PublishStreamEvent,
+    StreamActorScope, StreamCursor,
 };
 
 pub(in crate::engine::tests) fn wid(value: &str) -> WorkerId {

@@ -61,64 +61,6 @@ impl EngineHostHandle {
             .await)
     }
 
-    /// Invoke a target claimed by the engine queue runtime.
-    ///
-    /// The invocation ledger records every claimed target attempt.
-    pub(in crate::engine) async fn invoke_queue_target(
-        &self,
-        invocation: Invocation,
-    ) -> QueueTargetInvocation {
-        if invocation.function_id.as_str() == INVOKE_FUNCTION
-            || invocation.function_id.namespace() == ENGINE_WORKER_ID
-            || is_host_dispatched_primitive_function(&invocation.function_id)
-        {
-            return QueueTargetInvocation {
-                result: self.invoke(invocation).await,
-                recorded_invocation: true,
-                resource_lease_ids: Vec::new(),
-                compensation_status: None,
-                compensation_id: None,
-            };
-        }
-
-        let prepared = self.prepare_regular_invocation(invocation).await;
-        let prepared = match prepared {
-            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
-            PreparedSyncInvocationDecision::Finished(result) => {
-                return QueueTargetInvocation {
-                    result: *result,
-                    recorded_invocation: true,
-                    resource_lease_ids: Vec::new(),
-                    compensation_status: None,
-                    compensation_id: None,
-                };
-            }
-        };
-
-        self.execute_prepared_regular_with_recording_policy(*prepared, None)
-            .await
-    }
-
-    /// Invoke a target prepared by the trigger runtime.
-    pub(in crate::engine) async fn invoke_trigger_target(
-        &self,
-        invocation: Invocation,
-    ) -> InvocationResult {
-        if invocation.delivery_mode == DeliveryMode::Sync {
-            return self.invoke(invocation).await;
-        }
-
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_trigger_target_invocation(invocation)
-        };
-        let prepared = match prepared {
-            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
-            PreparedSyncInvocationDecision::Finished(result) => return *result,
-        };
-        self.execute_prepared_regular(*prepared, None).await
-    }
-
     async fn prepare_regular_invocation(
         &self,
         invocation: Invocation,
@@ -135,16 +77,6 @@ impl EngineHostHandle {
         prepared: PreparedSyncInvocation,
         cancellation: Option<&CancellationToken>,
     ) -> InvocationResult {
-        self.execute_prepared_regular_with_recording_policy(prepared, cancellation)
-            .await
-            .result
-    }
-
-    async fn execute_prepared_regular_with_recording_policy(
-        &self,
-        prepared: PreparedSyncInvocation,
-        cancellation: Option<&CancellationToken>,
-    ) -> QueueTargetInvocation {
         let compensation_contract = prepared.function.compensation.clone();
         let compensation_invocation = prepared.invocation.clone();
         let lease_result = self.acquire_prepared_resource_lease(&prepared).await;
@@ -174,8 +106,7 @@ impl EngineHostHandle {
                 lease_ids.clone(),
                 compensation_status.clone(),
             );
-        let resource_lease_ids = lease_ids.clone();
-        let compensation = self
+        let _ = self
             .record_compensation_for_result(
                 &compensation_invocation,
                 compensation_contract,
@@ -183,20 +114,7 @@ impl EngineHostHandle {
                 lease_ids,
             )
             .await;
-        let compensation_id = compensation
-            .as_ref()
-            .map(|record| record.compensation_id.clone());
-        let compensation_status = compensation
-            .as_ref()
-            .map(|record| record.status.as_str().to_owned())
-            .or(compensation_status);
-        QueueTargetInvocation {
-            result,
-            recorded_invocation: true,
-            resource_lease_ids,
-            compensation_status,
-            compensation_id,
-        }
+        result
     }
 
     async fn invoke_prepared_handler(

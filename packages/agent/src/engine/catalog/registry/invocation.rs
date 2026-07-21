@@ -58,22 +58,10 @@ impl LiveCatalog {
         &mut self,
         invocation: Invocation,
     ) -> PreparedSyncInvocationDecision {
-        self.prepare_invocation(invocation, policy::validate_invocation)
+        self.prepare_invocation(invocation)
     }
 
-    /// Prepare a trigger runtime target invocation without executing the handler.
-    pub(in crate::engine) fn prepare_trigger_target_invocation(
-        &mut self,
-        invocation: Invocation,
-    ) -> PreparedSyncInvocationDecision {
-        self.prepare_invocation(invocation, policy::validate_trigger_target_invocation)
-    }
-
-    fn prepare_invocation(
-        &mut self,
-        mut invocation: Invocation,
-        validate_policy: fn(&FunctionDefinition, &Invocation) -> Result<()>,
-    ) -> PreparedSyncInvocationDecision {
+    fn prepare_invocation(&mut self, mut invocation: Invocation) -> PreparedSyncInvocationDecision {
         let Some(entry) = self.functions.get(&invocation.function_id) else {
             let worker_id = WorkerId::new("missing").expect("valid static id");
             let result = InvocationResult::error(
@@ -98,7 +86,7 @@ impl LiveCatalog {
         invocation.causal_context.catalog_revision = self.revision;
 
         if let Err(err) = validate_advertised_surface(&function, &invocation)
-            .and_then(|_| validate_policy(&function, &invocation))
+            .and_then(|_| policy::validate_invocation(&function, &invocation))
             .and_then(|_| self.validate_invocation_grant(&function, &invocation))
         {
             let result = InvocationResult::error(

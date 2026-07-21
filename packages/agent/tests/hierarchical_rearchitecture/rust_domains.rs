@@ -319,7 +319,6 @@ fn rust_engine_tests_are_mirrored_by_subsystem() {
         "packages/agent/src/engine/tests/durability/mod.rs",
         "packages/agent/src/engine/tests/invocation/mod.rs",
         "packages/agent/src/engine/tests/kernel/mod.rs",
-        "packages/agent/src/engine/tests/runtime/mod.rs",
         "packages/agent/src/engine/tests/fixtures/mod.rs",
     ];
     let banned = [

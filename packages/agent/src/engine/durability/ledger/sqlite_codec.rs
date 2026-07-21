@@ -19,11 +19,13 @@ use crate::engine::kernel::types::{
 pub(super) const SQLITE_SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
 
--- Clean-cut migration: the removed external-worker plane formerly owned these
--- shadow definitions. Canonical fixed contracts and worker bundles now rebuild
--- the live catalog, so retaining either table would create a second owner.
+-- Clean-cut migration: the removed external-worker and generic queue planes
+-- formerly owned these tables. Canonical fixed contracts and worker bundles
+-- rebuild the live catalog, while worker dispatch owns its own durable queue.
 DROP TABLE IF EXISTS engine_catalog_functions;
 DROP TABLE IF EXISTS engine_catalog_workers;
+DELETE FROM storage_payload_refs WHERE owner_kind = 'engine_queue_item';
+DROP TABLE IF EXISTS engine_queue_items;
 
 CREATE TABLE IF NOT EXISTS engine_catalog_changes (
   id              TEXT PRIMARY KEY,
@@ -39,6 +41,11 @@ CREATE TABLE IF NOT EXISTS engine_catalog_changes (
   owner_worker_id TEXT,
   timestamp       TEXT NOT NULL
 );
+
+-- The removed generic trigger catalog no longer has a decoder or runtime
+-- owner. Worker trigger evidence lives in worker-kernel operational tables.
+DELETE FROM engine_catalog_changes
+WHERE subject_kind_json IN ('\"Trigger\"', '\"TriggerType\"');
 
 CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   function_id           TEXT NOT NULL,

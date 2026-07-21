@@ -194,11 +194,6 @@ impl ShutdownCoordinator {
         });
     }
 
-    #[cfg(test)]
-    pub(crate) fn registered_phase_callback_count(&self) -> usize {
-        self.callbacks.lock().len()
-    }
-
     /// Register a background task handle for graceful shutdown.
     ///
     /// Completed tasks self-prune automatically. If shutdown has already begun,

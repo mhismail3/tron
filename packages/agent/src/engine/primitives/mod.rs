@@ -37,28 +37,24 @@ use crate::engine::kernel::types::{
 
 pub(crate) mod catalog;
 pub(crate) mod grant;
-pub(crate) mod queue;
 pub(crate) mod resource;
 pub(in crate::engine) mod runtime;
 pub(crate) mod state;
 pub(crate) mod storage;
 mod stores;
 pub(crate) mod stream;
-pub(crate) mod trigger;
 pub(crate) mod ui;
 mod workers;
 
 pub(in crate::engine) use crate::engine::authority::grants::EngineGrantStoreBackend;
 pub(in crate::engine) use stores::{
-    PrimitiveStores, QueueStoreBackend, ResourceStoreBackend, StateStoreBackend, StreamStoreBackend,
+    PrimitiveStores, ResourceStoreBackend, StateStoreBackend, StreamStoreBackend,
 };
 pub(in crate::engine) use workers::{primitive_function_definitions, primitive_workers};
 
 pub(crate) const STREAM_WORKER_ID: &str = "stream";
 pub(crate) const STATE_WORKER_ID: &str = "state";
-pub(crate) const QUEUE_WORKER_ID: &str = "queue";
 pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
-pub(crate) const TRIGGER_WORKER_ID: &str = "trigger";
 pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";

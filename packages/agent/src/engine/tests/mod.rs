@@ -10,4 +10,3 @@ mod catalog;
 mod durability;
 mod invocation;
 mod kernel;
-mod runtime;

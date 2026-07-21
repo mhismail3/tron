@@ -172,7 +172,7 @@ fn inspect_schema() -> Value {
         "required": ["kind", "id"],
         "additionalProperties": false,
         "properties": {
-            "kind": {"type": "string", "enum": ["function", "worker", "trigger_type", "trigger"]},
+            "kind": {"type": "string", "enum": ["function", "worker"]},
             "id": {"type": "string"}
         }
     })
@@ -560,7 +560,6 @@ fn parse_change_class(value: &str) -> Result<CatalogChangeClass> {
     match value {
         "availability" => Ok(CatalogChangeClass::Availability),
         "contract" => Ok(CatalogChangeClass::Contract),
-        "trigger" => Ok(CatalogChangeClass::Trigger),
         "visibility" => Ok(CatalogChangeClass::Visibility),
         "health" => Ok(CatalogChangeClass::Health),
         _ => Err(EngineError::PolicyViolation(format!(
@@ -577,12 +576,6 @@ fn parse_change_kind(value: &str) -> Result<CatalogChangeKind> {
         "function_registered" => Ok(CatalogChangeKind::FunctionRegistered),
         "function_updated" => Ok(CatalogChangeKind::FunctionUpdated),
         "function_unregistered" => Ok(CatalogChangeKind::FunctionUnregistered),
-        "trigger_type_registered" => Ok(CatalogChangeKind::TriggerTypeRegistered),
-        "trigger_type_updated" => Ok(CatalogChangeKind::TriggerTypeUpdated),
-        "trigger_type_unregistered" => Ok(CatalogChangeKind::TriggerTypeUnregistered),
-        "trigger_registered" => Ok(CatalogChangeKind::TriggerRegistered),
-        "trigger_updated" => Ok(CatalogChangeKind::TriggerUpdated),
-        "trigger_unregistered" => Ok(CatalogChangeKind::TriggerUnregistered),
         "visibility_changed" => Ok(CatalogChangeKind::VisibilityChanged),
         "health_changed" => Ok(CatalogChangeKind::HealthChanged),
         _ => Err(EngineError::PolicyViolation(format!(
@@ -599,12 +592,6 @@ fn change_kind_str(kind: &CatalogChangeKind) -> &'static str {
         CatalogChangeKind::FunctionRegistered => "function_registered",
         CatalogChangeKind::FunctionUpdated => "function_updated",
         CatalogChangeKind::FunctionUnregistered => "function_unregistered",
-        CatalogChangeKind::TriggerTypeRegistered => "trigger_type_registered",
-        CatalogChangeKind::TriggerTypeUpdated => "trigger_type_updated",
-        CatalogChangeKind::TriggerTypeUnregistered => "trigger_type_unregistered",
-        CatalogChangeKind::TriggerRegistered => "trigger_registered",
-        CatalogChangeKind::TriggerUpdated => "trigger_updated",
-        CatalogChangeKind::TriggerUnregistered => "trigger_unregistered",
         CatalogChangeKind::VisibilityChanged => "visibility_changed",
         CatalogChangeKind::HealthChanged => "health_changed",
     }

@@ -17,14 +17,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
         EngineHost::visible_workers(self, actor)
     }
 
-    fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition> {
-        EngineHost::visible_triggers(self, actor)
-    }
-
-    fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition> {
-        EngineHost::visible_trigger_types(self, actor)
-    }
-
     fn inspect_catalog_item(&self, invocation: &Invocation) -> Result<Value> {
         self.meta_inspect(invocation)
     }

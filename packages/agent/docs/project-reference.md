@@ -571,7 +571,6 @@ kernel does not move these shared engine records into its disposable index.
 | `engine_grants` | retained non-local authority grants |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
 | `engine_invocations` | generic engine invocation history; local rows carry SQL `NULL` grant observation |
-| `engine_queue_items` | durable engine queue; local rows retain the trusted-local marker without a grant id |
 | `engine_resource_events` | generic resource event history |
 | `engine_resource_leases` | generic resource leases; grant id is optional provenance |
 | `engine_resource_links` | generic resource relationships |

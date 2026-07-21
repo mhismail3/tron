@@ -5,21 +5,16 @@ use std::sync::Arc;
 use crate::engine::catalog::discovery::ActorContext;
 use crate::engine::invocation::model::InProcessFunctionHandler;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
+use crate::engine::kernel::ids::{FunctionId, WorkerId};
 use crate::engine::kernel::policy;
 use crate::engine::kernel::types::{
-    CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision, TriggerDefinition,
-    TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind,
-    WorkerRevision,
+    CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision, VisibilityScope,
+    WorkerDefinition, WorkerKind, WorkerRevision,
 };
 
-use super::catalog_changes::{
-    function_change_subject, trigger_change_subject, trigger_type_change_subject,
-    worker_change_subject,
-};
+use super::catalog_changes::{function_change_subject, worker_change_subject};
 use super::{
-    FunctionEntry, LiveCatalog, RESERVED_ENGINE_NAMESPACE, RESERVED_ENGINE_WORKER_ID, TriggerEntry,
-    TriggerTypeEntry, WorkerEntry,
+    FunctionEntry, LiveCatalog, RESERVED_ENGINE_NAMESPACE, RESERVED_ENGINE_WORKER_ID, WorkerEntry,
 };
 
 impl LiveCatalog {
@@ -227,7 +222,6 @@ impl LiveCatalog {
             });
         }
         let subject = function_change_subject(&entry.definition);
-        self.cleanup_triggers_targeting(id)?;
         self.record_change(CatalogChangeKind::FunctionUnregistered, subject)?;
         let _ = self.functions.remove(id).expect("entry exists");
         Ok(())
@@ -293,163 +287,6 @@ impl LiveCatalog {
             .expect("function exists after immutable lookup")
             .definition = updated;
         Ok(revision)
-    }
-
-    /// Register or update a trigger type.
-    pub fn register_trigger_type(
-        &mut self,
-        definition: TriggerTypeDefinition,
-        volatile: bool,
-    ) -> Result<()> {
-        if self.worker(&definition.owner_worker).is_none() {
-            return Err(EngineError::NotFound {
-                kind: "worker",
-                id: definition.owner_worker.to_string(),
-            });
-        }
-
-        let kind = if let Some(existing) = self.trigger_types.get(&definition.id) {
-            if existing.definition.owner_worker != definition.owner_worker {
-                return Err(EngineError::OwnerMismatch {
-                    kind: "trigger_type",
-                    id: definition.id.to_string(),
-                    owner: existing.definition.owner_worker.to_string(),
-                    attempted_owner: definition.owner_worker.to_string(),
-                });
-            }
-            CatalogChangeKind::TriggerTypeUpdated
-        } else {
-            CatalogChangeKind::TriggerTypeRegistered
-        };
-        let subject = trigger_type_change_subject(&definition);
-        self.record_change(kind, subject)?;
-        let _ = self.trigger_types.insert(
-            definition.id.clone(),
-            TriggerTypeEntry {
-                definition,
-                volatile,
-            },
-        );
-        Ok(())
-    }
-
-    /// Inspect a trigger type.
-    pub fn inspect_trigger_type(&self, id: &TriggerTypeId) -> Result<TriggerTypeDefinition> {
-        self.trigger_types
-            .get(id)
-            .map(|entry| entry.definition.clone())
-            .ok_or_else(|| EngineError::NotFound {
-                kind: "trigger_type",
-                id: id.to_string(),
-            })
-    }
-
-    /// List trigger types in deterministic order.
-    #[must_use]
-    pub fn trigger_types(&self) -> Vec<TriggerTypeDefinition> {
-        self.trigger_types
-            .values()
-            .map(|entry| entry.definition.clone())
-            .collect()
-    }
-
-    /// Register or update a trigger.
-    pub fn register_trigger(
-        &mut self,
-        mut definition: TriggerDefinition,
-        volatile: bool,
-    ) -> Result<TriggerRevision> {
-        if self.worker(&definition.owner_worker).is_none() {
-            return Err(EngineError::NotFound {
-                kind: "worker",
-                id: definition.owner_worker.to_string(),
-            });
-        }
-        let trigger_type = self
-            .trigger_types
-            .get(&definition.trigger_type)
-            .ok_or_else(|| EngineError::NotFound {
-                kind: "trigger_type",
-                id: definition.trigger_type.to_string(),
-            })?;
-        let function = self
-            .functions
-            .get(&definition.target_function)
-            .ok_or_else(|| EngineError::NotFound {
-                kind: "function",
-                id: definition.target_function.to_string(),
-            })?;
-        policy::validate_trigger_registration(
-            &definition,
-            &trigger_type.definition,
-            &function.definition,
-        )?;
-
-        let kind = if let Some(existing) = self.triggers.get(&definition.id) {
-            if existing.definition.owner_worker != definition.owner_worker {
-                return Err(EngineError::OwnerMismatch {
-                    kind: "trigger",
-                    id: definition.id.to_string(),
-                    owner: existing.definition.owner_worker.to_string(),
-                    attempted_owner: definition.owner_worker.to_string(),
-                });
-            }
-            definition.revision = existing.definition.revision.next();
-            CatalogChangeKind::TriggerUpdated
-        } else {
-            definition.revision = TriggerRevision(1);
-            CatalogChangeKind::TriggerRegistered
-        };
-        let revision = definition.revision;
-        let subject = trigger_change_subject(&definition);
-        self.record_change(kind, subject)?;
-        let _ = self.triggers.insert(
-            definition.id.clone(),
-            TriggerEntry {
-                definition,
-                volatile,
-            },
-        );
-        Ok(revision)
-    }
-
-    /// Inspect a trigger.
-    pub fn inspect_trigger(&self, id: &TriggerId) -> Result<TriggerDefinition> {
-        self.triggers
-            .get(id)
-            .map(|entry| entry.definition.clone())
-            .ok_or_else(|| EngineError::NotFound {
-                kind: "trigger",
-                id: id.to_string(),
-            })
-    }
-
-    /// Unregister a trigger owned by a worker.
-    pub fn unregister_trigger(&mut self, id: &TriggerId, owner_worker: &WorkerId) -> Result<bool> {
-        let Some(entry) = self.triggers.get(id) else {
-            return Ok(false);
-        };
-        if &entry.definition.owner_worker != owner_worker {
-            return Err(EngineError::OwnerMismatch {
-                kind: "trigger",
-                id: id.to_string(),
-                owner: entry.definition.owner_worker.to_string(),
-                attempted_owner: owner_worker.to_string(),
-            });
-        }
-        let subject = trigger_change_subject(&entry.definition);
-        self.record_change(CatalogChangeKind::TriggerUnregistered, subject)?;
-        let _ = self.triggers.remove(id);
-        Ok(true)
-    }
-
-    /// List triggers in deterministic order.
-    #[must_use]
-    pub fn triggers(&self) -> Vec<TriggerDefinition> {
-        self.triggers
-            .values()
-            .map(|entry| entry.definition.clone())
-            .collect()
     }
 }
 

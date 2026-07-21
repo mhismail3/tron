@@ -37,9 +37,6 @@ use crate::engine::durability::ledger::EngineLedgerStore;
 use crate::engine::durability::ledger::{
     IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
-use crate::engine::durability::queue::{
-    EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation,
-};
 use crate::engine::durability::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
     EngineResourceVersion, LinkResources, ListResources, UpdateResource,
@@ -51,15 +48,13 @@ use crate::engine::invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationResult,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
-};
+use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, WorkerId};
 use crate::engine::kernel::types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CompensationContract, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
     FunctionRevision, IdempotencyContract, Provenance, ResourceLeaseFailureBehavior,
-    ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerRevision, TriggerTypeDefinition,
-    VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
+    ResourceLeaseRequirement, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
+    WorkerRevision,
 };
 use crate::engine::kernel::{policy, schema};
 use crate::engine::primitives;
@@ -94,14 +89,6 @@ enum PreparedDelegatedChild {
 enum PreparedDelegatedInvocationDecision {
     Execute(Box<PreparedDelegatedInvocation>),
     Finished(Box<InvocationResult>),
-}
-
-pub(in crate::engine) struct QueueTargetInvocation {
-    pub result: InvocationResult,
-    pub recorded_invocation: bool,
-    pub resource_lease_ids: Vec<String>,
-    pub compensation_status: Option<String>,
-    pub compensation_id: Option<String>,
 }
 
 /// Host for the in-process live capability engine.
