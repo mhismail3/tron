@@ -38,6 +38,7 @@ mod invocation;
 mod lifecycle;
 mod resident;
 mod secrets;
+mod session;
 mod support;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;

@@ -17,7 +17,7 @@
 //! | `persistence` | Canonical bundles, snapshot-first legacy-state retirement, index reconstruction, and durable operational ledgers |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
-//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, supervision, and their stateless support/tests |
+//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, supervision, and primitive session-metadata actuation |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //!
@@ -105,6 +105,9 @@
 //! 20,000 walked entries, skips hidden/heavy child trees unless requested, and
 //! reports every truncation cause. An agent abort or server shutdown therefore
 //! cannot be held indefinitely by a home-directory search.
+//! The fixed `session_set_title` operation owns only durable mutation and live
+//! projection. Title generation, eligibility, prompting, and normalization are
+//! worker policy and do not run implicitly in the agent prompt lifecycle.
 //! Executable child I/O is concurrent and bounded. Unix process groups make
 //! cancellation kill descendants; trusted-local `PATH` restores conventional
 //! host tools hidden by service launchers. Details belong to `process`.

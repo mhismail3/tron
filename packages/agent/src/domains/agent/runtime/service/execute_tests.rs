@@ -91,7 +91,6 @@ impl PromptFailureHarness {
             settings: crate::domains::settings::TronSettings::default(),
             event_store: self.event_store.clone(),
             shutdown_token: None,
-            shutdown_coordinator: None,
             engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
             server_origin: "localhost:9847".to_owned(),
             run_id: run_id.to_owned(),

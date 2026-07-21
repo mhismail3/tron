@@ -2,7 +2,7 @@
 //!
 //! `execute` owns the linear run-turn lifecycle, while sibling modules own the
 //! request DTO, dependency bundle, run plan, spawning, stream event publication,
-//! lightweight session title generation, and the major run-turn phases. The
+//! and the major run-turn phases. The
 //! service also owns the outer structured logging lifecycle for accepted prompt
 //! runs so logs, session events, and trace records share common
 //! run/session/trace identifiers. `PromptRequest` is the single
@@ -27,9 +27,7 @@
 //! service. Completion does not maintain a second final-answer state. Run-turn
 //! admission snapshots settings from the authoritative `SettingsRuntime`; the
 //! spawned run keeps that immutable value instead of consulting a second
-//! mutable settings owner. Main
-//! response and background title providers are both created from that same
-//! admitted API-settings snapshot. Each resumed prompt fail-closed reads the
+//! mutable settings owner. Each resumed prompt fail-closed reads the
 //! durable sequence and turn high-water marks, then seeds its agent from the
 //! maximum of reconstructed, completed, and started turns. A cancelled
 //! zero-content attempt therefore consumes its ordinal, while corrupt or
@@ -55,7 +53,6 @@ mod execute;
 mod plan;
 mod request;
 mod spawn;
-mod title_generation;
 
 pub use deps::{PromptEngineCausality, PromptRuntimeDeps};
 pub(super) use events::publish_prompt_runtime_stream;
@@ -63,4 +60,3 @@ pub(super) use execute::execute_prompt_run;
 pub(super) use plan::PromptRunPlan;
 pub use request::PromptRequest;
 pub use spawn::spawn_prompt_run;
-use title_generation::{SessionTitleGenerationRequest, spawn_session_title_generation};

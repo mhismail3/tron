@@ -17,6 +17,7 @@ mod command;
 mod coordination;
 mod projection;
 mod resident;
+mod session;
 
 fn system_actor() -> crate::engine::ActorContext {
     crate::engine::ActorContext::new(

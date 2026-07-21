@@ -52,8 +52,8 @@ The engine still uses generic words such as “capability invocation” in provi
 tool-call events and client rendering. Those names describe the model protocol;
 they do not imply the removed authorization or operation-catalog system.
 
-The model-facing fixed surface currently has 27 direct primitives grouped as
-seven host operations, sixteen worker-control operations, and four core-change
+The model-facing fixed surface currently has 28 direct primitives grouped as
+eight host operations, sixteen worker-control operations, and four core-change
 operations. A single typed manifest owns their provider names, groups, and
 stable order; registration, provider projection, introspection, and exact-set
 tests do not maintain parallel name lists. Every fixed primitive rejects
@@ -88,10 +88,12 @@ A fixed model tool is admitted only when it passes one of two tests:
    improves model success and runtime reliability. The filesystem primitives
    add bounded reads/listing/search, exact stale-write detection, atomic
    publication, and closed evidence. `web_fetch` adds URL validation, response
-   ceilings, and source provenance. They are ergonomic primitives, not new
-   semantic product policy.
+   ceilings, and source provenance. `session_set_title` is the narrow durable
+   session-metadata actuator needed for workers to replace hardcoded title
+   policy. These are ergonomic or state-custody primitives, not new semantic
+   product policy.
 
-This admits the current 7/16/4 grouping without pretending the smallest
+This admits the current 8/16/4 grouping without pretending the smallest
 possible tool count is the objective. It rejects fixed web search providers,
 transcription, memory policy, notifications, repository workflows, content
 analysis, and other task semantics: those belong in workers. The deterministic
@@ -490,7 +492,7 @@ evidence plus four explicitly different inventories:
 
 - eight server-owned compiled component roles, categorized as kernel, product
   infrastructure, or the protected core-change boundary;
-- all 27 fixed tools with their exact schemas, revisions, effect/risk,
+- all 28 fixed tools with their exact schemas, revisions, effect/risk,
   primitive group, and whether autonomy currently exposes them;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, and immutable worker version;

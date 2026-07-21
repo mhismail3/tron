@@ -31,6 +31,7 @@ operation_bindings! {
         "filesystem_edit" => |invocation, deps| { response(invocation, host::filesystem_edit(invocation, &deps.runtime).await) },
         "process_run" => |invocation, deps| { response(invocation, host::process_run(invocation, &deps.runtime).await) },
         "web_fetch" => |invocation, deps| { response(invocation, host::web_fetch(invocation, &deps.runtime).await) },
+        "session_set_title" => |invocation, deps| { response(invocation, session_set_title(invocation, deps).await) },
         "core_proposal_create" => |invocation, deps| { response(invocation, core_proposal_create(invocation, deps).await) },
         "core_proposal_list" => |invocation, deps| { response(invocation, core_proposal_list(invocation, deps).await) },
         "core_proposal_inspect" => |invocation, deps| { response(invocation, core_proposal_inspect(invocation, deps).await) },
@@ -55,6 +56,15 @@ operation_bindings! {
         "surface_snapshot" => |invocation, deps| { response(invocation, engine_surface_snapshot(invocation, deps).await) },
         "webhook_invoke" => |invocation, deps| { response(invocation, webhook(invocation, deps).await) },
     ];
+}
+
+async fn session_set_title(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    deps.runtime
+        .set_session_title(
+            required_string(&invocation.payload, "sessionId")?,
+            required_string(&invocation.payload, "title")?,
+        )
+        .await
 }
 
 async fn core_proposal_create(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {

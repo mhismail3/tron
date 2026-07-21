@@ -91,6 +91,12 @@ const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
         order: 60,
     },
     CorePrimitiveDescriptor {
+        operation_key: "session_set_title",
+        model_name: "session_set_title",
+        group: CorePrimitiveGroup::Host,
+        order: 70,
+    },
+    CorePrimitiveDescriptor {
         operation_key: "upsert",
         model_name: "worker_upsert",
         group: CorePrimitiveGroup::WorkerControl,
@@ -385,6 +391,13 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         "Fetch one explicit HTTP or HTTPS URL directly and return bounded source content with provenance.",
     )?);
     specs.push(spec(
+        "worker_kernel::session_set_title",
+        EffectClass::IdempotentWrite,
+        RiskLevel::Medium,
+        json!({"type":"object","additionalProperties":false,"required":["sessionId","title"],"properties":{"sessionId":{"type":"string","minLength":1},"title":{"type":"string","minLength":1,"maxLength":160}}}),
+        "Set an explicit durable session title and publish the canonical live session update. Adaptive title policy belongs in workers.",
+    )?);
+    specs.push(spec(
         "worker_kernel::core_proposal_create",
         EffectClass::ExternalSideEffect,
         RiskLevel::High,
@@ -653,6 +666,11 @@ fn response_schema(function: &str) -> Value {
             "type":"object","additionalProperties":false,
             "required":["url","status","contentType","contentLength","observedBytes","retainedBytes","truncated","content"],
             "properties":{"url":{"type":"string"},"status":{"type":"integer"},"contentType":{},"contentLength":{},"observedBytes":{"type":"integer"},"retainedBytes":{"type":"integer"},"truncated":{"type":"boolean"},"content":{"type":"string"}}
+        }),
+        "worker_kernel::session_set_title" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["sessionId","title","updated"],
+            "properties":{"sessionId":{"type":"string"},"title":{"type":"string"},"updated":{"type":"boolean"}}
         }),
         "worker_kernel::core_proposal_create"
         | "worker_kernel::core_proposal_inspect"

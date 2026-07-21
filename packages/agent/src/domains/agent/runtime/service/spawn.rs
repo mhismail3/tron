@@ -22,7 +22,6 @@ pub fn spawn_prompt_run(
             .shutdown_coordinator
             .as_ref()
             .map(|coord| coord.token()),
-        shutdown_coordinator: runtime_deps.shutdown_coordinator.clone(),
         engine_host: runtime_deps.engine_host.clone(),
         server_origin: runtime_deps.origin.clone(),
         run_id,

@@ -6,9 +6,9 @@ use tracing::{info, trace, warn};
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
 use super::completion::{PromptRunCompletion, finalize_prompt_run, publish_terminal_lifecycle};
 use super::{
-    PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, SessionTitleGenerationRequest,
-    ShutdownCancelForwarder, build_user_content_override, build_user_event_payload,
-    persist_user_message_event, resume_prompt_session, run_agent, spawn_session_title_generation,
+    PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, ShutdownCancelForwarder,
+    build_user_content_override, build_user_event_payload, persist_user_message_event,
+    resume_prompt_session, run_agent,
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::shared::protocol::events::{BaseEvent, error_event};
@@ -24,7 +24,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         settings,
         event_store,
         shutdown_token,
-        shutdown_coordinator,
         engine_host,
         server_origin,
         run_id,
@@ -69,7 +68,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         PromptRunCleanup::new(started_run, session_manager.clone(), session_id.clone());
     let cancel_token = run_cleanup.cancel_token();
     let _shutdown_forwarder = ShutdownCancelForwarder::new(shutdown_token, cancel_token.clone());
-    let title_responder_factory = responder_factory.clone();
 
     let state = match resume_prompt_session(
         session_manager.clone(),
@@ -273,21 +271,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     agent.set_persister(Some(persister.clone()));
     agent.set_compaction_session_manager(session_manager.clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
-    spawn_session_title_generation(
-        title_responder_factory,
-        event_store.clone(),
-        broadcast.clone(),
-        shutdown_coordinator,
-        SessionTitleGenerationRequest {
-            session_id: session_id.clone(),
-            model: model.clone(),
-            api_settings: settings.api.clone(),
-            prompt: prompt.clone(),
-            working_dir: working_dir.clone(),
-            server_origin: server_origin.clone(),
-        },
-    );
-
     let user_content_override =
         build_user_content_override(&prompt, &model, attachments.as_deref());
 
