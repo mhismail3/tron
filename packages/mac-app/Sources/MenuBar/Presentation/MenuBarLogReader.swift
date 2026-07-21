@@ -114,7 +114,7 @@ enum MenuBarLogReader {
             return .error("logs::recent failed")
         }
         guard let envelope = try? JSONDecoder().decode(EngineFunctionCallResponseEnvelope<RecentLogsResult>.self, from: data),
-              let result = envelope.result.child.value else {
+              let result = envelope.result else {
             return .malformed
         }
         return .result(result)
@@ -145,15 +145,7 @@ enum MenuBarLogReader {
 }
 
 private struct EngineFunctionCallResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
-    var result: EngineFunctionCallResult<Result>
-}
-
-private struct EngineFunctionCallResult<Result: Decodable & Equatable>: Decodable, Equatable {
-    var child: EngineFunctionCallChild<Result>
-}
-
-private struct EngineFunctionCallChild<Result: Decodable & Equatable>: Decodable, Equatable {
-    var value: Result?
+    var result: Result?
 }
 
 struct RecentLogsResult: Decodable, Equatable {

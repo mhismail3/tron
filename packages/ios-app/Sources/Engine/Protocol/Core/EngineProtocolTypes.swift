@@ -140,29 +140,6 @@ struct EngineProtocolResponseFrame: Decodable {
     let traceId: String?
 }
 
-struct EngineFunctionCallEnvelope<R: Decodable>: Decodable {
-    let child: EngineChildInvocation<R>
-}
-
-struct EngineChildInvocation<R: Decodable>: Decodable {
-    let invocationId: String?
-    let functionId: String?
-    let traceId: String?
-    let value: R?
-    let error: EngineChildError?
-    let replayedFrom: String?
-}
-
-struct EngineChildError: Decodable, Sendable {
-    let kind: String?
-    let message: String?
-    let details: [String: AnyCodable]?
-
-    var failure: CanonicalFailurePayload? {
-        CanonicalFailurePayload.fromDetails(details)
-    }
-}
-
 /// Known engine error codes from the server.
 ///
 /// Adding a case here forces exhaustive switches to handle new typed errors at

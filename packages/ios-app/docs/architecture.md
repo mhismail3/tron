@@ -122,6 +122,9 @@ requires re-pairing.
 Typed domain clients call exact engine function ids. Worker operations use
 `worker_kernel::*` directly; there is no operation wrapper or client-side
 capability grant construction.
+Successful invocations decode the target function value directly from the
+response's top-level `result`; failures decode only the canonical top-level
+protocol error. There is no nested child-invocation response envelope.
 
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
 non-model-facing `engine::surface_snapshot` read with optional session context.

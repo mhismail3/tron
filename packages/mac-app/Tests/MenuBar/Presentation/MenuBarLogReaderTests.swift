@@ -8,7 +8,7 @@ struct MenuBarLogReaderTests {
     @Test("decodes logs::recent response")
     func decodesRecentLogsResponse() throws {
         let data = """
-        {"type":"response","id":"mac-logs-recent","ok":true,"result":{"child":{"value":{"count":1,"entries":[{"id":7,"timestamp":"2026-04-27T10:00:00Z","level":"info","component":"server","message":"ready","origin":"server","sessionId":"session-1","workspaceId":"workspace-1","traceId":"trace-1","errorMessage":null}]}}}}
+        {"type":"response","id":"mac-logs-recent","ok":true,"result":{"count":1,"entries":[{"id":7,"timestamp":"2026-04-27T10:00:00Z","level":"info","component":"server","message":"ready","origin":"server","sessionId":"session-1","workspaceId":"workspace-1","traceId":"trace-1","errorMessage":null}]}}
         """.data(using: .utf8)!
 
         let frame = MenuBarLogReader.decodeFrame(data: data)
@@ -22,6 +22,24 @@ struct MenuBarLogReaderTests {
         } else {
             Issue.record("expected result frame")
         }
+    }
+
+    @Test("decodes top-level engine error")
+    func decodesTopLevelEngineError() throws {
+        let data = """
+        {"type":"response","id":"mac-logs-recent","ok":false,"result":null,"error":{"code":"INVALID_PARAMS","category":"invalid_request","message":"limit is invalid","retryable":false,"recoverable":true,"origin":"engine"}}
+        """.data(using: .utf8)!
+
+        #expect(MenuBarLogReader.decodeFrame(data: data) == .error("limit is invalid"))
+    }
+
+    @Test("retired child response envelope is malformed")
+    func retiredChildResponseEnvelopeIsMalformed() throws {
+        let data = """
+        {"type":"response","id":"mac-logs-recent","ok":true,"result":{"child":{"value":{"count":0,"entries":[]}}}}
+        """.data(using: .utf8)!
+
+        #expect(MenuBarLogReader.decodeFrame(data: data) == .malformed)
     }
 
     @Test("formats structured rows for display")

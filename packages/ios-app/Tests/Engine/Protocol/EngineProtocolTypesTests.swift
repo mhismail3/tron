@@ -512,55 +512,65 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         return try JSONSerialization.jsonObject(with: data) as! [String: Any]
     }
 
-    func testPublicEngineFramesDoNotExposeChildRuntimeMetadata() throws {
+    func testEngineFunctionCallResponseDecodesDirectResult() throws {
+        struct TestResult: Decodable, Equatable {
+            let data: String
+        }
+
+        let json = """
+        {"type":"response","id":"123","ok":true,"result":{"data":"hello"},"error":null}
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(EngineResponseEnvelope<TestResult>.self, from: json)
+
+        XCTAssertEqual(response.id, "123")
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(response.result, TestResult(data: "hello"))
+        XCTAssertNil(response.error)
+    }
+
+    func testEngineFunctionCallResponseDecodesTopLevelCanonicalError() throws {
         struct TestResult: Decodable {
             let data: String
         }
         let json = """
         {
-            "invocationId": "invocation-1",
-            "functionId": "system::ping",
-            "workerId": "engine",
-            "functionRevision": 7,
-            "catalogRevision": 9,
-            "traceId": "trace-1",
-            "value": {"data": "hello"},
-            "error": null,
-            "replayedFrom": null
+            "type":"response",
+            "id":"123",
+            "ok":false,
+            "result":null,
+            "error":{
+                "code":"CAPABILITY_NOT_FOUND",
+                "category":"not_found",
+                "message":"function not found: worker_missing",
+                "retryable":false,
+                "recoverable":true,
+                "origin":"engine",
+                "details":{"id":"worker_missing"}
+            }
         }
         """.data(using: .utf8)!
 
-        let child = try JSONDecoder().decode(EngineChildInvocation<TestResult>.self, from: json)
+        let response = try JSONDecoder().decode(EngineResponseEnvelope<TestResult>.self, from: json)
 
-        XCTAssertEqual(child.invocationId, "invocation-1")
-        XCTAssertEqual(child.functionId, "system::ping")
-        XCTAssertEqual(child.traceId, "trace-1")
-        XCTAssertEqual(child.value?.data, "hello")
-        XCTAssertNil(child.error)
-        XCTAssertNil(child.replayedFrom)
+        XCTAssertFalse(response.ok)
+        XCTAssertNil(response.result)
+        XCTAssertEqual(response.error?.errorCode, .capabilityNotFound)
+        XCTAssertEqual(response.error?.message, "function not found: worker_missing")
+        XCTAssertEqual(response.error?.details?["id"]?.stringValue, "worker_missing")
     }
 
-    func testEngineFunctionCallResponseDecoding() throws {
+    func testEngineFunctionCallResponseRejectsRetiredChildEnvelope() throws {
         struct TestResult: Decodable {
             let data: String
         }
-        struct Response<T: Decodable>: Decodable {
-            let id: String?
-            let ok: Bool
-            let result: T?
-            let error: EngineProtocolError?
-        }
-
         let json = """
         {"type":"response","id":"123","ok":true,"result":{"child":{"value":{"data":"hello"}}},"error":null}
         """.data(using: .utf8)!
 
-        let response = try JSONDecoder().decode(Response<EngineFunctionCallEnvelope<TestResult>>.self, from: json)
-
-        XCTAssertEqual(response.id, "123")
-        XCTAssertTrue(response.ok)
-        XCTAssertEqual(response.result?.child.value?.data, "hello")
-        XCTAssertNil(response.error)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(EngineResponseEnvelope<TestResult>.self, from: json)
+        )
     }
 
     func testEngineErrorDecoding() throws {

@@ -267,7 +267,10 @@ their context-specific colors. Consumers pattern-match `ServerPingResult`
 directly, while snapshots store only orthogonal process and host metadata.
 `ServerPing.decodeFrame` parses each WebSocket frame once, requires the
 canonical pong, timestamp, server/protocol versions, minimum client protocol,
-and compatibility fields, and projects only the server version. The configured
+and compatibility fields directly in the invocation response's top-level
+`result`, and projects only the server version. Canonical invocation failures
+remain top-level protocol errors; the wrapper has no child-result compatibility
+decoder. The configured
 port and settings-backed Tailscale cache stay with `EnvironmentSetup`; the Mac
 app owns its wizard-completion sentinel directly. `system::get_info` returns
 only the version, uptime, and cached-session count consumed by iOS. The status
@@ -279,6 +282,8 @@ policy. `MenuBarController` owns the setup used to compose
 the pairing and log windows; `MenuBarActionHandler` dispatches those typed
 window actions without resupplying composition. `MenuBarLogReader` accepts the
 token as request input and does not own credential storage or path resolution.
+It applies the same direct top-level `result`/top-level error contract to
+`logs::recent`.
 The poller is an immutable `Sendable` value. `MenuBarController` owns and
 cancels its consumer task, while each stream owns its producer task and buffers
 only the newest snapshot so a stalled consumer cannot accumulate obsolete

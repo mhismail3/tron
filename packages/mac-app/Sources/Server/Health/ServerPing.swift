@@ -146,14 +146,6 @@ enum ServerPing {
         let result: ResultFrame?
 
         struct ResultFrame: Decodable {
-            let child: ChildFrame
-        }
-
-        struct ChildFrame: Decodable {
-            let value: Value
-        }
-
-        struct Value: Decodable {
             let pong: Bool
             let timestamp: String
             let serverVersion: String
@@ -181,7 +173,7 @@ enum ServerPing {
         if json["error"] != nil || !frame.ok {
             return .error
         }
-        guard let value = frame.result?.child.value,
+        guard let value = frame.result,
               value.pong,
               !value.timestamp.isEmpty,
               !value.serverVersion.isEmpty,

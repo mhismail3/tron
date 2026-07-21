@@ -97,28 +97,28 @@ extension EngineConnection {
         )
         let startTime = CFAbsoluteTimeGetCurrent()
         logger.logEngineRequest(functionId: functionId.rawValue, payload: payload, id: requestId)
-        let envelope: EngineFunctionCallEnvelope<R> = try await sendResponseMessage(
-            message,
-            id: requestId,
-            operation: functionId.rawValue,
-            timeout: options.timeout
-        )
-        let duration = CFAbsoluteTimeGetCurrent() - startTime
-        if let error = envelope.child.error {
-            guard let failure = error.failure else {
-                logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: "Missing canonical child failure")
-                throw EngineConnectionError.invalidResponse
-            }
-            let protocolError = EngineProtocolError(failure: failure)
-            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: protocolError.diagnosticSummary)
-            throw protocolError
+        do {
+            let value: R = try await sendResponseMessage(
+                message,
+                id: requestId,
+                operation: functionId.rawValue,
+                timeout: options.timeout
+            )
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: true, duration: duration, result: value)
+            return value
+        } catch {
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            let detail = (error as? EngineProtocolError)?.diagnosticSummary ?? error.localizedDescription
+            logger.logEngineResponse(
+                functionId: functionId.rawValue,
+                id: requestId,
+                success: false,
+                duration: duration,
+                error: detail
+            )
+            throw error
         }
-        guard let value = envelope.child.value else {
-            logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: "Missing child value")
-            throw EngineConnectionError.invalidResponse
-        }
-        logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: true, duration: duration, result: value)
-        return value
     }
 
     func sendProtocolMessage<M: Encodable, R: Decodable>(
