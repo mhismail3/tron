@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-20 on `codex/worker-first-autonomy-poc`.
+> Last verified: 2026-07-21 on `codex/worker-first-autonomy-poc`.
 
 This document describes the active worker-first implementation.
 
@@ -974,11 +974,13 @@ worker, and invokes it.
 
 ## Observation-Driven Re-hardening
 
-The permissive POC is evaluated through actual sessions and the production
-evidence they already persist: worker versions, runs, inbox results, causal
-traces, health, and audit history. Tron does not ship a second observation
-ledger or an arbitrary time/scenario gate that exists only to validate Tron.
-Future guardrails must map to an observed failure or concrete threat, include a
+The permissive POC is evaluated through the deterministic scenario suite,
+opt-in live-network proof, actual sessions, and the production evidence they
+already persist: worker versions, runs, inbox results, causal traces, health,
+and audit history. The scenarios and autonomous-adaptation proofs are required;
+there is no minimum elapsed-time or multi-day waiting period. Tron does not
+ship a second observation ledger that exists only to validate Tron. Future
+guardrails must map to an observed failure or concrete threat, include a
 regression scenario for it, and preserve accepted worker workflows.
 
 ## Source Owners
