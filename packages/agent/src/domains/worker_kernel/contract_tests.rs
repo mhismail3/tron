@@ -79,6 +79,17 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .any(|field| field == "checksum")
     );
     assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
+    let files_description = bundle["properties"]["files"]["description"]
+        .as_str()
+        .expect("worker files description");
+    assert!(files_description.contains("non-executable"));
+    assert!(files_description.contains("explicit interpreter"));
+    let command_description =
+        bundle["properties"]["runner"]["oneOf"][1]["properties"]["command"]["description"]
+            .as_str()
+            .expect("command runner description");
+    assert!(command_description.contains("no shell parsing"));
+    assert!(command_description.contains("python3"));
     assert_eq!(
         bundle["properties"]["engineHooks"]["items"]["enum"],
         json!(["context_summary", "inbox_context", "worker_relevance"])

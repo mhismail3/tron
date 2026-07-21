@@ -12,7 +12,10 @@ pub(super) fn worker_bundle_schema() -> Value {
         "additionalProperties":false,
         "required":["command"],
         "properties":{
-            "command":{"type":"array","minItems":1,"items":{"type":"string"}},
+            "command":{
+                "type":"array","minItems":1,"items":{"type":"string"},
+                "description":"Exact program-and-argument vector; no shell parsing occurs. Worker source files are published as non-executable text, so invoke scripts through an explicit interpreter such as python3 or bash."
+            },
             "timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}
         }
     });
@@ -69,7 +72,7 @@ pub(super) fn worker_bundle_schema() -> Value {
                         "required":["kind","command"],
                         "properties":{
                             "kind":{"type":"string","enum":["command"]},
-                            "command":{"type":"array","minItems":1,"items":{"type":"string"},"description":"Program and arguments executed with files/ as the working directory. Refer to a fetched dependency named N through ../dependencies/N."}
+                            "command":{"type":"array","minItems":1,"items":{"type":"string"},"description":"Exact program-and-argument vector executed with files/ as the working directory; no shell parsing occurs. Worker source files are non-executable text, so invoke scripts through an explicit interpreter such as python3 or bash. Refer to a fetched dependency named N through ../dependencies/N."}
                         }
                     },
                     {
@@ -86,7 +89,7 @@ pub(super) fn worker_bundle_schema() -> Value {
             },
             "files":{
                 "type":"object",
-                "description":"Relative source-file paths mapped to complete UTF-8 string contents. They are materialized beneath files/, the working directory for runner, smoke-test, and health-check commands.",
+                "description":"Relative source-file paths mapped to complete UTF-8 string contents. They are materialized as non-executable text beneath files/, the working directory for runner, smoke-test, and health-check commands. Script commands must name an explicit interpreter.",
                 "additionalProperties":{"type":"string"}
             },
             "dependencies":{

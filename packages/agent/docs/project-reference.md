@@ -292,7 +292,12 @@ A command worker starts an executable with the version's `files/` directory as
 its working directory. JSON input is written to stdin. JSON stdout becomes the
 typed result; non-JSON stdout is wrapped as bounded text. Commands inherit the
 Tron user's normal host permissions. There is no application filesystem or
-process sandbox. A successful command may intentionally ignore its input; Tron
+process sandbox. The command is an exact program-and-argument vector, not a
+shell expression. Bundle and `sourceDirectory` files are published as
+non-executable UTF-8 text, so a script entrypoint names its interpreter
+explicitly (`python3 script.py`, `bash script.sh`, and so on). This keeps the
+immutable bundle behavior independent of source-tree mode bits and host shell
+configuration. A successful command may intentionally ignore its input; Tron
 does not turn the resulting closed stdin pipe into a false worker failure, but
 all other write errors and non-success child exits remain failures. From this
 working directory, a declared dependency named `N` is available at
