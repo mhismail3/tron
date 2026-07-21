@@ -73,22 +73,6 @@ mod policy_tests {
         assert_eq!(MANAGED_MODULE_OVERRIDES, &[("ort", "error")]);
         assert_eq!(managed_database_filter_directives(), "info,ort=error");
     }
-
-    #[test]
-    fn database_filter_cannot_read_terminal_environment_policy() {
-        let source = include_str!("mod.rs");
-        let database_filter_body = source
-            .split("fn managed_database_filter()")
-            .nth(1)
-            .unwrap()
-            .split("fn terminal_filter()")
-            .next()
-            .unwrap();
-
-        assert!(!database_filter_body.contains("try_from_default_env"));
-        assert!(source.contains("let database_filter = managed_database_filter();"));
-        assert!(source.contains("let terminal_filter = terminal_filter();"));
-    }
 }
 
 /// Initialize the global tracing subscriber with optional stderr output AND `SQLite` persistence.

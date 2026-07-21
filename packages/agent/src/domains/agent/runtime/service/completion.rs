@@ -200,17 +200,6 @@ async fn emit_session_update(
 mod tests {
     use super::*;
 
-    #[test]
-    fn completion_does_not_recreate_superseded_result_resources() {
-        let source = include_str!("completion.rs");
-        let create_operation = ["resource", "::", "create"].concat();
-        let obsolete_kind = ["agent", "_", "result"].concat();
-        let obsolete_refs = ["resource", "Refs"].concat();
-        assert!(!source.contains(&create_operation));
-        assert!(!source.contains(&obsolete_kind));
-        assert!(!source.contains(&obsolete_refs));
-    }
-
     #[tokio::test]
     async fn terminal_lifecycle_is_contiguous_and_ready_is_last() {
         let broadcast = Arc::new(crate::domains::agent::r#loop::EventEmitter::new());

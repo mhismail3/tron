@@ -1,7 +1,7 @@
 //! Living source-ownership guards retained from the hierarchy repair.
 
 pub(super) use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub(super) fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -19,11 +19,4 @@ pub(super) fn read_repo_file(path: &str) -> String {
     let full_path = repo_path(path);
     std::fs::read_to_string(&full_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
-}
-
-pub(super) fn source_line_count(path: &Path) -> usize {
-    std::fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
-        .lines()
-        .count()
 }

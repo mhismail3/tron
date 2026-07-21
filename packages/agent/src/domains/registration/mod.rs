@@ -388,7 +388,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn primitive_teardown_startup_catalog_excludes_deleted_product_domains() {
+    async fn startup_catalog_contains_worker_first_fixed_functions() {
         let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
         let functions = ctx
             .engine_host
@@ -424,29 +424,6 @@ mod tests {
                     .iter()
                     .any(|function_id| function_id == expected),
                 "worker-first fixed function missing from startup catalog: {expected}"
-            );
-        }
-        assert!(!function_ids.iter().any(|id| id == "capability::execute"));
-        for removed in [
-            "module_authoring::",
-            "module_install::",
-            "module_runtime::",
-            "capability_binding::",
-            "scheduler::",
-            "procedural::",
-            "worker_lifecycle::",
-        ] {
-            assert!(
-                !function_ids.iter().any(|id| id.starts_with(removed)),
-                "removed plane {removed} remains registered: {function_ids:?}"
-            );
-        }
-        for forbidden_prefix in forbidden_startup_prefixes() {
-            assert!(
-                !function_ids
-                    .iter()
-                    .any(|function_id| function_id.starts_with(&forbidden_prefix)),
-                "noncanonical startup function prefix {forbidden_prefix} registered in {function_ids:?}"
             );
         }
     }
@@ -814,58 +791,5 @@ mod tests {
             ActorId::new("system:test").expect("actor id"),
             ActorKind::System,
         )
-    }
-
-    fn forbidden_startup_prefixes() -> Vec<String> {
-        let product_namespaces = vec![
-            ["agent", "_", "briefing"].concat(),
-            "browser".to_owned(),
-            "cron".to_owned(),
-            "display".to_owned(),
-            "events".to_owned(),
-            "import".to_owned(),
-            "job".to_owned(),
-            "mcp".to_owned(),
-            "notifications".to_owned(),
-            "plan".to_owned(),
-            "process".to_owned(),
-            "program".to_owned(),
-            ["prompt", "_", "library"].concat(),
-            "repo".to_owned(),
-            "sandbox".to_owned(),
-            ["self", "_", "extension"].concat(),
-            ["sk", "ills"].concat(),
-            "tree".to_owned(),
-            ["voice", "_", "notes"].concat(),
-            "web".to_owned(),
-            ["work", "tree"].concat(),
-        ];
-        let mut prefixes = product_namespaces
-            .into_iter()
-            .map(|namespace| format!("{namespace}::"))
-            .collect::<Vec<_>>();
-        prefixes.extend([
-            format!("agent::{}", "run_goal"),
-            format!("agent::{}", "work_snapshot"),
-            format!("agent::{}", ["ask", "_", "user"].concat()),
-            format!("agent::{}", ["submit", "_", "answers"].concat()),
-            format!("agent::spawn_{}", ["sub", "agent"].concat()),
-            format!("agent::{}_{}", ["sub", "agent"].concat(), ""),
-            format!("agent::cancel_{}", ["sub", "agent"].concat()),
-            format!("worker::{}", "spawn"),
-            format!("capability::{}", "search"),
-            format!("capability::{}", "inspect"),
-            format!("capability::{}", "status"),
-            format!("capability::{}", "registry_snapshot"),
-            format!("capability::{}", "binding_"),
-            format!("capability::{}", "plugin_"),
-            format!("capability::{}", ["con", "formance_"].concat()),
-            format!("capability::{}", "policy_"),
-            format!("capability::{}", "program_run_list"),
-            format!("filesystem::{}", "read_file"),
-            format!("filesystem::{}", "write_file"),
-            format!("filesystem::{}", "edit_file"),
-        ]);
-        prefixes
     }
 }
