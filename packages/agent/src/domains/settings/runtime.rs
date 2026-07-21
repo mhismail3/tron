@@ -163,7 +163,7 @@ mod tests {
     fn seeded_runtime() -> (tempfile::TempDir, SettingsRuntime) {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
-        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+        crate::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
         let runtime = SettingsRuntime::load(&home).unwrap();
         (dir, runtime)
     }
@@ -216,7 +216,7 @@ mod tests {
     async fn watcher_reloads_valid_settings_edits() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
-        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+        crate::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
         let runtime = Arc::new(SettingsRuntime::load(&home).unwrap());
         let cancel = CancellationToken::new();
         let handle = runtime

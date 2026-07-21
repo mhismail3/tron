@@ -126,7 +126,7 @@ fn init_directories_at(home: &Path) -> Result<()> {
             .map_err(anyhow::Error::msg)
             .context("Failed to retire legacy profile settings")?;
     }
-    crate::shared::foundation::constitution::ensure_tron_home_at(&home)
+    crate::shared::foundation::home::ensure_tron_home_at(&home)
         .context("Failed to initialize primitive Tron Home")
 }
 

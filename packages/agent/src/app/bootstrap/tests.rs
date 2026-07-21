@@ -17,7 +17,7 @@ fn test_db_config() -> ConnectionConfig {
 
 fn test_tron_home(dir: &tempfile::TempDir) -> std::path::PathBuf {
     let home = dir.path().join(".tron");
-    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
     home
 }
 

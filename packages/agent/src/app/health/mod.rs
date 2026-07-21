@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_health_checks_canonical_constitution_settings_path() {
+    fn deep_health_checks_canonical_home_settings_path() {
         let pool = crate::domains::session::event_store::new_in_memory(
             &crate::domains::session::event_store::ConnectionConfig::default(),
         )
@@ -387,7 +387,7 @@ mod tests {
         }
         let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
-        crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
+        crate::shared::foundation::home::ensure_tron_home_at(dir.path()).unwrap();
         std::fs::write(
             crate::shared::foundation::paths::settings_path_for_home(dir.path()),
             "{broken",
@@ -417,7 +417,7 @@ mod tests {
         }
         let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
-        crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
+        crate::shared::foundation::home::ensure_tron_home_at(dir.path()).unwrap();
         std::fs::write(
             crate::shared::foundation::paths::settings_path_for_home(dir.path()),
             r#"

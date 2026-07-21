@@ -3,7 +3,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`constants`] | Shared compile-time constants |
-//! | [`constitution`] | Required Tron Home directory recovery without inert state files |
+//! | [`home`] | Required Tron Home directory initialization without inert state files |
 //! | [`ids`] | Branded IDs used across domains and protocol payloads |
 //! | [`paths`] | Canonical filesystem paths |
 //! | [`redaction`] | Authoritative text- and field-aware JSON sensitive-data redaction policy |
@@ -11,7 +11,7 @@
 //! | [`text`] | Text helpers used by multiple owners |
 
 pub mod constants;
-pub mod constitution;
+pub mod home;
 pub mod ids;
 pub mod paths;
 pub mod redaction;

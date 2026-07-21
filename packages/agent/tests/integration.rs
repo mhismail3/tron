@@ -37,7 +37,7 @@ struct TestServer {
 
 fn unique_home(root: &Path) -> PathBuf {
     let home = root.join(".tron");
-    tron::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+    tron::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
     home
 }
 

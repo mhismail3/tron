@@ -35,7 +35,7 @@ pub(crate) fn unique_test_path(name: &str, extension: &str) -> PathBuf {
 pub(crate) fn unique_tron_home() -> PathBuf {
     let dir = unique_test_path("tron-home", "dir");
     let home = dir.join(".tron");
-    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
     home
 }
 

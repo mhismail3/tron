@@ -1,9 +1,9 @@
-//! Primitive Tron Home filesystem layout.
+//! Minimal Tron Home filesystem initialization.
 //!
 //! Runtime state has three roots: `internal/`, `profiles/`, and `workspace/`.
 //! `profiles/` now contains protected `auth.json` only; named configuration
 //! profiles, inheritance, active pointers, and source-owned prompt assets are
-//! not part of the primitive constitution. Sparse user settings live directly
+//! not initialized. Sparse user settings live directly
 //! at `~/.tron/settings.toml` and are created only by an explicit mutation or
 //! snapshot-first legacy migration.
 
@@ -15,13 +15,13 @@ use super::paths::dirs;
 
 /// Ensure a specific Tron Home is structurally complete.
 pub fn ensure_tron_home_at(home: &Path) -> io::Result<()> {
-    for directory in primitive_dirs(home) {
+    for directory in required_directories(home) {
         fs::create_dir_all(directory)?;
     }
     Ok(())
 }
 
-fn primitive_dirs(home: &Path) -> Vec<PathBuf> {
+fn required_directories(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(dirs::INTERNAL),
         home.join(dirs::INTERNAL).join(dirs::DB),
@@ -40,7 +40,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn constitution_creates_only_primitive_roots() {
+    fn initialization_creates_only_required_roots() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join(".tron");
         ensure_tron_home_at(&home).unwrap();
@@ -62,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn constitution_never_overwrites_auth_or_settings() {
+    fn initialization_never_overwrites_auth_or_settings() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join(".tron");
         ensure_tron_home_at(&home).unwrap();

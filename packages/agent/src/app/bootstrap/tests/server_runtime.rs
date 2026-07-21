@@ -131,10 +131,10 @@ fn startup_ensures_bearer_token_exists() {
     assert_eq!(read_back, token);
 }
 #[test]
-fn constitution_creates_runtime_roots_without_inert_auth_state() {
+fn initialization_creates_runtime_roots_without_inert_auth_state() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join(".tron");
-    crate::shared::foundation::constitution::ensure_tron_home_at(&home)
+    crate::shared::foundation::home::ensure_tron_home_at(&home)
         .expect("recover Constitution home directories");
 
     assert!(

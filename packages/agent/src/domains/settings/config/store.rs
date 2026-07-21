@@ -236,7 +236,7 @@ mod tests {
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
         let home = dir.path().join(".tron");
-        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+        crate::shared::foundation::home::ensure_tron_home_at(&home).unwrap();
         crate::shared::foundation::paths::settings_path_for_home(&home)
     }
 
