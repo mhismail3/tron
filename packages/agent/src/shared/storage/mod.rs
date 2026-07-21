@@ -48,9 +48,6 @@ pub use stats::storage_stats;
 /// Canonical active database filename.
 pub const UNIFIED_DB_FILENAME: &str = "tron.sqlite";
 
-/// Canonical active lock filename.
-pub const UNIFIED_LOCK_FILENAME: &str = "tron.sqlite.lock";
-
 /// Current storage generation. A live DB without this marker is archived and
 /// reset before startup continues.
 pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v4";
