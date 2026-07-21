@@ -97,7 +97,10 @@ async fn execute_compaction_no_orphaned_capability_results() {
     let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("Summary of capability usage");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert!(result.success);
 
     assert_no_orphaned_capability_results(&engine.deps.get_messages());
@@ -123,7 +126,10 @@ async fn execute_turn_based_no_orphans() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert!(result.success);
     assert_no_orphaned_capability_results(&engine.deps.get_messages());
 }

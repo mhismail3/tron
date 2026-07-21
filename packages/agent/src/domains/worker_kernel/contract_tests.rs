@@ -79,11 +79,30 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .any(|field| field == "checksum")
     );
     assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
+    assert_eq!(
+        bundle["properties"]["engineHooks"]["items"]["enum"][0],
+        "context_summary"
+    );
     assert!(
         bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
             .as_str()
             .unwrap_or_default()
             .contains("../dependencies/<name>")
+    );
+}
+
+#[test]
+fn context_summary_is_an_internal_worker_seam_not_a_model_primitive() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let hook = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == CONTEXT_SUMMARY_FUNCTION)
+        .expect("context summary contract");
+    assert_eq!(hook.visibility, FunctionVisibility::Internal);
+    assert!(
+        core_primitives()
+            .iter()
+            .all(|primitive| primitive.function_id != CONTEXT_SUMMARY_FUNCTION)
     );
 }
 
@@ -118,6 +137,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
             revision: None,
             checksum: None,
         }],
+        engine_hooks: Vec::new(),
         routing: Default::default(),
     };
     let mut service_bundle = bundle.clone();

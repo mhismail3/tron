@@ -6,7 +6,10 @@ async fn execute_compaction_updates_messages() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Compacted summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(result.success);
     assert_eq!(result.summary, "Compacted summary");
@@ -23,7 +26,7 @@ async fn execute_uses_edited_summary() {
     let summarizer = MockSummarizer::new("Original");
 
     let result = engine
-        .execute(&summarizer, Some("User edited"))
+        .execute(&summarizer, Some("User edited"), &summary_context())
         .await
         .unwrap();
 
@@ -36,7 +39,10 @@ async fn execute_returns_turn_counts() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert_eq!(result.preserved_turns, 2);
     assert_eq!(result.summarized_turns, 1);
 }
@@ -62,7 +68,10 @@ async fn execute_token_cap_reflected() {
     let engine = CompactionEngine::new(0.70, 5, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert_eq!(result.preserved_turns, 3); // Budget limited to 3
 }
 
@@ -83,7 +92,10 @@ async fn execute_recompact_correct() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Re-compacted summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     assert!(result.success);
     assert_eq!(result.preserved_turns, 2);
     assert_eq!(result.summarized_turns, 1); // Only real turns in summarized portion
@@ -95,7 +107,10 @@ async fn execute_summary_format() {
     let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("The user worked on authentication.");
 
-    let _ = engine.execute(&summarizer, None).await.unwrap();
+    let _ = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     let new_msgs = engine.deps.get_messages();
 
     // Summary message
@@ -126,7 +141,10 @@ async fn execute_preserve_zero() {
     let engine = CompactionEngine::new(0.70, 0, deps);
     let summarizer = MockSummarizer::new("Everything summarized");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
     let new_msgs = engine.deps.get_messages();
 
     assert!(result.success);
@@ -142,7 +160,10 @@ async fn execute_skips_when_all_within_preserve_window() {
     let engine = CompactionEngine::new(0.70, 5, deps);
     let summarizer = PanicSummarizer;
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(!result.success);
     assert!(result.summary.is_empty());
@@ -157,7 +178,10 @@ async fn execute_skips_when_summary_would_not_reduce_context() {
     let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(!result.success);
     assert!(result.tokens_after >= result.tokens_before);
@@ -171,7 +195,10 @@ async fn execute_returns_compression_ratio() {
     let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("Short");
 
-    let result = engine.execute(&summarizer, None).await.unwrap();
+    let result = engine
+        .execute(&summarizer, None, &summary_context())
+        .await
+        .unwrap();
 
     assert!(result.compression_ratio > 0.0);
     assert!(result.compression_ratio <= 1.0);

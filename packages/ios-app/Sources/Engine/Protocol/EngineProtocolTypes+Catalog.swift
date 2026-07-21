@@ -48,9 +48,18 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
     let availableWorkers: [AvailableWorkerToolDTO]
 }
 
+struct EngineHookOwnerDTO: Codable, Equatable, Identifiable, Sendable {
+    let hook: String
+    let workerId: String
+    let workerVersion: String
+
+    var id: String { hook }
+}
+
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
     let autonomousWorkers: Bool
     let dispatchStopped: Bool
+    let activeEngineHooks: [EngineHookOwnerDTO]
     let fixedTools: [EngineSurfaceToolDTO]
     let surface: AgentToolSurfaceDTO
     let workers: [WorkerSummaryDTO]

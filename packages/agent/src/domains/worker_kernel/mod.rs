@@ -17,7 +17,7 @@
 //! | `persistence` | Canonical bundles, snapshot-first legacy-state retirement, index reconstruction, and durable operational ledgers |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
-//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, supervision, and primitive session-metadata actuation |
+//! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, supervision, and primitive session-metadata actuation |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
 //!
@@ -61,6 +61,15 @@
 //! Both stored promotions and the final dynamic provider surface have hard
 //! bounds, so repeated discovery cannot grow an unbounded tool request or
 //! revive a retired worker id at a different version.
+//! Semantic engine hooks are immutable bundle declarations activated by the
+//! same atomic upsert and version pointer as the worker tool. They are not a
+//! separate installer, binding, grant, or selection plane. Each hook has one
+//! fixed typed contract, selects the newest declaring worker when that worker
+//! is healthy and enabled, and uses the ordinary durable dispatcher. An older
+//! implementation never silently replaces a failed or disabled current owner.
+//! The Engine Dashboard exposes active hook ownership. `context_summary` is the
+//! first production hook; deterministic recovery remains in the kernel so
+//! compaction cannot depend recursively on its own policy worker.
 //! The authenticated `engine::surface_snapshot` read returns that same
 //! provider-neutral projection, every published worker's projection status,
 //! the complete fixed-tool inventory, and canonical engine worker summaries;
@@ -158,6 +167,8 @@ mod surface;
 #[cfg(test)]
 mod tests;
 mod types;
+
+pub(crate) use contract::CONTEXT_SUMMARY_FUNCTION;
 
 pub(crate) use persistence::{
     ensure_state_snapshot, list_state_snapshots, prepare_worker_state_retirement,

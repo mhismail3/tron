@@ -28,6 +28,7 @@ fn complete_bundle() -> WorkerBundle {
             revision: Some("1".to_owned()),
             checksum: None,
         }],
+        engine_hooks: Vec::new(),
         routing: Default::default(),
     };
     let _ = bundle.files.insert(

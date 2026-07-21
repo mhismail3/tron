@@ -103,6 +103,10 @@ pub struct RunContext {
     /// direct tool invocation so an agent hop cannot reset the depth ceiling.
     #[serde(skip)]
     pub worker_causal_depth: u32,
+    /// Worker that originated an agent-runner session. Semantic hook routing
+    /// uses this only to avoid recursively invoking a worker as its own policy.
+    #[serde(skip)]
+    pub origin_worker_id: Option<String>,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,

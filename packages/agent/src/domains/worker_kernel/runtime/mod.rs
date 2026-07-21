@@ -27,13 +27,14 @@ use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
     MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
-    WorkerCommand, WorkerDependency, WorkerRunner, WorkerTrigger,
+    WorkerCommand, WorkerDependency, WorkerEngineHook, WorkerRunner, WorkerTrigger,
 };
 use support::*;
 
 mod activation;
 mod dispatch;
 mod events;
+mod hooks;
 mod invocation;
 mod lifecycle;
 mod resident;
@@ -204,6 +205,7 @@ impl WorkerRuntime {
         Ok(json!({
             "autonomousWorkers": self.autonomous_enabled(),
             "dispatchStopped": self.store.stop_all()?,
+            "activeEngineHooks": self.engine_hook_inventory()?,
             "fixedTools": fixed_tools,
             "surface": surface,
             "workers": self.store.list(true)?,

@@ -53,6 +53,7 @@ operation_bindings! {
         "runs" => |invocation, deps| { response(invocation, runs(invocation, deps).await) },
         "webhook_rotate" => |invocation, deps| { response(invocation, rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { response(invocation, stop_all(invocation, deps).await) },
+        "context_summary" => |invocation, deps| { response(invocation, context_summary(invocation, deps).await) },
         "surface_snapshot" => |invocation, deps| { response(invocation, engine_surface_snapshot(invocation, deps).await) },
         "webhook_invoke" => |invocation, deps| { response(invocation, webhook(invocation, deps).await) },
     ];
@@ -104,6 +105,20 @@ async fn engine_surface_snapshot(invocation: &Invocation, deps: &Deps) -> Result
                 .payload
                 .get("relevanceQuery")
                 .and_then(Value::as_str),
+        )
+        .await
+}
+
+async fn context_summary(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    deps.runtime
+        .invoke_engine_hook(
+            super::types::WorkerEngineHook::ContextSummary,
+            json!({"messages": invocation.payload["messages"].clone()}),
+            invocation
+                .payload
+                .get("originWorkerId")
+                .and_then(Value::as_str),
+            invocation,
         )
         .await
 }

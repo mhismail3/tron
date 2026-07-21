@@ -50,8 +50,36 @@ pub struct WorkerBundle {
     pub health_checks: Vec<WorkerCommand>,
     #[serde(default)]
     pub provenance: Vec<SourceProvenance>,
+    /// Optional semantic engine roles implemented by this immutable version.
+    /// Upsert activates these roles with the worker; there is no separate
+    /// binding or permission transition.
+    #[serde(default)]
+    pub engine_hooks: Vec<WorkerEngineHook>,
     #[serde(default)]
     pub routing: WorkerRouting,
+}
+
+/// Semantic policy seams that may be implemented by normal workers.
+///
+/// Add a hook only when a production engine behavior has a concrete worker
+/// replacement. Deterministic state custody and safety ceilings remain kernel
+/// responsibilities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerEngineHook {
+    ContextSummary,
+}
+
+impl WorkerEngineHook {
+    pub const fn all() -> &'static [Self] {
+        &[Self::ContextSummary]
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ContextSummary => "context_summary",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

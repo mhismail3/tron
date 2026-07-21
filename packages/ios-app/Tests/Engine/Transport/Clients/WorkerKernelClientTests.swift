@@ -74,6 +74,13 @@ struct WorkerKernelClientTests {
             return EngineIntrospectionSnapshotDTO(
                 autonomousWorkers: true,
                 dispatchStopped: false,
+                activeEngineHooks: [
+                    EngineHookOwnerDTO(
+                        hook: "context_summary",
+                        workerId: "summary-worker",
+                        workerVersion: "v-summary"
+                    )
+                ],
                 fixedTools: [
                     EngineSurfaceToolDTO(
                         modelName: "filesystem_read",
@@ -144,6 +151,7 @@ struct WorkerKernelClientTests {
         #expect(snapshot.surface.tools.first?.selectionReason == "relevance")
         #expect(snapshot.surface.availableWorkers.first?.projected == true)
         #expect(snapshot.fixedTools.first?.primitiveGroup == "host")
+        #expect(snapshot.activeEngineHooks.first?.workerId == "summary-worker")
         #expect(snapshot.workers.first?.workerId == "research")
     }
 

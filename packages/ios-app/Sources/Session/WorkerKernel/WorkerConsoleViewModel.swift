@@ -49,6 +49,10 @@ final class WorkerConsoleViewModel {
         engineSnapshot?.surface.availableWorkers ?? []
     }
 
+    var activeEngineHooks: [EngineHookOwnerDTO] {
+        engineSnapshot?.activeEngineHooks ?? []
+    }
+
     var projectedWorkerCount: Int {
         Int(engineSnapshot?.surface.projectedWorkerCount ?? 0)
     }

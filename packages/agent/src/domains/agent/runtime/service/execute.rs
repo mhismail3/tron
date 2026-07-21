@@ -290,6 +290,12 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             .as_ref()
             .map(|causality| causality.context.trigger_depth())
             .unwrap_or(0),
+        origin_worker_id: engine_causality.as_ref().and_then(|causality| {
+            (causality.context.actor_kind == crate::engine::ActorKind::Worker)
+                .then(|| causality.context.actor_id.as_str().strip_prefix("worker:"))
+                .flatten()
+                .map(ToOwned::to_owned)
+        }),
         ..Default::default()
     };
 

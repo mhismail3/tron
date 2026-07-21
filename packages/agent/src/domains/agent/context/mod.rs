@@ -6,7 +6,7 @@
 //! |--------|---------|
 //! | `context_manager` | Entry point — owns context lifecycle and compaction dependency projection |
 //! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
-//! | `summarizer` | Summarizer trait and recovery implementations |
+//! | `summarizer` | Worker-backed semantic summary policy plus deterministic recovery |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
 //! | `seed` | Minimal product-intent instruction for the primitive loop |
 //! | `token_estimator` | Token counting and context budget calculations |
@@ -32,7 +32,12 @@
 //! handler to persist context-control proof before provider context is mutated;
 //! proof failure restores the pre-compaction checkpoint instead of creating an
 //! unaudited boundary.
-//! The replaceable strategy seam is limited to the summarizer implementation:
+//! Summary generation first resolves the atomically active
+//! `context_summary` worker hook. The bounded hook projection excludes hidden
+//! thinking, tool arguments, binary results, usage, and cost; hook failure or
+//! absence falls back to deterministic keyword recovery. A hook worker never
+//! invokes itself while compacting its own agent-runner session. The strategy
+//! seam is limited to summary meaning:
 //! compaction actions, epoch records, audit refs, and provider-safe projections
 //! remain server-owned record-plane custody.
 

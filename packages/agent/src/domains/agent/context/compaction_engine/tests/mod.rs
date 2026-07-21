@@ -98,6 +98,7 @@ impl Summarizer for MockSummarizer {
     async fn summarize(
         &self,
         _messages: &[Message],
+        _context: &super::super::summarizer::SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         Ok(SummaryResult {
             narrative: self.narrative.clone(),
@@ -112,9 +113,14 @@ impl Summarizer for PanicSummarizer {
     async fn summarize(
         &self,
         _messages: &[Message],
+        _context: &super::super::summarizer::SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         panic!("summarizer must not be called when no messages are summarizable");
     }
+}
+
+fn summary_context() -> super::super::summarizer::SummaryContext {
+    super::super::summarizer::SummaryContext::default()
 }
 
 fn default_messages() -> Vec<Message> {

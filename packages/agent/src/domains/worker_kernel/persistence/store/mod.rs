@@ -17,8 +17,8 @@ use sha2::{Digest, Sha256};
 
 use super::super::types::{
     ActiveWorker, BUNDLE_SCHEMA, InvocationRecord, MAX_INVOCATION_SECONDS, PreparedWorker,
-    UpsertOutcome, WebhookCredential, WorkerBundle, WorkerCommand, WorkerRunner, WorkerState,
-    WorkerSummary, WorkerTrigger,
+    UpsertOutcome, WebhookCredential, WorkerBundle, WorkerCommand, WorkerEngineHook, WorkerRunner,
+    WorkerState, WorkerSummary, WorkerTrigger,
 };
 pub(super) use state::validate_bundle;
 use support::*;

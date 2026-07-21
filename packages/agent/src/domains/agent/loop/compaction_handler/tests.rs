@@ -24,6 +24,7 @@ impl Summarizer for BlockingSummarizer {
     async fn summarize(
         &self,
         _messages: &[Message],
+        _context: &crate::domains::agent::context::summarizer::SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         self.started.notify_one();
         std::future::pending().await
@@ -35,6 +36,7 @@ impl Summarizer for MarkerSummarizer {
     async fn summarize(
         &self,
         _messages: &[Message],
+        _context: &crate::domains::agent::context::summarizer::SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(SummaryResult {
@@ -80,7 +82,10 @@ fn context_manager_with_three_turns() -> ContextManager {
 
 #[tokio::test]
 async fn skipped_event_reports_no_durable_reduction() {
-    let handler = CompactionHandler::new(CompactionTriggerConfig::default());
+    let handler = CompactionHandler::with_summarizer(
+        CompactionTriggerConfig::default(),
+        Arc::new(crate::domains::agent::context::summarizer::KeywordSummarizer::new()),
+    );
     let emitter = Arc::new(EventEmitter::new());
     let success = CompactionHandler::emit_compaction_events(
         Ok(crate::domains::agent::context::types::CompactionResult {
@@ -222,6 +227,10 @@ async fn cancellation_pairs_compaction_events_and_restores_context() {
                     CompactionReason::ThresholdExceeded,
                     Some(&sequence),
                     Some(&cancel),
+                    crate::domains::agent::context::summarizer::SummaryContext {
+                        session_id: "cancelled-compaction".to_owned(),
+                        ..Default::default()
+                    },
                 )
                 .await
         })

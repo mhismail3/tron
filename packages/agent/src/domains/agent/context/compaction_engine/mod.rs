@@ -28,7 +28,7 @@ use crate::shared::protocol::messages::{Message, UserMessageContent};
 use tracing::{instrument, trace};
 
 use super::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};
-use super::summarizer::Summarizer;
+use super::summarizer::{Summarizer, SummaryContext};
 use super::types::CompactionResult;
 
 // =============================================================================
@@ -188,6 +188,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         &self,
         summarizer: &dyn Summarizer,
         edited_summary: Option<&str>,
+        summary_context: &SummaryContext,
     ) -> Result<CompactionResult, Box<dyn std::error::Error + Send + Sync>> {
         let tokens_before = self.message_only_tokens();
         let messages = self.deps.get_messages();
@@ -232,7 +233,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let summary = if let Some(edited) = edited_summary {
             edited.to_owned()
         } else {
-            let result = summarizer.summarize(to_summarize).await?;
+            let result = summarizer.summarize(to_summarize, summary_context).await?;
             result.narrative
         };
 

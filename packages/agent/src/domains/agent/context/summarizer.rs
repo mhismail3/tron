@@ -1,12 +1,16 @@
 //! Summarizer trait and utilities for compaction.
 //!
 //! Defines the [`Summarizer`] trait used by the compaction engine, plus the
-//! deterministic [`KeywordSummarizer`] retained by the primitive loop.
+//! worker-backed production policy and deterministic recovery summarization.
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-use crate::shared::protocol::content::AssistantContent;
-use crate::shared::protocol::messages::{Message, UserMessageContent};
+use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
+use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Message, UserMessageContent,
+};
 
 use super::types::SummaryResult;
 
@@ -14,17 +18,114 @@ use super::types::SummaryResult;
 // Summarizer Trait
 // =============================================================================
 
+/// Causal facts available to semantic summary policy.
+#[derive(Clone, Debug, Default)]
+pub struct SummaryContext {
+    pub session_id: String,
+    pub trace_id: Option<TraceId>,
+    pub parent_invocation_id: Option<crate::engine::InvocationId>,
+    pub worker_causal_depth: u32,
+    pub origin_worker_id: Option<String>,
+}
+
 /// Trait for generating compaction summaries from conversation messages.
-///
-/// The primitive loop retains [`KeywordSummarizer`] as a deterministic recovery
-/// summarizer using keyword extraction.
 #[async_trait::async_trait]
 pub trait Summarizer: Send + Sync {
     /// Summarize a sequence of messages into a structured result.
     async fn summarize(
         &self,
         messages: &[Message],
+        context: &SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Production summary policy: use an atomically activated worker hook when one
+/// exists and recover through [`KeywordSummarizer`] otherwise.
+pub struct WorkerHookSummarizer {
+    host: crate::engine::EngineHostHandle,
+    fallback: KeywordSummarizer,
+}
+
+impl WorkerHookSummarizer {
+    #[must_use]
+    pub fn new(host: crate::engine::EngineHostHandle) -> Self {
+        Self {
+            host,
+            fallback: KeywordSummarizer::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Summarizer for WorkerHookSummarizer {
+    async fn summarize(
+        &self,
+        messages: &[Message],
+        context: &SummaryContext,
+    ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
+        let projected = project_messages(messages);
+        let mut payload = serde_json::json!({"messages":projected});
+        if let Some(worker_id) = &context.origin_worker_id {
+            payload["originWorkerId"] = Value::String(worker_id.clone());
+        }
+        let Ok(actor_id) = ActorId::new("system:context-summary") else {
+            return self.fallback.summarize(messages, context).await;
+        };
+        let mut causal = CausalContext::new(
+            actor_id,
+            ActorKind::System,
+            context.trace_id.clone().unwrap_or_else(TraceId::generate),
+        )
+        .with_session_id(context.session_id.clone())
+        .with_trigger_depth(context.worker_causal_depth)
+        .with_idempotency_key(format!(
+            "context-summary:{}:{}",
+            hex::encode(Sha256::digest(
+                serde_json::to_vec(&payload).unwrap_or_default()
+            )),
+            uuid::Uuid::now_v7()
+        ));
+        if let Some(parent) = &context.parent_invocation_id {
+            causal = causal.with_parent_invocation(parent.clone());
+        }
+        let Ok(function_id) =
+            FunctionId::new(crate::domains::worker_kernel::CONTEXT_SUMMARY_FUNCTION)
+        else {
+            return self.fallback.summarize(messages, context).await;
+        };
+        // Detach the durable engine invocation from the caller's wait. If a
+        // user cancels compaction, the worker delivery and engine ledger still
+        // reach a durable terminal state while the context checkpoint is
+        // restored by the compaction handler.
+        let host = self.host.clone();
+        let task = tokio::spawn(async move {
+            host.invoke(Invocation::new_sync(function_id, payload, causal))
+                .await
+        });
+        let Ok(outcome) = task.await else {
+            return self.fallback.summarize(messages, context).await;
+        };
+        if outcome.error.is_none() {
+            if let Some(narrative) = outcome
+                .value
+                .as_ref()
+                .filter(|value| value["handled"] == true)
+                .and_then(|value| value["narrative"].as_str())
+                .filter(|value| !value.trim().is_empty())
+            {
+                return Ok(SummaryResult {
+                    narrative: narrative.to_owned(),
+                });
+            }
+        } else {
+            tracing::warn!(
+                session_id = %context.session_id,
+                error = %outcome.error.as_ref().expect("checked above"),
+                "worker context-summary hook failed; using deterministic recovery"
+            );
+        }
+        self.fallback.summarize(messages, context).await
+    }
 }
 
 // =============================================================================
@@ -57,6 +158,7 @@ impl Summarizer for KeywordSummarizer {
     async fn summarize(
         &self,
         messages: &[Message],
+        _context: &SummaryContext,
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut user_messages = Vec::new();
         let mut files_modified = Vec::new();
@@ -121,6 +223,59 @@ impl Summarizer for KeywordSummarizer {
     }
 }
 
+/// Produce the bounded semantic transcript exposed to a summary worker.
+/// Hidden thinking, tool arguments, binary data, usage, and cost never cross
+/// this hook boundary.
+fn project_messages(messages: &[Message]) -> Vec<Value> {
+    let mut projected = Vec::new();
+    for message in messages {
+        match message {
+            Message::User { content, .. } => {
+                push_projection(&mut projected, "user", &user_content_text(content));
+            }
+            Message::Assistant { content, .. } => {
+                for block in content {
+                    match block {
+                        AssistantContent::Text { text } => {
+                            push_projection(&mut projected, "assistant", text);
+                        }
+                        AssistantContent::CapabilityInvocation { name, .. } => {
+                            push_projection(&mut projected, "tool", &format!("{name} invoked"));
+                        }
+                        AssistantContent::Thinking { .. } => {}
+                    }
+                }
+            }
+            Message::CapabilityResult { content, .. } => match content {
+                CapabilityResultMessageContent::Text(text) => {
+                    push_projection(&mut projected, "tool", text);
+                }
+                CapabilityResultMessageContent::Blocks(blocks) => {
+                    for block in blocks {
+                        if let CapabilityResultContent::Text { text } = block {
+                            push_projection(&mut projected, "tool", text);
+                        }
+                    }
+                }
+            },
+        }
+        if projected.len() >= 256 {
+            break;
+        }
+    }
+    projected
+}
+
+fn push_projection(projected: &mut Vec<Value>, role: &str, text: &str) {
+    if projected.len() >= 256 || text.trim().is_empty() {
+        return;
+    }
+    projected.push(serde_json::json!({
+        "role":role,
+        "text":truncate(text, 4096),
+    }));
+}
+
 /// Truncate a string to a maximum length, appending "..." if truncated.
 fn truncate(s: &str, max_len: usize) -> String {
     crate::shared::foundation::text::truncate_with_suffix(s, max_len, "...")
@@ -150,6 +305,58 @@ fn user_content_text(content: &UserMessageContent) -> String {
 mod tests {
     use super::*;
     use crate::shared::protocol::content::UserContent;
+    use crate::shared::protocol::messages::CapabilityResultMessageContent;
+
+    fn worker_bundle(command: &str, worker_id: &str) -> Value {
+        serde_json::json!({
+            "schemaVersion":"tron.worker_bundle.v1",
+            "workerId":worker_id,
+            "name":"Context Summary Policy",
+            "description":"Creates durable semantic context summaries",
+            "inputSchema":{
+                "type":"object","additionalProperties":false,"required":["messages"],
+                "properties":{"messages":{"type":"array","items":{
+                    "type":"object","additionalProperties":false,"required":["role","text"],
+                    "properties":{"role":{"enum":["user","assistant","tool"]},"text":{"type":"string"}}
+                }}}
+            },
+            "outputSchema":{
+                "type":"object","additionalProperties":false,"required":["narrative"],
+                "properties":{"narrative":{"type":"string"}}
+            },
+            "runner":{"kind":"command","command":["sh","-c",command]},
+            "engineHooks":["context_summary"],
+            "provenance":[{"source":"test:context-summary-policy"}]
+        })
+    }
+
+    async fn install_worker(host: &crate::engine::EngineHostHandle, bundle: Value) -> String {
+        let outcome = host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::upsert").unwrap(),
+                serde_json::json!({"bundle":bundle}),
+                CausalContext::new(
+                    ActorId::new("agent:summary-test").unwrap(),
+                    ActorKind::Agent,
+                    TraceId::generate(),
+                )
+                .with_session_id("summary-test")
+                .with_idempotency_key(format!("install-summary-{}", uuid::Uuid::now_v7())),
+            ))
+            .await;
+        assert_eq!(outcome.error, None, "worker upsert failed");
+        outcome.value.unwrap()["worker"]["workerId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn summary_context() -> SummaryContext {
+        SummaryContext {
+            session_id: "summary-test".to_owned(),
+            ..Default::default()
+        }
+    }
     #[test]
     fn truncate_bounds_long_string() {
         let result = truncate("hello world", 8);
@@ -164,7 +371,10 @@ mod tests {
             Message::user("Fix the login bug"),
             Message::assistant("I'll look at the login code."),
         ];
-        let result = summarizer.summarize(&messages).await.unwrap();
+        let result = summarizer
+            .summarize(&messages, &SummaryContext::default())
+            .await
+            .unwrap();
         assert!(!result.narrative.is_empty());
         assert!(result.narrative.contains("1 requests"));
     }
@@ -172,8 +382,126 @@ mod tests {
     #[tokio::test]
     async fn keyword_summarizer_empty_messages() {
         let summarizer = KeywordSummarizer;
-        let result = summarizer.summarize(&[]).await.unwrap();
+        let result = summarizer
+            .summarize(&[], &SummaryContext::default())
+            .await
+            .unwrap();
         assert!(result.narrative.contains("0 messages summarized"));
+    }
+
+    #[tokio::test]
+    async fn production_summarizer_uses_an_active_worker_hook() {
+        let context =
+            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        install_worker(
+            &context.engine_host,
+            worker_bundle(
+                "printf '{\"narrative\":\"semantic worker summary\"}'",
+                "summary-policy",
+            ),
+        )
+        .await;
+        let summarizer = WorkerHookSummarizer::new(context.engine_host.clone());
+
+        let result = summarizer
+            .summarize(
+                &[Message::user("Keep the semantic details")],
+                &summary_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.narrative, "semantic worker summary");
+    }
+
+    #[tokio::test]
+    async fn failed_worker_hook_disables_itself_and_compaction_recovers() {
+        let context =
+            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let worker_id = install_worker(
+            &context.engine_host,
+            worker_bundle("printf failure >&2; exit 7", "failing-summary-policy"),
+        )
+        .await;
+        let summarizer = WorkerHookSummarizer::new(context.engine_host.clone());
+
+        let result = summarizer
+            .summarize(&[Message::user("Recover this request")], &summary_context())
+            .await
+            .unwrap();
+
+        assert!(result.narrative.contains("Recover this request"));
+        let list = context
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::list").unwrap(),
+                serde_json::json!({"includeRetired":false}),
+                CausalContext::new(
+                    ActorId::new("agent:summary-test").unwrap(),
+                    ActorKind::Agent,
+                    TraceId::generate(),
+                )
+                .with_session_id("summary-test"),
+            ))
+            .await
+            .value
+            .unwrap();
+        let worker = list["workers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|worker| worker["workerId"] == worker_id)
+            .unwrap();
+        assert_eq!(worker["enabled"], false);
+        assert_eq!(worker["health"], "failed");
+    }
+
+    #[test]
+    fn worker_projection_excludes_thinking_arguments_and_binary_results() {
+        let messages = vec![
+            Message::Assistant {
+                content: vec![
+                    AssistantContent::Thinking {
+                        thinking: "private chain".to_owned(),
+                        kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+                        signature: None,
+                    },
+                    AssistantContent::CapabilityInvocation {
+                        id: "call-1".to_owned(),
+                        name: "filesystem_read".to_owned(),
+                        arguments: serde_json::Map::from_iter([(
+                            "secret".to_owned(),
+                            Value::String("do-not-project".to_owned()),
+                        )]),
+                        thought_signature: None,
+                    },
+                ],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::CapabilityResult {
+                invocation_id: "call-1".to_owned(),
+                content: CapabilityResultMessageContent::Blocks(vec![
+                    CapabilityResultContent::Text {
+                        text: "visible result".to_owned(),
+                    },
+                    CapabilityResultContent::Image {
+                        data: "base64-binary".to_owned(),
+                        mime_type: "image/png".to_owned(),
+                    },
+                ]),
+                is_error: None,
+            },
+        ];
+
+        let projection = serde_json::to_string(&project_messages(&messages)).unwrap();
+        assert!(projection.contains("filesystem_read invoked"));
+        assert!(projection.contains("visible result"));
+        assert!(!projection.contains("private chain"));
+        assert!(!projection.contains("do-not-project"));
+        assert!(!projection.contains("base64-binary"));
     }
 
     // -- User content helpers --

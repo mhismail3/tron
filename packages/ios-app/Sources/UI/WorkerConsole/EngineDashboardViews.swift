@@ -53,6 +53,29 @@ struct EngineSurfaceCard: View {
                 }
             }
 
+            if !viewModel.activeEngineHooks.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Worker-owned engine policy")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronTextMuted)
+                    ForEach(viewModel.activeEngineHooks) { owner in
+                        HStack(spacing: 7) {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                                .foregroundStyle(.tronPurple)
+                            Text(WorkerConsolePresentation.displayLabel(owner.hook))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                .foregroundStyle(.tronTextPrimary)
+                            Spacer()
+                            Text(owner.workerId)
+                                .font(TronTypography.code(size: TronTypography.sizeSM))
+                                .foregroundStyle(.tronTextMuted)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+
             if let hash = viewModel.engineSnapshot?.surface.surfaceHash, !hash.isEmpty {
                 Text("Surface \(WorkerConsolePresentation.compactIdentifier(hash, length: 12))")
                     .font(TronTypography.code(size: TronTypography.sizeSM))

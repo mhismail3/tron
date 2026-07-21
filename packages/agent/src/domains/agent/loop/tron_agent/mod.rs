@@ -73,7 +73,10 @@ impl TronAgent {
             responder: deps.responder,
             context_manager: deps.context_manager,
             emitter: Arc::new(EventEmitter::new()),
-            compaction: Arc::new(CompactionHandler::new(deps.compaction_trigger_config)),
+            compaction: Arc::new(CompactionHandler::new(
+                deps.compaction_trigger_config,
+                deps.engine_host.clone(),
+            )),
             session_id,
             turn_offset: AtomicU32::new(0),
             current_turn: AtomicU32::new(0),

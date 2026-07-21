@@ -189,6 +189,7 @@ impl ContextManager {
         &mut self,
         summarizer: &dyn Summarizer,
         edited_summary: Option<&str>,
+        summary_context: &super::summarizer::SummaryContext,
     ) -> Result<CompactionResult, Box<dyn std::error::Error + Send + Sync>> {
         let deps = ManagerCompactionDeps::from_manager(self);
         let engine = CompactionEngine::new(
@@ -196,7 +197,9 @@ impl ContextManager {
             self.config.compaction.preserve_recent_turns,
             deps,
         );
-        let result = engine.execute(summarizer, edited_summary).await?;
+        let result = engine
+            .execute(summarizer, edited_summary, summary_context)
+            .await?;
         self.messages.set(engine.deps.get_messages());
         self.api_context_tokens = None;
         Ok(result)

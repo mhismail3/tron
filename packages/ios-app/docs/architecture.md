@@ -23,7 +23,8 @@ The app has two primary operational surfaces:
 - Chat: create and resume sessions, submit prompts and attachments, stop work,
   inspect streamed and reconstructed messages, and manage context settings.
 - Engine Dashboard: inspect the compiled core, exact session tool surface,
-  published workers, and durable engine activity; operate worker lifecycle.
+  published workers, active worker-owned engine policy, and durable engine
+  activity; operate worker lifecycle.
 
 Conversational creation is the worker authoring interface; iOS does not contain
 a bundle editor or invent worker state.
@@ -173,10 +174,11 @@ strongly typed.
 
 `Engine/Protocol/EngineProtocolTypes+Catalog.swift` additionally owns
 `EngineIntrospectionSnapshotDTO`, `AgentToolSurfaceDTO`,
-`EngineSurfaceToolDTO`, and `AvailableWorkerToolDTO`. These are the
-authoritative client projection for executable fixed inventory, every
-published direct worker, and the exact fixed/dynamic tool surface selected by
-the server. The existing raw catalog-watch DTO remains an
+`EngineSurfaceToolDTO`, `AvailableWorkerToolDTO`, and `EngineHookOwnerDTO`.
+These are the authoritative client projection for executable fixed inventory,
+every published direct worker, active semantic-policy ownership, and the exact
+fixed/dynamic tool surface selected by the server. The existing raw
+catalog-watch DTO remains an
 invalidation/change-feed contract only.
 
 ### Client and repository

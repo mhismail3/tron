@@ -30,8 +30,8 @@ The source-owned kernel retains only:
 - authenticated `/engine` transport and loopback token-authenticated worker
   webhook ingress;
 - isolated core-change proposal creation and explicitly approved application;
-- product settings, auth, session compaction, logging, and blobs needed by
-  current clients.
+- product settings, auth, session-compaction custody, logging, and blobs needed
+  by current clients.
 
 The authenticated `filesystem` product domain contains only the three iOS
 workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Its old
@@ -107,6 +107,29 @@ a future worker developed through real sessions, not another mandatory kernel
 service. No primitive is added merely because it is convenient, and no direct
 tool is collapsed merely to make the manifest numerically smaller.
 
+### Worker-owned engine policy
+
+Higher-level behavior that must run inside an engine lifecycle boundary uses a
+small typed worker-hook seam rather than remaining hardcoded. A hook is declared
+in the immutable bundle's `engineHooks` array and becomes active in the same
+atomic `worker_upsert` publication as its runner, version, tool, and triggers.
+There is no proposal/install/bind/grant step and no separately stored hook
+configuration. The newest worker declaring a hook owns it while healthy and
+enabled; an older implementation never silently replaces a failed or disabled
+current owner. An update switches new hook work immediately while prior
+invocations retain their version.
+
+The first production hook is `context_summary`. It accepts a bounded transcript
+of visible user text, assistant text, tool names, and textual tool results and
+returns `{narrative}`. Hidden thinking, tool arguments, binary content, usage,
+and cost never cross the seam. Calls use the normal durable worker dispatcher,
+causal trace, idempotency, validation, failure-disable, and inbox behavior. If
+no hook is installed—or the hook fails—compaction uses a deterministic recovery
+summary. A hook worker is excluded while its own agent-runner session compacts,
+preventing semantic-policy recursion. Token-window selection, cancellation,
+checkpoint restoration, durable compact-boundary proof, and provider context
+mutation remain irreducible kernel custody.
+
 ## Autonomy Modes
 
 `autonomousWorkers` is an engine setting.
@@ -164,6 +187,7 @@ contains:
 - source files or durable agent instructions;
 - exact dependency sources, revisions, and SHA-256 checksums;
 - manual, schedule, engine-event, and webhook triggers;
+- typed semantic engine-hook declarations activated with the version;
 - logical named-secret bindings only;
 - smoke-test and health-check commands plus source provenance.
 
@@ -193,8 +217,9 @@ reproduce it as JSON. The runtime:
 
 1. normalizes a plain direct tool name into the `worker_` namespace, then
    validates identity, schemas, runner configuration, relative paths, trigger
-   definitions and deterministic schedule inputs, secret names, provenance,
-   and any caller-supplied dependency checksums;
+   definitions and deterministic schedule inputs, engine-hook input/output
+   compatibility, secret names, provenance, and any caller-supplied dependency
+   checksums;
 2. chooses the explicit predecessor or detects the closest semantic overlap by
    name/description terms, preferring an update over a duplicate;
 3. stages outside the active worker directory;
@@ -801,8 +826,8 @@ The iOS Engine Dashboard is backed by `WorkerKernelClient`,
 `WorkerKernelRepository`, `WorkerConsoleViewModel`, and `UI/WorkerConsole`.
 It exposes:
 
-- an Overview of the selected session's exact provider surface and current
-  operational state;
+- an Overview of the selected session's exact provider surface, current
+  operational state, and active worker-owned engine hooks;
 - a Core inventory of all fixed host, worker-control, and core-change tools,
   including schemas and current exposure;
 - published workers with distinct Published, This session, and Promoted state;

@@ -15,6 +15,7 @@ mod activation;
 mod agent;
 mod command;
 mod coordination;
+mod hooks;
 mod projection;
 mod resident;
 mod session;
@@ -47,6 +48,7 @@ fn command_bundle(command: Vec<String>) -> WorkerBundle {
             revision: Some("1".to_owned()),
             checksum: None,
         }],
+        engine_hooks: Vec::new(),
         routing: Default::default(),
     }
 }
@@ -181,6 +183,7 @@ print(json.dumps({
                 revision: Some("fixture-adaptation-v1".to_owned()),
                 checksum: None,
             }],
+            engine_hooks: Vec::new(),
             routing: super::super::types::WorkerRouting {
                 intents: vec!["recent research".to_owned(), "last 30 days".to_owned()],
                 examples: vec!["What changed in autonomous workers in the last month?".to_owned()],

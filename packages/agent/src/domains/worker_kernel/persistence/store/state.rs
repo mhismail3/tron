@@ -64,6 +64,13 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     }
     validate_object_schema(&bundle.input_schema, "inputSchema")?;
     validate_object_schema(&bundle.output_schema, "outputSchema")?;
+    let mut engine_hooks = BTreeSet::new();
+    for hook in &bundle.engine_hooks {
+        if !engine_hooks.insert(*hook) {
+            return Err(format!("duplicate engine hook '{}'", hook.as_str()));
+        }
+        validate_engine_hook_contract(*hook, bundle)?;
+    }
     let mut trigger_ids = BTreeSet::new();
     for trigger in &bundle.triggers {
         validate_identifier(trigger.id(), "trigger id")?;
@@ -191,4 +198,49 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
         }
     }
     Ok(())
+}
+
+fn validate_engine_hook_contract(
+    hook: WorkerEngineHook,
+    bundle: &WorkerBundle,
+) -> Result<(), String> {
+    let (input, output) = match hook {
+        WorkerEngineHook::ContextSummary => (
+            json!({
+                "messages": [
+                    {"role":"user","text":"Summarize the durable task context."},
+                    {"role":"assistant","text":"I inspected the relevant state."},
+                    {"role":"tool","text":"filesystem_read completed"}
+                ]
+            }),
+            json!({"narrative":"The user asked to preserve the durable task context."}),
+        ),
+    };
+    let function_id =
+        crate::engine::FunctionId::new(format!("worker_kernel::engine_hook_{}", hook.as_str()))
+            .map_err(|error| error.to_string())?;
+    crate::engine::validate_engine_schema_payload(
+        &function_id,
+        "request",
+        &bundle.input_schema,
+        &input,
+    )
+    .map_err(|error| {
+        format!(
+            "engine hook '{}' input does not match inputSchema: {error}",
+            hook.as_str()
+        )
+    })?;
+    crate::engine::validate_engine_schema_payload(
+        &function_id,
+        "response",
+        &bundle.output_schema,
+        &output,
+    )
+    .map_err(|error| {
+        format!(
+            "engine hook '{}' output does not match outputSchema: {error}",
+            hook.as_str()
+        )
+    })
 }

@@ -7,6 +7,7 @@ use crate::engine::{
 
 const WORKER: &str = "worker_kernel";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
+pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
@@ -482,10 +483,23 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["autonomousWorkers","dispatchStopped","fixedTools","surface","workers"],
+            "required":["autonomousWorkers","dispatchStopped","activeEngineHooks","fixedTools","surface","workers"],
             "properties":{
                 "autonomousWorkers":{"type":"boolean"},
                 "dispatchStopped":{"type":"boolean"},
+                "activeEngineHooks":{
+                    "type":"array",
+                    "items":{
+                        "type":"object",
+                        "additionalProperties":false,
+                        "required":["hook","workerId","workerVersion"],
+                        "properties":{
+                            "hook":{"type":"string"},
+                            "workerId":{"type":"string"},
+                            "workerVersion":{"type":"string"}
+                        }
+                    }
+                },
                 "fixedTools":{"type":"array"},
                 "surface":{
                     "type":"object",
@@ -507,6 +521,49 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .description(
             "Return authoritative fixed-tool, selected-worker, and engine worker inventory for authenticated clients.",
         )
+        .build()?,
+    );
+    specs.push(
+        FunctionContract::new(
+            CONTEXT_SUMMARY_FUNCTION,
+            WORKER,
+            EffectClass::ExternalSideEffect,
+            RiskLevel::Medium)
+        .visibility(FunctionVisibility::Internal)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["messages"],
+            "properties":{
+                "originWorkerId":{"type":"string"},
+                "messages":{
+                    "type":"array",
+                    "maxItems":256,
+                    "items":{
+                        "type":"object",
+                        "additionalProperties":false,
+                        "required":["role","text"],
+                        "properties":{
+                            "role":{"type":"string","enum":["user","assistant","tool"]},
+                            "text":{"type":"string","maxLength":4096}
+                        }
+                    }
+                }
+            }
+        }))
+        .response_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["handled"],
+            "properties":{
+                "handled":{"type":"boolean"},
+                "workerId":{"type":"string"},
+                "workerVersion":{"type":"string"},
+                "narrative":{"type":"string"}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Invoke the active worker-owned context-summary policy, if any. Kernel callers recover with deterministic summarization when no worker handles it.")
         .build()?,
     );
     specs.push(
@@ -889,6 +946,12 @@ fn worker_bundle_schema() -> Value {
             },
             "smokeTests":{"type":"array","description":"Pre-activation commands executed from files/ after dependencies and their install commands are ready.","items":command},
             "healthChecks":{"type":"array","description":"Pre-activation commands executed from files/ after dependencies and their install commands are ready.","items":command},
+            "engineHooks":{
+                "type":"array",
+                "uniqueItems":true,
+                "description":"Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. context_summary accepts {messages:[{role,text}]} and returns {narrative:string}.",
+                "items":{"type":"string","enum":["context_summary"]}
+            },
             "provenance":{
                 "type":"array","minItems":1,
                 "items":{

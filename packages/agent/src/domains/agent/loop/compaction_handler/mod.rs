@@ -17,7 +17,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domains::agent::context::compaction_trigger::CompactionTrigger;
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::agent::context::summarizer::{KeywordSummarizer, Summarizer};
+use crate::domains::agent::context::summarizer::{
+    Summarizer, SummaryContext, WorkerHookSummarizer,
+};
 use crate::domains::agent::context::types::CompactionTriggerConfig;
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
@@ -49,15 +51,20 @@ impl Drop for CompactionGuard<'_> {
 }
 
 impl CompactionHandler {
-    pub fn new(trigger_config: CompactionTriggerConfig) -> Self {
-        Self::with_summarizer(trigger_config, Arc::new(KeywordSummarizer::new()))
+    pub fn new(
+        trigger_config: CompactionTriggerConfig,
+        engine_host: crate::engine::EngineHostHandle,
+    ) -> Self {
+        Self::with_summarizer(
+            trigger_config,
+            Arc::new(WorkerHookSummarizer::new(engine_host)),
+        )
     }
 
     /// Build a compaction handler with an explicit summarizer strategy.
     ///
-    /// Production uses [`KeywordSummarizer`] through [`Self::new`]. This
-    /// constructor keeps the loop boundary replaceable so a future
-    /// engine-owned compaction strategy can be injected without changing
+    /// Production resolves a worker-owned summary hook through [`Self::new`].
+    /// This constructor keeps focused tests replaceable without changing
     /// context-control records, session persistence, or iOS presentation code.
     /// Replacement strategies still commit through the same server-owned proof
     /// path; the strategy seam is summary generation, not custody.
@@ -94,6 +101,7 @@ impl CompactionHandler {
         emitter: &Arc<EventEmitter>,
         sequence_counter: Option<&AtomicI64>,
         cancel: &CancellationToken,
+        run_context: &crate::domains::agent::r#loop::types::RunContext,
     ) -> Result<bool, RuntimeError> {
         let context_limit = context_manager.get_context_limit();
         if context_limit == 0 {
@@ -126,6 +134,13 @@ impl CompactionHandler {
             CompactionReason::ThresholdExceeded,
             sequence_counter,
             Some(cancel),
+            SummaryContext {
+                session_id: session_id.to_owned(),
+                trace_id: run_context.engine_trace_id.clone(),
+                parent_invocation_id: run_context.parent_invocation_id.clone(),
+                worker_causal_depth: run_context.worker_causal_depth,
+                origin_worker_id: run_context.origin_worker_id.clone(),
+            },
         )
         .await
     }
@@ -145,6 +160,10 @@ impl CompactionHandler {
             reason,
             sequence_counter,
             None,
+            SummaryContext {
+                session_id: session_id.to_owned(),
+                ..SummaryContext::default()
+            },
         )
         .await
     }
@@ -157,6 +176,7 @@ impl CompactionHandler {
         reason: CompactionReason,
         sequence_counter: Option<&AtomicI64>,
         cancel: Option<&CancellationToken>,
+        summary_context: SummaryContext,
     ) -> Result<bool, RuntimeError> {
         if cancel.is_some_and(CancellationToken::is_cancelled) {
             return Err(RuntimeError::Cancelled);
@@ -201,11 +221,11 @@ impl CompactionHandler {
                     );
                     return Err(RuntimeError::Cancelled);
                 }
-                result = context_manager.execute_compaction(self.summarizer.as_ref(), None) => result,
+                result = context_manager.execute_compaction(self.summarizer.as_ref(), None, &summary_context) => result,
             }
         } else {
             context_manager
-                .execute_compaction(self.summarizer.as_ref(), None)
+                .execute_compaction(self.summarizer.as_ref(), None, &summary_context)
                 .await
         };
         let effective_result = result.as_ref().is_ok_and(is_effective_compaction_result);

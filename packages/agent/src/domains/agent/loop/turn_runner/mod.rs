@@ -230,6 +230,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             emitter,
             sequence_counter,
             cancel,
+            run_context,
         )
         .await;
     match compaction_result {
