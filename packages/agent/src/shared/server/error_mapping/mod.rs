@@ -174,23 +174,6 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             "direction": direction,
             "path": path,
         }))),
-        EngineError::InvalidVisibilityPromotion {
-            function_id,
-            target,
-            reason,
-        } => FailureEnvelope::new(
-            codes::INVALID_VISIBILITY_PROMOTION,
-            FailureCategory::InvalidRequest,
-            format!("invalid visibility promotion for {function_id} to {target}: {reason}"),
-            false,
-            true,
-            FailureOrigin::Engine,
-        )
-        .with_details(Some(serde_json::json!({
-            "functionId": function_id,
-            "target": target,
-            "reason": reason,
-        }))),
         EngineError::StaleFunctionSurface {
             function_id,
             expected_revision,

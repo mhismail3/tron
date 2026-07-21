@@ -380,7 +380,7 @@ async fn command_runner_upserts_invokes_and_replays_idempotently() {
     .unwrap();
     let initial_definition = runtime
         .host
-        .inspect_function(&function_id, Some(&inspection_actor))
+        .inspect_function(&function_id, &inspection_actor)
         .await
         .unwrap();
     let first = runtime
@@ -467,7 +467,7 @@ async fn command_runner_upserts_invokes_and_replays_idempotently() {
     );
     let definition = runtime
         .host
-        .inspect_function(&function_id, Some(&inspection_actor))
+        .inspect_function(&function_id, &inspection_actor)
         .await
         .unwrap();
     assert_eq!(definition.revision, initial_definition.revision);

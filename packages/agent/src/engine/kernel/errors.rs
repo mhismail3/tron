@@ -104,17 +104,6 @@ pub enum EngineError {
         message: String,
     },
 
-    /// A visibility promotion is not allowed.
-    #[error("invalid visibility promotion for {function_id} to {target}: {reason}")]
-    InvalidVisibilityPromotion {
-        /// Function id.
-        function_id: String,
-        /// Requested visibility target.
-        target: String,
-        /// Rejection reason.
-        reason: String,
-    },
-
     /// A caller attempted to execute a function contract older or newer than
     /// the exact contract it was previously shown.
     #[error(

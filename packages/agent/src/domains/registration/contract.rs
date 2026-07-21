@@ -43,8 +43,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) stream_topics: Vec<&'static str>,
     /// Human-readable discovery description.
     pub(crate) description: Option<&'static str>,
-    /// Search/discovery tags.
-    pub(crate) tags: Vec<&'static str>,
     /// Optional presentation metadata for chip/sheet summaries. Renderers may
     /// use hints such as `themeColor`, but capability identity always comes
     /// from the contract.
@@ -77,7 +75,6 @@ impl CapabilityContract {
             idempotency: None,
             stream_topics: Vec::new(),
             description: None,
-            tags: Vec::new(),
             presentation_hints: None,
         }
     }
@@ -112,12 +109,6 @@ impl CapabilityContract {
         self
     }
 
-    /// Attach search/discovery tags.
-    pub(crate) fn tags(mut self, tags: Vec<&'static str>) -> Self {
-        self.tags = tags;
-        self
-    }
-
     /// Attach mutating idempotency metadata.
     pub(crate) fn idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
@@ -145,7 +136,6 @@ impl CapabilityContract {
             idempotency: self.idempotency,
             stream_topics: self.stream_topics,
             description: self.description,
-            tags: self.tags,
             presentation_hints: self.presentation_hints,
         })
     }
@@ -163,7 +153,6 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         spec.effect_class,
     )
     .with_risk(spec.risk_level)
-    .with_tags(spec.tags.iter().map(|tag| (*tag).to_owned()).collect())
     .with_provenance(Provenance::system());
     if let Some(contract) = &spec.idempotency {
         definition = definition.with_idempotency(contract.clone());

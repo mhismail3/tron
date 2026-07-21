@@ -163,8 +163,6 @@ pub struct FunctionDefinition {
     pub request_schema: Option<Value>,
     /// Response JSON schema.
     pub response_schema: Option<Value>,
-    /// Search tags.
-    pub tags: Vec<String>,
     /// Visibility scope.
     pub visibility: VisibilityScope,
     /// Side-effect class.
@@ -198,7 +196,6 @@ impl FunctionDefinition {
             description: description.into(),
             request_schema: None,
             response_schema: None,
-            tags: Vec::new(),
             visibility,
             effect_class,
             risk_level: RiskLevel::Low,
@@ -227,13 +224,6 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_health(mut self, health: FunctionHealth) -> Self {
         self.health = health;
-        self
-    }
-
-    /// Add tags.
-    #[must_use]
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-        self.tags = tags;
         self
     }
 

@@ -1,4 +1,4 @@
-//! Function registration, discovery, and promotion methods on `EngineHostHandle`.
+//! Function registration, discovery, and inspection methods on `EngineHostHandle`.
 
 use super::*;
 
@@ -45,8 +45,8 @@ impl EngineHostHandle {
     }
 
     /// Discover visible functions through the host boundary.
-    pub async fn discover(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
-        self.inner.lock().await.catalog.discover_functions(query)
+    pub async fn visible_functions(&self, actor: &ActorContext) -> Vec<FunctionDefinition> {
+        self.inner.lock().await.catalog.visible_functions(actor)
     }
 
     /// Discover visible functions and capture the matching catalog revision
@@ -55,14 +55,14 @@ impl EngineHostHandle {
     /// Provider surfaces use this instead of separate discovery/revision calls
     /// so their audit snapshot identifies the exact catalog view from which
     /// tool contracts were selected.
-    pub async fn discover_with_revision(
+    pub async fn visible_functions_with_revision(
         &self,
-        query: &FunctionQuery,
+        actor: &ActorContext,
     ) -> (CatalogRevision, Vec<FunctionDefinition>) {
         let host = self.inner.lock().await;
         (
             host.catalog.revision(),
-            host.catalog.discover_functions(query),
+            host.catalog.visible_functions(actor),
         )
     }
 
@@ -70,23 +70,8 @@ impl EngineHostHandle {
     pub async fn inspect_function(
         &self,
         id: &FunctionId,
-        actor: Option<&ActorContext>,
+        actor: &ActorContext,
     ) -> Result<FunctionDefinition> {
         self.inner.lock().await.catalog.inspect_function(id, actor)
-    }
-
-    /// Promote function visibility through the host boundary.
-    pub async fn promote_function_visibility(
-        &self,
-        id: &FunctionId,
-        owner: &WorkerId,
-        target: VisibilityScope,
-        workspace_id: Option<String>,
-    ) -> Result<FunctionRevision> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .promote_function_visibility(id, owner, target, workspace_id)
     }
 }

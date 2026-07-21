@@ -18,7 +18,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::catalog::discovery::{ActorContext, FunctionQuery};
+use crate::engine::catalog::discovery::ActorContext;
 use crate::engine::catalog::registry::{
     LiveCatalog, PreparedSyncInvocation, PreparedSyncInvocationDecision,
 };
@@ -31,9 +31,7 @@ use crate::engine::durability::streams::{
 use crate::engine::invocation::model::{InProcessFunctionHandler, Invocation, InvocationResult};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogRevision, FunctionDefinition, FunctionRevision, VisibilityScope,
-};
+use crate::engine::kernel::types::{CatalogRevision, FunctionDefinition, FunctionRevision};
 use crate::engine::primitives::PrimitiveStores;
 
 mod bootstrap;

@@ -118,15 +118,6 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             FailureCategory::InvalidRequest,
         ),
         (
-            EngineError::InvalidVisibilityPromotion {
-                function_id: "demo::run".to_owned(),
-                target: "session".to_owned(),
-                reason: "not allowed".to_owned(),
-            },
-            "INVALID_VISIBILITY_PROMOTION",
-            FailureCategory::InvalidRequest,
-        ),
-        (
             EngineError::StaleFunctionSurface {
                 function_id: "demo::run".to_owned(),
                 expected_revision: 1,
@@ -195,20 +186,6 @@ fn engine_owner_mismatch_is_typed() {
     assert_eq!(details["owner"], "worker-a");
     assert_eq!(details["attemptedOwner"], "worker-b");
     assert_eq!(details["failure"]["category"], "conflict");
-}
-
-#[test]
-fn engine_invalid_visibility_promotion_is_typed() {
-    let mapped = engine_error_to_capability_error(EngineError::InvalidVisibilityPromotion {
-        function_id: "demo::run".to_owned(),
-        target: "session".to_owned(),
-        reason: "only workspace and system promotion are supported".to_owned(),
-    });
-    assert_eq!(mapped.code(), "INVALID_VISIBILITY_PROMOTION");
-    let details = mapped.details().expect("visibility promotion details");
-    assert_eq!(details["functionId"], "demo::run");
-    assert_eq!(details["target"], "session");
-    assert_eq!(details["failure"]["code"], "INVALID_VISIBILITY_PROMOTION");
 }
 
 #[test]

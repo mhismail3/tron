@@ -87,13 +87,10 @@ fn catalog_changes_increment_by_one_and_record_subjects() {
 }
 
 #[test]
-fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_text() {
+fn visible_functions_are_sorted_and_hide_internal_functions_from_agents() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_function(
-            read_function("alpha::zeta", "w1").with_tags(vec!["lookup".to_owned()]),
-            handler(),
-        )
+        .register_function(read_function("alpha::zeta", "w1"), handler())
         .unwrap();
     catalog
         .register_function(
@@ -113,45 +110,11 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
     catalog.register_function(internal, handler()).unwrap();
 
     let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
-    let all = catalog.discover_functions(&FunctionQuery {
-        actor: Some(agent.clone()),
-        ..FunctionQuery::default()
-    });
+    let all = catalog.visible_functions(&agent);
     assert_eq!(
         all.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
         vec!["alpha::beta", "alpha::zeta"]
     );
-
-    let filtered = catalog.discover_functions(&FunctionQuery {
-        namespace_prefix: Some("alpha::z".to_owned()),
-        text: Some("lookup".to_owned()),
-        effect_class: Some(EffectClass::PureRead),
-        max_risk: Some(RiskLevel::Low),
-        health: Some(FunctionHealth::Healthy),
-        include_internal: false,
-        actor: Some(agent),
-        visibility: None,
-    });
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].id.as_str(), "alpha::zeta");
-}
-
-#[test]
-fn discovery_text_query_matches_tokens_across_canonical_id() {
-    let mut catalog = LiveCatalog::new();
-    catalog
-        .register_function(read_function("alpha::list", "alpha"), handler())
-        .unwrap();
-
-    let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
-    let filtered = catalog.discover_functions(&FunctionQuery {
-        text: Some("alpha list".to_owned()),
-        actor: Some(agent),
-        ..FunctionQuery::default()
-    });
-
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].id.as_str(), "alpha::list");
 }
 
 #[test]
@@ -193,11 +156,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
     let scoped_actor = ActorContext::new(actor("agent"), ActorKind::Agent)
         .with_session_id("session-a")
         .with_workspace_id("workspace-a");
-    let scoped = catalog.discover_functions(&FunctionQuery {
-        actor: Some(scoped_actor),
-        include_internal: true,
-        ..FunctionQuery::default()
-    });
+    let scoped = catalog.visible_functions(&scoped_actor);
     assert_eq!(
         scoped.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
         vec!["alpha::session", "alpha::workspace"]
@@ -206,10 +165,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
     let other_session = ActorContext::new(actor("agent"), ActorKind::Agent)
         .with_session_id("session-b")
         .with_workspace_id("workspace-a");
-    let workspace_only = catalog.discover_functions(&FunctionQuery {
-        actor: Some(other_session),
-        ..FunctionQuery::default()
-    });
+    let workspace_only = catalog.visible_functions(&other_session);
     assert_eq!(
         workspace_only
             .iter()
@@ -219,11 +175,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
     );
 
     let admin = ActorContext::new(actor("admin"), ActorKind::Admin);
-    let admin_view = catalog.discover_functions(&FunctionQuery {
-        actor: Some(admin),
-        include_internal: true,
-        ..FunctionQuery::default()
-    });
+    let admin_view = catalog.visible_functions(&admin);
     assert_eq!(
         admin_view.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
         vec!["alpha::internal", "alpha::session", "alpha::workspace"]
@@ -231,7 +183,7 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
 }
 
 #[test]
-fn inspect_and_promotion_are_visibility_and_owner_checked() {
+fn inspect_is_visibility_checked() {
     let mut catalog = LiveCatalog::new();
     let function = FunctionDefinition::new(
         fid("alpha::session"),
@@ -249,61 +201,13 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
         ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-b");
     assert!(
         catalog
-            .inspect_function(&fid("alpha::session"), Some(&matching_session))
+            .inspect_function(&fid("alpha::session"), &matching_session)
             .is_ok()
     );
     assert!(matches!(
-        catalog.inspect_function(&fid("alpha::session"), Some(&other_session)),
+        catalog.inspect_function(&fid("alpha::session"), &other_session),
         Err(EngineError::PolicyViolation(message)) if message.contains("not visible")
     ));
-
-    assert!(matches!(
-        catalog.promote_function_visibility(
-            &fid("alpha::session"),
-            &wid("other"),
-            VisibilityScope::Workspace,
-            Some("workspace-a".to_owned())
-        ),
-        Err(EngineError::OwnerMismatch { .. })
-    ));
-    assert!(matches!(
-        catalog.promote_function_visibility(
-            &fid("alpha::session"),
-            &wid("w1"),
-            VisibilityScope::Session,
-            None
-        ),
-        Err(EngineError::InvalidVisibilityPromotion { .. })
-    ));
-    let revision = catalog
-        .promote_function_visibility(
-            &fid("alpha::session"),
-            &wid("w1"),
-            VisibilityScope::Workspace,
-            Some("workspace-a".to_owned()),
-        )
-        .unwrap();
-    assert_eq!(revision, FunctionRevision(2));
-    let promoted = catalog.function(&fid("alpha::session")).unwrap();
-    assert_eq!(promoted.visibility, VisibilityScope::Workspace);
-    assert_eq!(
-        promoted.provenance.workspace_id.as_deref(),
-        Some("workspace-a")
-    );
-    assert!(promoted.provenance.session_id.is_none());
-    let changes = catalog.ledger_catalog_changes().unwrap();
-    assert_eq!(
-        changes.last().unwrap().kind,
-        CatalogChangeKind::VisibilityChanged
-    );
-
-    let workspace_actor =
-        ActorContext::new(actor("agent"), ActorKind::Agent).with_workspace_id("workspace-a");
-    assert!(
-        catalog
-            .inspect_function(&fid("alpha::session"), Some(&workspace_actor))
-            .is_ok()
-    );
 }
 
 #[test]

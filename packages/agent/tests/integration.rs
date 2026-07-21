@@ -19,7 +19,7 @@ use tron::app::bootstrap::server::TronServer;
 use tron::domains::agent::{Orchestrator, SessionManager};
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
 use tron::domains::settings::SettingsRuntime;
-use tron::engine::{ActorContext, ActorId, ActorKind, FunctionQuery};
+use tron::engine::{ActorContext, ActorId, ActorKind};
 use tron::shared::server::context::ServerRuntimeContext;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -479,11 +479,7 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
         .server
         .runtime_context()
         .engine_host
-        .discover(&FunctionQuery {
-            actor: Some(admin),
-            include_internal: true,
-            ..FunctionQuery::default()
-        })
+        .visible_functions(&admin)
         .await;
     let model_tools = functions
         .iter()

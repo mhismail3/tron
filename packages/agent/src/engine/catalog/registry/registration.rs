@@ -8,7 +8,7 @@ use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
 use crate::engine::kernel::policy;
 use crate::engine::kernel::types::{
-    CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision, VisibilityScope,
+    CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision,
 };
 
 use super::catalog_changes::function_change_subject;
@@ -78,7 +78,7 @@ impl LiveCatalog {
     pub fn inspect_function(
         &self,
         id: &FunctionId,
-        actor: Option<&ActorContext>,
+        actor: &ActorContext,
     ) -> Result<FunctionDefinition> {
         let function = self.function(id).ok_or_else(|| EngineError::NotFound {
             kind: "function",
@@ -112,68 +112,6 @@ impl LiveCatalog {
         self.record_change(CatalogChangeKind::FunctionUnregistered, subject)?;
         let _ = self.functions.remove(id).expect("entry exists");
         Ok(())
-    }
-
-    /// Promote a function from session scope to workspace or system visibility.
-    pub fn promote_function_visibility(
-        &mut self,
-        id: &FunctionId,
-        owner: &WorkerId,
-        target: VisibilityScope,
-        workspace_id: Option<String>,
-    ) -> Result<FunctionRevision> {
-        let Some(entry) = self.functions.get(id) else {
-            return Err(EngineError::NotFound {
-                kind: "function",
-                id: id.to_string(),
-            });
-        };
-        if &entry.definition.owner_worker != owner {
-            return Err(EngineError::OwnerMismatch {
-                kind: "function",
-                id: id.to_string(),
-                owner: entry.definition.owner_worker.to_string(),
-                attempted_owner: owner.to_string(),
-            });
-        }
-
-        let mut updated = entry.definition.clone();
-        match target {
-            VisibilityScope::Workspace if workspace_id.is_some() => {
-                updated.visibility = VisibilityScope::Workspace;
-                updated.provenance.session_id = None;
-                updated.provenance.workspace_id = workspace_id;
-            }
-            VisibilityScope::System => {
-                updated.visibility = VisibilityScope::System;
-                updated.provenance.session_id = None;
-                updated.provenance.workspace_id = None;
-            }
-            VisibilityScope::Workspace => {
-                return Err(EngineError::InvalidVisibilityPromotion {
-                    function_id: id.to_string(),
-                    target: target.as_str().to_owned(),
-                    reason: "workspace promotion requires a workspace id".to_owned(),
-                });
-            }
-            _ => {
-                return Err(EngineError::InvalidVisibilityPromotion {
-                    function_id: id.to_string(),
-                    target: target.as_str().to_owned(),
-                    reason: "only workspace and system promotion are supported".to_owned(),
-                });
-            }
-        }
-
-        updated.revision = updated.revision.next();
-        let revision = updated.revision;
-        let subject = function_change_subject(&updated);
-        self.record_change(CatalogChangeKind::VisibilityChanged, subject)?;
-        self.functions
-            .get_mut(id)
-            .expect("function exists after immutable lookup")
-            .definition = updated;
-        Ok(revision)
     }
 }
 

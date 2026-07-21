@@ -116,19 +116,6 @@ impl StoredEngineError {
                     "message": message,
                 }),
             },
-            EngineError::InvalidVisibilityPromotion {
-                function_id,
-                target,
-                reason,
-            } => Self {
-                kind: "invalid_visibility_promotion".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({
-                    "functionId": function_id,
-                    "target": target,
-                    "reason": reason,
-                }),
-            },
             EngineError::StaleFunctionSurface {
                 function_id,
                 expected_revision,

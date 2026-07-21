@@ -42,7 +42,7 @@ fn validate_invocation_contract(
     invocation: &Invocation,
 ) -> Result<()> {
     let actor = actor_from_causal_context(&invocation.causal_context);
-    if !is_visible_to_actor(function, Some(&actor)) {
+    if !is_visible_to_actor(function, &actor) {
         return Err(EngineError::PolicyViolation(format!(
             "function {} is not visible to actor {}",
             function.id, invocation.causal_context.actor_id
@@ -68,63 +68,49 @@ fn validate_invocation_contract(
 
 /// Whether a function is visible to the actor for discovery.
 #[must_use]
-pub fn is_visible_to_actor(function: &FunctionDefinition, actor: Option<&ActorContext>) -> bool {
+pub fn is_visible_to_actor(function: &FunctionDefinition, actor: &ActorContext) -> bool {
     match function.visibility {
-        VisibilityScope::Internal => actor
-            .map(|ctx| {
-                matches!(
-                    ctx.actor_kind,
-                    ActorKind::Admin
-                        | ActorKind::System
-                        | ActorKind::Worker
-                        | ActorKind::Queue
-                        | ActorKind::Cron
+        VisibilityScope::Internal => matches!(
+            actor.actor_kind,
+            ActorKind::Admin
+                | ActorKind::System
+                | ActorKind::Worker
+                | ActorKind::Queue
+                | ActorKind::Cron
+        ),
+        VisibilityScope::Session => {
+            actor.actor_kind.is_admin_like()
+                || matches!(
+                    (
+                        actor.session_id.as_deref(),
+                        function.provenance.session_id.as_deref()
+                    ),
+                    (Some(actor_session), Some(function_session))
+                        if actor_session == function_session
                 )
-            })
-            .unwrap_or(false),
-        VisibilityScope::Session => actor
-            .map(|ctx| {
-                ctx.actor_kind.is_admin_like()
-                    || matches!(
-                        (
-                            ctx.session_id.as_deref(),
-                            function.provenance.session_id.as_deref()
-                        ),
-                        (Some(actor_session), Some(function_session))
-                            if actor_session == function_session
-                    )
-            })
-            .unwrap_or(false),
-        VisibilityScope::Workspace => actor
-            .map(|ctx| {
-                ctx.actor_kind.is_admin_like()
-                    || matches!(
-                        (
-                            ctx.workspace_id.as_deref(),
-                            function.provenance.workspace_id.as_deref()
-                        ),
-                        (Some(actor_workspace), Some(function_workspace))
-                            if actor_workspace == function_workspace
-                    )
-            })
-            .unwrap_or(false),
-        VisibilityScope::System => actor.is_some(),
-        VisibilityScope::Client => actor
-            .map(|ctx| {
-                matches!(ctx.actor_kind, ActorKind::Client) || ctx.actor_kind.is_admin_like()
-            })
-            .unwrap_or(false),
-        VisibilityScope::Worker => actor
-            .map(|ctx| {
-                matches!(ctx.actor_kind, ActorKind::Worker) || ctx.actor_kind.is_admin_like()
-            })
-            .unwrap_or(false),
-        VisibilityScope::Admin => actor
-            .map(|ctx| ctx.actor_kind.is_admin_like())
-            .unwrap_or(false),
-        VisibilityScope::Agent => actor
-            .map(|ctx| matches!(ctx.actor_kind, ActorKind::Agent) || ctx.actor_kind.is_admin_like())
-            .unwrap_or(false),
+        }
+        VisibilityScope::Workspace => {
+            actor.actor_kind.is_admin_like()
+                || matches!(
+                    (
+                        actor.workspace_id.as_deref(),
+                        function.provenance.workspace_id.as_deref()
+                    ),
+                    (Some(actor_workspace), Some(function_workspace))
+                        if actor_workspace == function_workspace
+                )
+        }
+        VisibilityScope::System => true,
+        VisibilityScope::Client => {
+            matches!(actor.actor_kind, ActorKind::Client) || actor.actor_kind.is_admin_like()
+        }
+        VisibilityScope::Worker => {
+            matches!(actor.actor_kind, ActorKind::Worker) || actor.actor_kind.is_admin_like()
+        }
+        VisibilityScope::Admin => actor.actor_kind.is_admin_like(),
+        VisibilityScope::Agent => {
+            matches!(actor.actor_kind, ActorKind::Agent) || actor.actor_kind.is_admin_like()
+        }
     }
 }
 
@@ -153,25 +139,10 @@ mod tests {
         );
         let actor = |kind| ActorContext::new(ActorId::new("actor").expect("actor id"), kind);
 
-        assert!(!is_visible_to_actor(
-            &function,
-            Some(&actor(ActorKind::Client))
-        ));
-        assert!(!is_visible_to_actor(
-            &function,
-            Some(&actor(ActorKind::User))
-        ));
-        assert!(!is_visible_to_actor(
-            &function,
-            Some(&actor(ActorKind::Agent))
-        ));
-        assert!(is_visible_to_actor(
-            &function,
-            Some(&actor(ActorKind::Worker))
-        ));
-        assert!(is_visible_to_actor(
-            &function,
-            Some(&actor(ActorKind::System))
-        ));
+        assert!(!is_visible_to_actor(&function, &actor(ActorKind::Client)));
+        assert!(!is_visible_to_actor(&function, &actor(ActorKind::User)));
+        assert!(!is_visible_to_actor(&function, &actor(ActorKind::Agent)));
+        assert!(is_visible_to_actor(&function, &actor(ActorKind::Worker)));
+        assert!(is_visible_to_actor(&function, &actor(ActorKind::System)));
     }
 }

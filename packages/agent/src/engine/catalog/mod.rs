@@ -10,8 +10,11 @@
 //! can never advertise a definition that the current process cannot route. The
 //! live registry does not retain duplicate history.
 //!
-//! Discovery actor context is provenance plus visibility scope, not an
-//! authorization token or permission object.
+//! Discovery has one operation: return the functions visible to a concrete
+//! actor. Relevance ranking and health selection belong to the worker-kernel
+//! provider-surface resolver; the catalog has no generic search/filter DSL or
+//! unused visibility-promotion workflow. Actor context is provenance plus
+//! visibility scope, not an authorization token or permission object.
 
 pub mod discovery;
 pub mod registry;

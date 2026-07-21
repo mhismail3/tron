@@ -796,7 +796,7 @@ async fn canonical_version_tampering_disables_routing_before_execution() {
                     outcome.worker.worker_id
                 ))
                 .unwrap(),
-                None,
+                &system_actor(),
             )
             .await
             .is_err()
@@ -843,7 +843,7 @@ async fn direct_tool_activation_failure_cannot_leave_an_enabled_unroutable_worke
                     outcome.worker.worker_id
                 ))
                 .unwrap(),
-                None,
+                &system_actor(),
             )
             .await
             .is_err()

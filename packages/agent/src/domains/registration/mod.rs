@@ -275,8 +275,7 @@ mod tests {
 
     use crate::engine::{
         ActorContext, ActorId, ActorKind, CausalContext, EffectClass, FunctionDefinition,
-        FunctionId, FunctionQuery, InProcessFunctionHandler, Invocation, TraceId, VisibilityScope,
-        WorkerId,
+        FunctionId, InProcessFunctionHandler, Invocation, TraceId, VisibilityScope, WorkerId,
     };
 
     #[derive(Debug)]
@@ -381,14 +380,7 @@ mod tests {
     #[tokio::test]
     async fn startup_catalog_contains_worker_first_fixed_functions() {
         let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
-        let functions = ctx
-            .engine_host
-            .discover(&FunctionQuery {
-                actor: Some(system_actor()),
-                include_internal: true,
-                ..FunctionQuery::default()
-            })
-            .await;
+        let functions = ctx.engine_host.visible_functions(&system_actor()).await;
         let function_ids = functions
             .iter()
             .map(|function| function.id.as_str().to_owned())

@@ -573,7 +573,6 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .description(
             "Return authoritative fixed-tool, selected-worker, and engine worker inventory for authenticated clients.",
         )
-        .tags(vec!["kernel", "introspection", "workers", "surface"])
         .build()?,
     );
     specs.push(
@@ -617,8 +616,7 @@ fn spec(
     let mut contract = CapabilityContract::new(function, WORKER, effect, risk)
         .request_schema(request)
         .response_schema(response_schema(function))
-        .description(description)
-        .tags(vec!["kernel", "worker", "self-extension", "persistent"]);
+        .description(description);
     if effect.requires_idempotency() {
         contract = contract
             .idempotency(IdempotencyContract::caller_session_engine_ledger())

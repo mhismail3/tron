@@ -38,7 +38,7 @@ pub(crate) mod invocation;
 pub(crate) mod kernel;
 pub(crate) mod primitives;
 
-pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
+pub use catalog::discovery::{ActorContext, ActorKind};
 pub(crate) use durability::ledger::retire_legacy_invocation_columns;
 pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,

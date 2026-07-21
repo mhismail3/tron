@@ -18,6 +18,13 @@ mod coordination;
 mod projection;
 mod resident;
 
+fn system_actor() -> crate::engine::ActorContext {
+    crate::engine::ActorContext::new(
+        crate::engine::ActorId::new("system:worker-runtime-test").expect("actor id"),
+        crate::engine::ActorKind::System,
+    )
+}
+
 fn command_bundle(command: Vec<String>) -> WorkerBundle {
     WorkerBundle {
         schema_version: super::super::types::BUNDLE_SCHEMA.to_owned(),

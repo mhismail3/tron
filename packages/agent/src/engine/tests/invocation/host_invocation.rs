@@ -269,19 +269,13 @@ async fn host_unregister_function_updates_discovery() {
         .unwrap();
 
     let actor_context = ActorContext::new(actor("system"), ActorKind::System);
-    let query = FunctionQuery {
-        actor: Some(actor_context.clone()),
-        namespace_prefix: Some("alpha::".to_owned()),
-        include_internal: true,
-        ..FunctionQuery::default()
-    };
-    assert_eq!(host.discover(&query).await.len(), 1);
+    assert_eq!(host.visible_functions(&actor_context).await.len(), 1);
 
     host.unregister_function(&fid("alpha::read"), &wid("w1"))
         .await
         .unwrap();
 
-    assert!(host.discover(&query).await.is_empty());
+    assert!(host.visible_functions(&actor_context).await.is_empty());
 }
 
 #[tokio::test]
@@ -434,10 +428,7 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
     started.wait().await;
     let functions = tokio::time::timeout(
         std::time::Duration::from_millis(100),
-        handle.discover(&FunctionQuery {
-            actor: Some(ActorContext::new(actor("agent"), ActorKind::Agent)),
-            ..FunctionQuery::default()
-        }),
+        handle.visible_functions(&ActorContext::new(actor("agent"), ActorKind::Agent)),
     )
     .await
     .expect("discovery should not wait for slow handler");

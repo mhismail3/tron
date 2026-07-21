@@ -24,9 +24,6 @@ pub const SESSION_BUSY: &str = "SESSION_BUSY";
 pub const IDEMPOTENCY_CONFLICT: &str = "IDEMPOTENCY_CONFLICT";
 /// Engine catalog mutation targeted an item owned by a different worker.
 pub const ENGINE_OWNER_MISMATCH: &str = "ENGINE_OWNER_MISMATCH";
-/// Engine visibility promotion request is not allowed.
-pub const INVALID_VISIBILITY_PROMOTION: &str = "INVALID_VISIBILITY_PROMOTION";
-
 // ── Typed event-store errors ─────────────────────────────────────────
 //
 // `EventStoreError` variants get mapped to these codes via
@@ -207,9 +204,7 @@ impl CapabilityError {
 
 fn category_for_capability_code(code: &str) -> FailureCategory {
     match code {
-        INVALID_PARAMS | CLIENT_VERSION_UNSUPPORTED | INVALID_VISIBILITY_PROMOTION => {
-            FailureCategory::InvalidRequest
-        }
+        INVALID_PARAMS | CLIENT_VERSION_UNSUPPORTED => FailureCategory::InvalidRequest,
         SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND | BLOB_NOT_FOUND | NOT_FOUND => {
             FailureCategory::NotFound
         }

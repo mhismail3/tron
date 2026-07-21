@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::{
     ActorContext, ActorId, ActorKind, EngineHostHandle, EngineStateScope, FunctionDefinition,
-    FunctionHealth, FunctionQuery,
+    FunctionHealth,
 };
 
 const MAX_RELEVANT_WORKERS: usize = 12;
@@ -231,13 +231,8 @@ pub(crate) async fn resolve_tool_surface(
     if let Some(workspace_id) = workspace_id {
         actor = actor.with_workspace_id(workspace_id.to_owned());
     }
-    let (catalog_revision, mut functions) = host
-        .discover_with_revision(&FunctionQuery {
-            actor: Some(actor),
-            health: Some(FunctionHealth::Healthy),
-            ..FunctionQuery::default()
-        })
-        .await;
+    let (catalog_revision, mut functions) = host.visible_functions_with_revision(&actor).await;
+    functions.retain(|function| function.health == FunctionHealth::Healthy);
     functions.sort_by_key(|function| {
         (
             function
@@ -446,7 +441,7 @@ pub(crate) async fn fixed_tool_inventory(
             crate::engine::FunctionId::new(format!("worker_kernel::{}", descriptor.operation_key))
                 .map_err(|error| error.to_string())?;
         let function = host
-            .inspect_function(&function_id, Some(&inspector))
+            .inspect_function(&function_id, &inspector)
             .await
             .map_err(|error| error.to_string())?;
         let exposed = resolved_surface

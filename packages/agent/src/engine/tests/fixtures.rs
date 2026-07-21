@@ -9,9 +9,7 @@ pub(in crate::engine::tests) use async_trait::async_trait;
 pub(in crate::engine::tests) use serde_json::{Value, json};
 pub(in crate::engine::tests) use tokio::sync::{Barrier, Notify};
 
-pub(in crate::engine::tests) use crate::engine::catalog::discovery::{
-    ActorContext, ActorKind, FunctionQuery,
-};
+pub(in crate::engine::tests) use crate::engine::catalog::discovery::{ActorContext, ActorKind};
 pub(in crate::engine::tests) use crate::engine::catalog::registry::LiveCatalog;
 pub(in crate::engine::tests) use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,

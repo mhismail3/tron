@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::engine::kernel::ids::ActorId;
-use crate::engine::kernel::types::{EffectClass, FunctionHealth, RiskLevel, VisibilityScope};
 
 /// Context of the actor performing discovery or invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,25 +71,4 @@ impl ActorKind {
     pub fn is_admin_like(&self) -> bool {
         matches!(self, Self::Admin | Self::System)
     }
-}
-
-/// Function discovery query.
-#[derive(Clone, Debug, Default)]
-pub struct FunctionQuery {
-    /// Actor context.
-    pub actor: Option<ActorContext>,
-    /// Exact visibility filter.
-    pub visibility: Option<VisibilityScope>,
-    /// Namespace prefix filter.
-    pub namespace_prefix: Option<String>,
-    /// Text search over id, description, and tags.
-    pub text: Option<String>,
-    /// Effect class filter.
-    pub effect_class: Option<EffectClass>,
-    /// Maximum risk.
-    pub max_risk: Option<RiskLevel>,
-    /// Health filter.
-    pub health: Option<FunctionHealth>,
-    /// Include internal entries.
-    pub include_internal: bool,
 }

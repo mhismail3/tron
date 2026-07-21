@@ -247,7 +247,7 @@ async fn resident_supervisor_disables_an_exited_service_without_another_invocati
             .host
             .inspect_function(
                 &FunctionId::new("worker_kernel::dynamic_resident-supervision").unwrap(),
-                None,
+                &system_actor(),
             )
             .await
             .is_err(),

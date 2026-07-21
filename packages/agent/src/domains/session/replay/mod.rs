@@ -532,16 +532,6 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
             "path": path,
             "message": message
         }),
-        EngineError::InvalidVisibilityPromotion {
-            function_id,
-            target,
-            reason,
-        } => json!({
-            "kind": "invalid_visibility_promotion",
-            "functionId": function_id,
-            "target": target,
-            "reason": reason
-        }),
         EngineError::StaleFunctionSurface {
             function_id,
             expected_revision,
