@@ -1,57 +1,5 @@
 import SwiftUI
 
-struct EngineComponentCard: View {
-    let component: EngineCoreComponentDTO
-
-    private var color: Color {
-        switch component.category {
-        case "kernel": .tronEmerald
-        case "protected_boundary": .tronPurple
-        default: .tronCyan
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: symbol)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 7) {
-                    Text(component.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(WorkerConsolePresentation.displayLabel(component.category))
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(color)
-                }
-                Text(component.role)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .sectionFill(color, cornerRadius: 11, subtle: true, interactive: false)
-    }
-
-    private var symbol: String {
-        switch component.id {
-        case "model_agent_execution": "brain.head.profile"
-        case "host_substrate": "terminal"
-        case "durable_truth": "externaldrive.badge.checkmark"
-        case "worker_runtime": "bolt.horizontal.circle"
-        case "secret_observation_boundary": "key.viewfinder"
-        case "authenticated_transport": "lock.shield"
-        case "settings_provider_shell": "switch.2"
-        case "core_change_guard": "arrow.triangle.branch"
-        default: "square.stack.3d.up"
-        }
-    }
-}
-
 struct EngineSurfaceCard: View {
     let viewModel: WorkerConsoleViewModel
 

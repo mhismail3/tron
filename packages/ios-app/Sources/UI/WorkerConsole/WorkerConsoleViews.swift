@@ -252,22 +252,8 @@ struct WorkerConsoleSheet: View {
     private var overviewContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             WorkerConsoleSectionHeader(
-                title: "Compiled engine",
-                detail: "The fixed substrate is separate from replaceable worker behavior."
-            )
-            if let components = viewModel.engineSnapshot?.coreComponents, !components.isEmpty {
-                LazyVStack(spacing: 10) {
-                    ForEach(components) { component in
-                        EngineComponentCard(component: component)
-                    }
-                }
-            } else {
-                WorkerConsoleLoadingState(title: "Loading engine composition")
-            }
-
-            WorkerConsoleSectionHeader(
                 title: "Current agent surface",
-                detail: "Resolved for the selected session at the next provider boundary."
+                detail: "Executable tools resolved for the selected session at the next provider boundary."
             )
             EngineSurfaceCard(viewModel: viewModel)
 

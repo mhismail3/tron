@@ -18,8 +18,6 @@ use crate::engine::{
 
 const MAX_RELEVANT_WORKERS: usize = 12;
 const MAX_STORED_SESSION_PROMOTIONS: usize = 50;
-const SURFACE_FORMAT_VERSION: u32 = 1;
-
 const PROMOTION_NAMESPACE: &str = "worker_kernel.surface_promotions";
 const EVIDENCE_NAMESPACE: &str = "worker_kernel.surface_evidence";
 
@@ -189,7 +187,6 @@ pub(crate) struct AvailableWorkerToolSnapshot {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EngineSurfaceSnapshot {
-    pub(crate) format: u32,
     pub(crate) catalog_revision: u64,
     pub(crate) surface_hash: String,
     pub(crate) fixed_tool_count: usize,
@@ -392,7 +389,6 @@ pub(crate) async fn resolve_tool_surface(
     Ok(ResolvedToolSurface {
         functions: resolved,
         snapshot: EngineSurfaceSnapshot {
-            format: SURFACE_FORMAT_VERSION,
             catalog_revision: catalog_revision.0,
             surface_hash,
             fixed_tool_count,

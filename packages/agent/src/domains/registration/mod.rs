@@ -513,15 +513,7 @@ mod tests {
             result.error
         );
         let value = result.value.expect("surface snapshot value");
-        assert_eq!(value["format"], 1);
         assert_eq!(value["autonomousWorkers"], true);
-        assert_eq!(
-            value["coreComponents"]
-                .as_array()
-                .expect("core component inventory")
-                .len(),
-            8
-        );
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");

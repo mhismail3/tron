@@ -1,4 +1,3 @@
-use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::domains::registration::catalog::{CapabilitySpec, TransportIdempotencyMode};
@@ -228,82 +227,6 @@ pub(crate) fn core_primitive_for_operation(
     core_primitives()
         .iter()
         .find(|descriptor| descriptor.operation_key == operation_key)
-}
-
-/// Server-owned architectural component shown by engine introspection.
-/// Components explain the compiled substrate without pretending that internal
-/// services are additional model tools.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CoreComponentDescriptor {
-    pub(crate) id: &'static str,
-    pub(crate) title: &'static str,
-    pub(crate) role: &'static str,
-    pub(crate) category: &'static str,
-    pub(crate) status: &'static str,
-}
-
-const CORE_COMPONENTS: &[CoreComponentDescriptor] = &[
-    CoreComponentDescriptor {
-        id: "model_agent_execution",
-        title: "Model & Agent Execution",
-        role: "Runs provider-neutral model turns and direct typed tool calls.",
-        category: "kernel",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "host_substrate",
-        title: "Host Substrate",
-        role: "Owns filesystem, process, network, schema, and function routing mechanics.",
-        category: "kernel",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "durable_truth",
-        title: "Durable Truth",
-        role: "Persists sessions, events, causal traces, state, audit evidence, and recovery records.",
-        category: "kernel",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "worker_runtime",
-        title: "Worker Runtime",
-        role: "Versions, activates, dispatches, triggers, supervises, and recovers persistent workers.",
-        category: "kernel",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "secret_observation_boundary",
-        title: "Secret & Provenance Boundary",
-        role: "Injects declared named secrets and records redacted provenance and operational evidence.",
-        category: "kernel",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "authenticated_transport",
-        title: "Authenticated Transport",
-        role: "Connects trusted clients without projecting client APIs as model vocabulary.",
-        category: "product_infrastructure",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "settings_provider_shell",
-        title: "Settings & Provider Shell",
-        role: "Owns engine settings, provider credentials, protocol adapters, and application lifecycle.",
-        category: "product_infrastructure",
-        status: "active",
-    },
-    CoreComponentDescriptor {
-        id: "core_change_guard",
-        title: "Core-Change Guard",
-        role: "Custodies isolated tested proposals and requires later conversational approval before application.",
-        category: "protected_boundary",
-        status: "active",
-    },
-];
-
-pub(crate) const fn core_components() -> &'static [CoreComponentDescriptor] {
-    CORE_COMPONENTS
 }
 
 pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
@@ -558,19 +481,16 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["format","autonomousWorkers","dispatchStopped","coreComponents","fixedTools","surface","workers"],
+            "required":["autonomousWorkers","dispatchStopped","fixedTools","surface","workers"],
             "properties":{
-                "format":{"type":"integer"},
                 "autonomousWorkers":{"type":"boolean"},
                 "dispatchStopped":{"type":"boolean"},
-                "coreComponents":{"type":"array"},
                 "fixedTools":{"type":"array"},
                 "surface":{
                     "type":"object",
                     "additionalProperties":false,
-                    "required":["format","catalogRevision","surfaceHash","fixedToolCount","projectedWorkerCount","availableWorkerCount","tools","availableWorkers"],
+                    "required":["catalogRevision","surfaceHash","fixedToolCount","projectedWorkerCount","availableWorkerCount","tools","availableWorkers"],
                     "properties":{
-                        "format":{"type":"integer"},
                         "catalogRevision":{"type":"integer"},
                         "surfaceHash":{"type":"string"},
                         "fixedToolCount":{"type":"integer"},

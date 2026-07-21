@@ -72,18 +72,8 @@ struct WorkerKernelClientTests {
             #expect((payload as? EngineSurfaceSnapshotRequestDTO)?.relevanceQuery == "research")
             #expect(options.context?.sessionId == "session-1")
             return EngineIntrospectionSnapshotDTO(
-                format: 1,
                 autonomousWorkers: true,
                 dispatchStopped: false,
-                coreComponents: [
-                    EngineCoreComponentDTO(
-                        id: "worker_runtime",
-                        title: "Worker Runtime",
-                        role: "Runs workers",
-                        category: "kernel",
-                        status: "active"
-                    )
-                ],
                 fixedTools: [
                     EngineSurfaceToolDTO(
                         modelName: "filesystem_read",
@@ -103,7 +93,6 @@ struct WorkerKernelClientTests {
                     )
                 ],
                 surface: AgentToolSurfaceDTO(
-                    format: 1,
                     catalogRevision: 42,
                     surfaceHash: "abc123",
                     fixedToolCount: 28,
@@ -154,7 +143,6 @@ struct WorkerKernelClientTests {
         #expect(snapshot.surface.catalogRevision == 42)
         #expect(snapshot.surface.tools.first?.selectionReason == "relevance")
         #expect(snapshot.surface.availableWorkers.first?.projected == true)
-        #expect(snapshot.coreComponents.first?.category == "kernel")
         #expect(snapshot.fixedTools.first?.primitiveGroup == "host")
         #expect(snapshot.workers.first?.workerId == "research")
     }

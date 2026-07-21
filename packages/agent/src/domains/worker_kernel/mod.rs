@@ -61,8 +61,9 @@
 //! revive a retired worker id at a different version.
 //! The authenticated `engine::surface_snapshot` read returns that same
 //! provider-neutral projection, every published worker's projection status,
-//! the complete fixed-tool inventory, compiled engine-component roles, and
-//! canonical engine worker summaries; it is not itself model vocabulary.
+//! the complete fixed-tool inventory, and canonical engine worker summaries;
+//! it is not itself model vocabulary. The snapshot reports executable runtime
+//! facts rather than a separately maintained description of the source tree.
 //! Fixed inventory remains inspectable while autonomy is off and marks each
 //! tool unexposed, so operator introspection never masquerades as provider
 //! availability.

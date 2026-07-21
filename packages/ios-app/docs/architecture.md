@@ -132,10 +132,11 @@ protocol error. There is no nested child-invocation response envelope.
 
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
 non-model-facing `engine::surface_snapshot` read with optional session context.
-Strongly typed catalog DTOs expose compiled component roles, the complete fixed
-tool inventory, catalog revision, surface hash, exact selected surface,
+Strongly typed catalog DTOs expose the complete executable fixed-tool
+inventory, catalog revision, surface hash, exact selected surface,
 function/worker versions, every published worker's promoted/projected state,
-selection evidence, and canonical engine worker inventory. UI code does not
+selection evidence, and canonical worker inventory. The server does not send a
+separately maintained description of its own source architecture. UI code does not
 reconstruct model visibility from raw catalog `[AnyCodable]` entries. The exact
 `surface.tools` projection is kept distinct from fixed/published inventories;
 when autonomy is off, fixed tools remain inspectable but explicitly unexposed.
@@ -171,11 +172,11 @@ routing metadata are intentionally extensible. Stable operational fields are
 strongly typed.
 
 `Engine/Protocol/EngineProtocolTypes+Catalog.swift` additionally owns
-`EngineIntrospectionSnapshotDTO`, `EngineCoreComponentDTO`,
-`AgentToolSurfaceDTO`, `EngineSurfaceToolDTO`, and `AvailableWorkerToolDTO`.
-These are the authoritative client projection for compiled composition, fixed
-inventory, every published direct worker, and the exact fixed/dynamic tool
-surface selected by the server. The existing raw catalog-watch DTO remains an
+`EngineIntrospectionSnapshotDTO`, `AgentToolSurfaceDTO`,
+`EngineSurfaceToolDTO`, and `AvailableWorkerToolDTO`. These are the
+authoritative client projection for executable fixed inventory, every
+published direct worker, and the exact fixed/dynamic tool surface selected by
+the server. The existing raw catalog-watch DTO remains an
 invalidation/change-feed contract only.
 
 ### Client and repository
@@ -200,8 +201,8 @@ state.
 
 `WorkerConsoleViewModel` is `@MainActor` and owns only presentation state:
 
-- the selected-session engine snapshot, fixed inventory, published worker
-  projection state, and compiled component roles;
+- the selected-session engine snapshot, fixed inventory, and published worker
+  projection state;
 - engine-wide activity runs and inbox results;
 - current list and selection;
 - selected inspection, runs, and inbox;

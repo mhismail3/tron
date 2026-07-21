@@ -585,7 +585,6 @@ mod tests {
     fn surface_primer_is_compact_and_explains_hidden_workers() {
         let primer =
             surface_context_primer(&crate::domains::worker_kernel::EngineSurfaceSnapshot {
-                format: 1,
                 catalog_revision: 42,
                 surface_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
                     .to_owned(),

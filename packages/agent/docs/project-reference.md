@@ -488,10 +488,8 @@ owners of agent-run termination.
 
 Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
-evidence plus four explicitly different inventories:
+evidence plus three operational inventories:
 
-- eight server-owned compiled component roles, categorized as kernel, product
-  infrastructure, or the protected core-change boundary;
 - all 28 fixed tools with their exact schemas, revisions, effect/risk,
   primitive group, and whether autonomy currently exposes them;
 - every published direct worker tool, including its promoted/projected state,
@@ -784,8 +782,8 @@ The iOS Engine Dashboard is backed by `WorkerKernelClient`,
 `WorkerKernelRepository`, `WorkerConsoleViewModel`, and `UI/WorkerConsole`.
 It exposes:
 
-- an Overview of compiled component roles and the selected session's exact
-  provider surface;
+- an Overview of the selected session's exact provider surface and current
+  operational state;
 - a Core inventory of all fixed host, worker-control, and core-change tools,
   including schemas and current exposure;
 - published workers with distinct Published, This session, and Promoted state;

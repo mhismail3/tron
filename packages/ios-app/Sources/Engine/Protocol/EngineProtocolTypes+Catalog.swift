@@ -38,16 +38,7 @@ struct AvailableWorkerToolDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String { workerId }
 }
 
-struct EngineCoreComponentDTO: Codable, Equatable, Identifiable, Sendable {
-    let id: String
-    let title: String
-    let role: String
-    let category: String
-    let status: String
-}
-
 struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
-    let format: UInt32
     let catalogRevision: UInt64
     let surfaceHash: String
     let fixedToolCount: UInt64
@@ -58,10 +49,8 @@ struct AgentToolSurfaceDTO: Codable, Equatable, Sendable {
 }
 
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
-    let format: UInt32
     let autonomousWorkers: Bool
     let dispatchStopped: Bool
-    let coreComponents: [EngineCoreComponentDTO]
     let fixedTools: [EngineSurfaceToolDTO]
     let surface: AgentToolSurfaceDTO
     let workers: [WorkerSummaryDTO]

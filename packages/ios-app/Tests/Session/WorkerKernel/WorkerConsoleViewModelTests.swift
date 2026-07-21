@@ -128,21 +128,10 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     ) async throws -> EngineIntrospectionSnapshotDTO {
         snapshotSessionIds.append(sessionId)
         return EngineIntrospectionSnapshotDTO(
-            format: 1,
             autonomousWorkers: true,
             dispatchStopped: false,
-            coreComponents: [
-                EngineCoreComponentDTO(
-                    id: "worker_runtime",
-                    title: "Worker Runtime",
-                    role: "Runs workers",
-                    category: "kernel",
-                    status: "active"
-                )
-            ],
             fixedTools: [],
             surface: AgentToolSurfaceDTO(
-                format: 1,
                 catalogRevision: 42,
                 surfaceHash: "surface-test",
                 fixedToolCount: 28,
