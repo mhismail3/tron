@@ -8,6 +8,57 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
+const ROUTING_STOP_WORDS: &[&str] = &[
+    "and",
+    "are",
+    "assistant",
+    "been",
+    "but",
+    "can",
+    "could",
+    "did",
+    "does",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "how",
+    "into",
+    "its",
+    "may",
+    "our",
+    "result",
+    "should",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "tool",
+    "use",
+    "used",
+    "user",
+    "using",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "will",
+    "with",
+    "worker",
+    "would",
+    "you",
+    "your",
+];
+
 /// Searchable facts for one published worker without its executable payload.
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerRetrievalDocument {
@@ -38,12 +89,12 @@ pub(crate) fn rank_workers(
     query: Option<&str>,
     promoted_workers: &BTreeSet<String>,
 ) -> Vec<WorkerRetrievalRank> {
-    let normalized_query = query.unwrap_or_default().trim().to_ascii_lowercase();
-    let query_terms = terms(&normalized_query);
+    let query_terms = terms(query.unwrap_or_default());
+    let query_phrases = adjacent_phrases(query.unwrap_or_default());
     let mut ranked = documents
         .into_iter()
         .map(|document| WorkerRetrievalRank {
-            relevance_score: relevance_score(&document, &normalized_query, &query_terms),
+            relevance_score: relevance_score(&document, &query_terms, &query_phrases),
             promoted: promoted_workers.contains(&document.worker_id),
             key: document.key,
             worker_id: document.worker_id,
@@ -61,43 +112,48 @@ pub(crate) fn query_is_empty(query: Option<&str>) -> bool {
 
 fn relevance_score(
     document: &WorkerRetrievalDocument,
-    normalized_query: &str,
     query_terms: &BTreeSet<String>,
+    query_phrases: &BTreeSet<String>,
 ) -> usize {
     if query_terms.is_empty() {
         return 0;
     }
-    let name = document.name.to_ascii_lowercase();
-    let description = document.description.to_ascii_lowercase();
+    let name = normalized_text(&document.name);
+    let description = normalized_text(&document.description);
     let intents = document
         .intents
         .iter()
-        .map(|value| value.to_ascii_lowercase())
+        .map(|value| normalized_text(value))
         .collect::<Vec<_>>();
     let examples = document
         .examples
         .iter()
-        .map(|value| value.to_ascii_lowercase())
+        .map(|value| normalized_text(value))
         .collect::<Vec<_>>();
     let provenance = document
         .provenance
         .iter()
-        .map(|value| value.to_ascii_lowercase())
+        .map(|value| normalized_text(value))
         .collect::<Vec<_>>();
+    let name_terms = terms(&name);
+    let description_terms = terms(&description);
+    let intent_terms = combined_terms(&intents);
+    let example_terms = combined_terms(&examples);
+    let provenance_terms = combined_terms(&provenance);
 
     let mut score = 0usize;
-    if !normalized_query.is_empty() {
-        score += contains_phrase(&name, normalized_query, 12);
-        score += contains_any_phrase(&intents, normalized_query, 8);
-        score += contains_any_phrase(&examples, normalized_query, 6);
-        score += contains_phrase(&description, normalized_query, 4);
-    }
     for term in query_terms {
-        score += contains_term(&name, term, 4);
-        score += contains_any_term(&intents, term, 3);
-        score += contains_any_term(&examples, term, 2);
-        score += contains_term(&description, term, 1);
-        score += contains_any_term(&provenance, term, 1);
+        score += usize::from(name_terms.contains(term)) * 8;
+        score += usize::from(intent_terms.contains(term)) * 6;
+        score += usize::from(example_terms.contains(term)) * 4;
+        score += usize::from(description_terms.contains(term)) * 2;
+        score += usize::from(provenance_terms.contains(term));
+    }
+    for phrase in query_phrases {
+        score += contains_phrase(&name, phrase, 14);
+        score += contains_any_phrase(&intents, phrase, 10);
+        score += contains_any_phrase(&examples, phrase, 8);
+        score += contains_phrase(&description, phrase, 4);
     }
     score
 }
@@ -117,7 +173,39 @@ fn terms(value: &str) -> BTreeSet<String> {
     value
         .split(|character: char| !character.is_ascii_alphanumeric())
         .map(str::to_ascii_lowercase)
-        .filter(|term| term.len() > 2)
+        .filter(|term| term.len() > 2 && !ROUTING_STOP_WORDS.contains(&term.as_str()))
+        .collect()
+}
+
+fn normalized_text(value: &str) -> String {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn combined_terms(values: &[String]) -> BTreeSet<String> {
+    values.iter().flat_map(|value| terms(value)).collect()
+}
+
+fn adjacent_phrases(value: &str) -> BTreeSet<String> {
+    value
+        .lines()
+        .flat_map(|line| {
+            let words = normalized_text(line)
+                .split_whitespace()
+                .filter(|word| word.len() > 2 && !ROUTING_STOP_WORDS.contains(word))
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            (2..=3).flat_map(move |width| {
+                words
+                    .windows(width)
+                    .map(|window| window.join(" "))
+                    .collect::<Vec<_>>()
+            })
+        })
         .collect()
 }
 
@@ -127,14 +215,6 @@ fn contains_phrase(value: &str, phrase: &str, weight: usize) -> usize {
 
 fn contains_any_phrase(values: &[String], phrase: &str, weight: usize) -> usize {
     usize::from(values.iter().any(|value| value.contains(phrase))) * weight
-}
-
-fn contains_term(value: &str, term: &str, weight: usize) -> usize {
-    usize::from(value.contains(term)) * weight
-}
-
-fn contains_any_term(values: &[String], term: &str, weight: usize) -> usize {
-    usize::from(values.iter().any(|value| value.contains(term))) * weight
 }
 
 #[cfg(test)]
@@ -186,5 +266,32 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(ranked[0].worker_id, "purpose-built");
+    }
+
+    #[test]
+    fn exact_tokens_do_not_match_inside_unrelated_words() {
+        let ranked = rank_workers(
+            [
+                document("party", "party catalog", 0),
+                document("art", "art catalog", 0),
+            ],
+            Some("art catalog"),
+            &BTreeSet::new(),
+        );
+        assert_eq!(ranked[0].worker_id, "art");
+        assert!(ranked[0].relevance_score > ranked[1].relevance_score);
+    }
+
+    #[test]
+    fn conversational_framing_does_not_make_every_worker_relevant() {
+        let ranked = rank_workers(
+            [document("formatter", "format source code", 0)],
+            Some("user: use a worker\nassistant: tool result"),
+            &BTreeSet::new(),
+        );
+        assert_eq!(ranked[0].relevance_score, 0);
+        assert!(query_is_empty(Some(
+            "user: use a worker\nassistant: tool result"
+        )));
     }
 }

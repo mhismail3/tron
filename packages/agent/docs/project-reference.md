@@ -571,6 +571,14 @@ schemas, worker availability, lifecycle mechanics, and approval boundaries are
 projected from the live typed surface on every turn instead of being duplicated
 in a second hardcoded instruction set.
 
+Automatic worker projection and `worker_discover` share one deterministic
+bootstrap ranker over worker names, declared intents, examples, descriptions,
+and provenance. It uses exact weighted terms and short adjacent phrases while
+discarding common conversation framing; session promotions remain version-bound
+and outrank automatic relevance. A future learned router can be an ordinary
+worker, but the engine always retains this local fallback so routing cannot
+depend on another worker being healthy.
+
 Three unrelated runtime boundaries use three deliberately separate closed
 types instead of the former generic visibility scope:
 

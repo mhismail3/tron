@@ -70,7 +70,9 @@
 //! tool unexposed, so operator introspection never masquerades as provider
 //! availability.
 //! Explicit discovery and automatic projection use one deterministic weighted
-//! retrieval implementation. Mutable run/health evidence is a rebuildable
+//! retrieval implementation. Its bootstrap scorer uses exact field-weighted
+//! tokens and bounded adjacent phrases, so conversation framing and substring
+//! collisions cannot manufacture relevance. Mutable run/health evidence is a rebuildable
 //! engine-state overlay, not function-contract text; successful work therefore
 //! cannot churn catalog revisions. Fixed invocation supports durable enqueue
 //! plus bounded await so parallel workers do not monopolize provider calls.
