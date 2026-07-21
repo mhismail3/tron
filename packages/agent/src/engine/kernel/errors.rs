@@ -1,4 +1,4 @@
-//! Error types for the live capability engine.
+//! Error types for the live typed-function engine.
 
 /// Result alias for engine operations.
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -40,15 +40,6 @@ pub enum EngineError {
         owner: String,
         /// Attempted owner id.
         attempted_owner: String,
-    },
-
-    /// A worker tried to register outside its namespace claims.
-    #[error("worker {worker_id} cannot register function {function_id}; namespace is not claimed")]
-    NamespaceDenied {
-        /// Worker id.
-        worker_id: String,
-        /// Function id.
-        function_id: String,
     },
 
     /// A duplicate idempotency key cannot be replayed safely.
@@ -126,7 +117,7 @@ pub enum EngineError {
     #[error("policy violation: {0}")]
     PolicyViolation(String),
 
-    /// A domain capability preserved its native error envelope.
+    /// A product domain preserved its native error envelope.
     #[error("domain {domain} failed with {code}: {message}")]
     DomainFailure {
         /// Domain namespace.

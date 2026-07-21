@@ -54,17 +54,6 @@ impl StoredEngineError {
                     "attemptedOwner": attempted_owner,
                 }),
             },
-            EngineError::NamespaceDenied {
-                worker_id,
-                function_id,
-            } => Self {
-                kind: "namespace_denied".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({
-                    "workerId": worker_id,
-                    "functionId": function_id,
-                }),
-            },
             EngineError::IdempotencyConflict {
                 function_id,
                 key,

@@ -55,13 +55,13 @@ impl EffectClass {
 /// Risk level for discovery and operator evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RiskLevel {
-    /// Low-risk capability.
+    /// Low-risk function.
     Low,
-    /// Medium-risk capability.
+    /// Medium-risk function.
     Medium,
-    /// High-risk capability.
+    /// High-risk function.
     High,
-    /// Critical-risk capability.
+    /// Critical-risk function.
     Critical,
 }
 

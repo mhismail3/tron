@@ -38,14 +38,14 @@ mod handle;
 mod invocation_handle;
 mod substrate_handle;
 
-/// Host for the in-process live capability engine.
+/// Host for the in-process live typed-function engine.
 pub struct EngineHost {
     catalog: LiveCatalog,
     primitives: PrimitiveStores,
     storage_path: Option<PathBuf>,
 }
 
-/// Cloneable owner for the live capability engine host.
+/// Cloneable owner for the live typed-function engine host.
 #[derive(Clone)]
 pub struct EngineHostHandle {
     inner: Arc<Mutex<EngineHost>>,

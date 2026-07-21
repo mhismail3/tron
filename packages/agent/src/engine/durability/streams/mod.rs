@@ -62,7 +62,7 @@ pub struct EngineStreamEvent {
     pub session_id: Option<String>,
     /// Optional workspace scope.
     pub workspace_id: Option<String>,
-    /// Producer worker/capability label.
+    /// Producer worker/function label.
     pub producer: String,
     /// Trace propagated from the producer.
     pub trace_id: Option<TraceId>,

@@ -1,4 +1,4 @@
-//! Host construction and built-in capability registration.
+//! Host construction for the live typed-function registry and durable stores.
 
 use super::*;
 

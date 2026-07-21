@@ -473,14 +473,6 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
             "owner": owner,
             "attemptedOwner": attempted_owner
         }),
-        EngineError::NamespaceDenied {
-            worker_id,
-            function_id,
-        } => json!({
-            "kind": "namespace_denied",
-            "workerId": worker_id,
-            "functionId": function_id
-        }),
         EngineError::IdempotencyConflict {
             function_id,
             key,

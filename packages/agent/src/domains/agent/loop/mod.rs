@@ -7,10 +7,10 @@
 //!
 //! Runtime observability is intentionally first-class here. The loop emits
 //! structured `agent_event` logs for run/turn boundaries, provider requests,
-//! stream lifecycle, and model-requested capability execution. INFO logs mark
+//! stream lifecycle, and model-requested tool execution. INFO logs mark
 //! durable lifecycle transitions and IDs; TRACE logs add high-volume stream
 //! sizes and sequencing metadata without recording prompt text, generated text,
-//! or tool arguments. Provider-facing capability results stay terse for users
+//! or tool arguments. Provider-facing tool results stay terse for users
 //! while selected read/list/record operations append bounded model-context
 //! evidence containing safe ids, lifecycle/status, refs, and truncation
 //! metadata; raw logs, commands, code, file contents, local paths, secrets,

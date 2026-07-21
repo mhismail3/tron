@@ -9,9 +9,9 @@ use crate::engine::{EngineError, InvocationResult};
 use crate::shared::server::errors::{self as codes, CapabilityError};
 use crate::shared::server::failure::{
     ENGINE_DOMAIN_FAILURE, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID,
-    ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_POLICY_VIOLATION,
-    ENGINE_SCHEMA_VIOLATION, ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
-    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
+    ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR, FailureCategory,
+    FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::Value;
 
@@ -84,21 +84,6 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             "id": id,
             "owner": owner,
             "attemptedOwner": attempted_owner,
-        }))),
-        EngineError::NamespaceDenied {
-            worker_id,
-            function_id,
-        } => FailureEnvelope::new(
-            ENGINE_NAMESPACE_DENIED,
-            FailureCategory::Auth,
-            error.to_string(),
-            false,
-            true,
-            FailureOrigin::Engine,
-        )
-        .with_details(Some(serde_json::json!({
-            "workerId": worker_id,
-            "functionId": function_id,
         }))),
         EngineError::IdempotencyConflict {
             function_id,

@@ -14,7 +14,6 @@ pub const ENGINE_INVALID_ID: &str = "ENGINE_INVALID_ID";
 /// Engine function id parse failure.
 pub const ENGINE_INVALID_FUNCTION_ID: &str = "ENGINE_INVALID_FUNCTION_ID";
 /// Engine namespace authorization failure.
-pub const ENGINE_NAMESPACE_DENIED: &str = "ENGINE_NAMESPACE_DENIED";
 /// Engine ledger or durable store operation failed.
 pub const ENGINE_LEDGER_FAILURE: &str = "ENGINE_LEDGER_FAILURE";
 /// Stored invocation failure replayed from the ledger.
