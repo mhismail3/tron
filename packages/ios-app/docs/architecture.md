@@ -25,10 +25,8 @@ The app has two primary operational surfaces:
 - Engine Dashboard: inspect the compiled core, exact session tool surface,
   published workers, and durable engine activity; operate worker lifecycle.
 
-The former Agent Cockpit, module activity, capability-binding, package
-lifecycle, legacy worker-lifecycle, generated-UI resource, and display-stream
-planes are deleted. Conversational creation is the worker authoring interface;
-iOS does not contain a bundle editor or invent worker state.
+Conversational creation is the worker authoring interface; iOS does not contain
+a bundle editor or invent worker state.
 
 ## State Ownership
 
@@ -124,8 +122,7 @@ The bearer token comes from pairing and is never logged. Unauthorized state
 requires re-pairing.
 
 Typed domain clients call exact engine function ids. Worker operations use
-`worker_kernel::*` directly; there is no operation wrapper or client-side
-capability grant construction.
+`worker_kernel::*` directly and the server supplies their execution context.
 Successful invocations decode the target function value directly from the
 response's top-level `result`; failures decode only the canonical top-level
 protocol error. There is no nested child-invocation response envelope.

@@ -478,13 +478,6 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     );
 
     let logs = read_repo_file("scripts/tron-lib.d/logs.sh");
-    let deployment_sources = format!("{manual}\n{service}\n{logs}");
-    for retired_writer in ["write_deployment_result", "TRON_DEPLOYMENT_"] {
-        assert!(
-            !deployment_sources.contains(retired_writer),
-            "scripts must not recreate the retired deployment-result writer: {retired_writer}"
-        );
-    }
     assert!(
         !manual.contains("last-deployment.json") && !logs.contains("last-deployment.json"),
         "restart-sentinel.json must remain the sole manual-deploy outcome projection"

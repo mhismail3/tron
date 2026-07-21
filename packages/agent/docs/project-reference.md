@@ -696,7 +696,7 @@ indexes and durable operational history.
 | Table | Ownership |
 |---|---|
 | `blobs` | content-addressed durable payloads |
-| `engine_catalog_changes` | typed-function surface revisions |
+| `engine_catalog_revision` | current typed-function surface revision |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
 | `engine_invocations` | generic engine invocation history |
 | `engine_state_entries` | engine-owned state values |

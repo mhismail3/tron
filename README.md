@@ -18,8 +18,8 @@ engine-global worker through one atomic operation.
 - Agent, command, and lazy resident-service workers share one durable runtime.
 - Manual calls, schedules, engine events, and authenticated local webhooks share
   one at-least-once dispatcher.
-- Local agents and workers use the Mac user's normal authority. The former
-  per-call capability-grant and proposal-only module planes are gone.
+- Local agents and workers use the Mac user's normal authority without
+  per-call permission objects or proposal-only activation steps.
 - Provenance, immutable versions, dependency locks, audit history, secret
   isolation, execution ceilings, failure disablement, rollback, and stop-all
   remain because they improve reliability.
