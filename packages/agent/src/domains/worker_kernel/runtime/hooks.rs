@@ -7,6 +7,12 @@
 
 use super::*;
 
+pub(crate) struct EngineHookExecution {
+    pub(crate) worker_id: String,
+    pub(crate) worker_version: String,
+    pub(crate) output: Value,
+}
+
 impl WorkerRuntime {
     pub(super) fn engine_hook_inventory(&self) -> Result<Vec<Value>, String> {
         WorkerEngineHook::all()
@@ -30,8 +36,49 @@ impl WorkerRuntime {
         origin_worker_id: Option<&str>,
         invocation: &Invocation,
     ) -> Result<Value, String> {
-        let Some(worker) = self.active_engine_hook(hook, origin_worker_id)? else {
+        let Some(execution) = self
+            .execute_engine_hook(hook, input, origin_worker_id, invocation)
+            .await?
+        else {
             return Ok(json!({"handled":false}));
+        };
+        let narrative = execution
+            .output
+            .get("narrative")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned);
+        let Some(narrative) = narrative else {
+            let reason = self
+                .handle_worker_runtime_failure(
+                    &execution.worker_id,
+                    &execution.worker_version,
+                    "engine_hook",
+                    &format!(
+                        "engine hook '{}' returned no non-empty narrative",
+                        hook.as_str()
+                    ),
+                )
+                .await;
+            return Err(reason);
+        };
+        Ok(json!({
+            "handled":true,
+            "workerId":execution.worker_id,
+            "workerVersion":execution.worker_version,
+            "narrative":narrative,
+        }))
+    }
+
+    pub(crate) async fn execute_engine_hook(
+        self: &Arc<Self>,
+        hook: WorkerEngineHook,
+        input: Value,
+        origin_worker_id: Option<&str>,
+        invocation: &Invocation,
+    ) -> Result<Option<EngineHookExecution>, String> {
+        let Some(worker) = self.active_engine_hook(hook, origin_worker_id)? else {
+            return Ok(None);
         };
         let queued = self.enqueue_and_dispatch(InvokeRequest {
             worker_id: worker.summary.worker_id.clone(),
@@ -65,22 +112,26 @@ impl WorkerRuntime {
         let output = record
             .output
             .ok_or_else(|| format!("engine hook '{}' returned no output", hook.as_str()))?;
-        let narrative = output
-            .get("narrative")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "engine hook '{}' returned no non-empty narrative",
-                    hook.as_str()
-                )
-            })?;
-        Ok(json!({
-            "handled":true,
-            "workerId":worker.summary.worker_id,
-            "workerVersion":worker.summary.active_version,
-            "narrative":narrative,
+        Ok(Some(EngineHookExecution {
+            worker_id: worker.summary.worker_id,
+            worker_version: worker.summary.active_version,
+            output,
         }))
+    }
+
+    pub(crate) async fn reject_engine_hook_output(
+        &self,
+        execution: &EngineHookExecution,
+        hook: WorkerEngineHook,
+        error: &str,
+    ) -> String {
+        self.handle_worker_runtime_failure(
+            &execution.worker_id,
+            &execution.worker_version,
+            "engine_hook",
+            &format!("engine hook '{}' output is invalid: {error}", hook.as_str()),
+        )
+        .await
     }
 
     fn active_engine_hook(

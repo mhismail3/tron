@@ -101,11 +101,12 @@ This admits the current 8/16/4 grouping without pretending the smallest
 possible tool count is the objective. It rejects fixed web search providers,
 transcription, memory policy, notifications, repository workflows, content
 analysis, and other task semantics: those belong in workers. The deterministic
-weighted worker ranker is the bootstrap fallback needed before any worker is
-available; stronger embedding or model-based semantic routing is intentionally
-a future worker developed through real sessions, not another mandatory kernel
-service. No primitive is added merely because it is convenient, and no direct
-tool is collapsed merely to make the manifest numerically smaller.
+weighted worker ranker is the recovery substrate needed before a relevance
+worker is available and while that worker handles its own agent turn. Stronger
+embedding or model-based routing is an ordinary persistent worker, not another
+mandatory kernel service. No primitive is added merely because it is
+convenient, and no direct tool is collapsed merely to make the manifest
+numerically smaller.
 
 ### Worker-owned engine policy
 
@@ -119,7 +120,7 @@ enabled; an older implementation never silently replaces a failed or disabled
 current owner. An update switches new hook work immediately while prior
 invocations retain their version.
 
-The first production hook is `context_summary`. It accepts a bounded transcript
+The `context_summary` hook accepts a bounded transcript
 of visible user text, assistant text, tool names, and textual tool results and
 returns `{narrative}`. Hidden thinking, tool arguments, binary content, usage,
 and cost never cross the seam. Calls use the normal durable worker dispatcher,
@@ -129,6 +130,15 @@ summary. A hook worker is excluded while its own agent-runner session compacts,
 preventing semantic-policy recursion. Token-window selection, cancellation,
 checkpoint restoration, durable compact-boundary proof, and provider context
 mutation remain irreducible kernel custody.
+
+The `worker_relevance` hook accepts the evolving task query plus a bounded set
+of canonical candidate summaries and returns typed worker ids and scores.
+Automatic provider projection and explicit `worker_discover` call this same
+hook; there is no parallel semantic-discovery policy. The engine validates that
+rankings contain only unique candidates, preserves version-bound explicit
+promotion precedence, and disables an owner that returns invalid semantic
+output. If no healthy owner exists, or its own agent-runner turn is resolving a
+tool surface, the exact local weighted scorer provides deterministic recovery.
 
 ## Autonomy Modes
 
@@ -479,11 +489,10 @@ canonical worker state and inbox history; failed workers are unregistered, so
 the callable catalog has no duplicate synthetic health state.
 
 At each provider request boundary, the worker-kernel-owned resolver captures the
-catalog revision and ranks dynamic workers by explicit session promotion,
-weighted name/description/intent/example/provenance relevance, recent
-successes, recency, and identity. `worker_discover` uses the exact same scorer;
-there is no second discovery policy. The deterministic local scorer is the
-always-available fallback seam for a future semantic-router worker. The entire
+catalog revision and ranks dynamic workers by explicit session promotion, the
+active `worker_relevance` hook, recent successes, recency, and identity.
+`worker_discover` uses the same hook and local recovery scorer; there is no
+second discovery policy. The entire
 dynamic provider surface selects at most 12 workers: recent explicit
 promotions enter first, then relevant/default candidates fill remaining slots.
 Promotion records are version-bound, recency-ordered, and retained to a bounded
@@ -596,13 +605,13 @@ schemas, worker availability, lifecycle mechanics, and approval boundaries are
 projected from the live typed surface on every turn instead of being duplicated
 in a second hardcoded instruction set.
 
-Automatic worker projection and `worker_discover` share one deterministic
-bootstrap ranker over worker names, declared intents, examples, descriptions,
-and provenance. It uses exact weighted terms and short adjacent phrases while
-discarding common conversation framing; session promotions remain version-bound
-and outrank automatic relevance. A future learned router can be an ordinary
-worker, but the engine always retains this local fallback so routing cannot
-depend on another worker being healthy.
+Automatic worker projection and `worker_discover` share the active
+`worker_relevance` worker. Its input contains the evolving task query and
+bounded canonical candidate metadata; its output is a typed ranking. The engine
+retains one exact weighted-term and adjacent-phrase scorer as recovery when no
+hook is active, the hook fails, or the hook's own agent-runner turn resolves its
+surface. Session promotions remain version-bound and outrank both paths, so
+routing never depends exclusively on another worker being healthy.
 
 Three unrelated runtime boundaries use three deliberately separate closed
 types instead of the former generic visibility scope:

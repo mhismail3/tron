@@ -54,6 +54,7 @@ operation_bindings! {
         "webhook_rotate" => |invocation, deps| { response(invocation, rotate_webhook(invocation, deps).await) },
         "stop_all" => |invocation, deps| { response(invocation, stop_all(invocation, deps).await) },
         "context_summary" => |invocation, deps| { response(invocation, context_summary(invocation, deps).await) },
+        "worker_relevance" => |invocation, deps| { response(invocation, worker_relevance(invocation, deps).await) },
         "surface_snapshot" => |invocation, deps| { response(invocation, engine_surface_snapshot(invocation, deps).await) },
         "webhook_invoke" => |invocation, deps| { response(invocation, webhook(invocation, deps).await) },
     ];
@@ -121,6 +122,60 @@ async fn context_summary(invocation: &Invocation, deps: &Deps) -> Result<Value, 
             invocation,
         )
         .await
+}
+
+async fn worker_relevance(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    let candidates = invocation
+        .payload
+        .get("candidates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "worker relevance candidates must be an array".to_owned())?;
+    let candidate_ids = candidates
+        .iter()
+        .filter_map(|candidate| candidate.get("workerId").and_then(Value::as_str))
+        .collect::<std::collections::BTreeSet<_>>();
+    let Some(execution) = deps
+        .runtime
+        .execute_engine_hook(
+            super::types::WorkerEngineHook::WorkerRelevance,
+            json!({
+                "query":invocation.payload["query"].clone(),
+                "candidates":candidates,
+            }),
+            invocation
+                .payload
+                .get("originWorkerId")
+                .and_then(Value::as_str),
+            invocation,
+        )
+        .await?
+    else {
+        return Ok(json!({"handled":false,"rankings":[]}));
+    };
+    let rankings = execution.output["rankings"]
+        .as_array()
+        .ok_or_else(|| "worker relevance hook returned no rankings array".to_owned())?;
+    let mut seen = std::collections::BTreeSet::new();
+    for ranking in rankings {
+        let worker_id = ranking["workerId"].as_str().unwrap_or_default();
+        if !candidate_ids.contains(worker_id) || !seen.insert(worker_id) {
+            let reason = deps
+                .runtime
+                .reject_engine_hook_output(
+                    &execution,
+                    super::types::WorkerEngineHook::WorkerRelevance,
+                    "rankings must contain unique IDs from the supplied candidate set",
+                )
+                .await;
+            return Err(reason);
+        }
+    }
+    Ok(json!({
+        "handled":true,
+        "workerId":execution.worker_id,
+        "workerVersion":execution.worker_version,
+        "rankings":rankings,
+    }))
 }
 
 async fn core_proposal_list(_invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -368,11 +423,33 @@ async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String>
         let _ = payloads.insert(worker.worker_id.clone(), (worker, active.bundle, evidence));
     }
     let include_unmatched = super::retrieval::query_is_empty(Some(&query));
-    let ranked = super::retrieval::rank_workers(documents, Some(&query), &promoted)
-        .into_iter()
-        .filter(|rank| include_unmatched || rank.relevance_score > 0)
-        .take(limit)
-        .collect::<Vec<_>>();
+    let origin_worker_id = (invocation.causal_context.actor_kind
+        == crate::engine::ActorKind::Worker)
+        .then(|| {
+            invocation
+                .causal_context
+                .actor_id
+                .as_str()
+                .strip_prefix("worker:")
+        })
+        .flatten();
+    let ranked = super::retrieval::rank_workers_with_hook(
+        deps.runtime.host(),
+        invocation
+            .causal_context
+            .session_id
+            .as_deref()
+            .unwrap_or("worker-discover"),
+        origin_worker_id,
+        documents,
+        Some(&query),
+        &promoted,
+    )
+    .await
+    .into_iter()
+    .filter(|rank| include_unmatched || rank.relevance_score > 0)
+    .take(limit)
+    .collect::<Vec<_>>();
     if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
         for rank in &ranked {
             let Some((worker, _, _)) = payloads.get(&rank.worker_id) else {

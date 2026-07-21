@@ -216,6 +216,7 @@ pub(crate) async fn resolve_tool_surface(
     host: &EngineHostHandle,
     session_id: &str,
     relevance_query: Option<&str>,
+    origin_worker_id: Option<&str>,
 ) -> Result<ResolvedToolSurface, String> {
     let actor_id =
         ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?;
@@ -259,8 +260,15 @@ pub(crate) async fn resolve_tool_surface(
         })
         .map(|promotion| promotion.worker_id.clone())
         .collect::<BTreeSet<_>>();
-    let ranked =
-        super::retrieval::rank_workers(dynamic_documents, relevance_query, &applicable_promotions);
+    let ranked = super::retrieval::rank_workers_with_hook(
+        host,
+        session_id,
+        origin_worker_id,
+        dynamic_documents,
+        relevance_query,
+        &applicable_promotions,
+    )
+    .await;
     let query_is_empty = super::retrieval::query_is_empty(relevance_query);
     let mut selected_dynamic = BTreeMap::new();
     for promotion in &promotion_entries {

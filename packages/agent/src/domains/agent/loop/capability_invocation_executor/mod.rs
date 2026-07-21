@@ -244,6 +244,9 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     /// engine-owned value prevents an agent-runner hop from restarting a
     /// worker causal trace at zero.
     pub worker_causal_depth: u32,
+    /// Worker that owns an agent-runner child session. Tool calls retain that
+    /// worker actor identity so semantic hooks can avoid self-recursion.
+    pub origin_worker_id: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
@@ -348,6 +351,7 @@ pub async fn execute_capability_invocation(
             ctx.trace_id,
             ctx.parent_invocation_id,
             ctx.worker_causal_depth,
+            ctx.origin_worker_id,
             effective_args,
             &per_invocation_cancel,
         )
@@ -413,6 +417,7 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     worker_causal_depth: u32,
+    origin_worker_id: Option<&str>,
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
@@ -448,7 +453,11 @@ async fn execute_capability_primitive_via_engine(
         workspace_id,
         &effective_args,
     );
-    let actor_id = match ActorId::new(format!("agent:{session_id}")) {
+    let (actor_identity, actor_kind) = origin_worker_id.map_or_else(
+        || (format!("agent:{session_id}"), ActorKind::Agent),
+        |worker_id| (format!("worker:{worker_id}"), ActorKind::Worker),
+    );
+    let actor_id = match ActorId::new(actor_identity) {
         Ok(id) => id,
         Err(error) => {
             return capability_failure_result(
@@ -466,7 +475,7 @@ async fn execute_capability_primitive_via_engine(
         .cloned()
         .unwrap_or_else(TraceId::generate);
     let function_id = target.function_id.clone();
-    let base_context = CausalContext::new(actor_id, ActorKind::Agent, trace_id.clone());
+    let base_context = CausalContext::new(actor_id, actor_kind, trace_id.clone());
     let worker_version = target
         .function
         .model_tool

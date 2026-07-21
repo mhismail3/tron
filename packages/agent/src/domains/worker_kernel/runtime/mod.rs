@@ -198,9 +198,10 @@ impl WorkerRuntime {
         relevance_query: Option<&str>,
     ) -> Result<Value, String> {
         let session_id = session_id.unwrap_or("engine-dashboard");
-        let surface = super::surface::resolve_tool_surface(&self.host, session_id, relevance_query)
-            .await?
-            .snapshot;
+        let surface =
+            super::surface::resolve_tool_surface(&self.host, session_id, relevance_query, None)
+                .await?
+                .snapshot;
         let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
         Ok(json!({
             "autonomousWorkers": self.autonomous_enabled(),

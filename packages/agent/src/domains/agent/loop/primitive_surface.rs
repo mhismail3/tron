@@ -137,17 +137,22 @@ pub(crate) async fn resolve_provider_primitive_surface(
     host: &EngineHostHandle,
     session_id: &str,
 ) -> Result<ResolvedPrimitiveSurface, String> {
-    resolve_provider_primitive_surface_for_query(host, session_id, None).await
+    resolve_provider_primitive_surface_for_query(host, session_id, None, None).await
 }
 
 pub(crate) async fn resolve_provider_primitive_surface_for_query(
     host: &EngineHostHandle,
     session_id: &str,
     relevance_query: Option<&str>,
+    origin_worker_id: Option<&str>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
-    let resolved =
-        crate::domains::worker_kernel::resolve_tool_surface(host, session_id, relevance_query)
-            .await?;
+    let resolved = crate::domains::worker_kernel::resolve_tool_surface(
+        host,
+        session_id,
+        relevance_query,
+        origin_worker_id,
+    )
+    .await?;
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
 
@@ -369,6 +374,7 @@ mod tests {
             &host,
             "autonomy-session",
             Some("perform recent research with sources"),
+            None,
         )
         .await
         .expect("autonomous surface");
@@ -433,6 +439,7 @@ mod tests {
             &host,
             "promotion-session",
             Some("astronomy ephemeris"),
+            None,
         )
         .await
         .expect("surface before promotion");
@@ -443,6 +450,7 @@ mod tests {
             &host,
             "promotion-session",
             Some("astronomy ephemeris"),
+            None,
         )
         .await
         .expect("surface after promotion");
@@ -492,6 +500,7 @@ mod tests {
             &reopened,
             "durable-session",
             Some("astronomy ephemeris"),
+            None,
         )
         .await
         .expect("surface after restart");
@@ -528,6 +537,7 @@ mod tests {
             &host,
             "bounded-session",
             Some("astronomy ephemeris"),
+            None,
         )
         .await
         .expect("bounded surface");
@@ -571,6 +581,7 @@ mod tests {
             &host,
             "recreated-session",
             Some("astronomy ephemeris"),
+            None,
         )
         .await
         .expect("surface");

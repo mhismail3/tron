@@ -204,7 +204,7 @@ fn validate_engine_hook_contract(
     hook: WorkerEngineHook,
     bundle: &WorkerBundle,
 ) -> Result<(), String> {
-    let (input, output) = match hook {
+    let (input, output, invalid_inputs, invalid_outputs) = match hook {
         WorkerEngineHook::ContextSummary => (
             json!({
                 "messages": [
@@ -214,6 +214,32 @@ fn validate_engine_hook_contract(
                 ]
             }),
             json!({"narrative":"The user asked to preserve the durable task context."}),
+            vec![json!({})],
+            vec![json!({}), json!({"narrative":""})],
+        ),
+        WorkerEngineHook::WorkerRelevance => (
+            json!({
+                "query":"recent compiler research",
+                "candidates":[{
+                    "workerId":"recent-research",
+                    "name":"Recent Research",
+                    "description":"Researches recent sources",
+                    "intents":["recent research"],
+                    "examples":["What changed this month?"],
+                    "provenance":["test:fixture@1"],
+                    "completedRuns":3,
+                    "updatedAt":"2026-07-21T00:00:00Z"
+                }]
+            }),
+            json!({
+                "rankings":[{
+                    "workerId":"recent-research",
+                    "score":900,
+                    "reason":"semantic match"
+                }]
+            }),
+            vec![json!({}), json!({"query":"missing candidates"})],
+            vec![json!({}), json!({"rankings":[{"workerId":"","score":-1}]})],
         ),
     };
     let function_id =
@@ -242,5 +268,36 @@ fn validate_engine_hook_contract(
             "engine hook '{}' output does not match outputSchema: {error}",
             hook.as_str()
         )
-    })
+    })?;
+    for invalid in invalid_inputs {
+        if crate::engine::validate_engine_schema_payload(
+            &function_id,
+            "request",
+            &bundle.input_schema,
+            &invalid,
+        )
+        .is_ok()
+        {
+            return Err(format!(
+                "engine hook '{}' inputSchema accepts an invalid hook payload",
+                hook.as_str()
+            ));
+        }
+    }
+    for invalid in invalid_outputs {
+        if crate::engine::validate_engine_schema_payload(
+            &function_id,
+            "response",
+            &bundle.output_schema,
+            &invalid,
+        )
+        .is_ok()
+        {
+            return Err(format!(
+                "engine hook '{}' outputSchema accepts an invalid hook payload",
+                hook.as_str()
+            ));
+        }
+    }
+    Ok(())
 }

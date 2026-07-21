@@ -55,6 +55,7 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
     pub worker_causal_depth: u32,
+    pub origin_worker_id: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -286,6 +287,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         trace_id: params.trace_id,
                         parent_invocation_id: params.parent_invocation_id,
                         worker_causal_depth: params.worker_causal_depth,
+                        origin_worker_id: params.origin_worker_id,
                     };
                 let working_dir = working_dir.as_str();
                 async move {

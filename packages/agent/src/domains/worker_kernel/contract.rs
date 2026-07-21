@@ -8,6 +8,7 @@ use crate::engine::{
 const WORKER: &str = "worker_kernel";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
 pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
+pub(crate) const WORKER_RELEVANCE_FUNCTION: &str = "worker_kernel::worker_relevance";
 pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
@@ -357,7 +358,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         json!({
             "type":"object","additionalProperties":false,"required":["bundle"],
             "properties":{
-                "bundle":worker_bundle_schema(),
+                "bundle":super::bundle_contract::worker_bundle_schema(),
                 "sourceDirectory":{"type":"string","description":"Optional local directory containing staged UTF-8 worker source. Files are imported recursively into bundle.files; explicit inline files win. Use this after authoring and testing locally so the model does not read and echo file contents back through JSON."},
                 "predecessorWorkerId":{"type":"string"}
             }
@@ -568,6 +569,63 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
     );
     specs.push(
         FunctionContract::new(
+            WORKER_RELEVANCE_FUNCTION,
+            WORKER,
+            EffectClass::ExternalSideEffect,
+            RiskLevel::Medium)
+        .visibility(FunctionVisibility::Internal)
+        .request_schema(json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["query","candidates"],
+            "properties":{
+                "originWorkerId":{"type":"string"},
+                "query":{"type":"string","maxLength":12000},
+                "candidates":{
+                    "type":"array","maxItems":256,
+                    "items":{
+                        "type":"object","additionalProperties":false,
+                        "required":["workerId","name","description","intents","examples","provenance","completedRuns","updatedAt"],
+                        "properties":{
+                            "workerId":{"type":"string","minLength":1},
+                            "name":{"type":"string"},
+                            "description":{"type":"string"},
+                            "intents":{"type":"array","items":{"type":"string"}},
+                            "examples":{"type":"array","items":{"type":"string"}},
+                            "provenance":{"type":"array","items":{"type":"string"}},
+                            "completedRuns":{"type":"integer","minimum":0},
+                            "updatedAt":{"type":"string"}
+                        }
+                    }
+                }
+            }
+        }))
+        .response_schema(json!({
+            "type":"object","additionalProperties":false,"required":["handled","rankings"],
+            "properties":{
+                "handled":{"type":"boolean"},
+                "workerId":{"type":"string"},
+                "workerVersion":{"type":"string"},
+                "rankings":{
+                    "type":"array","maxItems":256,
+                    "items":{
+                        "type":"object","additionalProperties":false,
+                        "required":["workerId","score"],
+                        "properties":{
+                            "workerId":{"type":"string","minLength":1},
+                            "score":{"type":"integer","minimum":0,"maximum":1000000000},
+                            "reason":{"type":"string"}
+                        }
+                    }
+                }
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Invoke the active worker-owned semantic relevance policy, if any. Kernel callers retain deterministic local ranking as recovery.")
+        .build()?,
+    );
+    specs.push(
+        FunctionContract::new(
             "worker_kernel::inbox_attach",
             WORKER,
             EffectClass::IdempotentWrite,
@@ -771,208 +829,6 @@ fn worker_id_schema(include_version: bool) -> Value {
 
 fn open_response() -> Value {
     json!({"type":"object","additionalProperties":true})
-}
-
-/// Keep the complete worker authoring contract on the model-facing operation.
-/// `WorkerBundle` remains the decoding authority; this schema makes that same
-/// contract discoverable to an agent without a separate proposal or manual.
-fn worker_bundle_schema() -> Value {
-    let command = json!({
-        "type":"object",
-        "additionalProperties":false,
-        "required":["command"],
-        "properties":{
-            "command":{"type":"array","minItems":1,"items":{"type":"string"}},
-            "timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}
-        }
-    });
-    json!({
-        "type":"object",
-        "additionalProperties":false,
-        "description":"Complete self-contained persistent worker bundle. No external proposal, installer, binding, or private source documentation is required.",
-        "required":[
-            "schemaVersion","name","description","inputSchema","outputSchema",
-            "runner","provenance"
-        ],
-        "properties":{
-            "schemaVersion":{
-                "type":"string",
-                "enum":["tron.worker_bundle.v1"],
-                "description":"Version of the complete persistent-worker bundle contract."
-            },
-            "workerId":{
-                "type":"string",
-                "description":"Optional stable kebab-case identity. An existing id is updated directly; a new suggested id still yields to a near-identical semantic match."
-            },
-            "name":{"type":"string","minLength":1},
-            "description":{
-                "type":"string",
-                "minLength":1,
-                "description":"Explain when the agent should route work to this worker."
-            },
-            "toolName":{
-                "type":"string",
-                "description":"Optional stable direct tool name. Plain names are normalized to the worker_<name> namespace automatically; omit to retain the predecessor name or derive it from the worker name."
-            },
-            "inputSchema":{
-                "type":"object",
-                "description":"JSON object schema for typed worker input."
-            },
-            "outputSchema":{
-                "type":"object",
-                "description":"JSON object schema for typed worker output."
-            },
-            "runner":{
-                "description":"Exactly one durable runner contract.",
-                "oneOf":[
-                    {
-                        "type":"object","additionalProperties":false,
-                        "required":["kind","instructions"],
-                        "properties":{
-                            "kind":{"type":"string","enum":["agent"]},
-                            "instructions":{"type":"string","minLength":1},
-                            "model":{"type":"string"}
-                        }
-                    },
-                    {
-                        "type":"object","additionalProperties":false,
-                        "required":["kind","command"],
-                        "properties":{
-                            "kind":{"type":"string","enum":["command"]},
-                            "command":{"type":"array","minItems":1,"items":{"type":"string"},"description":"Program and arguments executed with files/ as the working directory. Refer to a fetched dependency named N through ../dependencies/N."}
-                        }
-                    },
-                    {
-                        "type":"object","additionalProperties":false,
-                        "required":["kind","command","invokeUrl"],
-                        "properties":{
-                            "kind":{"type":"string","enum":["service"]},
-                            "command":{"type":"array","minItems":1,"items":{"type":"string"}},
-                            "invokeUrl":{"type":"string"},
-                            "healthUrl":{"type":"string"}
-                        }
-                    }
-                ]
-            },
-            "files":{
-                "type":"object",
-                "description":"Relative source-file paths mapped to complete UTF-8 string contents. They are materialized beneath files/, the working directory for runner, smoke-test, and health-check commands.",
-                "additionalProperties":{"type":"string"}
-            },
-            "dependencies":{
-                "type":"array",
-                "items":{
-                    "type":"object","additionalProperties":false,
-                    "required":["name","source","version"],
-                    "properties":{
-                        "name":{"type":"string"},
-                        "source":{"type":"string","description":"Use file:// for a local source, git+https:// for a repository, or http(s):// for one downloaded file. The acquired source is materialized at ../dependencies/<name> relative to files/."},
-                        "version":{"type":"string","description":"Exact version or source revision; never latest or a range."},
-                        "checksum":{"type":"string","description":"Optional expected sha256:<64 hex> source-tree digest. Omit it to let worker_upsert fetch the exact version and persist the actual digest automatically."},
-                        "install":{
-                            "type":"object",
-                            "additionalProperties":false,
-                            "required":["command"],
-                            "description":"Optional isolated setup command executed with this dependency's ../dependencies/<name> directory as its working directory before smoke tests.",
-                            "properties":{
-                                "command":{"type":"array","minItems":1,"items":{"type":"string"}},
-                                "timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}
-                            }
-                        }
-                    }
-                }
-            },
-            "triggers":{
-                "type":"array",
-                "items":{
-                    "oneOf":[
-                        {
-                            "type":"object","additionalProperties":false,
-                            "required":["kind","id"],
-                            "properties":{
-                                "kind":{"type":"string","enum":["manual"]},
-                                "id":{"type":"string"}
-                            }
-                        },
-                        {
-                            "type":"object","additionalProperties":false,
-                            "required":["kind","id","everySeconds"],
-                            "properties":{
-                                "kind":{"type":"string","enum":["schedule"]},
-                                "id":{"type":"string"},
-                                "everySeconds":{"type":"integer","minimum":1},
-                                "input":{}
-                            }
-                        },
-                        {
-                            "type":"object","additionalProperties":false,
-                            "required":["kind","id","topic"],
-                            "properties":{
-                                "kind":{"type":"string","enum":["engine_event"]},
-                                "id":{"type":"string"},
-                                "topic":{"type":"string","minLength":1},
-                                "filter":{"type":"object"},
-                                "input":{}
-                            }
-                        },
-                        {
-                            "type":"object","additionalProperties":false,
-                            "required":["kind","id"],
-                            "properties":{
-                                "kind":{"type":"string","enum":["webhook"]},
-                                "id":{"type":"string"},
-                                "input":{}
-                            }
-                        }
-                    ]
-                }
-            },
-            "secretBindings":{
-                "type":"array",
-                "description":"Logical vault names only; never include secret values.",
-                "items":{
-                    "oneOf":[
-                        {"type":"string"},
-                        {
-                            "type":"object","additionalProperties":false,
-                            "required":["name"],
-                            "properties":{
-                                "name":{"type":"string"},
-                                "required":{"type":"boolean"}
-                            }
-                        }
-                    ]
-                }
-            },
-            "smokeTests":{"type":"array","description":"Pre-activation commands executed from files/ after dependencies and their install commands are ready.","items":command},
-            "healthChecks":{"type":"array","description":"Pre-activation commands executed from files/ after dependencies and their install commands are ready.","items":command},
-            "engineHooks":{
-                "type":"array",
-                "uniqueItems":true,
-                "description":"Optional semantic engine roles activated atomically with this version. No separate binding or grant is required. context_summary accepts {messages:[{role,text}]} and returns {narrative:string}.",
-                "items":{"type":"string","enum":["context_summary"]}
-            },
-            "provenance":{
-                "type":"array","minItems":1,
-                "items":{
-                    "type":"object","additionalProperties":false,
-                    "required":["source"],
-                    "properties":{
-                        "source":{"type":"string","minLength":1},
-                        "revision":{"type":"string"},
-                        "checksum":{"type":"string"}
-                    }
-                }
-            },
-            "routing":{
-                "type":"object","additionalProperties":false,
-                "properties":{
-                    "intents":{"type":"array","items":{"type":"string"}},
-                    "examples":{"type":"array","items":{"type":"string"}}
-                }
-            }
-        }
-    })
 }
 
 #[cfg(test)]

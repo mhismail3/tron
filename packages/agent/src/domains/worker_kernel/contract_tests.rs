@@ -80,8 +80,8 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     );
     assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
     assert_eq!(
-        bundle["properties"]["engineHooks"]["items"]["enum"][0],
-        "context_summary"
+        bundle["properties"]["engineHooks"]["items"]["enum"],
+        json!(["context_summary", "worker_relevance"])
     );
     assert!(
         bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
@@ -103,6 +103,21 @@ fn context_summary_is_an_internal_worker_seam_not_a_model_primitive() {
         core_primitives()
             .iter()
             .all(|primitive| primitive.function_id != CONTEXT_SUMMARY_FUNCTION)
+    );
+}
+
+#[test]
+fn worker_relevance_is_internal_policy_not_provider_ceremony() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let hook = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == WORKER_RELEVANCE_FUNCTION)
+        .expect("worker relevance contract");
+    assert_eq!(hook.visibility, FunctionVisibility::Internal);
+    assert!(
+        core_primitives()
+            .iter()
+            .all(|primitive| primitive.function_id != WORKER_RELEVANCE_FUNCTION)
     );
 }
 

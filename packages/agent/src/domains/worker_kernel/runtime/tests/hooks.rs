@@ -36,7 +36,7 @@ fn context_summary_bundle(worker_id: &str, narrative: &str) -> WorkerBundle {
         "type":"object",
         "additionalProperties":false,
         "required":["narrative"],
-        "properties":{"narrative":{"type":"string"}}
+        "properties":{"narrative":{"type":"string","minLength":1}}
     });
     bundle.engine_hooks = vec![WorkerEngineHook::ContextSummary];
     bundle

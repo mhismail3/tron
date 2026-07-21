@@ -59,6 +59,7 @@ fn execution_context<'a>(
         trace_id: None,
         parent_invocation_id: None,
         worker_causal_depth: 0,
+        origin_worker_id: None,
     }
 }
 
@@ -166,7 +167,10 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
     assert_eq!(invocation.payload, json!({"value":"hello"}));
     assert_eq!(invocation.causal_context.actor_kind, ActorKind::Agent);
     assert_eq!(invocation.causal_context.trace_id, trace);
-    assert_eq!(invocation.causal_context.parent_invocation_id, Some(parent));
+    assert_eq!(
+        invocation.causal_context.parent_invocation_id,
+        Some(parent.clone())
+    );
     assert_eq!(invocation.causal_context.trigger_depth(), 7);
     assert_eq!(
         invocation.causal_context.advertised_function_revision(),
@@ -179,6 +183,22 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
             .idempotency_key
             .as_deref()
             .is_some_and(|key| key.starts_with("model-tool:"))
+    );
+
+    context.origin_worker_id = Some("semantic-router");
+    let worker_call = CapabilityInvocationDraft::new(
+        "worker-direct-call",
+        "direct_test",
+        Map::from_iter([("value".to_owned(), json!("from worker"))]),
+    );
+    let worker_result =
+        execute_capability_invocation(&worker_call, "direct-session", "/tmp", &context).await;
+    assert_eq!(worker_result.result.is_error, None);
+    let invocation = captured.lock().clone().expect("captured worker invocation");
+    assert_eq!(invocation.causal_context.actor_kind, ActorKind::Worker);
+    assert_eq!(
+        invocation.causal_context.actor_id.as_str(),
+        "worker:semantic-router"
     );
 }
 

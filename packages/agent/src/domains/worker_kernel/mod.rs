@@ -11,6 +11,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `bundle_contract` | Complete model-discoverable schema for atomic worker authoring |
 //! | `contract` | Fixed direct worker-management contracts and their adjacent contract tests |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
@@ -67,9 +68,10 @@
 //! fixed typed contract, selects the newest declaring worker when that worker
 //! is healthy and enabled, and uses the ordinary durable dispatcher. An older
 //! implementation never silently replaces a failed or disabled current owner.
-//! The Engine Dashboard exposes active hook ownership. `context_summary` is the
-//! first production hook; deterministic recovery remains in the kernel so
-//! compaction cannot depend recursively on its own policy worker.
+//! The Engine Dashboard exposes active hook ownership. `context_summary` and
+//! `worker_relevance` are production hooks. Each retains a narrow deterministic
+//! recovery path in the kernel so compaction and tool projection cannot depend
+//! recursively on their own policy worker.
 //! The authenticated `engine::surface_snapshot` read returns that same
 //! provider-neutral projection, every published worker's projection status,
 //! the complete fixed-tool inventory, and canonical engine worker summaries;
@@ -78,13 +80,16 @@
 //! Fixed inventory remains inspectable while autonomy is off and marks each
 //! tool unexposed, so operator introspection never masquerades as provider
 //! availability.
-//! Explicit discovery and automatic projection use one deterministic weighted
-//! retrieval implementation. Its bootstrap scorer uses exact field-weighted
-//! tokens and bounded adjacent phrases, so conversation framing and substring
-//! collisions cannot manufacture relevance. Mutable run/health evidence is a rebuildable
-//! engine-state overlay, not function-contract text; successful work therefore
-//! cannot churn catalog revisions. Fixed invocation supports durable enqueue
-//! plus bounded await so parallel workers do not monopolize provider calls.
+//! Explicit discovery and automatic projection use one worker-owned relevance
+//! hook when installed. Its bounded candidate contract carries canonical worker
+//! metadata and operational evidence without exposing provider internals. The
+//! local recovery scorer uses exact field-weighted tokens and bounded adjacent
+//! phrases, so conversation framing and substring collisions cannot manufacture
+//! relevance when the hook is absent, unhealthy, or executing itself. Mutable
+//! run/health evidence is a rebuildable engine-state overlay, not
+//! function-contract text; successful work therefore cannot churn catalog
+//! revisions. Fixed invocation supports durable enqueue plus bounded await so
+//! parallel workers do not monopolize provider calls.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute
@@ -155,6 +160,7 @@ use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
 
+mod bundle_contract;
 mod contract;
 mod core_proposals;
 mod handlers;
@@ -168,7 +174,7 @@ mod surface;
 mod tests;
 mod types;
 
-pub(crate) use contract::CONTEXT_SUMMARY_FUNCTION;
+pub(crate) use contract::{CONTEXT_SUMMARY_FUNCTION, WORKER_RELEVANCE_FUNCTION};
 
 pub(crate) use persistence::{
     ensure_state_snapshot, list_state_snapshots, prepare_worker_state_retirement,

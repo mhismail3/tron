@@ -1,12 +1,16 @@
 //! Provider-neutral worker retrieval and deterministic fallback ranking.
 //!
-//! Both automatic provider projection and explicit `worker_discover` use this
-//! scorer. A replaceable semantic-router worker may later supply stronger
-//! rankings, but the kernel fallback remains deterministic, local, explainable,
-//! and available before any router worker exists.
+//! Both automatic provider projection and explicit `worker_discover` first use
+//! an active `worker_relevance` hook. The scorer below remains deterministic,
+//! local, explainable recovery before a router worker exists, after it fails,
+//! and while that worker's own agent-runner session resolves tools.
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+
+use serde_json::json;
+
+use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
 
 const ROUTING_STOP_WORDS: &[&str] = &[
     "and",
@@ -95,6 +99,94 @@ pub(crate) fn rank_workers(
         .into_iter()
         .map(|document| WorkerRetrievalRank {
             relevance_score: relevance_score(&document, &query_terms, &query_phrases),
+            promoted: promoted_workers.contains(&document.worker_id),
+            key: document.key,
+            worker_id: document.worker_id,
+            completed_runs: document.completed_runs,
+            updated_at: document.updated_at,
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(compare_rank);
+    ranked
+}
+
+/// Resolve semantic ranking through an active worker hook and recover through
+/// the deterministic local scorer when no hook is active or it fails.
+pub(crate) async fn rank_workers_with_hook(
+    host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+    origin_worker_id: Option<&str>,
+    documents: Vec<WorkerRetrievalDocument>,
+    query: Option<&str>,
+    promoted_workers: &BTreeSet<String>,
+) -> Vec<WorkerRetrievalRank> {
+    if query_is_empty(query) || documents.is_empty() {
+        return rank_workers(documents, query, promoted_workers);
+    }
+    let candidates = documents
+        .iter()
+        .map(|document| {
+            json!({
+                "workerId":document.worker_id,
+                "name":document.name,
+                "description":document.description,
+                "intents":document.intents,
+                "examples":document.examples,
+                "provenance":document.provenance,
+                "completedRuns":document.completed_runs,
+                "updatedAt":document.updated_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut payload = json!({
+        "query":query.unwrap_or_default(),
+        "candidates":candidates,
+    });
+    if let Some(worker_id) = origin_worker_id {
+        payload["originWorkerId"] = json!(worker_id);
+    }
+    let invocation = FunctionId::new(crate::domains::worker_kernel::WORKER_RELEVANCE_FUNCTION)
+        .ok()
+        .and_then(|function_id| {
+            let actor_id = ActorId::new("system:worker-relevance").ok()?;
+            Some(Invocation::new_sync(
+                function_id,
+                payload,
+                CausalContext::new(actor_id, ActorKind::System, TraceId::generate())
+                    .with_session_id(session_id)
+                    .with_idempotency_key(format!("worker-relevance:{}", uuid::Uuid::now_v7())),
+            ))
+        });
+    let Some(invocation) = invocation else {
+        return rank_workers(documents, query, promoted_workers);
+    };
+    let outcome = host.invoke(invocation).await;
+    let rankings = outcome
+        .error
+        .is_none()
+        .then_some(outcome.value)
+        .flatten()
+        .filter(|value| value["handled"] == true)
+        .and_then(|value| value["rankings"].as_array().cloned());
+    let Some(rankings) = rankings else {
+        if let Some(error) = outcome.error {
+            tracing::warn!(%error, "worker relevance hook failed; using deterministic recovery");
+        }
+        return rank_workers(documents, query, promoted_workers);
+    };
+    let scores = rankings
+        .into_iter()
+        .filter_map(|ranking| {
+            Some((
+                ranking["workerId"].as_str()?.to_owned(),
+                usize::try_from(ranking["score"].as_u64()?).ok()?,
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut ranked = documents
+        .into_iter()
+        .map(|document| WorkerRetrievalRank {
+            relevance_score: scores.get(&document.worker_id).copied().unwrap_or(0),
             promoted: promoted_workers.contains(&document.worker_id),
             key: document.key,
             worker_id: document.worker_id,
@@ -221,6 +313,62 @@ fn contains_any_phrase(values: &[String], phrase: &str, weight: usize) -> usize 
 mod tests {
     use super::*;
 
+    async fn install_relevance_worker(
+        host: &crate::engine::EngineHostHandle,
+        rankings_output: &str,
+    ) {
+        let bundle = json!({
+            "schemaVersion":"tron.worker_bundle.v1",
+            "workerId":"semantic-router",
+            "name":"Semantic Router",
+            "description":"Ranks persistent workers for the current task",
+            "inputSchema":{
+                "type":"object","additionalProperties":false,"required":["query","candidates"],
+                "properties":{
+                    "query":{"type":"string"},
+                    "candidates":{"type":"array","items":{
+                        "type":"object","additionalProperties":false,
+                        "required":["workerId","name","description","intents","examples","provenance","completedRuns","updatedAt"],
+                        "properties":{
+                            "workerId":{"type":"string","minLength":1},"name":{"type":"string"},
+                            "description":{"type":"string"},"intents":{"type":"array"},
+                            "examples":{"type":"array"},"provenance":{"type":"array"},
+                            "completedRuns":{"type":"integer","minimum":0},"updatedAt":{"type":"string"}
+                        }
+                    }}
+                }
+            },
+            "outputSchema":{
+                "type":"object","additionalProperties":false,"required":["rankings"],
+                "properties":{"rankings":{"type":"array","items":{
+                    "type":"object","additionalProperties":false,"required":["workerId","score"],
+                    "properties":{
+                        "workerId":{"type":"string","minLength":1},
+                        "score":{"type":"integer","minimum":0,"maximum":1000000000},
+                        "reason":{"type":"string"}
+                    }
+                }}}
+            },
+            "runner":{"kind":"command","command":["printf",rankings_output]},
+            "engineHooks":["worker_relevance"],
+            "provenance":[{"source":"test:semantic-router"}]
+        });
+        let outcome = host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::upsert").unwrap(),
+                json!({"bundle":bundle}),
+                CausalContext::new(
+                    ActorId::new("agent:retrieval-test").unwrap(),
+                    ActorKind::Agent,
+                    TraceId::generate(),
+                )
+                .with_session_id("retrieval-test")
+                .with_idempotency_key("install-semantic-router"),
+            ))
+            .await;
+        assert_eq!(outcome.error, None, "semantic router upsert failed");
+    }
+
     fn document(worker_id: &str, intent: &str, completed_runs: u64) -> WorkerRetrievalDocument {
         WorkerRetrievalDocument {
             key: worker_id.to_owned(),
@@ -254,6 +402,91 @@ mod tests {
             ["promoted", "veteran", "research"]
         );
         assert!(ranked[1].relevance_score > 0);
+    }
+
+    #[tokio::test]
+    async fn active_worker_hook_ranks_projection_and_self_origin_recovers_locally() {
+        let context =
+            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        install_relevance_worker(
+            &context.engine_host,
+            r#"{"rankings":[{"workerId":"formatter","score":1000},{"workerId":"research","score":1}]}"#,
+        )
+        .await;
+        let documents = vec![
+            document("research", "recent research", 1),
+            document("formatter", "format notes", 0),
+        ];
+
+        let ranked = rank_workers_with_hook(
+            &context.engine_host,
+            "retrieval-test",
+            None,
+            documents.clone(),
+            Some("recent research"),
+            &BTreeSet::new(),
+        )
+        .await;
+        assert_eq!(ranked[0].worker_id, "formatter");
+        assert_eq!(ranked[0].relevance_score, 1000);
+
+        let self_origin = rank_workers_with_hook(
+            &context.engine_host,
+            "retrieval-worker-test",
+            Some("semantic-router"),
+            documents,
+            Some("recent research"),
+            &BTreeSet::new(),
+        )
+        .await;
+        assert_eq!(self_origin[0].worker_id, "research");
+        assert!(self_origin[0].relevance_score > 0);
+    }
+
+    #[tokio::test]
+    async fn invalid_worker_hook_ranking_disables_owner_and_uses_recovery() {
+        let context =
+            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        install_relevance_worker(
+            &context.engine_host,
+            r#"{"rankings":[{"workerId":"not-a-candidate","score":1000}]}"#,
+        )
+        .await;
+        let documents = vec![
+            document("research", "recent research", 1),
+            document("formatter", "format notes", 0),
+        ];
+
+        let ranked = rank_workers_with_hook(
+            &context.engine_host,
+            "invalid-retrieval-test",
+            None,
+            documents,
+            Some("recent research"),
+            &BTreeSet::new(),
+        )
+        .await;
+        assert_eq!(ranked[0].worker_id, "research");
+
+        let inspection = context
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::inspect").unwrap(),
+                json!({"workerId":"semantic-router"}),
+                CausalContext::new(
+                    ActorId::new("agent:retrieval-test").unwrap(),
+                    ActorKind::Agent,
+                    TraceId::generate(),
+                )
+                .with_session_id("invalid-retrieval-test")
+                .with_idempotency_key("inspect-invalid-semantic-router"),
+            ))
+            .await;
+        assert_eq!(inspection.error, None);
+        let inspection = inspection.value.expect("worker inspection payload");
+        assert_eq!(inspection["worker"]["enabled"], false);
+        assert_eq!(inspection["route"]["enabled"], false);
+        assert_eq!(inspection["healthHistory"][0]["status"], "failed");
     }
 
     #[test]
