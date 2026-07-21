@@ -1,7 +1,7 @@
 //! Primitive agent loop.
 //!
 //! The loop owns provider execution after startup has accepted a prompt:
-//! reconstruct session state, compose soul/state/history context, call the
+//! reconstruct session state, compose product intent and durable history, call the
 //! provider with the resolved direct typed surface, persist resulting events,
 //! and repeat until the assistant reaches a terminal response.
 //!
@@ -16,8 +16,7 @@
 //! metadata; raw logs, commands, code, file contents, local paths, secrets,
 //! grant ids, authority ids, and hidden reasoning are not projected. Failures
 //! rejected before durable trace insertion still rely on direct bounded failure
-//! result evidence; adding a pre-trace failure record is a separate tracing
-//! slice.
+//! result evidence.
 //!
 //! Every `TronAgent` owns a required engine host for its full lifetime. Each
 //! turn borrows that host to adapt the worker-kernel-owned live tool surface

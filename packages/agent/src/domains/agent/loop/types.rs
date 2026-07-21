@@ -53,7 +53,7 @@ pub struct AgentConfig {
     /// Retry configuration for provider stream failures.
     #[serde(skip)]
     pub retry: Option<crate::shared::foundation::retry::RetryConfig>,
-    /// Workspace ID for scoping memory recall (resolved from working directory).
+    /// Workspace observation resolved from the working directory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
 }

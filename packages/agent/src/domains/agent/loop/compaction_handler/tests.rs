@@ -61,7 +61,7 @@ fn context_manager_with_three_turns() -> ContextManager {
     let older_context = "older-context-detail ".repeat(2_000);
     let recent_context = "recent-context-detail ".repeat(50);
     let mut manager = ContextManager::new(ContextManagerConfig {
-        system_prompt: Some("soul".into()),
+        system_prompt: Some("product intent".into()),
         working_directory: Some("/tmp".into()),
         compaction: CompactionConfig {
             threshold: 0.70,

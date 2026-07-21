@@ -1,6 +1,6 @@
 //! Primitive context management types.
 //!
-//! These types describe the bare agent loop context: soul/system prompt,
+//! These types describe the bare agent loop context: product/system prompt,
 //! provider-visible direct tools, environment metadata, messages, and
 //! compaction state. Persistent adaptation belongs to worker bundles rather
 //! than a separate generic prompt-state plane.

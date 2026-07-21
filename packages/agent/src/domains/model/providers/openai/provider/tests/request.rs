@@ -97,7 +97,7 @@ fn build_request_serializes_capabilities_as_provider_tools() {
 fn build_request_compiles_primitive_context_into_instructions() {
     let provider = OpenAIProvider::new(oauth_config("gpt-5.5"));
     let context = Context {
-        system_prompt: Some("Agent soul".into()),
+        system_prompt: Some("Product intent".into()),
         messages: std::sync::Arc::from([Message::user("Hello")]),
         capabilities: Some(vec![test_tool()]),
         working_directory: Some("/workspace".into()),
@@ -107,7 +107,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
     let request = provider.build_request(&context, &ProviderStreamOptions::default());
     let instructions = request.instructions.expect("instructions are required");
 
-    assert!(instructions.contains("Agent soul"));
+    assert!(instructions.contains("Product intent"));
     assert!(instructions.contains("Server: localhost:9847"));
     assert!(instructions.contains("Current working directory: /workspace"));
     assert!(instructions.contains("Available Direct Tools"));
@@ -132,7 +132,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
 fn build_request_merges_provider_instructions_with_context() {
     let provider = OpenAIProvider::new(api_key_config("gpt-5"));
     let context = Context {
-        system_prompt: Some("Agent soul".into()),
+        system_prompt: Some("Product intent".into()),
         working_directory: Some("/workspace".into()),
         ..Default::default()
     };
@@ -148,10 +148,10 @@ fn build_request_merges_provider_instructions_with_context() {
     let provider_index = instructions
         .find("Provider front matter")
         .expect("provider instructions included");
-    let soul_index = instructions
-        .find("Agent soul")
+    let intent_index = instructions
+        .find("Product intent")
         .expect("context instructions included");
-    assert!(provider_index < soul_index);
+    assert!(provider_index < intent_index);
     assert!(instructions.contains("Current working directory: /workspace"));
 }
 

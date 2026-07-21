@@ -3,7 +3,7 @@ use crate::domains::agent::context::types::{CompactionConfig, ContextManagerConf
 
 fn test_config() -> ContextManagerConfig {
     ContextManagerConfig {
-        system_prompt: Some("soul".into()),
+        system_prompt: Some("product intent".into()),
         working_directory: Some("/tmp".into()),
         compaction: CompactionConfig {
             threshold: 0.70,
@@ -34,10 +34,10 @@ fn message_store_updates_tokens_and_count() {
 }
 
 #[test]
-fn build_base_context_contains_soul_and_environment_only() {
+fn build_base_context_contains_product_intent_and_environment_only() {
     let manager = manager();
     let context = manager.build_base_context();
-    assert_eq!(context.system_prompt.as_deref(), Some("soul"));
+    assert_eq!(context.system_prompt.as_deref(), Some("product intent"));
     assert_eq!(context.working_directory.as_deref(), Some("/tmp"));
     assert!(context.messages.is_empty());
     assert!(context.capabilities.is_none());

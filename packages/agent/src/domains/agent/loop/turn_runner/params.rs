@@ -33,7 +33,7 @@ pub struct TurnParams<'a> {
     pub previous_context_baseline: u64,
     /// Optional retry configuration for provider stream retries.
     pub retry_config: Option<&'a crate::shared::foundation::retry::RetryConfig>,
-    /// Workspace ID for scoping capability context (e.g. memory recall).
+    /// Workspace observation carried into causal records and worker inputs.
     pub workspace_id: Option<&'a str>,
     /// Server origin (e.g. `"localhost:9847"`) for system prompt.
     pub server_origin: Option<&'a str>,

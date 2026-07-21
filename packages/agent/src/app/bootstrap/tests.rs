@@ -5,7 +5,6 @@ mod cli;
 mod database;
 mod provider_auth;
 mod server_runtime;
-mod source_guards;
 
 /// Small pool size for tests - prevents FD exhaustion when many tests
 /// run in parallel, each opening a file-backed `SQLite` pool.

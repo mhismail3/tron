@@ -6,10 +6,10 @@ use crate::shared::protocol::messages::Context;
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
 
-    if let Some(ref soul) = context.system_prompt
-        && !soul.is_empty()
+    if let Some(ref system_prompt) = context.system_prompt
+        && !system_prompt.is_empty()
     {
-        parts.push(soul.clone());
+        parts.push(system_prompt.clone());
     }
 
     if let Some(ref origin) = context.server_origin
