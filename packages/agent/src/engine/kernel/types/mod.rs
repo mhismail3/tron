@@ -1,16 +1,15 @@
 //! Engine type contracts grouped by kernel concern.
 //!
 //! `catalog` owns revision counters, visibility, provenance, and change
-//! metadata; `worker` and `function` own the concrete catalog definitions.
+//! metadata; `function` owns the executable catalog definition. Persistent
+//! worker bundles and lifecycle state belong to `domains::worker_kernel`.
 
 mod catalog;
 mod function;
-mod worker;
 
 pub use catalog::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind,
-    FunctionHealth, FunctionRevision, Provenance, VisibilityScope, WorkerRevision,
+    FunctionHealth, FunctionRevision, Provenance, VisibilityScope,
 };
 pub use function::FunctionDefinition;
 pub use function::{EffectClass, IdempotencyContract, IdempotencyScope, ReplayBehavior, RiskLevel};
-pub use worker::{WorkerDefinition, WorkerKind, WorkerLifecycleState};

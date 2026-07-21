@@ -1,22 +1,18 @@
 //! In-memory engine stream store.
 
-use std::collections::BTreeMap;
-
 use chrono::Utc;
 
 use super::{
-    EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
-    StreamActorScope, StreamCursor, stream_scope_visible,
+    EngineStreamEvent, EngineStreamPage, PublishStreamEvent, StreamActorScope, StreamCursor,
+    stream_scope_visible,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::types::VisibilityScope;
 
 /// In-memory stream store.
 #[derive(Default)]
 pub struct InMemoryEngineStreamStore {
     next_cursor: u64,
     events: Vec<EngineStreamEvent>,
-    subscriptions: BTreeMap<String, EngineStreamSubscription>,
 }
 
 impl InMemoryEngineStreamStore {
@@ -50,41 +46,6 @@ impl InMemoryEngineStreamStore {
         Ok(cursor)
     }
 
-    /// Create or update a subscription.
-    pub fn subscribe(
-        &mut self,
-        subscription_id: String,
-        topic: String,
-        cursor: StreamCursor,
-        visibility: VisibilityScope,
-        session_id: Option<String>,
-        workspace_id: Option<String>,
-    ) -> Result<EngineStreamSubscription> {
-        if subscription_id.trim().is_empty() {
-            return Err(EngineError::PolicyViolation(
-                "stream subscription id must not be empty".to_owned(),
-            ));
-        }
-        if topic.trim().is_empty() {
-            return Err(EngineError::PolicyViolation(
-                "stream topic must not be empty".to_owned(),
-            ));
-        }
-        let subscription = EngineStreamSubscription {
-            subscription_id: subscription_id.clone(),
-            topic,
-            cursor,
-            visibility,
-            session_id,
-            workspace_id,
-            active: true,
-            created_at: Utc::now(),
-        };
-        self.subscriptions
-            .insert(subscription_id, subscription.clone());
-        Ok(subscription)
-    }
-
     /// Return the latest cursor assigned for a topic.
     #[must_use]
     pub fn latest_cursor(&self, topic: &str) -> StreamCursor {
@@ -94,55 +55,6 @@ impl InMemoryEngineStreamStore {
             .find(|event| event.topic == topic)
             .map(|event| event.cursor)
             .unwrap_or_default()
-    }
-
-    /// Mark a subscription inactive.
-    pub fn unsubscribe(&mut self, subscription_id: &str) -> Result<bool> {
-        let Some(subscription) = self.subscriptions.get_mut(subscription_id) else {
-            return Ok(false);
-        };
-        let was_active = subscription.active;
-        subscription.active = false;
-        Ok(was_active)
-    }
-
-    /// Poll a subscription after a cursor.
-    pub fn poll(
-        &self,
-        subscription_id: &str,
-        after: Option<StreamCursor>,
-        limit: usize,
-        actor: &StreamActorScope,
-    ) -> Result<EngineStreamPage> {
-        if limit == 0 {
-            return Err(EngineError::PolicyViolation(
-                "stream poll limit must be greater than zero".to_owned(),
-            ));
-        }
-        let subscription =
-            self.subscriptions
-                .get(subscription_id)
-                .ok_or_else(|| EngineError::NotFound {
-                    kind: "stream_subscription",
-                    id: subscription_id.to_owned(),
-                })?;
-        if !subscription.active {
-            return Err(EngineError::PolicyViolation(format!(
-                "stream subscription {subscription_id} is inactive"
-            )));
-        }
-        if !stream_scope_visible(
-            &subscription.visibility,
-            subscription.session_id.as_deref(),
-            subscription.workspace_id.as_deref(),
-            actor,
-        ) {
-            return Err(EngineError::PolicyViolation(format!(
-                "stream subscription {subscription_id} is not visible"
-            )));
-        }
-        let after = after.unwrap_or(subscription.cursor);
-        self.poll_topic(&subscription.topic, after, limit, actor)
     }
 
     /// Poll a topic directly from an explicit cursor without durable subscriber state.

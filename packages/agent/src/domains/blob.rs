@@ -9,8 +9,8 @@ use base64::Engine;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::worker::DomainRegistrationContext;
-use crate::domains::registration::worker::DomainWorkerModule;
+use crate::domains::registration::module::DomainModule;
+use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
 use crate::shared::server::context::run_blocking_task;
@@ -21,10 +21,10 @@ use std::sync::Arc;
 
 const STREAM_TOPICS: &[&str] = &[];
 
-pub(crate) fn worker_module(
+pub(crate) fn function_module(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
-    crate::domains::registration::worker::domain_worker_module(
+) -> crate::engine::Result<DomainModule> {
+    crate::domains::registration::module::domain_module(
         "blob",
         STREAM_TOPICS,
         function_registrations(capabilities()?, Arc::clone(&deps.event_store))?,

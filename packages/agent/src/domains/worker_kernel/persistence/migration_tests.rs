@@ -201,11 +201,10 @@ fn assert_migrated_state(database: &Path, root: &Path) {
     let report: Value =
         serde_json::from_slice(&fs::read(root.join(IMPORT_REPORT_FILE)).unwrap()).unwrap();
     assert_eq!(report["format"], IMPORT_FORMAT);
-    assert_eq!(report["schemaVersion"], 5);
+    assert_eq!(report["schemaVersion"], 6);
     assert_eq!(report["sourceCounts"]["resources"], 2);
     assert_eq!(report["sourceCounts"]["invocations"], 1);
     assert_eq!(report["catalogChangesRetired"], 2);
-    assert_eq!(report["streamSubscriptionsRetired"], 2);
     assert_eq!(report["importedCandidates"].as_array().unwrap().len(), 1);
     assert_eq!(report["unconvertibleRecords"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -260,23 +259,7 @@ fn assert_migrated_state(database: &Path, root: &Path) {
         scalar_text(&connection, "SELECT kind_json FROM engine_catalog_changes"),
         "\"FunctionRegistered\""
     );
-    assert_eq!(
-        connection
-            .query_row(
-                "SELECT COUNT(*) FROM engine_stream_subscriptions WHERE active=0",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-        2
-    );
-    assert_eq!(
-        scalar_text(
-            &connection,
-            "SELECT subscription_id FROM engine_stream_subscriptions WHERE active=1"
-        ),
-        "caller-durable-subscription"
-    );
+    assert!(!table_present(&connection, "engine_stream_subscriptions"));
     drop(connection);
     let ledger =
         crate::engine::durability::ledger::SqliteEngineLedgerStore::open(database).unwrap();
@@ -284,11 +267,7 @@ fn assert_migrated_state(database: &Path, root: &Path) {
         crate::engine::EngineLedgerStore::list_catalog_changes(&ledger)
             .unwrap()
             .iter()
-            .all(|change| matches!(
-                change.subject_kind,
-                crate::engine::CatalogSubjectKind::Worker
-                    | crate::engine::CatalogSubjectKind::Function
-            ))
+            .all(|change| change.subject_kind == crate::engine::CatalogSubjectKind::Function)
     );
     drop(ledger);
     let connection = Connection::open(database).unwrap();

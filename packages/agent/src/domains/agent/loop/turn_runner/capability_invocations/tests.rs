@@ -8,8 +8,8 @@ use crate::domains::session::event_store::sqlite::connection::{self, ConnectionC
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 use crate::engine::{
-    ActorId, EffectClass, EngineHostHandle, FunctionDefinition, FunctionId, Invocation, RiskLevel,
-    VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+    EffectClass, EngineHostHandle, FunctionDefinition, FunctionId, Invocation, RiskLevel,
+    VisibilityScope, WorkerId,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::events::{AssistantMessage, TronEvent};
@@ -200,19 +200,6 @@ async fn phase_engine_surface_with_mode(
     execution_mode: ExecutionMode,
 ) -> (EngineHostHandle, ResolvedPrimitiveSurface) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
-    engine_host
-        .register_worker(
-            WorkerDefinition::new(
-                WorkerId::new("capability").expect("worker id"),
-                WorkerKind::InProcess,
-                ActorId::new("capability-owner").expect("actor id"),
-            )
-            .with_namespace_claim("capability"),
-            false,
-        )
-        .await
-        .expect("register worker");
-
     let function_id = FunctionId::new("capability::phase_lifecycle").expect("function id");
     let function = FunctionDefinition::new(
         function_id.clone(),
@@ -223,11 +210,7 @@ async fn phase_engine_surface_with_mode(
     )
     .with_risk(RiskLevel::Low);
     engine_host
-        .register_function(
-            function.clone(),
-            Some(Arc::new(DelayedCapabilityHandler)),
-            false,
-        )
+        .register_function(function.clone(), Some(Arc::new(DelayedCapabilityHandler)))
         .await
         .expect("register function");
 

@@ -264,18 +264,14 @@ impl WorkerRuntime {
         for (next, _, handler) in &prepared {
             if let Err(error) = self
                 .host
-                .register_function(next.clone(), Some(Arc::clone(handler)), false)
+                .register_function(next.clone(), Some(Arc::clone(handler)))
                 .await
             {
                 let mut rollback_failures = Vec::new();
                 for (_, rollback, rollback_handler) in prepared.iter().take(updated).rev() {
                     if let Err(rollback_error) = self
                         .host
-                        .register_function(
-                            rollback.clone(),
-                            Some(Arc::clone(rollback_handler)),
-                            false,
-                        )
+                        .register_function(rollback.clone(), Some(Arc::clone(rollback_handler)))
                         .await
                     {
                         rollback_failures.push(rollback_error.to_string());
@@ -391,7 +387,6 @@ impl WorkerRuntime {
                     runtime: Arc::clone(self),
                     worker_id: worker_id.to_owned(),
                 })),
-                false,
             )
             .await
             .map_err(|error| format!("register dynamic worker tool: {error}"))?;

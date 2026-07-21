@@ -11,7 +11,7 @@ use crate::shared::server::context::ServerRuntimeContext;
 /// Register server-owned domain workers and canonical functions
 /// for single-threaded setup/test contexts.
 pub fn register_server_domains_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
-    let activation = crate::domains::registration::register_domain_workers_for_context(ctx)?;
+    let activation = crate::domains::registration::register_domains_for_context(ctx)?;
     activation.activate();
     Ok(())
 }
@@ -22,7 +22,7 @@ pub async fn register_server_domains_for_runtime_context(
     ctx: &ServerRuntimeContext,
 ) -> EngineResult<()> {
     let activation =
-        crate::domains::registration::register_domain_workers_for_runtime_context(ctx).await?;
+        crate::domains::registration::register_domains_for_runtime_context(ctx).await?;
     activation.activate();
     Ok(())
 }

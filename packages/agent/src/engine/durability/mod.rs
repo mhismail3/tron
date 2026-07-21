@@ -4,10 +4,10 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `ledger` | Invocation, idempotency, catalog-change, and worker restart truth. |
+//! | `ledger` | Invocation, idempotency, and catalog-change truth. |
 //! | `replay` | Read-only session replay snapshot DTOs for engine-owned rows. |
-//! | `state` | Scoped primitive key-value state with compare-and-set revisioning. |
-//! | `streams` | Durable stream events, cursors, and subscriptions. |
+//! | `state` | Scoped kernel key-value state for runtime overlays. |
+//! | `streams` | Durable stream events read through caller-owned cursors. |
 //!
 //! ## Entry Points
 //!
@@ -19,7 +19,7 @@
 //!
 //! Durability depends on kernel ids/types, invocation records, validation, and
 //! SQLite storage helpers. It does not depend on app, transport, provider, or
-//! domain workers.
+//! domain runtimes.
 //!
 //! ## Invariants
 //!

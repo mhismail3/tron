@@ -17,7 +17,7 @@ use crate::engine::{
     Result as EngineResult, RiskLevel, VisibilityScope, WorkerId,
 };
 
-/// Fully-owned contract record supplied by one domain worker.
+/// Fully-owned contract record supplied by one source domain.
 pub(crate) struct CapabilityContract {
     /// Stable operation key used by the owning domain handler.
     pub(crate) operation_key: String,
@@ -25,8 +25,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) function_id: &'static str,
     /// Worker that owns the registered function.
     pub(crate) owner_worker: &'static str,
-    /// Domain worker namespace that owns behavior.
-    pub(crate) domain_worker: &'static str,
     /// Effect class enforced by the engine.
     pub(crate) effect_class: EffectClass,
     /// Risk classification.
@@ -70,7 +68,6 @@ impl CapabilityContract {
             operation_key,
             function_id: method,
             owner_worker,
-            domain_worker: owner_worker,
             effect_class,
             risk_level,
             visibility: VisibilityScope::System,
@@ -83,18 +80,6 @@ impl CapabilityContract {
             tags: Vec::new(),
             presentation_hints: None,
         }
-    }
-
-    /// Override the canonical function id.
-    pub(crate) fn function_id(mut self, function_id: &'static str) -> Self {
-        self.function_id = function_id;
-        self
-    }
-
-    /// Override the behavior-owning domain worker.
-    pub(crate) fn domain_worker(mut self, domain_worker: &'static str) -> Self {
-        self.domain_worker = domain_worker;
-        self
     }
 
     /// Set transport idempotency mode.
@@ -151,7 +136,6 @@ impl CapabilityContract {
             operation_key: self.operation_key,
             function_id: FunctionId::new(self.function_id)?,
             owner_worker: WorkerId::new(self.owner_worker)?,
-            domain_worker: WorkerId::new(self.domain_worker)?,
             effect_class: self.effect_class,
             risk_level: self.risk_level,
             visibility: self.visibility,

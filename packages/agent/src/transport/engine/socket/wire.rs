@@ -56,21 +56,6 @@ pub(super) struct InvokeMessage {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct PromoteMessage {
-    #[serde(rename = "type")]
-    pub(super) _message_type: String,
-    pub(super) id: Option<String>,
-    pub(super) function_id: String,
-    pub(super) target_visibility: String,
-    #[serde(default)]
-    pub(super) workspace_id: Option<String>,
-    pub(super) idempotency_key: String,
-    #[serde(default)]
-    pub(super) context: Option<WireContext>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SubscribeMessage {
     #[serde(rename = "type")]
     pub(super) _message_type: String,
@@ -136,18 +121,6 @@ pub(super) struct ProtocolEvent {
     pub(super) topic: String,
     pub(super) cursor: u64,
     pub(super) event: ServerEventPayload,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct RequestMessage {
-    #[serde(rename = "type")]
-    pub(super) _message_type: String,
-    #[serde(default)]
-    pub(super) id: Option<String>,
-    pub(super) request: Value,
-    #[serde(default)]
-    pub(super) context: Option<WireContext>,
 }
 
 pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>, CapabilityError> {

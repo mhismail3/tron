@@ -41,6 +41,7 @@ pub(in crate::engine) enum PreparedSyncInvocationDecision {
 
 impl LiveCatalog {
     /// Invoke an in-process function synchronously.
+    #[cfg(test)]
     pub async fn invoke_sync(&mut self, invocation: Invocation) -> InvocationResult {
         match self.prepare_sync_invocation(invocation) {
             PreparedSyncInvocationDecision::Finished(result) => *result,

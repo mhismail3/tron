@@ -26,7 +26,6 @@ macro_rules! revision_type {
 
 revision_type!(CatalogRevision);
 revision_type!(FunctionRevision);
-revision_type!(WorkerRevision);
 
 /// Visibility scope for catalog entries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,8 +77,6 @@ impl VisibilityScope {
 /// Catalog subject type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CatalogSubjectKind {
-    /// Worker catalog entry.
-    Worker,
     /// Function catalog entry.
     Function,
 }
@@ -89,13 +86,12 @@ impl CatalogSubjectKind {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Worker => "worker",
             Self::Function => "function",
         }
     }
 }
 
-/// Coarse class for catalog-change subscriptions.
+/// Coarse class for catalog-change evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CatalogChangeClass {
     /// Worker or capability availability changed.
@@ -153,12 +149,6 @@ pub struct CatalogChange {
 /// Kind of catalog change.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CatalogChangeKind {
-    /// Worker was registered.
-    WorkerRegistered,
-    /// Worker metadata changed.
-    WorkerUpdated,
-    /// Worker unregistered.
-    WorkerUnregistered,
     /// Function was registered.
     FunctionRegistered,
     /// Function contract or metadata changed.

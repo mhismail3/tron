@@ -509,12 +509,12 @@ proposals, and removes the old grant/resource/lease/compensation tables and
 invocation columns in one transaction. Neither path retains a synthetic grant,
 compatibility adapter, nullable permission observation, or permissive legacy
 parser in steady-state execution. The same transaction removes catalog-change
-rows owned by the deleted generic trigger registry while retaining current
-worker/function catalog evidence; startup does not decode obsolete trigger
-variants merely to discard them later. It also deactivates transport-owned
-subscription rows from the former durable WebSocket design. Current sockets
-keep their cursors in connection-local state, so steady-state startup has no
-legacy subscription scanner.
+rows owned by the deleted generic trigger and catalog-worker registries while
+retaining function-change evidence; startup does not decode obsolete variants
+merely to discard them later. It also drops the former durable WebSocket
+subscription table. Durable stream events remain, while current sockets keep
+subscription identity and cursors in authenticated connection-local state and
+explicit replay callers own their cursors.
 
 There are no local operation claims, resource selectors, synthetic
 grants, or agent-kind rejections. Executable workers can change local files and
@@ -631,12 +631,11 @@ indexes and durable operational history.
 | Table | Ownership |
 |---|---|
 | `blobs` | content-addressed durable payloads |
-| `engine_catalog_changes` | catalog change stream |
+| `engine_catalog_changes` | typed-function surface revisions |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
 | `engine_invocations` | generic engine invocation history |
 | `engine_state_entries` | engine-owned state values |
 | `engine_stream_events` | durable engine stream records |
-| `engine_stream_subscriptions` | durable stream cursors |
 | `events` | session event log |
 | `logs` | structured session logs |
 | `schema_version` | primary schema version |
@@ -677,8 +676,11 @@ as a worker rather than restored as a fixed domain.
 
 ## Events and Transport
 
-`GET /engine` remains the authenticated WebSocket upgrade endpoint for clients. The public
-invoke contract admits client identity and idempotency metadata but rejects
+`GET /engine` remains the authenticated WebSocket upgrade endpoint for clients.
+Its one request operation invokes a canonical function id directly and returns
+that function's value directly in the top-level result; there is no registered
+`engine::invoke` delegation or child-result wrapper in the transport contract.
+The wire admits client scope and optional idempotency metadata but rejects
 injected internal authority/runtime fields. Bearer rotation continues to force
 client re-pairing.
 

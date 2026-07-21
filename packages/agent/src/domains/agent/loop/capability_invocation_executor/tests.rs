@@ -12,8 +12,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
     ExecutionMode, PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::engine::{
-    ActorId, EffectClass, FunctionDefinition, FunctionId, RiskLevel, VisibilityScope,
-    WorkerDefinition, WorkerId, WorkerKind,
+    EffectClass, FunctionDefinition, FunctionId, RiskLevel, VisibilityScope, WorkerId,
 };
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use crate::shared::server::failure::{CAPABILITY_PRIMITIVE_NOT_FOUND, RUNTIME_CANCELLED};
@@ -107,17 +106,6 @@ async fn unknown_direct_tool_fails_before_engine_execution() {
 #[tokio::test]
 async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.register_worker(
-        WorkerDefinition::new(
-            WorkerId::new("worker_kernel").unwrap(),
-            WorkerKind::InProcess,
-            ActorId::new("worker-kernel-owner").unwrap(),
-        )
-        .with_namespace_claim("worker_kernel"),
-        false,
-    )
-    .await
-    .unwrap();
     let function_id = FunctionId::new("worker_kernel::direct_test").unwrap();
     let mut function = FunctionDefinition::new(
         function_id.clone(),
@@ -140,7 +128,6 @@ async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
             Some(Arc::new(CapturingDirectHandler {
                 captured: Arc::clone(&captured),
             })),
-            false,
         )
         .await
         .unwrap();

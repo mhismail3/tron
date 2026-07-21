@@ -3,10 +3,10 @@
 //! `registry::LiveCatalog` owns current-process routing maps and the revision
 //! cursor. The injected engine ledger is the sole owner of catalog-change and
 //! invocation history: registration appends before advancing the revision,
-//! invocation completion returns a ledger error when persistence fails, restart
-//! derives the cursor from persisted changes, and session replay/catalog watch
-//! read durable records. The live registry does not retain duplicate history
-//! projections.
+//! invocation completion returns a ledger error when persistence fails, and
+//! restart derives the cursor from persisted changes. Function definitions are
+//! self-sufficient; there is no parallel catalog-worker registry or namespace-
+//! claim preflight. The live registry does not retain duplicate history.
 //!
 //! Discovery actor context is provenance plus visibility scope, not an
 //! authorization token or permission object.

@@ -21,7 +21,7 @@
 
 use std::path::PathBuf;
 
-use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
+use crate::domains::registration::module::{DomainModule, DomainRegistrationContext};
 use crate::shared::foundation::paths;
 
 pub(crate) mod contract;
@@ -49,10 +49,10 @@ impl Deps {
     }
 }
 
-pub(crate) fn worker_module(
+pub(crate) fn function_module(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
-    crate::domains::registration::worker::domain_worker_module(
+) -> crate::engine::Result<DomainModule> {
+    crate::domains::registration::module::domain_module(
         WORKER,
         STREAM_TOPICS,
         handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,

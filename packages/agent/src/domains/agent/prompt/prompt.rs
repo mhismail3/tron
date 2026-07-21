@@ -317,7 +317,7 @@ pub(crate) async fn publish_prompt_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::registration::worker::DomainRegistrationContext;
+    use crate::domains::registration::module::DomainRegistrationContext;
     use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, TraceId};
     use crate::shared::server::test_support::make_test_context;
 

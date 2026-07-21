@@ -4,12 +4,12 @@
 //! ids, server-driven heartbeat, and stream cursor subscription state. One
 //! stack-owned connection lease covers registry accounting, while one bounded
 //! child-task set owns the socket writer and subscription pump. Worker/client
-//! discover/inspect/watch/invoke/promote messages are translated into
+//! invoke messages are translated into
 //! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
 //! through the canonical engine transport path. Public context is limited to
 //! session/workspace/trace correlation; authority scopes and runtime metadata
-//! are not accepted on the wire. Model providers do not receive this transport
-//! surface; they receive only the capability-domain `execute` orchestrator.
+//! are not accepted on the wire. Model providers receive their own direct typed
+//! tool surface rather than this authenticated client transport.
 //!
 //! A peer remains live while it returns Pong or any other inbound activity.
 //! Missing activity after a sent Ping retires the socket; teardown cancels its
@@ -23,14 +23,14 @@ use std::time::{Duration, Instant};
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use metrics::counter;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(test)]
-use crate::engine::{StreamActorScope, StreamCursor};
+use crate::engine::StreamCursor;
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::errors::{CapabilityError, INVALID_PARAMS};
 use crate::shared::server::failure::FailureOrigin;
@@ -58,8 +58,8 @@ use outbound::{send_engine_ws_value, send_engine_ws_value_async};
 use stream_projection::stream_event_matches_filters;
 use subscriptions::{SubscriptionState, push_subscription_events};
 use wire::{
-    HeartbeatMessage, HelloMessage, InvokeMessage, PromoteMessage, RequestMessage, WireContext,
-    now_timestamp, optional_id, protocol_error,
+    HeartbeatMessage, HelloMessage, InvokeMessage, WireContext, now_timestamp, optional_id,
+    protocol_error,
 };
 
 /// Tracks connected `/engine` clients.
@@ -324,11 +324,7 @@ impl EngineWsSession {
 
         match message_type {
             "hello" => self.handle_hello(id, value).await,
-            "discover" => self.handle_request_message(id, "discover", value).await,
-            "inspect" => self.handle_request_message(id, "inspect", value).await,
-            "watch" => self.handle_request_message(id, "watch", value).await,
             "invoke" => self.handle_invoke(id, value).await,
-            "promote" => self.handle_promote(id, value).await,
             "subscribe" => self.handle_subscribe(id, value).await,
             "poll" => self.handle_poll(id, value).await,
             "ack" => self.handle_ack(id, value).await,
@@ -392,29 +388,6 @@ impl EngineWsSession {
         }))
     }
 
-    async fn handle_request_message(
-        &self,
-        id: Option<String>,
-        public_method: &'static str,
-        value: Value,
-    ) -> bool {
-        let message = match serde_json::from_value::<RequestMessage>(value) {
-            Ok(message) => message,
-            Err(error) => {
-                return self.send_error(
-                    id,
-                    protocol_error(
-                        INVALID_PARAMS,
-                        format!("invalid request message: {error}"),
-                        None,
-                    ),
-                );
-            }
-        };
-        self.dispatch_transport(message.id, public_method, message.request, message.context)
-            .await
-    }
-
     async fn handle_invoke(&self, id: Option<String>, value: Value) -> bool {
         let message = match serde_json::from_value::<InvokeMessage>(value) {
             Ok(message) => message,
@@ -425,60 +398,18 @@ impl EngineWsSession {
                 );
             }
         };
-        let mut payload = Map::new();
-        payload.insert("functionId".to_owned(), Value::String(message.function_id));
-        payload.insert(
-            "payload".to_owned(),
-            message.payload.unwrap_or_else(|| json!({})),
-        );
-        if let Some(key) = message.idempotency_key {
-            payload.insert("idempotencyKey".to_owned(), Value::String(key));
-        }
-        self.dispatch_transport(
-            message.id,
-            "invoke",
-            Value::Object(payload),
-            message.context,
-        )
-        .await
-    }
-
-    async fn handle_promote(&self, id: Option<String>, value: Value) -> bool {
-        let message = match serde_json::from_value::<PromoteMessage>(value) {
-            Ok(message) => message,
-            Err(error) => {
-                return self.send_error(
-                    id,
-                    protocol_error(INVALID_PARAMS, format!("invalid promote: {error}"), None),
-                );
-            }
-        };
-        let mut payload = Map::new();
-        payload.insert("functionId".to_owned(), Value::String(message.function_id));
-        payload.insert(
-            "targetVisibility".to_owned(),
-            Value::String(message.target_visibility),
-        );
-        payload.insert(
-            "idempotencyKey".to_owned(),
-            Value::String(message.idempotency_key),
-        );
-        if let Some(workspace_id) = message.workspace_id {
-            payload.insert("workspaceId".to_owned(), Value::String(workspace_id));
-        }
-        self.dispatch_transport(
-            message.id,
-            "promote",
-            Value::Object(payload),
-            message.context,
-        )
-        .await
+        let payload = json!({
+            "functionId": message.function_id,
+            "payload": message.payload.unwrap_or_else(|| json!({})),
+            "idempotencyKey": message.idempotency_key,
+        });
+        self.dispatch_transport(message.id, payload, message.context)
+            .await
     }
 
     async fn dispatch_transport(
         &self,
         id: Option<String>,
-        public_method: &'static str,
         params_payload: Value,
         context_override: Option<WireContext>,
     ) -> bool {
@@ -488,21 +419,10 @@ impl EngineWsSession {
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let envelope = match build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id,
-            public_method: public_method.to_owned(),
             params_payload,
             context,
         }) {
-            Ok(Some(envelope)) => envelope,
-            Ok(None) => {
-                return self.send_error(
-                    id,
-                    protocol_error(
-                        INVALID_PARAMS,
-                        format!("engine method {public_method} is not registered"),
-                        None,
-                    ),
-                );
-            }
+            Ok(envelope) => envelope,
             Err(error) => return self.send_error(id, error),
         };
         let trace_id = envelope.causal_context.trace_id.to_string();

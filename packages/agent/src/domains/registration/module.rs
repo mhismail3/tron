@@ -1,13 +1,12 @@
-//! Domain worker registration data structures.
+//! Domain function-composition data structures.
 //!
 //! This module is the setup-only boundary between the broad server runtime
-//! context and domain-owned worker modules. Runtime handlers receive the narrow
+//! context and domain-owned function sets. Runtime handlers receive the narrow
 //! `Deps` type owned by their domain; this context is only used while building
-//! worker/function registrations at startup. `DomainWorkerModule` is an inert
-//! catalog description; startup tasks and shutdown hooks remain under the
-//! registration lifecycle token until complete engine setup succeeds. Domain
-//! builders may return the opaque description, but only the registration owner
-//! can inspect or mutate its worker, function, and stream-topic contents.
+//! registrations at startup. `DomainModule` groups one source-owned function
+//! set; it is not a runtime worker or a second lifecycle plane. Startup tasks
+//! and shutdown hooks remain under the registration lifecycle token until
+//! complete engine setup succeeds.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,7 +19,7 @@ use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::registration::catalog;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::settings::SettingsRuntime;
-use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerDefinition, WorkerKind};
+use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerId};
 use crate::shared::server::context::ServerRuntimeContext;
 
 #[derive(Clone)]
@@ -68,25 +67,19 @@ pub(crate) struct DomainFunctionRegistration {
     pub(crate) handler: Arc<dyn InProcessFunctionHandler>,
 }
 
-pub(crate) struct DomainWorkerModule {
-    pub(super) worker: WorkerDefinition,
+pub(crate) struct DomainModule {
+    pub(super) owner: WorkerId,
     pub(super) functions: Vec<DomainFunctionRegistration>,
     pub(super) stream_topics: &'static [&'static str],
 }
 
-pub(crate) fn domain_worker_module(
+pub(crate) fn domain_module(
     namespace: &'static str,
     stream_topics: &'static [&'static str],
     functions: Vec<DomainFunctionRegistration>,
-) -> crate::engine::Result<DomainWorkerModule> {
-    let worker = WorkerDefinition::new(
-        catalog::worker_id(namespace)?,
-        WorkerKind::InProcess,
-        catalog::actor_id(catalog::SYSTEM_OWNER_ACTOR)?,
-    )
-    .with_namespace_claim(namespace);
-    Ok(DomainWorkerModule {
-        worker,
+) -> crate::engine::Result<DomainModule> {
+    Ok(DomainModule {
+        owner: catalog::worker_id(namespace)?,
         functions,
         stream_topics,
     })

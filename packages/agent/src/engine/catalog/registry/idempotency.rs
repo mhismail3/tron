@@ -5,29 +5,14 @@ use sha2::{Digest, Sha256};
 
 use super::LiveCatalog;
 use crate::engine::durability::ledger::{
-    IdempotencyEntry, IdempotencyKey, IdempotencyReservation, IdempotencyReservationOutcome,
-    IdempotencyStatus, StoredInvocationOutcome,
+    IdempotencyEntry, IdempotencyKey, IdempotencyReservation, IdempotencyStatus,
+    StoredInvocationOutcome,
 };
 use crate::engine::invocation::model::{Invocation, InvocationResult};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::types::{
     FunctionDefinition, IdempotencyScope, ReplayBehavior, VisibilityScope,
 };
-
-/// Idempotency decision for an invocation before the handler or built-in runs.
-pub(in crate::engine) enum InvocationIdempotencyDecision {
-    /// No idempotency reservation is required.
-    None,
-    /// This invocation owns a fresh reservation and may execute.
-    Reserved(IdempotencyReservation),
-    /// A replay/conflict/error result has already been determined.
-    Finished {
-        /// Result to record and return.
-        result: InvocationResult,
-        /// Concrete idempotency scope, if one was resolved.
-        scope: Option<IdempotencyScope>,
-    },
-}
 
 impl LiveCatalog {
     pub(super) fn result_for_existing_idempotency(
@@ -130,57 +115,6 @@ impl LiveCatalog {
                         reason: "duplicate key is configured to reject".to_owned(),
                     },
                 ),
-            },
-        }
-    }
-
-    /// Reserve or replay an invocation idempotency key before executing work.
-    pub(in crate::engine) fn begin_invocation_idempotency(
-        &mut self,
-        function: &FunctionDefinition,
-        invocation: &Invocation,
-    ) -> InvocationIdempotencyDecision {
-        let reservation = match self.idempotency_lookup(function, invocation) {
-            Ok(Some(reservation)) => reservation,
-            Ok(None) => return InvocationIdempotencyDecision::None,
-            Err(err) => {
-                return InvocationIdempotencyDecision::Finished {
-                    result: InvocationResult::error(
-                        invocation,
-                        function.owner_worker.clone(),
-                        function.revision,
-                        self.revision,
-                        err,
-                    ),
-                    scope: None,
-                };
-            }
-        };
-
-        match self.ledger.reserve_idempotency(reservation.clone()) {
-            Ok(IdempotencyReservationOutcome::Reserved(_)) => {
-                InvocationIdempotencyDecision::Reserved(reservation)
-            }
-            Ok(IdempotencyReservationOutcome::Existing(existing)) => {
-                InvocationIdempotencyDecision::Finished {
-                    result: self.result_for_existing_idempotency(
-                        function,
-                        invocation,
-                        &existing,
-                        &reservation.payload_fingerprint,
-                    ),
-                    scope: Some(existing.key.scope.clone()),
-                }
-            }
-            Err(err) => InvocationIdempotencyDecision::Finished {
-                result: InvocationResult::error(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    err,
-                ),
-                scope: Some(reservation.key.scope),
             },
         }
     }

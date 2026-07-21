@@ -10,16 +10,16 @@
 //! replay/catch-up and stateless stream polling require explicit stored
 //! cursors. `/engine` keeps subscription ids and acknowledged cursors local to
 //! the owning socket; it does not project transient connection state into the
-//! durable subscription store. The engine applies visibility before stream pagination so a
+//! durable engine database. The engine applies visibility before stream pagination so a
 //! session-specific `/engine` subscriber cannot starve behind older events from
-//! other sessions.
+//! other sessions. No durable subscription-record plane exists.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`http`] | HTTP-adjacent auth gate for WebSocket upgrades |
-//! | [`engine`] | `/engine` contracts, request routing, socket sessions, and stream cursors |
+//! | [`engine`] | Direct `/engine` invocation routing, socket sessions, and stream cursors |
 //! | [`runtime`] | Runtime services, stream projection, and setup |
 //!
 //! ## Entry Points

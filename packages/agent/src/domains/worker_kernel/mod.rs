@@ -131,8 +131,8 @@
 use serde_json::Value;
 use std::sync::Arc;
 
-use crate::domains::registration::worker::{
-    DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
+use crate::domains::registration::module::{
+    DomainFunctionRegistration, DomainModule, DomainRegistrationContext,
 };
 
 mod contract;
@@ -160,7 +160,7 @@ pub(crate) use surface::{EngineSurfaceSnapshot, promote_worker_for_session, reso
 pub(crate) const STREAM_TOPICS: &[&str] = &["worker.lifecycle", "worker.invocations"];
 
 pub(crate) struct Registration {
-    pub(crate) module: DomainWorkerModule,
+    pub(crate) module: DomainModule,
     pub(crate) engine_functions: Vec<DomainFunctionRegistration>,
     pub(crate) runtime: Arc<WorkerRuntime>,
 }
@@ -237,7 +237,7 @@ pub(crate) fn registration(
     let (engine_functions, functions): (Vec<_>, Vec<_>) = functions
         .into_iter()
         .partition(|registration| registration.definition.id.namespace() == "engine");
-    let module = crate::domains::registration::worker::domain_worker_module(
+    let module = crate::domains::registration::module::domain_module(
         "worker_kernel",
         STREAM_TOPICS,
         functions,

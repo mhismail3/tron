@@ -119,26 +119,6 @@ impl InMemoryEngineStateStore {
         Ok(entry)
     }
 
-    /// Compare-and-set one entry.
-    pub fn compare_and_set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        expected_revision: Option<u64>,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        let existing = self.get(scope.clone(), &namespace, &key)?;
-        let actual = existing.as_ref().map(|entry| entry.revision);
-        if actual != expected_revision {
-            return Err(EngineError::PolicyViolation(format!(
-                "state revision conflict for {namespace}/{key}: expected {:?}, actual {:?}",
-                expected_revision, actual
-            )));
-        }
-        self.set(scope, namespace, key, value)
-    }
-
     /// Delete one entry.
     pub fn delete(&mut self, scope: EngineStateScope, namespace: &str, key: &str) -> Result<bool> {
         Ok(self
@@ -285,26 +265,6 @@ CREATE TABLE IF NOT EXISTS engine_state_entries (
             revision,
             updated_at,
         })
-    }
-
-    /// Compare-and-set one entry.
-    pub fn compare_and_set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        expected_revision: Option<u64>,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        let existing = self.get(scope.clone(), &namespace, &key)?;
-        let actual = existing.as_ref().map(|entry| entry.revision);
-        if actual != expected_revision {
-            return Err(EngineError::PolicyViolation(format!(
-                "state revision conflict for {namespace}/{key}: expected {:?}, actual {:?}",
-                expected_revision, actual
-            )));
-        }
-        self.set(scope, namespace, key, value)
     }
 
     /// Delete one entry.

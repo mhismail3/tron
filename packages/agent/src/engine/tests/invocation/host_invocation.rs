@@ -4,10 +4,7 @@ use super::*;
 async fn sync_invocation_succeeds_and_records_revisions() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
     let invocation = Invocation::new_sync(fid("alpha::read"), json!({"x": 1}), causal());
 
@@ -21,20 +18,15 @@ async fn sync_invocation_succeeds_and_records_revisions() {
 #[tokio::test]
 async fn invocation_rejects_a_function_surface_that_changed_after_advertisement() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let mut first = read_function("alpha::read", "w1");
     first.metadata = json!({"workerVersion":"worker-v1"});
     let advertised_revision = catalog
-        .register_function(first.clone(), Some(handler()), true)
+        .register_function(first.clone(), Some(handler()))
         .unwrap();
 
     let mut second = first;
     second.metadata = json!({"workerVersion":"worker-v2"});
-    let current_revision = catalog
-        .register_function(second, Some(handler()), true)
-        .unwrap();
+    let current_revision = catalog.register_function(second, Some(handler())).unwrap();
     let invocation = Invocation::new_sync(
         fid("alpha::read"),
         json!({"x": 1}),
@@ -71,10 +63,7 @@ async fn invocation_rejects_a_function_surface_that_changed_after_advertisement(
 async fn invocation_ledger_records_success_error_and_full_causality() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
 
     let parent = super::ids::InvocationId::new("parent-invocation").unwrap();
@@ -123,9 +112,6 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
 #[tokio::test]
 async fn schema_validation_checks_request_and_response_payloads() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let schema = json!({
         "type": "object",
         "required": ["name"],
@@ -146,7 +132,6 @@ async fn schema_validation_checks_request_and_response_payloads() {
                     "additionalProperties": true
                 })),
             Some(handler()),
-            true,
         )
         .unwrap();
 
@@ -192,7 +177,7 @@ async fn schema_validation_checks_request_and_response_payloads() {
     let invalid_schema = read_function("alpha::invalid_schema", "w1")
         .with_request_schema(json!({"type": "definitely-not-json-schema"}));
     assert!(matches!(
-        catalog.register_function(invalid_schema, Some(handler()), true),
+        catalog.register_function(invalid_schema, Some(handler())),
         Err(EngineError::InvalidSchema { .. })
     ));
 }
@@ -200,9 +185,6 @@ async fn schema_validation_checks_request_and_response_payloads() {
 #[tokio::test]
 async fn schema_validation_enforces_array_max_items() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     catalog
         .register_function(
             read_function("alpha::bounded", "w1").with_request_schema(json!({
@@ -218,7 +200,6 @@ async fn schema_validation_enforces_array_max_items() {
                 "additionalProperties": false
             })),
             Some(handler()),
-            true,
         )
         .unwrap();
 
@@ -249,7 +230,7 @@ async fn schema_validation_enforces_array_max_items() {
     let invalid_schema = read_function("alpha::bad_max_items", "w1")
         .with_request_schema(json!({"type": "array", "maxItems": -1}));
     assert!(matches!(
-        catalog.register_function(invalid_schema, Some(handler()), true),
+        catalog.register_function(invalid_schema, Some(handler())),
         Err(EngineError::InvalidSchema { .. })
     ));
 }
@@ -258,16 +239,12 @@ async fn schema_validation_enforces_array_max_items() {
 async fn schema_validation_enforces_array_max_items_without_items_schema() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
         .register_function(
             read_function("alpha::bare_bounded", "w1").with_request_schema(json!({
                 "type": "array",
                 "maxItems": 1
             })),
             Some(handler()),
-            true,
         )
         .unwrap();
 
@@ -288,11 +265,9 @@ async fn schema_validation_enforces_array_max_items_without_items_schema() {
 }
 
 #[tokio::test]
-async fn host_unregister_function_updates_discovery_and_watch() {
+async fn host_unregister_function_updates_discovery() {
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.register_worker_for_setup(worker("w1", "alpha"), true)
-        .unwrap();
-    host.register_function_for_setup(read_function("alpha::read", "w1"), Some(handler()), true)
+    host.register_function_for_setup(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
 
     let actor_context = ActorContext::new(actor("system"), ActorKind::System);
@@ -304,48 +279,20 @@ async fn host_unregister_function_updates_discovery_and_watch() {
     };
     assert_eq!(host.discover(&query).await.len(), 1);
 
-    let before = host
-        .watch(&actor_context, CatalogWatchRequest::default())
-        .await
-        .unwrap()
-        .current_revision;
     host.unregister_function(&fid("alpha::read"), &wid("w1"))
         .await
         .unwrap();
 
     assert!(host.discover(&query).await.is_empty());
-    let page = host
-        .watch(
-            &actor_context,
-            CatalogWatchRequest {
-                after_revision: before,
-                classes: Some(vec![CatalogChangeClass::Availability]),
-                subject_prefix: Some("alpha::".to_owned()),
-                owner_worker: Some(wid("w1")),
-                ..CatalogWatchRequest::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(page.changes.len(), 1);
-    assert_eq!(
-        page.changes[0].kind,
-        CatalogChangeKind::FunctionUnregistered
-    );
-    assert_eq!(page.changes[0].subject_id, "alpha::read");
 }
 
 #[tokio::test]
 async fn invocation_returns_structured_errors() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
         .register_function(
             read_function("alpha::read", "w1"),
             Some(Arc::new(FailHandler)),
-            true,
         )
         .unwrap();
 
@@ -380,12 +327,9 @@ async fn invocation_returns_structured_errors() {
 #[tokio::test]
 async fn invocation_enforces_health_and_idempotency_key() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let function = write_function("alpha::write", "w1");
     catalog
-        .register_function(function, Some(handler()), true)
+        .register_function(function, Some(handler()))
         .unwrap();
 
     let no_key = catalog
@@ -413,7 +357,6 @@ async fn invocation_enforces_health_and_idempotency_key() {
         .register_function(
             write_function("alpha::write", "w1").with_health(FunctionHealth::Unhealthy),
             Some(handler()),
-            true,
         )
         .unwrap();
     let unhealthy = catalog
@@ -432,9 +375,6 @@ async fn invocation_enforces_health_and_idempotency_key() {
 #[tokio::test]
 async fn invocation_enforces_visibility_scope() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let session_function = FunctionDefinition::new(
         fid("alpha::session"),
         wid("w1"),
@@ -444,7 +384,7 @@ async fn invocation_enforces_visibility_scope() {
     )
     .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
     catalog
-        .register_function(session_function, Some(handler()), true)
+        .register_function(session_function, Some(handler()))
         .unwrap();
 
     let hidden = catalog
@@ -470,29 +410,15 @@ async fn invocation_enforces_visibility_scope() {
 }
 
 #[tokio::test]
-async fn engine_host_handle_bootstraps_in_memory_host() {
+async fn engine_host_handle_starts_without_registered_wrapper_functions() {
     let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
     let host = handle.lock().await;
-    assert!(host.catalog().worker(&wid("engine")).is_some());
-    for id in [
-        "engine::discover",
-        "engine::inspect",
-        "engine::watch",
-        "engine::invoke",
-        "engine::promote",
-    ] {
-        assert!(host.catalog().function(&fid(id)).is_some(), "{id}");
-    }
+    assert!(host.catalog().function(&fid("engine::invoke")).is_none());
 }
 
 #[tokio::test]
 async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
     let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker(worker("w1", "alpha"), true)
-        .await
-        .unwrap();
-
     let started = Arc::new(Barrier::new(2));
     let release = Arc::new(Notify::new());
     handle
@@ -502,7 +428,6 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
                 started: Arc::clone(&started),
                 release: Arc::clone(&release),
             })),
-            true,
         )
         .await
         .unwrap();
@@ -529,11 +454,7 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
             .any(|function| function.id == fid("alpha::slow"))
     );
     handle
-        .register_function(
-            read_function("alpha::new_read", "w1"),
-            Some(handler()),
-            true,
-        )
+        .register_function(read_function("alpha::new_read", "w1"), Some(handler()))
         .await
         .expect("catalog updates should not wait for slow handler");
 
@@ -548,93 +469,8 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
 }
 
 #[tokio::test]
-async fn engine_invoke_meta_does_not_block_discovery_while_child_runs() {
-    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker(worker("w1", "alpha"), true)
-        .await
-        .unwrap();
-
-    let started = Arc::new(Barrier::new(2));
-    let release = Arc::new(Notify::new());
-    handle
-        .register_function(
-            read_function("alpha::slow", "w1"),
-            Some(Arc::new(BlockingHandler {
-                started: Arc::clone(&started),
-                release: Arc::clone(&release),
-            })),
-            true,
-        )
-        .await
-        .unwrap();
-
-    let invocation = Invocation::new_sync(
-        fid("engine::invoke"),
-        json!({
-            "functionId": "alpha::slow",
-            "payload": {"x": 1}
-        }),
-        causal(),
-    );
-    let running = {
-        let handle = handle.clone();
-        tokio::spawn(async move { handle.invoke(invocation).await })
-    };
-
-    started.wait().await;
-    let functions = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        handle.discover(&FunctionQuery {
-            actor: Some(ActorContext::new(actor("agent"), ActorKind::Agent)),
-            ..FunctionQuery::default()
-        }),
-    )
-    .await
-    .expect("engine::invoke child execution should not block discovery");
-    assert!(
-        functions
-            .iter()
-            .any(|function| function.id == fid("alpha::slow"))
-    );
-    handle
-        .register_function(
-            read_function("alpha::new_read", "w1"),
-            Some(handler()),
-            true,
-        )
-        .await
-        .expect("catalog updates should not wait for delegated child execution");
-
-    release.notify_waiters();
-    let result = running.await.unwrap();
-    assert_eq!(
-        result.value.as_ref().unwrap()["child"]["value"]["payload"],
-        json!({"x": 1})
-    );
-    let host = handle.lock().await;
-    let records = host.catalog().ledger_invocations().unwrap();
-    let child_record = records
-        .iter()
-        .find(|record| record.function_id == fid("alpha::slow"))
-        .unwrap();
-    assert_eq!(
-        child_record.parent_invocation_id,
-        Some(result.invocation_id.clone())
-    );
-    assert!(
-        child_record.catalog_revision < host.catalog().revision(),
-        "delegated child should preserve the catalog revision captured before the concurrent update"
-    );
-}
-
-#[tokio::test]
 async fn engine_host_handle_records_panics_and_replays_panic_errors() {
     let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker(worker("w1", "alpha"), true)
-        .await
-        .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     #[derive(Clone)]
     struct CountingPanicHandler {
@@ -654,7 +490,6 @@ async fn engine_host_handle_records_panics_and_replays_panic_errors() {
             Some(Arc::new(CountingPanicHandler {
                 calls: Arc::clone(&calls),
             })),
-            true,
         )
         .await
         .unwrap();
@@ -691,9 +526,6 @@ async fn engine_host_handle_records_panics_and_replays_panic_errors() {
 #[tokio::test]
 async fn regular_cancellation_records_and_replays_typed_error() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker_for_setup(worker("w1", "alpha"), true)
-        .unwrap();
     let started = Arc::new(Barrier::new(2));
     handle
         .register_function_for_setup(
@@ -703,7 +535,6 @@ async fn regular_cancellation_records_and_replays_typed_error() {
                 started: Arc::clone(&started),
                 release: Arc::new(Notify::new()),
             })),
-            true,
         )
         .unwrap();
 
@@ -756,31 +587,14 @@ async fn regular_cancellation_records_and_replays_typed_error() {
 }
 
 #[tokio::test]
-async fn regular_cancellation_rejects_privileged_host_targets() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-    let error = handle
-        .invoke_regular_cancellable(
-            Invocation::new_sync(fid("engine::discover"), json!({}), causal()),
-            &tokio_util::sync::CancellationToken::new(),
-        )
-        .await
-        .expect_err("privileged target must not fall back to ordinary invocation");
-    assert!(matches!(
-        error,
-        EngineError::PolicyViolation(message)
-            if message.contains("regular in-process function")
-    ));
-}
-
-#[tokio::test]
-async fn sqlite_engine_host_handle_reopens_watchable_catalog_changes() {
+async fn sqlite_engine_host_handle_reopens_catalog_revision() {
     let dir = tempfile::tempdir().unwrap();
     let ledger_path = dir.path().join("tron.sqlite");
     {
         let handle = super::host::EngineHostHandle::open_sqlite(&ledger_path).unwrap();
         let mut host = handle.lock().await;
         host.catalog_mut()
-            .register_worker(worker("w1", "alpha"), true)
+            .register_function(read_function("alpha::read", "w1"), Some(handler()))
             .unwrap();
     }
 
@@ -793,7 +607,11 @@ async fn sqlite_engine_host_handle_reopens_watchable_catalog_changes() {
     assert!(
         changes
             .iter()
-            .any(|change| change.subject_id == "engine::discover")
+            .any(|change| change.subject_id == "alpha::read")
     );
-    assert!(changes.iter().any(|change| change.subject_id == "w1"));
+    assert!(
+        changes
+            .iter()
+            .all(|change| change.subject_id != "engine::invoke")
+    );
 }

@@ -34,131 +34,15 @@ impl EngineHost {
         Ok(host)
     }
 
-    /// Wrap an existing catalog and bootstrap engine transport functions.
-    #[cfg(test)]
-    pub(in crate::engine) fn from_catalog(catalog: LiveCatalog) -> Result<Self> {
-        Self::from_catalog_and_primitives(catalog, PrimitiveStores::in_memory())
-    }
-
     fn from_catalog_and_primitives(
         catalog: LiveCatalog,
         primitives: PrimitiveStores,
     ) -> Result<Self> {
-        let mut host = Self {
+        let host = Self {
             catalog,
             primitives,
             storage_path: None,
         };
-        host.bootstrap_meta_capabilities()?;
         Ok(host)
     }
-
-    /// Idempotently register the privileged engine worker and meta-functions.
-    pub(in crate::engine) fn bootstrap_meta_capabilities(&mut self) -> Result<()> {
-        let engine_worker_id = worker_id(ENGINE_WORKER_ID)?;
-        match self.catalog.worker(&engine_worker_id) {
-            Some(worker) => {
-                if worker.kind != WorkerKind::System
-                    || !worker
-                        .namespace_claims
-                        .iter()
-                        .any(|claim| claim == ENGINE_WORKER_ID)
-                {
-                    return Err(EngineError::PolicyViolation(
-                        "reserved engine namespace already has a non-system owner".to_owned(),
-                    ));
-                }
-            }
-            None => {
-                self.catalog.register_worker(engine_worker(), false)?;
-            }
-        }
-
-        for definition in meta_function_definitions()? {
-            match self.catalog.function(&definition.id) {
-                Some(existing) if existing.owner_worker == engine_worker_id => {
-                    if !same_meta_function_contract(existing, &definition) {
-                        self.catalog.register_function(definition, None, false)?;
-                    }
-                }
-                Some(existing) => {
-                    return Err(EngineError::OwnerMismatch {
-                        kind: "function",
-                        id: existing.id.to_string(),
-                        owner: existing.owner_worker.to_string(),
-                        attempted_owner: engine_worker_id.to_string(),
-                    });
-                }
-                None => {
-                    self.catalog.register_function(definition, None, false)?;
-                }
-            }
-        }
-        self.bootstrap_primitive_capabilities()?;
-        Ok(())
-    }
-
-    fn bootstrap_primitive_capabilities(&mut self) -> Result<()> {
-        for worker in primitive_workers()? {
-            let worker_id = worker.id.clone();
-            match self.catalog.worker(&worker_id) {
-                Some(existing)
-                    if existing.kind == worker.kind
-                        && existing.namespace_claims == worker.namespace_claims => {}
-                Some(existing) => {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "primitive namespace {} already claimed by incompatible worker {:?}",
-                        worker_id, existing.kind
-                    )));
-                }
-                None => {
-                    self.catalog.register_worker(worker, false)?;
-                }
-            }
-        }
-
-        for registration in primitive_function_definitions(&self.primitives)? {
-            let definition = registration.definition;
-            let handler = registration.handler;
-            match self.catalog.function(&definition.id) {
-                Some(existing) if existing.owner_worker == definition.owner_worker => {
-                    if !same_primitive_function_contract(existing, &definition) {
-                        self.catalog.register_function(definition, handler, false)?;
-                    }
-                }
-                Some(existing) => {
-                    return Err(EngineError::OwnerMismatch {
-                        kind: "function",
-                        id: existing.id.to_string(),
-                        owner: existing.owner_worker.to_string(),
-                        attempted_owner: definition.owner_worker.to_string(),
-                    });
-                }
-                None => {
-                    self.catalog.register_function(definition, handler, false)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-fn same_primitive_function_contract(
-    existing: &FunctionDefinition,
-    expected: &FunctionDefinition,
-) -> bool {
-    existing.id == expected.id
-        && existing.owner_worker == expected.owner_worker
-        && existing.description == expected.description
-        && existing.request_schema == expected.request_schema
-        && existing.response_schema == expected.response_schema
-        && existing.opaque_response == expected.opaque_response
-        && existing.tags == expected.tags
-        && existing.visibility == expected.visibility
-        && existing.effect_class == expected.effect_class
-        && existing.risk_level == expected.risk_level
-        && existing.idempotency == expected.idempotency
-        && existing.health == expected.health
-        && existing.provenance == expected.provenance
-        && existing.metadata == expected.metadata
 }

@@ -31,10 +31,10 @@ pub(in crate::engine::tests) use crate::engine::kernel::ids::{
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
     CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind, EffectClass,
     FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract, IdempotencyScope,
-    Provenance, ReplayBehavior, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
+    Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
 };
 pub(in crate::engine::tests) use crate::engine::{
-    CatalogWatchRequest, EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,
+    EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
 
 pub(in crate::engine::tests) fn wid(value: &str) -> WorkerId {
@@ -51,11 +51,6 @@ pub(in crate::engine::tests) fn actor(value: &str) -> ActorId {
 
 pub(in crate::engine::tests) fn trace(value: &str) -> TraceId {
     TraceId::new(value).unwrap()
-}
-
-pub(in crate::engine::tests) fn worker(id: &str, namespace: &str) -> WorkerDefinition {
-    WorkerDefinition::new(wid(id), WorkerKind::InProcess, actor("owner"))
-        .with_namespace_claim(namespace)
 }
 
 pub(in crate::engine::tests) fn read_function(id: &str, owner: &str) -> FunctionDefinition {
@@ -306,14 +301,6 @@ pub(in crate::engine::tests) fn mutating_causal(key: &str) -> CausalContext {
         .with_session_id("session-a")
         .with_workspace_id("workspace-a")
         .with_idempotency_key(key)
-}
-
-pub(in crate::engine::tests) fn host_invocation(
-    function_id: &str,
-    payload: Value,
-    context: CausalContext,
-) -> Invocation {
-    Invocation::new_sync(fid(function_id), payload, context)
 }
 
 pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {

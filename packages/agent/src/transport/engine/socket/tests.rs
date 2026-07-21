@@ -270,20 +270,6 @@ async fn stream_poll_returns_neutral_events() {
         .as_str()
         .unwrap()
         .to_owned();
-    assert!(matches!(
-        session
-            .ctx
-            .engine_host
-            .poll_stream(
-                &subscription_id,
-                Some(StreamCursor(0)),
-                100,
-                &StreamActorScope::scoped(Some("s1".to_owned()), None),
-            )
-            .await,
-        Err(EngineError::NotFound { .. })
-    ));
-
     assert!(
         session
             .handle_text(

@@ -9,10 +9,10 @@
 //!
 //! | Module | Fixed responsibility |
 //! |--------|----------------------|
-//! | catalog | Live typed function/worker definitions and discovery |
+//! | catalog | Live typed function definitions and discovery |
 //! | invocation | Typed dispatch, schemas, causal traces, and ledgers |
 //! | durability | SQLite/in-memory state, streams, and invocation ledgers |
-//! | primitives | State, stream, catalog, and storage primitives |
+//! | primitives | Direct durable state and stream stores |
 //!
 //! ## Invariants
 //!
@@ -47,10 +47,9 @@ pub use durability::ledger::{
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub use durability::state::{EngineStateEntry, EngineStateScope};
 pub use durability::streams::{
-    EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
-    StreamActorScope, StreamCursor,
+    EngineStreamEvent, EngineStreamPage, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
-pub use invocation::host::{CatalogWatchRequest, CatalogWatchResponse, EngineHostHandle};
+pub use invocation::host::EngineHostHandle;
 pub use invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
     RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION, RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
@@ -67,8 +66,7 @@ pub(crate) use kernel::schema::validate_schema_definition as validate_engine_sch
 pub use kernel::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind,
     EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope, WorkerDefinition,
-    WorkerKind, WorkerLifecycleState, WorkerRevision,
+    IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
 };
 
 #[cfg(test)]

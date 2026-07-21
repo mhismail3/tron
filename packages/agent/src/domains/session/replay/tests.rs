@@ -10,9 +10,19 @@ use crate::domains::session::event_store::{
     AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
 };
 use crate::engine::{
-    ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionId, Invocation,
-    PublishStreamEvent, TraceId, VisibilityScope,
+    ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
+    FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation, PublishStreamEvent,
+    TraceId, VisibilityScope, WorkerId,
 };
+
+struct ReplayWriteHandler;
+
+#[async_trait::async_trait]
+impl InProcessFunctionHandler for ReplayWriteHandler {
+    async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<serde_json::Value> {
+        Ok(json!({"stored": invocation.payload}))
+    }
+}
 
 struct ReplayHarness {
     _temp: tempfile::TempDir,
@@ -35,6 +45,19 @@ fn harness() -> ReplayHarness {
     }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = EngineHostHandle::open_sqlite(&db_path).expect("engine host");
+    engine_host
+        .register_function_for_setup(
+            FunctionDefinition::new(
+                FunctionId::new("replay::write").expect("function id"),
+                WorkerId::new("replay").expect("owner id"),
+                "Write deterministic replay evidence",
+                VisibilityScope::System,
+                EffectClass::IdempotentWrite,
+            )
+            .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+            Some(Arc::new(ReplayWriteHandler)),
+        )
+        .expect("register replay write function");
     ReplayHarness {
         _temp: temp,
         event_store,
@@ -124,14 +147,8 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     let result = harness
         .engine_host
         .invoke(Invocation::new_sync(
-            FunctionId::new("state::set").unwrap(),
-            json!({
-                "scope": "session",
-                "sessionId": session_id,
-                "namespace": "replay",
-                "key": "marker",
-                "value": {"ok": true}
-            }),
+            FunctionId::new("replay::write").unwrap(),
+            json!({"sessionId": session_id, "value": {"ok": true}}),
             CausalContext::new(
                 actor_id("actor-replay"),
                 ActorKind::System,

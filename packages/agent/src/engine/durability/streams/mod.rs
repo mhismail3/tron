@@ -2,15 +2,12 @@
 //!
 //! Streams are resumable cursor views over engine-visible change records. They
 //! are not a transport: authenticated engine clients and retained internal
-//! services poll the same stream cursor model. Package-owned lifecycle topics such
-//! as `catalog.discovery` and `approval.lifecycle` publish durable evidence
-//! transitions through this substrate without becoming typed session events.
-//! Durable consumers own subscription rows through subscribe/poll/ack. An
-//! ephemeral transport can instead read a topic from an explicit cursor and
-//! keep its connection lifecycle state outside this store.
+//! services poll the same stream cursor model. Package-owned lifecycle topics
+//! publish durable evidence transitions through this substrate without
+//! becoming typed session events. Callers own their cursor; authenticated
+//! transports keep live-subscription lifecycle in connection state.
 //!
-//! INVARIANT: live subscriptions that omit an explicit cursor start at the
-//! topic tail. Historical replay is explicit (`afterCursor` / `cursor`) and
+//! INVARIANT: historical replay is explicit (`afterCursor` / `cursor`) and
 //! belongs to callers that are intentionally catching up.
 //!
 //! INVARIANT: stream polling applies engine visibility before pagination. A
@@ -67,28 +64,6 @@ pub struct EngineStreamEvent {
     /// Parent invocation that caused the event, if known.
     pub parent_invocation_id: Option<InvocationId>,
     /// Event timestamp.
-    pub created_at: DateTime<Utc>,
-}
-
-/// Stream subscription record.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EngineStreamSubscription {
-    /// Stable subscription id.
-    pub subscription_id: String,
-    /// Topic being watched.
-    pub topic: String,
-    /// Cursor after which the next poll starts by default.
-    pub cursor: StreamCursor,
-    /// Visibility of the subscription itself.
-    pub visibility: VisibilityScope,
-    /// Optional session scope.
-    pub session_id: Option<String>,
-    /// Optional workspace scope.
-    pub workspace_id: Option<String>,
-    /// Whether the subscription is active.
-    pub active: bool,
-    /// Creation timestamp.
     pub created_at: DateTime<Utc>,
 }
 

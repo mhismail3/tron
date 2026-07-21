@@ -7,7 +7,7 @@ use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::WorkerId;
 use crate::engine::kernel::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogSubjectKind, FunctionDefinition,
-    Provenance, VisibilityScope, WorkerDefinition,
+    Provenance, VisibilityScope,
 };
 
 #[derive(Clone)]
@@ -48,16 +48,6 @@ impl LiveCatalog {
     }
 }
 
-pub(super) fn worker_change_subject(definition: &WorkerDefinition) -> CatalogChangeSubject {
-    provenance_subject(
-        definition.id.to_string(),
-        CatalogSubjectKind::Worker,
-        definition.visibility.clone(),
-        &definition.provenance,
-        None,
-    )
-}
-
 pub(super) fn function_change_subject(definition: &FunctionDefinition) -> CatalogChangeSubject {
     provenance_subject(
         definition.id.to_string(),
@@ -87,11 +77,9 @@ fn provenance_subject(
 
 fn catalog_change_class(kind: &CatalogChangeKind) -> CatalogChangeClass {
     match kind {
-        CatalogChangeKind::WorkerRegistered
-        | CatalogChangeKind::WorkerUpdated
-        | CatalogChangeKind::WorkerUnregistered
-        | CatalogChangeKind::FunctionRegistered
-        | CatalogChangeKind::FunctionUnregistered => CatalogChangeClass::Availability,
+        CatalogChangeKind::FunctionRegistered | CatalogChangeKind::FunctionUnregistered => {
+            CatalogChangeClass::Availability
+        }
         CatalogChangeKind::FunctionUpdated => CatalogChangeClass::Contract,
         CatalogChangeKind::VisibilityChanged => CatalogChangeClass::Visibility,
         CatalogChangeKind::HealthChanged => CatalogChangeClass::Health,

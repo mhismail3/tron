@@ -11,11 +11,10 @@ use crate::engine::durability::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };
 use crate::engine::durability::streams::{
-    EngineStreamPage, EngineStreamSubscription, InMemoryEngineStreamStore, PublishStreamEvent,
-    SqliteEngineStreamStore, StreamActorScope, StreamCursor,
+    EngineStreamPage, InMemoryEngineStreamStore, PublishStreamEvent, SqliteEngineStreamStore,
+    StreamActorScope, StreamCursor,
 };
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::types::VisibilityScope;
 
 pub(in crate::engine) enum StreamStoreBackend {
     InMemory(InMemoryEngineStreamStore),
@@ -30,59 +29,10 @@ impl StreamStoreBackend {
         }
     }
 
-    pub(in crate::engine) fn subscribe(
-        &mut self,
-        subscription_id: String,
-        topic: String,
-        cursor: StreamCursor,
-        visibility: VisibilityScope,
-        session_id: Option<String>,
-        workspace_id: Option<String>,
-    ) -> Result<EngineStreamSubscription> {
-        match self {
-            Self::InMemory(store) => store.subscribe(
-                subscription_id,
-                topic,
-                cursor,
-                visibility,
-                session_id,
-                workspace_id,
-            ),
-            Self::Sqlite(store) => store.subscribe(
-                subscription_id,
-                topic,
-                cursor,
-                visibility,
-                session_id,
-                workspace_id,
-            ),
-        }
-    }
-
     pub(in crate::engine) fn latest_cursor(&self, topic: &str) -> Result<StreamCursor> {
         match self {
             Self::InMemory(store) => Ok(store.latest_cursor(topic)),
             Self::Sqlite(store) => store.latest_cursor(topic),
-        }
-    }
-
-    pub(in crate::engine) fn unsubscribe(&mut self, subscription_id: &str) -> Result<bool> {
-        match self {
-            Self::InMemory(store) => store.unsubscribe(subscription_id),
-            Self::Sqlite(store) => store.unsubscribe(subscription_id),
-        }
-    }
-
-    pub(in crate::engine) fn poll(
-        &self,
-        subscription_id: &str,
-        after: Option<StreamCursor>,
-        limit: usize,
-        actor: &StreamActorScope,
-    ) -> Result<EngineStreamPage> {
-        match self {
-            Self::InMemory(store) => store.poll(subscription_id, after, limit, actor),
-            Self::Sqlite(store) => store.poll(subscription_id, after, limit, actor),
         }
     }
 
@@ -138,24 +88,6 @@ impl StateStoreBackend {
         match self {
             Self::InMemory(store) => store.set(scope, namespace, key, value),
             Self::Sqlite(store) => store.set(scope, namespace, key, value),
-        }
-    }
-
-    pub(in crate::engine) fn compare_and_set(
-        &mut self,
-        scope: EngineStateScope,
-        namespace: String,
-        key: String,
-        expected_revision: Option<u64>,
-        value: Value,
-    ) -> Result<EngineStateEntry> {
-        match self {
-            Self::InMemory(store) => {
-                store.compare_and_set(scope, namespace, key, expected_revision, value)
-            }
-            Self::Sqlite(store) => {
-                store.compare_and_set(scope, namespace, key, expected_revision, value)
-            }
         }
     }
 

@@ -3,9 +3,6 @@ use super::*;
 #[tokio::test]
 async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     catalog
         .register_function(
@@ -14,7 +11,6 @@ async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
             Some(Arc::new(CountingHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
 
@@ -34,72 +30,4 @@ async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
             if message.contains("idempotency") && message.contains("alpha::write")
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload_handling() {
-    let mut host = EngineHost::new().unwrap();
-
-    for function_id in [
-        "storage::checkpoint",
-        "storage::export_snapshot",
-        "storage::retention_run",
-    ] {
-        let context = CausalContext::new(actor("system"), ActorKind::System, trace("trace"))
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a");
-        let result = host
-            .invoke(host_invocation(function_id, json!({}), context))
-            .await;
-
-        assert!(
-            matches!(
-                result.error,
-                Some(EngineError::PolicyViolation(ref message))
-                    if message.contains("idempotency") && message.contains(function_id)
-            ),
-            "{function_id} should reject missing idempotency before payload handling: {result:?}"
-        );
-    }
-}
-
-#[test]
-fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
-    let host = EngineHost::new().unwrap();
-    let functions = host.catalog().discover_functions(&FunctionQuery {
-        actor: Some(ActorContext::new(actor("system"), ActorKind::System)),
-        include_internal: true,
-        ..FunctionQuery::default()
-    });
-
-    let missing = functions
-        .iter()
-        .filter(|function| function.id.as_str().starts_with("storage::"))
-        .filter(|function| function.effect_class.requires_idempotency())
-        .filter(|function| function.idempotency.is_none())
-        .map(|function| function.id.as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert!(
-        missing.is_empty(),
-        "mutating storage surfaces missing idempotency: {missing:?}"
-    );
-
-    for required in [
-        "storage::checkpoint",
-        "storage::export_snapshot",
-        "storage::retention_run",
-    ] {
-        let definition = functions
-            .iter()
-            .find(|function| function.id.as_str() == required)
-            .unwrap_or_else(|| panic!("{required} must be registered for idempotency coverage"));
-        assert!(
-            definition.effect_class.requires_idempotency(),
-            "{required} must remain classified as mutating"
-        );
-        assert!(
-            definition.idempotency.is_some(),
-            "{required} must require an idempotency contract"
-        );
-    }
 }

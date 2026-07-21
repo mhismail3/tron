@@ -2,7 +2,7 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::registration::worker::DomainRegistrationContext;
+use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -8,39 +8,30 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::invocation::model::{InProcessFunctionHandler, InvocationRecord};
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, WorkerDefinition,
-};
+use crate::engine::kernel::ids::FunctionId;
+#[cfg(test)]
+use crate::engine::kernel::types::CatalogChange;
+use crate::engine::kernel::types::{CatalogRevision, FunctionDefinition};
 
 mod catalog_changes;
-mod cleanup;
 mod idempotency;
 mod invocation;
 mod registration;
 mod search;
 
-pub(in crate::engine) use idempotency::InvocationIdempotencyDecision;
 pub(in crate::engine) use invocation::{PreparedSyncInvocation, PreparedSyncInvocationDecision};
 
 const RESERVED_ENGINE_NAMESPACE: &str = "engine";
 const RESERVED_ENGINE_WORKER_ID: &str = "engine";
 
-struct WorkerEntry {
-    definition: WorkerDefinition,
-    volatile: bool,
-}
-
 struct FunctionEntry {
     definition: FunctionDefinition,
     handler: Option<Arc<dyn InProcessFunctionHandler>>,
-    volatile: bool,
 }
 
 /// In-memory live catalog.
 pub struct LiveCatalog {
     revision: CatalogRevision,
-    workers: BTreeMap<WorkerId, WorkerEntry>,
     functions: BTreeMap<FunctionId, FunctionEntry>,
     ledger: Box<dyn EngineLedgerStore>,
 }
@@ -57,7 +48,6 @@ impl LiveCatalog {
     pub(in crate::engine) fn with_ledger_store(ledger: Box<dyn EngineLedgerStore>) -> Self {
         Self {
             revision: CatalogRevision(0),
-            workers: BTreeMap::new(),
             functions: BTreeMap::new(),
             ledger,
         }
@@ -86,6 +76,7 @@ impl LiveCatalog {
     }
 
     /// All durable catalog changes recorded by the engine ledger.
+    #[cfg(test)]
     pub fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
         self.ledger.list_catalog_changes()
     }

@@ -10,13 +10,11 @@
 //! Public transports do not accept caller-provided runtime metadata; it remains
 //! reserved for trusted engine and agent-owned execution paths.
 
-pub mod contracts;
 pub mod socket;
 
 use serde_json::Value;
 
 use crate::domains::registration::catalog;
-use crate::domains::registration::catalog::TransportIdempotencyMode;
 use crate::engine::{ActorKind, CausalContext, FunctionId, Invocation, InvocationId, TraceId};
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
@@ -40,9 +38,7 @@ pub struct EngineTransportContext {
 pub struct EngineTransportBuildRequest {
     /// Protocol-level correlation id.
     pub correlation_id: String,
-    /// Public engine message type such as `invoke`.
-    pub public_method: String,
-    /// Method params/payload before transport-only fields are stripped.
+    /// Invoke parameters containing the canonical function id and target payload.
     pub params_payload: Value,
     /// Transport context.
     pub context: EngineTransportContext,
@@ -55,9 +51,7 @@ pub struct EngineTransportRequest {
     pub correlation_id: String,
     /// Transport name, currently always `engine_ws`.
     pub transport: String,
-    /// Public transport message type, for example `invoke`.
-    pub public_method: String,
-    /// Canonical target function id selected by the transport binding.
+    /// Canonical target function id supplied by the authenticated client.
     pub function_id: FunctionId,
     /// Payload delivered to the engine function.
     pub payload: Value,
@@ -68,50 +62,36 @@ pub struct EngineTransportRequest {
 /// Build one protocol-neutral envelope for a public engine transport method.
 pub fn build_engine_transport_request(
     input: EngineTransportBuildRequest,
-) -> Result<Option<EngineTransportRequest>, CapabilityError> {
-    let spec = contracts::public_engine_transport_spec_for_method(&input.public_method)
-        .map_err(engine_error_to_capability_error)?;
-    let Some(spec) = spec else {
-        return Ok(None);
-    };
-    reject_noncanonical_target(spec.operation_key.as_str(), &input.params_payload)?;
-    let mut causal_context =
-        transport_causal_context_for_method(spec.operation_key.as_str(), &input.context)?;
-    if spec.effect_class.is_mutating() {
-        match spec.idempotency_mode {
-            TransportIdempotencyMode::ExplicitRequired => {
-                let key =
-                    extract_string(&input.params_payload, "idempotencyKey").ok_or_else(|| {
-                        CapabilityError::InvalidParams {
-                            message: format!(
-                                "{} requires non-empty explicit idempotencyKey",
-                                spec.operation_key.as_str()
-                            ),
-                        }
-                    })?;
-                if key.trim().is_empty() {
-                    return Err(CapabilityError::InvalidParams {
-                        message: format!(
-                            "{} requires non-empty explicit idempotencyKey",
-                            spec.operation_key.as_str()
-                        ),
-                    });
-                }
-                causal_context = causal_context.with_idempotency_key(key);
-            }
-            TransportIdempotencyMode::NotRequired => {}
+) -> Result<EngineTransportRequest, CapabilityError> {
+    let function_id = extract_string(&input.params_payload, "functionId").ok_or_else(|| {
+        CapabilityError::InvalidParams {
+            message: "invoke requires functionId".to_owned(),
         }
+    })?;
+    validate_canonical_target(&function_id)?;
+    let function_id = FunctionId::new(function_id).map_err(engine_error_to_capability_error)?;
+    let payload = input
+        .params_payload
+        .get("payload")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut causal_context = transport_causal_context(&input.context)?;
+    if let Some(key) = extract_string(&input.params_payload, "idempotencyKey") {
+        if key.trim().is_empty() {
+            return Err(CapabilityError::InvalidParams {
+                message: "idempotencyKey must not be empty".to_owned(),
+            });
+        }
+        causal_context = causal_context.with_idempotency_key(key);
     }
-    let payload = strip_transport_only_fields(spec.operation_key.as_str(), input.params_payload);
 
-    Ok(Some(EngineTransportRequest {
+    Ok(EngineTransportRequest {
         correlation_id: input.correlation_id,
         transport: "engine_ws".to_owned(),
-        public_method: input.public_method,
-        function_id: spec.function_id,
+        function_id,
         payload,
         causal_context,
-    }))
+    })
 }
 
 /// Dispatch one protocol-neutral transport envelope directly to its canonical
@@ -131,11 +111,9 @@ pub async fn dispatch_engine_transport_request(
     crate::shared::server::error_mapping::result_to_capability_value(result)
 }
 
-fn transport_causal_context_for_method(
-    method: &str,
+fn transport_causal_context(
     context: &EngineTransportContext,
 ) -> Result<CausalContext, CapabilityError> {
-    let (actor_kind, actor_id) = transport_actor_for_method(method);
     let trace_id = match context.trace_id.as_deref() {
         Some(id) if !id.trim().is_empty() => {
             TraceId::new(id).map_err(engine_error_to_capability_error)?
@@ -143,8 +121,8 @@ fn transport_causal_context_for_method(
         _ => TraceId::generate(),
     };
     let mut causal_context = CausalContext::new(
-        catalog::actor_id(actor_id).map_err(engine_error_to_capability_error)?,
-        actor_kind,
+        catalog::actor_id("engine-client").map_err(engine_error_to_capability_error)?,
+        ActorKind::Client,
         trace_id,
     );
     if let Some(session_id) = context
@@ -173,20 +151,7 @@ fn transport_causal_context_for_method(
     Ok(causal_context)
 }
 
-fn transport_actor_for_method(method: &str) -> (ActorKind, &'static str) {
-    if method == "promote" {
-        return (ActorKind::User, "engine-user");
-    }
-    (ActorKind::Client, "engine-client")
-}
-
-fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), CapabilityError> {
-    if method != "invoke" {
-        return Ok(());
-    }
-    let Some(function_id) = extract_string(payload, "functionId") else {
-        return Ok(());
-    };
+fn validate_canonical_target(function_id: &str) -> Result<(), CapabilityError> {
     let Some((namespace, operation)) = function_id.split_once("::") else {
         return Err(CapabilityError::InvalidParams {
             message: "invoke requires a canonical function id".to_owned(),
@@ -202,25 +167,6 @@ fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), Capab
         });
     }
     Ok(())
-}
-
-fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
-    if matches!(method, "discover" | "inspect" | "watch" | "invoke") {
-        if let Some(object) = payload.as_object_mut() {
-            let _ = object.remove("sessionId");
-            let _ = object.remove("workspaceId");
-            let _ = object.remove("traceId");
-            let _ = object.remove("parentInvocationId");
-        }
-    }
-    if method == "promote" {
-        if let Some(object) = payload.as_object_mut() {
-            let _ = object.remove("idempotencyKey");
-            let _ = object.remove("traceId");
-            let _ = object.remove("parentInvocationId");
-        }
-    }
-    payload
 }
 
 fn extract_string(payload: &Value, key: &str) -> Option<String> {
@@ -239,7 +185,6 @@ mod tests {
     fn build_invoke(function_id: &str) -> EngineTransportRequest {
         build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id: "request-1".to_owned(),
-            public_method: "invoke".to_owned(),
             params_payload: json!({
                 "functionId": function_id,
                 "payload": {"targetId": "target-1"},
@@ -252,7 +197,6 @@ mod tests {
             },
         })
         .expect("transport envelope builds")
-        .expect("invoke maps to engine transport")
     }
 
     #[test]
@@ -275,15 +219,13 @@ mod tests {
     fn public_transport_context_cannot_inject_runtime_metadata() {
         let envelope = build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id: "request-1".to_owned(),
-            public_method: "invoke".to_owned(),
             params_payload: json!({
                 "functionId": "worker_kernel::invoke",
                 "payload": {"operation": "observe", "input": {"text": "read file"}}
             }),
             context: EngineTransportContext::default(),
         })
-        .expect("transport envelope builds")
-        .expect("invoke maps to engine transport");
+        .expect("transport envelope builds");
 
         assert!(envelope.causal_context.runtime_metadata.is_empty());
     }

@@ -1,18 +1,15 @@
 //! Shared domain capability registration contracts.
 //!
-//! Domain workers own their full canonical function contracts in domain-local
+//! Source domains own their full canonical function contracts in domain-local
 //! modules. This file owns only the common contract shape and stable
 //! registration identities; production startup owns complete enumeration and
-//! validation in `registration::domain_worker_modules`.
+//! validation in `registration::domain_modules`.
 
 pub(crate) use super::contract::function_definition_for_capability;
 use crate::engine::{
     ActorId, EffectClass, FunctionId, IdempotencyContract, Result as EngineResult, RiskLevel,
     VisibilityScope, WorkerId,
 };
-
-/// System actor used for server-owned capability registration.
-pub(crate) const SYSTEM_OWNER_ACTOR: &str = "system";
 
 /// Idempotency source for a public engine transport method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,8 +29,6 @@ pub struct CapabilitySpec {
     pub function_id: FunctionId,
     /// Owner worker id.
     pub owner_worker: WorkerId,
-    /// Domain worker that owns the capability behavior.
-    pub domain_worker: WorkerId,
     /// Effect class.
     pub effect_class: EffectClass,
     /// Risk level.

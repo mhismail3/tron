@@ -148,25 +148,25 @@ fn domain_workers_expose_contracts_not_services() {
         service_leaks.join("\n")
     );
 
-    let public_worker_constructors = rust_source_lines("packages/agent/src/domains")
+    let public_module_constructors = rust_source_lines("packages/agent/src/domains")
         .into_iter()
         .filter(|line| {
-            line.contains("pub fn worker_module")
-                || line.contains("pub fn worker_modules")
-                || line.contains("pub fn domain_worker_module")
-                || line.contains("pub fn register_domain_workers_for_context")
+            line.contains("pub fn function_module")
+                || line.contains("pub fn function_modules")
+                || line.contains("pub fn domain_module")
+                || line.contains("pub fn register_domains_for_context")
         })
         .collect::<Vec<_>>();
 
     assert!(
-        public_worker_constructors.is_empty(),
-        "domain worker registration and worker-module constructors must stay crate-private:\n{}",
-        public_worker_constructors.join("\n")
+        public_module_constructors.is_empty(),
+        "domain registration and function-module constructors must stay crate-private:\n{}",
+        public_module_constructors.join("\n")
     );
 
     let registration_call_leaks = rust_source_lines("packages/agent/src")
         .into_iter()
-        .filter(|line| line.contains("register_domain_workers_for_context("))
+        .filter(|line| line.contains("register_domains_for_context("))
         .filter(|line| {
             let path = path_from_line(line);
             path != "packages/agent/src/domains/registration/mod.rs"
@@ -176,7 +176,7 @@ fn domain_workers_expose_contracts_not_services() {
 
     assert!(
         registration_call_leaks.is_empty(),
-        "domain worker registration must be centralized behind transport runtime setup:\n{}",
+        "domain function registration must be centralized behind transport runtime setup:\n{}",
         registration_call_leaks.join("\n")
     );
 }

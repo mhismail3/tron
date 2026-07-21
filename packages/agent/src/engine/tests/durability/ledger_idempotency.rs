@@ -277,20 +277,10 @@ fn sqlite_stream_blobs_large_payload_but_poll_returns_original_payload() {
         )
         .unwrap();
     assert!(stored.contains(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY));
-    store
-        .subscribe(
-            "sub".to_owned(),
-            "agent.runtime".to_owned(),
-            StreamCursor(0),
-            VisibilityScope::Session,
-            Some("session-stream".to_owned()),
-            Some("workspace-stream".to_owned()),
-        )
-        .unwrap();
     let page = store
-        .poll(
-            "sub",
-            None,
+        .poll_topic(
+            "agent.runtime",
+            StreamCursor(0),
             10,
             &StreamActorScope {
                 session_id: Some("session-stream".to_owned()),
@@ -305,9 +295,6 @@ fn sqlite_stream_blobs_large_payload_but_poll_returns_original_payload() {
 #[tokio::test]
 async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     catalog
         .register_function(
@@ -315,7 +302,6 @@ async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() 
             Some(Arc::new(CountingHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
 
@@ -362,9 +348,6 @@ async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() 
 #[tokio::test]
 async fn idempotency_reject_and_noop_policies_are_enforced() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     catalog
         .register_function(
@@ -372,7 +355,6 @@ async fn idempotency_reject_and_noop_policies_are_enforced() {
             Some(Arc::new(CountingHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
     catalog
@@ -381,7 +363,6 @@ async fn idempotency_reject_and_noop_policies_are_enforced() {
             Some(Arc::new(CountingHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
 
@@ -435,16 +416,12 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
         let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
         let mut catalog = LiveCatalog::with_ledger_store(Box::new(store));
         catalog
-            .register_worker(worker("w1", "alpha"), true)
-            .unwrap();
-        catalog
             .register_function(
                 write_function("alpha::write", "w1")
                     .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
                 Some(Arc::new(CountingHandler {
                     calls: calls.clone(),
                 })),
-                true,
             )
             .unwrap();
 
@@ -466,16 +443,12 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
     assert_eq!(persisted.len(), 1);
     assert_eq!(persisted[0].invocation_id, first_invocation_id);
     restarted
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    restarted
         .register_function(
             write_function("alpha::write", "w1")
                 .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
             Some(Arc::new(CountingHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
 
@@ -495,9 +468,6 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
 #[tokio::test]
 async fn duplicate_after_handler_failure_replays_stored_error_without_reinvoking() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     catalog
         .register_function(
@@ -505,7 +475,6 @@ async fn duplicate_after_handler_failure_replays_stored_error_without_reinvoking
             Some(Arc::new(CountingFailHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
 
@@ -541,15 +510,11 @@ async fn idempotency_reservation_failure_prevents_handler_execution() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut catalog = LiveCatalog::with_ledger_store(Box::new(ReserveFailingLedger));
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
         .register_function(
             write_function("alpha::write", "w1"),
             Some(Arc::new(CountingHandler {
                 calls: calls.clone(),
             })),
-            true,
         )
         .unwrap();
 
@@ -578,9 +543,6 @@ fn sqlite_ledger_reopen_preserves_watch_scope_metadata() {
         let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
         let mut host = EngineHost::with_ledger_store(Box::new(store)).unwrap();
         host.catalog_mut()
-            .register_worker(worker("w1", "alpha"), true)
-            .unwrap();
-        host.catalog_mut()
             .register_function(
                 FunctionDefinition::new(
                     fid("alpha::session"),
@@ -593,7 +555,6 @@ fn sqlite_ledger_reopen_preserves_watch_scope_metadata() {
                     Provenance::new(actor("agent"), "test").with_session_id("session-a"),
                 ),
                 Some(handler()),
-                true,
             )
             .unwrap();
     }

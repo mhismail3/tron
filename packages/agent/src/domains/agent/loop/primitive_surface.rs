@@ -245,9 +245,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::engine::{
-        ActorId, EffectClass, FunctionDefinition, WorkerDefinition, WorkerId, WorkerKind,
-    };
+    use crate::engine::{EffectClass, FunctionDefinition, WorkerId};
 
     struct InboxAttachHandler;
 
@@ -261,15 +259,6 @@ mod tests {
                 "items": [{"workerId":"background-worker","result":{"summary":"ready"}}]
             }))
         }
-    }
-
-    fn worker(id: &str, namespace: &str) -> WorkerDefinition {
-        WorkerDefinition::new(
-            WorkerId::new(id).expect("worker id"),
-            WorkerKind::System,
-            ActorId::new("system").expect("actor id"),
-        )
-        .with_namespace_claim(namespace)
     }
 
     fn register_worker_primitive(
@@ -306,15 +295,13 @@ mod tests {
             "workerProvenance": {"source": "test fixture"},
             "workerSuccessEvidence": {"completedRuns": 3}
         });
-        host.register_function_for_setup(definition, None, false)
+        host.register_function_for_setup(definition, None)
             .expect("worker function");
     }
 
     #[tokio::test]
     async fn non_model_functions_are_not_projected() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        host.register_worker_for_setup(worker("demo", "demo"), false)
-            .expect("demo worker");
         let mut old_builtin_like_function = FunctionDefinition::new(
             FunctionId::new("demo::read").expect("function id"),
             WorkerId::new("demo").expect("worker id"),
@@ -324,7 +311,7 @@ mod tests {
         );
         old_builtin_like_function.metadata =
             serde_json::json!({"modelPrimitiveName": "old_filesystem_read"});
-        host.register_function_for_setup(old_builtin_like_function, None, false)
+        host.register_function_for_setup(old_builtin_like_function, None)
             .expect("nonprimitive function");
 
         let surface = resolve_provider_primitive_surface(&host, "session-a", None)
@@ -336,8 +323,6 @@ mod tests {
     #[tokio::test]
     async fn engine_owned_inbox_attachment_crosses_internal_visibility_for_trusted_runtime() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-            .expect("worker kernel");
         register_worker_primitive(
             &host,
             "inbox",
@@ -357,7 +342,7 @@ mod tests {
         .with_idempotency(crate::engine::IdempotencyContract::caller_system_engine_ledger())
         .with_request_schema(serde_json::json!({"type":"object"}))
         .with_response_schema(serde_json::json!({"type":"object"}));
-        host.register_function_for_setup(attach, Some(Arc::new(InboxAttachHandler)), false)
+        host.register_function_for_setup(attach, Some(Arc::new(InboxAttachHandler)))
             .expect("internal inbox attachment");
 
         let surface = resolve_provider_primitive_surface(&host, "session-a", None)
@@ -382,8 +367,6 @@ mod tests {
     #[tokio::test]
     async fn autonomous_surface_hides_execute_and_selects_relevant_typed_workers() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-            .expect("worker kernel");
         register_worker_primitive(
             &host,
             "worker_upsert",
@@ -459,8 +442,6 @@ mod tests {
     #[tokio::test]
     async fn worker_discovery_promotion_changes_the_live_session_surface() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-            .expect("worker kernel");
         register_worker_primitive(
             &host,
             "worker_upsert",
@@ -518,8 +499,6 @@ mod tests {
         let path = directory.path().join("engine.sqlite3");
         {
             let host = EngineHostHandle::open_sqlite(&path).expect("durable host");
-            host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-                .expect("worker kernel");
             register_worker_primitive(
                 &host,
                 "dynamic_durable_formatter",
@@ -533,9 +512,6 @@ mod tests {
         }
 
         let reopened = EngineHostHandle::open_sqlite(&path).expect("reopened durable host");
-        reopened
-            .register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-            .expect("reopened worker kernel");
         register_worker_primitive(
             &reopened,
             "dynamic_durable_formatter",
@@ -569,8 +545,6 @@ mod tests {
     #[tokio::test]
     async fn repeated_promotions_keep_the_complete_dynamic_surface_bounded() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-            .expect("worker kernel");
         for index in 0..15 {
             let worker_id = format!("promoted-{index:02}");
             register_worker_primitive(
@@ -611,8 +585,6 @@ mod tests {
     #[tokio::test]
     async fn promotion_for_an_old_worker_version_does_not_revive_a_recreated_worker() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
-            .expect("worker kernel");
         register_worker_primitive(
             &host,
             "dynamic_recreated",

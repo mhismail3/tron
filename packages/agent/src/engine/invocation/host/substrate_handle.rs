@@ -98,31 +98,6 @@ impl EngineHostHandle {
             .publish(event)
     }
 
-    /// Subscribe directly to the engine stream store.
-    #[cfg(test)]
-    pub async fn subscribe_stream(
-        &self,
-        subscription_id: String,
-        topic: String,
-        cursor: StreamCursor,
-        visibility: VisibilityScope,
-        session_id: Option<String>,
-        workspace_id: Option<String>,
-    ) -> Result<EngineStreamSubscription> {
-        let store = self.inner.lock().await.primitives.streams.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .subscribe(
-                subscription_id,
-                topic,
-                cursor,
-                visibility,
-                session_id,
-                workspace_id,
-            )
-    }
-
     /// Return the latest stream cursor for one topic.
     pub async fn latest_stream_cursor(&self, topic: &str) -> Result<StreamCursor> {
         let store = self.inner.lock().await.primitives.streams.clone();
@@ -132,25 +107,9 @@ impl EngineHostHandle {
             .latest_cursor(topic)
     }
 
-    /// Poll the engine stream store.
-    #[cfg(test)]
-    pub async fn poll_stream(
-        &self,
-        subscription_id: &str,
-        after: Option<StreamCursor>,
-        limit: usize,
-        actor: &StreamActorScope,
-    ) -> Result<EngineStreamPage> {
-        let store = self.inner.lock().await.primitives.streams.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .poll(subscription_id, after, limit, actor)
-    }
-
     /// Poll an engine stream topic from an explicit cursor without creating a
-    /// durable subscription. Transport owners use this for connection-local
-    /// cursors while durable engine consumers keep using [`Self::poll_stream`].
+    /// durable subscription. Callers own cursor persistence; authenticated
+    /// transports keep live-subscription lifecycle in connection state.
     pub(crate) async fn poll_stream_topic(
         &self,
         topic: &str,

@@ -535,7 +535,6 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "engine",
             EffectClass::PureRead,
             RiskLevel::Low)
-        .domain_worker(WORKER)
         .request_schema(json!({
             "type":"object",
             "additionalProperties":false,

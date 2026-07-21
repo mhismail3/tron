@@ -67,22 +67,12 @@ fn all_session_events_project_to_system_visible_stream_scope() {
 async fn pump_publishes_runtime_events_to_engine_streams_once() {
     let (tx, rx) = broadcast::channel(8);
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.subscribe_stream(
-        "runtime-events".to_owned(),
-        "events.session".to_owned(),
-        StreamCursor(0),
-        VisibilityScope::Session,
-        Some("s1".to_owned()),
-        None,
-    )
-    .await
-    .unwrap();
     let cancel = CancellationToken::new();
     let pump = EngineStreamEventPump::new(rx, host.clone(), cancel.clone());
     let handle = tokio::spawn(pump.run());
 
     tx.send(agent_start_event("s1")).unwrap();
-    let page = poll_until_event(&host, "runtime-events", Some("s1")).await;
+    let page = poll_until_event(&host, Some("s1")).await;
     cancel.cancel();
     let _ = handle.await;
 
@@ -99,16 +89,6 @@ async fn pump_publishes_runtime_events_to_engine_streams_once() {
 async fn pump_persists_runtime_event_trace_context() {
     let (tx, rx) = broadcast::channel(8);
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.subscribe_stream(
-        "runtime-events".to_owned(),
-        "events.session".to_owned(),
-        StreamCursor(0),
-        VisibilityScope::Session,
-        Some("s1".to_owned()),
-        None,
-    )
-    .await
-    .unwrap();
     let cancel = CancellationToken::new();
     let pump = EngineStreamEventPump::new(rx, host.clone(), cancel.clone());
     let handle = tokio::spawn(pump.run());
@@ -119,7 +99,7 @@ async fn pump_persists_runtime_event_trace_context() {
         content: "hello".to_owned(),
     })
     .unwrap();
-    let page = poll_until_event(&host, "runtime-events", Some("s1")).await;
+    let page = poll_until_event(&host, Some("s1")).await;
     cancel.cancel();
     let _ = handle.await;
 
@@ -143,16 +123,6 @@ async fn pump_persists_runtime_event_trace_context() {
 async fn lag_beyond_source_capacity_publishes_recovery_marker() {
     let (tx, rx) = broadcast::channel(2);
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.subscribe_stream(
-        "runtime-recovery".to_owned(),
-        "events.session".to_owned(),
-        StreamCursor(0),
-        VisibilityScope::System,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
     let mut pump = EngineStreamEventPump::new(rx, host.clone(), CancellationToken::new());
 
     for _ in 0..5 {
@@ -165,7 +135,7 @@ async fn lag_beyond_source_capacity_publishes_recovery_marker() {
     ));
     assert!(pump.handle_tron_recv(lagged).await);
 
-    let page = poll_until_event(&host, "runtime-recovery", None).await;
+    let page = poll_until_event(&host, None).await;
     assert_eq!(page.events.len(), 1);
     let event = &page.events[0];
     assert_eq!(
@@ -182,16 +152,6 @@ async fn lag_beyond_source_capacity_publishes_recovery_marker() {
 async fn stream_scope_prevents_cross_session_delivery() {
     let (tx, rx) = broadcast::channel(8);
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.subscribe_stream(
-        "session-a".to_owned(),
-        "events.session".to_owned(),
-        StreamCursor(0),
-        VisibilityScope::Session,
-        Some("s1".to_owned()),
-        None,
-    )
-    .await
-    .unwrap();
     let cancel = CancellationToken::new();
     let pump = EngineStreamEventPump::new(rx, host.clone(), cancel.clone());
     let handle = tokio::spawn(pump.run());
@@ -199,9 +159,9 @@ async fn stream_scope_prevents_cross_session_delivery() {
     tx.send(agent_start_event("s2")).unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let page = host
-        .poll_stream(
-            "session-a",
-            Some(StreamCursor(0)),
+        .poll_stream_topic(
+            "events.session",
+            StreamCursor(0),
             10,
             &StreamActorScope::scoped(Some("s1".to_owned()), None),
         )
@@ -215,13 +175,12 @@ async fn stream_scope_prevents_cross_session_delivery() {
 
 async fn poll_until_event(
     host: &EngineHostHandle,
-    subscription_id: &str,
     session_id: Option<&str>,
 ) -> crate::engine::EngineStreamPage {
     let actor = StreamActorScope::scoped(session_id.map(ToOwned::to_owned), None);
     for _ in 0..20 {
         let page = host
-            .poll_stream(subscription_id, Some(StreamCursor(0)), 10, &actor)
+            .poll_stream_topic("events.session", StreamCursor(0), 10, &actor)
             .await
             .unwrap();
         if !page.events.is_empty() {

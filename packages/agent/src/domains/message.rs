@@ -7,8 +7,8 @@ use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::worker::DomainRegistrationContext;
-use crate::domains::registration::worker::DomainWorkerModule;
+use crate::domains::registration::module::DomainModule;
+use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors;
@@ -36,12 +36,12 @@ impl Deps {
     }
 }
 
-pub(crate) fn worker_module(
+pub(crate) fn function_module(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
+) -> crate::engine::Result<DomainModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::worker::domain_worker_module(
+        crate::domains::registration::module::domain_module(
             "message",
             STREAM_TOPICS,
             function_registrations(capabilities()?, domain_deps)?,

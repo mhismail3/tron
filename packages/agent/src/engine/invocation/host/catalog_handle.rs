@@ -1,60 +1,19 @@
-//! Catalog registration, discovery, watch, and promotion methods on `EngineHostHandle`.
+//! Function registration, discovery, and promotion methods on `EngineHostHandle`.
 
 use super::*;
 
 impl EngineHostHandle {
-    /// Register or update a worker through the host boundary.
-    pub async fn register_worker(
-        &self,
-        definition: WorkerDefinition,
-        volatile: bool,
-    ) -> Result<WorkerRevision> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .register_worker(definition, volatile)
-    }
-
-    /// Unregister a worker and clean up its volatile owned entries.
-    pub async fn unregister_worker(&self, id: &WorkerId, owner_actor: &str) -> Result<()> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .unregister_worker(id, owner_actor)
-    }
-
-    /// Register or update a worker during single-threaded startup/test setup.
-    ///
-    /// This fails closed if the host is already in use, keeping setup code from
-    /// blocking on a global engine mutex.
-    pub fn register_worker_for_setup(
-        &self,
-        definition: WorkerDefinition,
-        volatile: bool,
-    ) -> Result<WorkerRevision> {
-        self.inner
-            .try_lock()
-            .map_err(|_| {
-                EngineError::PolicyViolation("engine host is busy during worker setup".to_owned())
-            })?
-            .catalog
-            .register_worker(definition, volatile)
-    }
-
     /// Register or update a function through the host boundary.
     pub async fn register_function(
         &self,
         definition: FunctionDefinition,
         handler: Option<Arc<dyn InProcessFunctionHandler>>,
-        volatile: bool,
     ) -> Result<FunctionRevision> {
         self.inner
             .lock()
             .await
             .catalog
-            .register_function(definition, handler, volatile)
+            .register_function(definition, handler)
     }
 
     /// Register or update a function during single-threaded startup/test setup.
@@ -66,7 +25,6 @@ impl EngineHostHandle {
         &self,
         definition: FunctionDefinition,
         handler: Option<Arc<dyn InProcessFunctionHandler>>,
-        volatile: bool,
     ) -> Result<FunctionRevision> {
         self.inner
             .try_lock()
@@ -74,7 +32,7 @@ impl EngineHostHandle {
                 EngineError::PolicyViolation("engine host is busy during function setup".to_owned())
             })?
             .catalog
-            .register_function(definition, handler, volatile)
+            .register_function(definition, handler)
     }
 
     /// Unregister a function through the host boundary.
@@ -115,31 +73,6 @@ impl EngineHostHandle {
         actor: Option<&ActorContext>,
     ) -> Result<FunctionDefinition> {
         self.inner.lock().await.catalog.inspect_function(id, actor)
-    }
-
-    /// Inspect a worker through the host boundary.
-    pub async fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition> {
-        self.inner.lock().await.catalog.inspect_worker(id)
-    }
-
-    /// List workers visible to an actor through the host boundary.
-    pub async fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition> {
-        self.inner.lock().await.visible_workers(actor)
-    }
-
-    /// Return whether a worker is a volatile runtime registration.
-    pub async fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
-        self.inner.lock().await.catalog.worker_is_volatile(id)
-    }
-
-    /// Watch catalog changes through the host boundary.
-    #[cfg(test)]
-    pub async fn watch(
-        &self,
-        actor: &ActorContext,
-        request: CatalogWatchRequest,
-    ) -> Result<CatalogWatchResponse> {
-        self.inner.lock().await.watch_catalog(actor, request)
     }
 
     /// Promote function visibility through the host boundary.

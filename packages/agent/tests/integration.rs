@@ -174,15 +174,8 @@ async fn invoke_with_context(
 
 fn unwrap_invoke_value(response: Value) -> Value {
     assert_eq!(response["ok"], true, "invoke failed: {response}");
-    if let Some(child) = response.pointer("/result/child") {
-        assert!(
-            child.get("error").is_none_or(Value::is_null),
-            "child invocation failed: {child}"
-        );
-        child.get("value").cloned().unwrap_or(Value::Null)
-    } else {
-        response.get("result").cloned().unwrap_or(Value::Null)
-    }
+    assert!(response.pointer("/result/child").is_none());
+    response.get("result").cloned().unwrap_or(Value::Null)
 }
 
 async fn wait_for_connection_count(server: &TronServer, expected: usize) {

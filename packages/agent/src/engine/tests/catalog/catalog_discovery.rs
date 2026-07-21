@@ -4,70 +4,32 @@ use super::*;
 fn empty_catalog_starts_at_revision_zero() {
     let catalog = LiveCatalog::new();
     assert_eq!(catalog.revision(), CatalogRevision(0));
-    assert!(catalog.workers().is_empty());
     assert!(catalog.ledger_catalog_changes().unwrap().is_empty());
 }
 
 #[test]
-fn worker_registration_updates_revision_and_owner_conflicts_are_rejected() {
+fn function_registration_is_self_sufficient() {
     let mut catalog = LiveCatalog::new();
-    let rev = catalog
-        .register_worker(worker("w1", "alpha"), true)
+    let revision = catalog
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
-    assert_eq!(rev.0, 1);
-    assert_eq!(catalog.revision().0, 1);
-    assert_eq!(catalog.worker_is_volatile(&wid("w1")), Some(true));
-
-    let rev = catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    assert_eq!(rev.0, 2);
-    assert_eq!(catalog.revision().0, 2);
-
-    let conflicting = WorkerDefinition::new(wid("w1"), WorkerKind::InProcess, actor("other"))
-        .with_namespace_claim("alpha");
-    assert!(matches!(
-        catalog.register_worker(conflicting, true),
-        Err(EngineError::OwnerMismatch { kind: "worker", .. })
-    ));
-}
-
-#[test]
-fn function_registration_requires_owner_and_namespace_claim() {
-    let mut catalog = LiveCatalog::new();
-    assert!(matches!(
-        catalog.register_function(read_function("alpha::read", "w1"), Some(handler()), true),
-        Err(EngineError::NotFound { kind: "worker", .. })
-    ));
-
-    catalog.register_worker(worker("w1", "beta"), true).unwrap();
-    assert!(matches!(
-        catalog.register_function(read_function("alpha::read", "w1"), Some(handler()), true),
-        Err(EngineError::NamespaceDenied { .. })
-    ));
+    assert_eq!(revision, FunctionRevision(1));
 }
 
 #[test]
 fn function_registration_allows_same_owner_update_and_rejects_cross_owner() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
-        .register_worker(worker("w2", "alpha"), true)
-        .unwrap();
-
     let rev = catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
     assert_eq!(rev.0, 1);
     let rev = catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
     assert_eq!(rev.0, 2);
 
     assert!(matches!(
-        catalog.register_function(read_function("alpha::read", "w2"), Some(handler()), true),
+        catalog.register_function(read_function("alpha::read", "w2"), Some(handler())),
         Err(EngineError::OwnerMismatch {
             kind: "function",
             ..
@@ -78,9 +40,6 @@ fn function_registration_allows_same_owner_update_and_rejects_cross_owner() {
 #[test]
 fn mutating_function_requires_idempotency() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let missing_contract = FunctionDefinition::new(
         fid("alpha::write"),
         wid("w1"),
@@ -89,7 +48,7 @@ fn mutating_function_requires_idempotency() {
         EffectClass::IdempotentWrite,
     );
     assert!(matches!(
-        catalog.register_function(missing_contract, Some(handler()), true),
+        catalog.register_function(missing_contract, Some(handler())),
         Err(EngineError::PolicyViolation(message)) if message.contains("requires idempotency")
     ));
 
@@ -101,12 +60,12 @@ fn mutating_function_requires_idempotency() {
         EffectClass::IdempotentWrite,
     );
     assert!(matches!(
-        catalog.register_function(internal_missing_contract, Some(handler()), true),
+        catalog.register_function(internal_missing_contract, Some(handler())),
         Err(EngineError::PolicyViolation(message)) if message.contains("requires idempotency")
     ));
 
     catalog
-        .register_function(write_function("alpha::write", "w1"), Some(handler()), true)
+        .register_function(write_function("alpha::write", "w1"), Some(handler()))
         .unwrap();
 }
 
@@ -114,35 +73,26 @@ fn mutating_function_requires_idempotency() {
 fn catalog_changes_increment_by_one_and_record_subjects() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
     let changes = catalog.ledger_catalog_changes().unwrap();
-    assert_eq!(changes.len(), 2);
+    assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].before.0, 0);
     assert_eq!(changes[0].after.0, 1);
-    assert_eq!(changes[1].before.0, 1);
-    assert_eq!(changes[1].after.0, 2);
-    assert_eq!(changes[1].kind, CatalogChangeKind::FunctionRegistered);
-    assert_eq!(changes[1].subject_id, "alpha::read");
-    assert_eq!(changes[1].subject_kind, CatalogSubjectKind::Function);
-    assert_eq!(changes[1].class, CatalogChangeClass::Availability);
-    assert_eq!(changes[1].visibility, VisibilityScope::Agent);
+    assert_eq!(changes[0].kind, CatalogChangeKind::FunctionRegistered);
+    assert_eq!(changes[0].subject_id, "alpha::read");
+    assert_eq!(changes[0].subject_kind, CatalogSubjectKind::Function);
+    assert_eq!(changes[0].class, CatalogChangeClass::Availability);
+    assert_eq!(changes[0].visibility, VisibilityScope::Agent);
 }
 
 #[test]
 fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_text() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
         .register_function(
             read_function("alpha::zeta", "w1").with_tags(vec!["lookup".to_owned()]),
             Some(handler()),
-            true,
         )
         .unwrap();
     catalog
@@ -151,7 +101,6 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
                 .with_risk(RiskLevel::Medium)
                 .with_health(FunctionHealth::Degraded),
             Some(handler()),
-            true,
         )
         .unwrap();
     let internal = FunctionDefinition::new(
@@ -162,7 +111,7 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
         EffectClass::PureRead,
     );
     catalog
-        .register_function(internal, Some(handler()), true)
+        .register_function(internal, Some(handler()))
         .unwrap();
 
     let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
@@ -193,10 +142,7 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
 fn discovery_text_query_matches_tokens_across_canonical_id() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("alpha", "alpha"), true)
-        .unwrap();
-    catalog
-        .register_function(read_function("alpha::list", "alpha"), Some(handler()), true)
+        .register_function(read_function("alpha::list", "alpha"), Some(handler()))
         .unwrap();
 
     let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
@@ -213,9 +159,6 @@ fn discovery_text_query_matches_tokens_across_canonical_id() {
 #[test]
 fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let session_function = FunctionDefinition::new(
         fid("alpha::session"),
         wid("w1"),
@@ -240,13 +183,13 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
         EffectClass::PureRead,
     );
     catalog
-        .register_function(session_function, Some(handler()), true)
+        .register_function(session_function, Some(handler()))
         .unwrap();
     catalog
-        .register_function(workspace_function, Some(handler()), true)
+        .register_function(workspace_function, Some(handler()))
         .unwrap();
     catalog
-        .register_function(internal_function, Some(handler()), true)
+        .register_function(internal_function, Some(handler()))
         .unwrap();
 
     let scoped_actor = ActorContext::new(actor("agent"), ActorKind::Agent)
@@ -290,30 +233,8 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
 }
 
 #[test]
-fn worker_unregister_cleans_owned_volatile_registrations_only() {
-    let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog.register_worker(worker("w2", "beta"), true).unwrap();
-    catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
-        .unwrap();
-    catalog
-        .register_function(read_function("beta::read", "w2"), Some(handler()), true)
-        .unwrap();
-
-    catalog.unregister_worker(&wid("w1"), "owner").unwrap();
-    assert!(catalog.function(&fid("alpha::read")).is_none());
-    assert!(catalog.function(&fid("beta::read")).is_some());
-}
-
-#[test]
 fn inspect_and_promotion_are_visibility_and_owner_checked() {
     let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
     let function = FunctionDefinition::new(
         fid("alpha::session"),
         wid("w1"),
@@ -323,7 +244,7 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
     )
     .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
     catalog
-        .register_function(function, Some(handler()), true)
+        .register_function(function, Some(handler()))
         .unwrap();
 
     let matching_session =
@@ -387,17 +308,13 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
             .inspect_function(&fid("alpha::session"), Some(&workspace_actor))
             .is_ok()
     );
-    assert!(catalog.inspect_worker(&wid("w1")).is_ok());
 }
 
 #[test]
 fn unregister_function_removes_the_function_and_advances_revision() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .register_function(read_function("alpha::read", "w1"), Some(handler()))
         .unwrap();
     let before = catalog.revision();
 
@@ -415,54 +332,11 @@ fn unregister_function_removes_the_function_and_advances_revision() {
 }
 
 #[test]
-fn engine_host_bootstrap_repairs_stale_system_meta_contracts() {
-    let mut catalog = LiveCatalog::new();
-    let engine_worker = WorkerDefinition::new(wid("engine"), WorkerKind::System, actor("system"))
-        .with_namespace_claim("engine");
-    catalog.register_worker(engine_worker, false).unwrap();
-    catalog
-        .register_function(
-            FunctionDefinition::new(
-                fid("engine::discover"),
-                wid("engine"),
-                "stale discover",
-                VisibilityScope::Internal,
-                EffectClass::IdempotentWrite,
-            )
-            .with_idempotency(IdempotencyContract::caller_session()),
-            None,
-            false,
-        )
-        .unwrap();
-
-    let host = EngineHost::from_catalog(catalog).unwrap();
-    let discover = host.catalog().function(&fid("engine::discover")).unwrap();
-    assert_eq!(discover.description, "discover live engine capabilities");
-    assert_eq!(discover.visibility, VisibilityScope::System);
-    assert_eq!(discover.effect_class, EffectClass::PureRead);
-    assert_eq!(discover.idempotency, None);
-    assert_eq!(discover.revision, FunctionRevision(2));
-}
-
-#[test]
-fn engine_namespace_is_reserved_for_the_system_engine_worker() {
-    let mut catalog = LiveCatalog::new();
-    let denied = catalog.register_worker(worker("w1", "engine"), true);
-    assert!(matches!(
-        denied,
-        Err(EngineError::PolicyViolation(message))
-            if message.contains("reserved engine namespace")
-    ));
-
+fn engine_namespace_is_reserved_for_the_engine_owner() {
     let mut host = EngineHost::new().unwrap();
-    host.catalog_mut()
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    let denied_function = host.catalog_mut().register_function(
-        read_function("engine::spoof", "w1"),
-        Some(handler()),
-        true,
-    );
+    let denied_function = host
+        .catalog_mut()
+        .register_function(read_function("engine::spoof", "w1"), Some(handler()));
     assert!(matches!(
         denied_function,
         Err(EngineError::PolicyViolation(message))
@@ -474,7 +348,7 @@ fn engine_namespace_is_reserved_for_the_system_engine_worker() {
 fn catalog_change_ledger_failure_does_not_mutate_registered_catalog_entries() {
     let mut catalog = LiveCatalog::with_ledger_store(Box::new(CatalogChangeFailingLedger));
 
-    let result = catalog.register_worker(worker("w1", "alpha"), true);
+    let result = catalog.register_function(read_function("alpha::read", "w1"), Some(handler()));
     assert!(matches!(
         result,
         Err(EngineError::LedgerFailure {
@@ -483,6 +357,6 @@ fn catalog_change_ledger_failure_does_not_mutate_registered_catalog_entries() {
         })
     ));
     assert_eq!(catalog.revision(), CatalogRevision(0));
-    assert!(catalog.worker(&wid("w1")).is_none());
+    assert!(catalog.function(&fid("alpha::read")).is_none());
     assert!(catalog.ledger_catalog_changes().unwrap().is_empty());
 }

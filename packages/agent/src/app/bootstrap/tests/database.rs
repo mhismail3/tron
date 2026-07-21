@@ -19,11 +19,7 @@ async fn init_engine_host_bootstraps_sqlite_host() {
     ensure_parent_dir(&event_db).unwrap();
     let handle = init_engine_host(&event_db).unwrap();
     let host = handle.lock().await;
-    assert!(
-        host.catalog()
-            .function(&crate::engine::FunctionId::new("engine::discover").unwrap())
-            .is_some()
-    );
+    assert_eq!(host.catalog().revision(), crate::engine::CatalogRevision(0));
     assert!(event_db.exists());
 }
 

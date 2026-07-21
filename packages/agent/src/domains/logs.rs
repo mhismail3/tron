@@ -13,8 +13,8 @@
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::worker::DomainRegistrationContext;
-use crate::domains::registration::worker::DomainWorkerModule;
+use crate::domains::registration::module::DomainModule;
+use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::{
     ClientLogEntry, EventStore, LogEntry, LogSessionFilter, RecentLogQuery,
 };
@@ -29,10 +29,10 @@ use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
 
-pub(crate) fn worker_module(
+pub(crate) fn function_module(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
-    crate::domains::registration::worker::domain_worker_module(
+) -> crate::engine::Result<DomainModule> {
+    crate::domains::registration::module::domain_module(
         "logs",
         STREAM_TOPICS,
         function_registrations(capabilities()?, Arc::clone(&deps.event_store))?,
