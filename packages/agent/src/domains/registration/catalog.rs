@@ -3,7 +3,7 @@
 //! Source domains own their full canonical function contracts in domain-local
 //! modules. This file owns only the common contract shape and stable
 //! registration identities; production startup owns complete enumeration and
-//! validation in `registration::domain_modules`.
+//! validation in `registration::compose_domains`.
 
 pub(crate) use super::contract::function_definition_for_capability;
 use crate::engine::{
@@ -44,14 +44,8 @@ pub struct CapabilitySpec {
     pub response_schema: Option<serde_json::Value>,
     /// Idempotency contract owned by the domain contract for mutating functions.
     pub idempotency: Option<IdempotencyContract>,
-    /// Stream topics emitted by this capability.
-    pub stream_topics: Vec<&'static str>,
     /// Discovery description supplied by the owning domain.
     pub description: Option<&'static str>,
-}
-
-pub(crate) fn worker_id(value: &str) -> EngineResult<WorkerId> {
-    WorkerId::new(value)
 }
 
 pub(crate) fn actor_id(value: &str) -> EngineResult<ActorId> {

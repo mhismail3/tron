@@ -6,8 +6,6 @@ use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
 
-pub(crate) const STREAM_TOPICS: &[&str] = &["model.config"];
-
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -19,7 +17,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","model"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"newModel":{"type":"string"},"previousModel":{"type":"string"}},"required":["previousModel","newModel"],"type":"object"}))
             .idempotency(IdempotencyContract::session())
-            .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
 }

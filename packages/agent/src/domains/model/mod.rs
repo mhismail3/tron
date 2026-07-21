@@ -27,17 +27,14 @@ pub mod routing;
 pub mod tokens;
 pub(crate) use deps::Deps;
 
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 
-pub(crate) fn function_modules(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<Vec<DomainModule>> {
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
     let model_specs = contract::capabilities()?;
     let domain_deps = Deps::from_engine(deps);
-    Ok(vec![crate::domains::registration::module::domain_module(
-        "model",
-        contract::STREAM_TOPICS,
-        handlers::model::function_registrations(model_specs, domain_deps)?,
-    )?])
+    handlers::model::bind_functions(model_specs, domain_deps)
 }

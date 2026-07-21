@@ -3,10 +3,8 @@
 //! This module is the setup-only boundary between the broad server runtime
 //! context and domain-owned function sets. Runtime handlers receive the narrow
 //! `Deps` type owned by their domain; this context is only used while building
-//! registrations at startup. `DomainModule` groups one source-owned function
-//! set; it is not a runtime worker or a second lifecycle plane. Startup tasks
-//! and shutdown hooks remain under the registration lifecycle token until
-//! complete engine setup succeeds.
+//! registrations at startup. Startup tasks and shutdown hooks remain under the
+//! registration lifecycle token until complete engine setup succeeds.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,10 +14,9 @@ use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::model::responder::ModelResponderFactory;
-use crate::domains::registration::catalog;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::settings::SettingsRuntime;
-use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerId};
+use crate::engine::{FunctionDefinition, InProcessFunctionHandler};
 use crate::shared::server::context::ServerRuntimeContext;
 
 #[derive(Clone)]
@@ -65,23 +62,4 @@ impl DomainRegistrationContext {
 pub(crate) struct DomainFunctionRegistration {
     pub(crate) definition: FunctionDefinition,
     pub(crate) handler: Arc<dyn InProcessFunctionHandler>,
-    pub(crate) stream_topics: Vec<&'static str>,
-}
-
-pub(crate) struct DomainModule {
-    pub(super) owner: WorkerId,
-    pub(super) functions: Vec<DomainFunctionRegistration>,
-    pub(super) stream_topics: &'static [&'static str],
-}
-
-pub(crate) fn domain_module(
-    namespace: &'static str,
-    stream_topics: &'static [&'static str],
-    functions: Vec<DomainFunctionRegistration>,
-) -> crate::engine::Result<DomainModule> {
-    Ok(DomainModule {
-        owner: catalog::worker_id(namespace)?,
-        functions,
-        stream_topics,
-    })
 }

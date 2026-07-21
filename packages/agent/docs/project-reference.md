@@ -63,8 +63,10 @@ provider observations small and mechanically dependable.
 Callable function definitions have no generic metadata map. A closed typed
 model-tool contract owns the model name, autonomy exposure, fixed group/order,
 and—only for direct workers—the worker id, immutable version, routing phrases,
-update time, and compact provenance. Stream-topic declarations stay in the
-setup-only domain registration record. This removes magic-key discovery and
+update time, and compact provenance. Function contracts do not carry declared
+stream topics: durable stream publication is owned directly by the emitters
+that perform it. Startup composes one flat executable function set; there is no
+parallel domain-module owner record. This removes magic-key discovery and
 prevents unproduced flags or test fixtures from changing production routing.
 Calls emitted together by a provider execute concurrently. The dispatcher and
 individual implementations own actual queueing and concurrency ceilings; the

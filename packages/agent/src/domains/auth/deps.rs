@@ -1,6 +1,6 @@
 //! Domain-specific dependency bundle for the auth worker.
 
-use crate::domains::registration::module::DomainRegistrationContext;
+use crate::domains::registration::composition::DomainRegistrationContext;
 use std::path::PathBuf;
 use std::sync::Arc;
 

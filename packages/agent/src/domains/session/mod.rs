@@ -8,7 +8,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `contract` | Capability contracts and stream topic declarations. |
+//! | `contract` | Canonical function schemas and invocation contracts. |
 //! | `lifecycle` | Create, delete, fork, archive, and lifecycle operation wrappers. |
 //! | `query` | Resume, list, head/state/history, export, and replay manifest operation wrappers. |
 //! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
@@ -46,8 +46,9 @@ use std::sync::Arc;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::registration::bindings::operation_bindings;
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 use crate::domains::session::event_store::EventStore;
 
 #[derive(Clone)]
@@ -76,17 +77,10 @@ impl Deps {
     }
 }
 
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    {
-        let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::module::domain_module(
-            "session",
-            contract::STREAM_TOPICS,
-            function_registrations(contract::capabilities()?, domain_deps)?,
-        )
-    }
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    bind_functions(contract::capabilities()?, Deps::from_engine(deps))
 }
 
 use lifecycle::{

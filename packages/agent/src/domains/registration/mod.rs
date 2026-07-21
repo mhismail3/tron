@@ -6,8 +6,8 @@
 //! bundles; there is no module manifest, proposal, binding, scheduler, legacy
 //! worker-lifecycle, or `capability::execute` registration plane.
 //! The complete production composition validates function ownership,
-//! canonical identity uniqueness, and stream-topic boundaries before either
-//! registration path mutates the engine catalog. The worker runtime returns one
+//! and canonical identity uniqueness before either registration path mutates
+//! the engine catalog. The worker runtime returns one
 //! activation token so transport setup starts its lifecycle observer only after
 //! registration. That observer always runs; the editable autonomous-worker
 //! setting controls dispatch and the provider tool surface live rather than
@@ -18,21 +18,19 @@
 //! Domain method names are internal operation keys for service routing only.
 //! Only canonical function ids are registered. Every handler binding is owned
 //! by a domain contract; composition has no hidden-operation exceptions.
-//! Emitted stream topics remain setup-only registration data and never enter a
-//! callable function contract as generic metadata.
 
 pub(crate) mod bindings;
 pub(crate) mod catalog;
+pub(crate) mod composition;
 pub(crate) mod contract;
-pub(crate) mod module;
 
 use std::collections::BTreeSet;
 
 use crate::engine::{EngineError, Result as EngineResult};
 use crate::shared::server::context::ServerRuntimeContext;
 
-use crate::domains::registration::module::{
-    DomainFunctionRegistration, DomainModule, DomainRegistrationContext,
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
 };
 use crate::domains::{
     agent, auth, blob, filesystem, logs, message, model, session, settings, system, worker_kernel,
@@ -66,7 +64,7 @@ impl DomainLifecycleActivation {
 }
 
 struct DomainComposition {
-    modules: Vec<DomainModule>,
+    functions: Vec<DomainFunctionRegistration>,
     engine_functions: Vec<DomainFunctionRegistration>,
     activation: DomainLifecycleActivation,
 }
@@ -76,15 +74,13 @@ pub(crate) fn register_domains_for_context(
     ctx: &ServerRuntimeContext,
 ) -> EngineResult<DomainLifecycleActivation> {
     let DomainComposition {
-        modules,
+        functions,
         engine_functions,
         activation,
-    } = domain_modules(ctx)?;
+    } = compose_domains(ctx)?;
     let handle = &ctx.engine_host;
-    for module in modules {
-        for function in module.functions {
-            handle.register_function_for_setup(function.definition, function.handler)?;
-        }
+    for function in functions {
+        handle.register_function_for_setup(function.definition, function.handler)?;
     }
     for function in engine_functions {
         handle.register_function_for_setup(function.definition, function.handler)?;
@@ -97,17 +93,15 @@ pub(crate) async fn register_domains_for_runtime_context(
     ctx: &ServerRuntimeContext,
 ) -> EngineResult<DomainLifecycleActivation> {
     let DomainComposition {
-        modules,
+        functions,
         engine_functions,
         activation,
-    } = domain_modules(ctx)?;
+    } = compose_domains(ctx)?;
     let handle = &ctx.engine_host;
-    for module in modules {
-        for function in module.functions {
-            handle
-                .register_function(function.definition, function.handler)
-                .await?;
-        }
+    for function in functions {
+        handle
+            .register_function(function.definition, function.handler)
+            .await?;
     }
     for function in engine_functions {
         handle
@@ -117,31 +111,27 @@ pub(crate) async fn register_domains_for_runtime_context(
     Ok(activation)
 }
 
-fn domain_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition> {
+fn compose_domains(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition> {
     let deps = DomainRegistrationContext::from_context(ctx);
     let worker_kernel_registration = worker_kernel::registration(&deps)?;
     let worker_kernel_runtime = worker_kernel_registration.runtime.clone();
     let engine_functions = worker_kernel_registration.engine_functions;
-    let mut modules = vec![
-        system::function_module(&deps)?,
-        worker_kernel_registration.module,
-        filesystem::function_module(&deps)?,
-        blob::function_module(&deps)?,
-        message::function_module(&deps)?,
-        settings::function_module(&deps)?,
-        auth::function_module(&deps)?,
-        agent::function_module(&deps)?,
-        logs::function_module(&deps)?,
-        session::function_module(&deps)?,
-    ];
-    modules.extend(model::function_modules(&deps)?);
-    validate_domain_composition(&modules)?;
+    let mut functions = Vec::new();
+    functions.extend(system::function_registrations(&deps)?);
+    functions.extend(worker_kernel_registration.functions);
+    functions.extend(filesystem::function_registrations(&deps)?);
+    functions.extend(blob::function_registrations(&deps)?);
+    functions.extend(message::function_registrations(&deps)?);
+    functions.extend(settings::function_registrations(&deps)?);
+    functions.extend(auth::function_registrations(&deps)?);
+    functions.extend(agent::function_registrations(&deps)?);
+    functions.extend(logs::function_registrations(&deps)?);
+    functions.extend(session::function_registrations(&deps)?);
+    functions.extend(model::function_registrations(&deps)?);
+    validate_domain_composition(&functions)?;
     validate_engine_extension_functions(&engine_functions)?;
-    for module in &modules {
-        validate_domain_stream_topics(module)?;
-    }
     Ok(DomainComposition {
-        modules,
+        functions,
         engine_functions,
         activation: DomainLifecycleActivation {
             worker_kernel: worker_kernel_runtime,
@@ -173,79 +163,13 @@ fn validate_engine_extension_functions(
     Ok(())
 }
 
-fn validate_domain_composition(modules: &[DomainModule]) -> EngineResult<()> {
+fn validate_domain_composition(functions: &[DomainFunctionRegistration]) -> EngineResult<()> {
     let mut function_ids = BTreeSet::new();
-    for module in modules {
-        for function in &module.functions {
-            if function.definition.owner_worker != module.owner {
-                return Err(EngineError::PolicyViolation(format!(
-                    "function {} is owned by {} but composed under domain component {}",
-                    function.definition.id.as_str(),
-                    function.definition.owner_worker.as_str(),
-                    module.owner.as_str()
-                )));
-            }
-            if !function_ids.insert(function.definition.id.as_str()) {
-                return Err(EngineError::PolicyViolation(format!(
-                    "duplicate canonical function id {} in domain composition",
-                    function.definition.id.as_str()
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_domain_stream_topics(module: &DomainModule) -> EngineResult<()> {
-    let declared = module
-        .stream_topics
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    if declared.len() != module.stream_topics.len() {
-        return Err(EngineError::PolicyViolation(format!(
-            "domain component {} declares duplicate stream topics",
-            module.owner.as_str()
-        )));
-    }
-    for topic in &declared {
-        if topic.trim().is_empty() {
+    for function in functions {
+        if !function_ids.insert(function.definition.id.as_str()) {
             return Err(EngineError::PolicyViolation(format!(
-                "domain component {} declares an empty stream topic",
-                module.owner.as_str()
-            )));
-        }
-        if !topic.contains('.') {
-            return Err(EngineError::PolicyViolation(format!(
-                "domain component {} stream topic {topic} must use domain-scoped dotted form",
-                module.owner.as_str()
-            )));
-        }
-        if matches!(*topic, "catalog.changes" | "queue.lifecycle") {
-            return Err(EngineError::PolicyViolation(format!(
-                "domain component {} cannot claim engine-owned stream topic {topic}",
-                module.owner.as_str()
-            )));
-        }
-    }
-
-    for function in &module.functions {
-        validate_function_stream_topics(module, function, &declared)?;
-    }
-    Ok(())
-}
-
-fn validate_function_stream_topics(
-    module: &DomainModule,
-    function: &DomainFunctionRegistration,
-    declared: &BTreeSet<&'static str>,
-) -> EngineResult<()> {
-    for topic in &function.stream_topics {
-        if !declared.contains(topic) {
-            return Err(EngineError::PolicyViolation(format!(
-                "function {} emits undeclared domain stream topic {topic} for component {}",
-                function.definition.id.as_str(),
-                module.owner.as_str()
+                "duplicate canonical function id {} in domain composition",
+                function.definition.id.as_str()
             )));
         }
     }
@@ -278,10 +202,7 @@ mod tests {
         }
     }
 
-    fn test_module(
-        declared_topics: &'static [&'static str],
-        function_topics: Vec<&'static str>,
-    ) -> DomainModule {
+    fn test_function() -> DomainFunctionRegistration {
         let definition = FunctionDefinition::new(
             FunctionId::new("test::op").expect("function id"),
             WorkerId::new("test").expect("worker id"),
@@ -289,78 +210,23 @@ mod tests {
             FunctionVisibility::Public,
             EffectClass::PureRead,
         );
-        DomainModule {
-            owner: WorkerId::new("test").expect("worker id"),
-            functions: vec![DomainFunctionRegistration {
-                definition,
-                handler: Arc::new(NoopHandler),
-                stream_topics: function_topics,
-            }],
-            stream_topics: declared_topics,
+        DomainFunctionRegistration {
+            definition,
+            handler: Arc::new(NoopHandler),
         }
     }
 
     #[test]
-    fn stream_topic_validation_accepts_declared_domain_topics() {
-        let module = test_module(&["test.events"], vec!["test.events"]);
-        validate_domain_stream_topics(&module).expect("declared topic should pass");
-    }
-
-    #[test]
-    fn stream_topic_validation_rejects_active_engine_owned_topics() {
-        let module = test_module(&["catalog.changes"], vec!["catalog.changes"]);
-        let Err(error) = validate_domain_stream_topics(&module) else {
-            panic!("engine topic must fail");
-        };
-        assert!(error.to_string().contains("engine-owned stream topic"));
-    }
-
-    #[test]
-    fn stream_topic_validation_rejects_unscoped_topics() {
-        let module = test_module(&["events"], vec!["events"]);
-        let Err(error) = validate_domain_stream_topics(&module) else {
-            panic!("unscoped topic must fail");
-        };
-        assert!(error.to_string().contains("domain-scoped dotted form"));
-    }
-
-    #[test]
-    fn stream_topic_validation_rejects_undeclared_function_topics() {
-        let module = test_module(&["test.events"], vec!["other.events"]);
-        let Err(error) = validate_domain_stream_topics(&module) else {
-            panic!("undeclared topic must fail");
-        };
-        assert!(error.to_string().contains("undeclared domain stream topic"));
-    }
-
-    #[test]
     fn domain_composition_rejects_duplicate_function_ids() {
-        let mut module = test_module(&[], vec![]);
-        module.functions.push(module.functions[0].clone());
+        let function = test_function();
 
-        let Err(error) = validate_domain_composition(&[module]) else {
+        let Err(error) = validate_domain_composition(&[function.clone(), function]) else {
             panic!("duplicate canonical function id must fail");
         };
         assert!(
             error
                 .to_string()
                 .contains("duplicate canonical function id")
-        );
-    }
-
-    #[test]
-    fn domain_composition_rejects_function_owner_drift() {
-        let mut module = test_module(&[], vec![]);
-        module.functions[0].definition.owner_worker =
-            WorkerId::new("other").expect("valid wrong owner");
-
-        let Err(error) = validate_domain_composition(&[module]) else {
-            panic!("function owner drift must fail");
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("composed under domain component")
         );
     }
 

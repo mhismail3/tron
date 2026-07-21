@@ -21,7 +21,9 @@
 
 use std::path::PathBuf;
 
-use crate::domains::registration::module::{DomainModule, DomainRegistrationContext};
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 use crate::shared::foundation::paths;
 
 pub(crate) mod contract;
@@ -29,8 +31,6 @@ mod handlers;
 mod service;
 
 pub(crate) const WORKER: &str = "filesystem";
-const STREAM_TOPICS: &[&str] = &[];
-
 #[derive(Clone)]
 pub(crate) struct Deps {
     home_dir: PathBuf,
@@ -49,14 +49,10 @@ impl Deps {
     }
 }
 
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    crate::domains::registration::module::domain_module(
-        WORKER,
-        STREAM_TOPICS,
-        handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
-    )
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    handlers::bind_functions(contract::capabilities()?, Deps::from_engine(deps))
 }
 
 #[cfg(test)]

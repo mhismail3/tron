@@ -21,7 +21,7 @@ impl<'a> AuthStreamPublisher<'a> {
         if let Err(error) = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[0].to_owned(),
+                topic: contract::ACCOUNTS_STREAM_TOPIC.to_owned(),
                 payload: json!({
                     "serverEvent": event,
                     "__broadcastScope": { "kind": "all" },

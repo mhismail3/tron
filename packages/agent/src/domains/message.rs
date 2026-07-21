@@ -6,9 +6,10 @@
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors;
@@ -18,8 +19,6 @@ use crate::shared::server::params::require_string_param;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
-
-const STREAM_TOPICS: &[&str] = &["message.events"];
 
 #[derive(Clone)]
 pub(crate) struct Deps {
@@ -36,17 +35,10 @@ impl Deps {
     }
 }
 
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    {
-        let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::module::domain_module(
-            "message",
-            STREAM_TOPICS,
-            function_registrations(capabilities()?, domain_deps)?,
-        )
-    }
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    bind_functions(capabilities()?, Deps::from_engine(deps))
 }
 
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
@@ -59,7 +51,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(json!({"additionalProperties":false,"properties":{"reason":{"type":"string"},"sessionId":{"type":"string"},"targetEventId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","targetEventId"],"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"deletionEventId":{"type":"string"},"success":{"type":"boolean"},"targetType":{"type":"string"}},"required":["success","deletionEventId","targetType"],"type":"object"}))
         .idempotency(IdempotencyContract::session())
-        .stream_topics(STREAM_TOPICS.to_vec())
         .build()?,
     ])
 }

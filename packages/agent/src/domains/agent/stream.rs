@@ -27,7 +27,7 @@ impl<'a> AgentStreamPublisher<'a> {
         let _ = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[0].to_owned(),
+                topic: contract::RUNTIME_STREAM_TOPIC.to_owned(),
                 payload: json!({
                     "type": format!("agent.prompt.{action}"),
                     "action": action,
@@ -64,7 +64,7 @@ impl<'a> AgentStreamPublisher<'a> {
         let _ = self
             .engine_host
             .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[0].to_owned(),
+                topic: contract::RUNTIME_STREAM_TOPIC.to_owned(),
                 payload: json!({
                     "type": format!("agent.prompt.{action}"),
                     "action": action,

@@ -3,7 +3,7 @@
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::model::responder::ModelResponderFactory;
-use crate::domains::registration::module::DomainRegistrationContext;
+use crate::domains::registration::composition::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::settings::SettingsRuntime;
 use std::path::PathBuf;

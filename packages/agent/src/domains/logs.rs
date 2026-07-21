@@ -12,9 +12,10 @@
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::{
     ClientLogEntry, EventStore, LogEntry, LogSessionFilter, RecentLogQuery,
 };
@@ -29,17 +30,12 @@ use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
 
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    crate::domains::registration::module::domain_module(
-        "logs",
-        STREAM_TOPICS,
-        function_registrations(capabilities()?, Arc::clone(&deps.event_store))?,
-    )
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    bind_functions(capabilities()?, Arc::clone(&deps.event_store))
 }
 
-const STREAM_TOPICS: &[&str] = &["logs.ingest"];
 const DEFAULT_RECENT_LIMIT: u32 = 200;
 const MAX_RECENT_LIMIT: u32 = 1_000;
 

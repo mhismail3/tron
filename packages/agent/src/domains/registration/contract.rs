@@ -1,13 +1,11 @@
 //! Generic capability-contract builders.
 //!
 //! Domain contracts are the primitive manifest for retained in-process workers:
-//! they declare the canonical function id, schema, risk/effect, and emitted
-//! stream topics.
+//! they declare the canonical function id, schema, and risk/effect contract.
 //!
-//! Domain `contract.rs` files own their function inventory, schemas, risk,
-//! idempotency, and stream declarations. This
-//! module contains only method-agnostic construction helpers used to turn those
-//! local records into engine definitions.
+//! Domain `contract.rs` files own their function inventory, schemas, risk, and
+//! idempotency. This module contains only method-agnostic construction helpers
+//! used to turn those local records into engine definitions.
 
 use serde_json::Value;
 
@@ -39,8 +37,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) response_schema: Option<Value>,
     /// Mutating idempotency contract.
     pub(crate) idempotency: Option<IdempotencyContract>,
-    /// Stream topics emitted by the function.
-    pub(crate) stream_topics: Vec<&'static str>,
     /// Human-readable discovery description.
     pub(crate) description: Option<&'static str>,
 }
@@ -69,7 +65,6 @@ impl CapabilityContract {
             request_schema: None,
             response_schema: None,
             idempotency: None,
-            stream_topics: Vec::new(),
             description: None,
         }
     }
@@ -110,12 +105,6 @@ impl CapabilityContract {
         self
     }
 
-    /// Attach stream topics.
-    pub(crate) fn stream_topics(mut self, topics: Vec<&'static str>) -> Self {
-        self.stream_topics = topics;
-        self
-    }
-
     /// Convert the local domain record to the aggregate catalog shape.
     pub(crate) fn build(self) -> EngineResult<CapabilitySpec> {
         Ok(CapabilitySpec {
@@ -129,7 +118,6 @@ impl CapabilityContract {
             request_schema: self.request_schema,
             response_schema: self.response_schema,
             idempotency: self.idempotency,
-            stream_topics: self.stream_topics,
             description: self.description,
         })
     }

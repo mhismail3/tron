@@ -15,18 +15,12 @@ pub(crate) mod oauth;
 pub(crate) mod stream;
 pub(crate) use deps::Deps;
 
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    {
-        let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::module::domain_module(
-            "auth",
-            contract::STREAM_TOPICS,
-            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
-        )
-    }
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    handlers::bind_functions(contract::capabilities()?, Deps::from_engine(deps))
 }

@@ -64,13 +64,10 @@ pub use r#loop::{Orchestrator, SessionManager};
 pub(crate) mod runtime;
 pub(crate) mod stream;
 
-pub(crate) fn function_module(
-    deps: &crate::domains::registration::module::DomainRegistrationContext,
-) -> crate::engine::Result<crate::domains::registration::module::DomainModule> {
+pub(crate) fn function_registrations(
+    deps: &crate::domains::registration::composition::DomainRegistrationContext,
+) -> crate::engine::Result<Vec<crate::domains::registration::composition::DomainFunctionRegistration>>
+{
     let domain_deps = Deps::from_engine(deps);
-    crate::domains::registration::module::domain_module(
-        "agent",
-        contract::STREAM_TOPICS,
-        handlers::function_registrations(contract::capabilities()?, domain_deps)?,
-    )
+    handlers::bind_functions(contract::capabilities()?, domain_deps)
 }

@@ -8,9 +8,10 @@ use base64::Engine;
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
 use crate::shared::server::context::run_blocking_task;
@@ -19,16 +20,10 @@ use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
 
-const STREAM_TOPICS: &[&str] = &[];
-
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    crate::domains::registration::module::domain_module(
-        "blob",
-        STREAM_TOPICS,
-        function_registrations(capabilities()?, Arc::clone(&deps.event_store))?,
-    )
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    bind_functions(capabilities()?, Arc::clone(&deps.event_store))
 }
 
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {

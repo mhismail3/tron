@@ -6,9 +6,10 @@
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
+};
 use crate::domains::registration::contract::CapabilityContract;
-use crate::domains::registration::module::DomainModule;
-use crate::domains::registration::module::DomainRegistrationContext;
 use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::shared::server::errors::CapabilityError;
@@ -32,17 +33,10 @@ impl Deps {
     }
 }
 
-pub(crate) fn function_module(
+pub(crate) fn function_registrations(
     deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainModule> {
-    {
-        let domain_deps = Deps::from_engine(deps);
-        crate::domains::registration::module::domain_module(
-            "system",
-            &[],
-            function_registrations(capabilities()?, domain_deps)?,
-        )
-    }
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    bind_functions(capabilities()?, Deps::from_engine(deps))
 }
 
 use crate::shared::server::protocol as engine_transport_protocol;

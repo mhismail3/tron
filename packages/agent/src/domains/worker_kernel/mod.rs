@@ -138,8 +138,8 @@
 
 use std::sync::Arc;
 
-use crate::domains::registration::module::{
-    DomainFunctionRegistration, DomainModule, DomainRegistrationContext,
+use crate::domains::registration::composition::{
+    DomainFunctionRegistration, DomainRegistrationContext,
 };
 
 mod contract;
@@ -164,10 +164,8 @@ pub(crate) use runtime::WorkerRuntime;
 pub(crate) use surface::SurfaceToolSnapshot;
 pub(crate) use surface::{EngineSurfaceSnapshot, promote_worker_for_session, resolve_tool_surface};
 
-pub(crate) const STREAM_TOPICS: &[&str] = &["worker.lifecycle", "worker.invocations"];
-
 pub(crate) struct Registration {
-    pub(crate) module: DomainModule,
+    pub(crate) functions: Vec<DomainFunctionRegistration>,
     pub(crate) engine_functions: Vec<DomainFunctionRegistration>,
     pub(crate) runtime: Arc<WorkerRuntime>,
 }
@@ -187,7 +185,7 @@ pub(crate) fn registration(
         deps.settings_runtime.clone(),
     )
     .map_err(crate::engine::EngineError::HandlerFailed)?;
-    let mut functions = handlers::function_registrations(
+    let mut functions = handlers::bind_functions(
         contract::capabilities()?,
         handlers::Deps {
             runtime: Arc::clone(&runtime),
@@ -228,13 +226,8 @@ pub(crate) fn registration(
     let (engine_functions, functions): (Vec<_>, Vec<_>) = functions
         .into_iter()
         .partition(|registration| registration.definition.id.namespace() == "engine");
-    let module = crate::domains::registration::module::domain_module(
-        "worker_kernel",
-        STREAM_TOPICS,
-        functions,
-    )?;
     Ok(Registration {
-        module,
+        functions,
         engine_functions,
         runtime,
     })
