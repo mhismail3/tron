@@ -132,6 +132,8 @@ selection evidence, and canonical engine worker inventory. UI code does not
 reconstruct model visibility from raw catalog `[AnyCodable]` entries. The exact
 `surface.tools` projection is kept distinct from fixed/published inventories;
 when autonomy is off, fixed tools remain inspectable but explicitly unexposed.
+The client models current surface truth only; it has no catalog-watch, catalog-
+change-history, or raw catalog snapshot DTO plane.
 
 Write calls carry `EngineIdempotencyKey`. User actions use distinct generated
 keys, while retrying the same accepted action retains its operation identity at
@@ -288,6 +290,9 @@ Provider direct-tool calls continue to render through generic invocation/result
 chips; “capability” in those UI type names means a provider tool call, not the
 removed authorization framework. Direct typed command vectors render as a
 readable command while the technical detail retains their exact JSON evidence.
+Failure presentation classifies current schema and policy errors from their
+server evidence, but never invents an authority grant or a scoped-authorization
+retry path for legacy failure text.
 
 ## Composer and Attachments
 

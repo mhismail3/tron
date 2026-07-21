@@ -58,6 +58,56 @@ final class CapabilityInvocationBriefPresentationTests: XCTestCase {
         XCTAssertTrue(brief.technicalRows.contains { $0.label == "Invocation" && $0.value.contains("call_7tRZ") })
     }
 
+    func testLegacyAuthorityWordingDoesNotInventAuthorizationRecovery() {
+        let invocation = CapabilityInvocationData(
+            id: "call_legacy_failure",
+            status: .error,
+            arguments: #"{"workerId":"recent-research"}"#,
+            result: "worker grant authority was not available",
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "worker_invoke",
+                operationName: "worker_invoke"
+            ),
+            errorClassification: CapabilityErrorClassification(
+                code: "LEGACY_AUTHORITY_FAILURE",
+                category: "engine",
+                message: "worker grant authority was not available",
+                recoverable: true
+            )
+        )
+
+        let brief = CapabilityInvocationBriefPresentation(data: invocation)
+
+        XCTAssertEqual(brief.issue?.title, "Worker Invoke failed")
+        XCTAssertEqual(brief.issue?.nextStep, "This is recoverable after correcting the request.")
+        XCTAssertFalse(brief.narrative.contains("scoped authority"))
+        XCTAssertFalse(brief.narrative.contains("Policy blocked"))
+    }
+
+    func testCurrentPolicyFailureKeepsPolicyClassification() {
+        let invocation = CapabilityInvocationData(
+            id: "call_policy_failure",
+            status: .error,
+            arguments: "{}",
+            result: "policy violation: mutating invocation requires an idempotency key",
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "worker_disable",
+                operationName: "worker_disable"
+            ),
+            errorClassification: CapabilityErrorClassification(
+                code: "ENGINE_POLICY_VIOLATION",
+                category: "policy",
+                message: "policy violation: mutating invocation requires an idempotency key",
+                recoverable: true
+            )
+        )
+
+        let brief = CapabilityInvocationBriefPresentation(data: invocation)
+
+        XCTAssertEqual(brief.issue?.title, "Policy blocked this request")
+        XCTAssertEqual(brief.issue?.nextStep, "This is recoverable after correcting the request.")
+    }
+
     func testRawPayloadIsSeparatedFromConciseRequestRows() {
         let invocation = testCapabilityInvocation(
             status: .success,

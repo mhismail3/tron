@@ -182,8 +182,6 @@ extension SourceGuardTests {
             ("NSTemporary" + "Directory" + "()" + " + " + "\".tron/database/events.db\"", "temporary database path"),
             ("target" + "Function" + "Id", "generated UI target construction"),
             ("payload" + "Template", "generated UI payload construction"),
-            ("required" + "Grant", "grant construction"),
-            ("Authority" + "Grant", "grant policy ownership"),
             ("resource" + "Refs", "resource lineage ownership"),
             ("Resource" + "Ref", "resource lineage ownership"),
         ]

@@ -240,7 +240,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         defaultTitle: String
     ) -> String {
         let lowered = [error?.code, error?.category, message].compactMap { $0 }.joined(separator: " ").lowercased()
-        if lowered.contains("policy") || lowered.contains("authority") || lowered.contains("grant") {
+        if lowered.contains("policy") {
             return "Policy blocked this request"
         }
         if lowered.contains("schema") || lowered.contains("invalid") {
@@ -253,9 +253,6 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         let lowered = message.lowercased()
         if let selector = explicitSelector(from: message) {
             return "Retry with the explicit \(selector) selector."
-        }
-        if lowered.contains("authority") || lowered.contains("grant") {
-            return "Use the required scoped authority before retrying."
         }
         if error?.recoverable == true {
             return "This is recoverable after correcting the request."
