@@ -4,7 +4,6 @@
 //! |--------|---------|
 //! | [`constants`] | Shared compile-time constants |
 //! | [`constitution`] | Required Tron Home directory recovery without inert state files |
-//! | [`errors`] | Shared error taxonomy and parsing |
 //! | [`ids`] | Branded IDs used across domains and protocol payloads |
 //! | [`paths`] | Canonical filesystem paths |
 //! | [`redaction`] | Authoritative text- and field-aware JSON sensitive-data redaction policy |
@@ -13,7 +12,6 @@
 
 pub mod constants;
 pub mod constitution;
-pub mod errors;
 pub mod ids;
 pub mod paths;
 pub mod redaction;
