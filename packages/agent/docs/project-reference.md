@@ -566,6 +566,11 @@ grants, or agent-kind rejections. Executable workers can change local files and
 make consequential external requests without fresh confirmation. This is the
 intentional POC threat model.
 
+The primary model receives one short, stable product-intent seed. Tool names,
+schemas, worker availability, lifecycle mechanics, and approval boundaries are
+projected from the live typed surface on every turn instead of being duplicated
+in a second hardcoded instruction set.
+
 Three unrelated runtime boundaries use three deliberately separate closed
 types instead of the former generic visibility scope:
 

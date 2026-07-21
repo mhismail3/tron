@@ -10,7 +10,7 @@
 //! | Module                | Content |
 //! |-----------------------|---------|
 //! | [`provider`]          | [`OpenAIProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`]); stream, retry, capability invocation parsing |
-//! | [`message_converter`] | `Vec<Message>` → Responses `input` items, tool schema conversion, and single-primitive `execute` instruction text |
+//! | [`message_converter`] | `Vec<Message>` → Responses `input` items and direct typed-tool schema conversion |
 //! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::protocol::events`]); handles output deltas, capability invocations, and terminal events |
 //! | [`types`]             | [`OpenAIAuth`], [`OpenAIConfig`], [`ApiEndpoint`], endpoint-aware model profiles, and Responses wire DTOs split by owned surface |
 //!
@@ -30,7 +30,7 @@
 //!   request is sent.
 //! - Primitive context is compiled into the Responses `instructions` field.
 //!   The `input` array carries conversation items and capability results only;
-//!   it must not receive synthetic developer/user messages for agent soul,
+//!   it must not receive synthetic developer/user messages for the agent seed,
 //!   environment, or tool-use guidance.
 //! - Capability invocations arrive as streaming deltas over multiple SSE events.
 //!   [`stream_handler`] accumulates them until the closing `finish_reason`

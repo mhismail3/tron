@@ -8,7 +8,7 @@
 //! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
 //! | `summarizer` | Summarizer trait and recovery implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
-//! | `soul` | Static seed instruction for the primitive loop |
+//! | `seed` | Minimal product-intent instruction for the primitive loop |
 //! | `token_estimator` | Token counting and context budget calculations |
 //! | `constants` | Token limits, compaction thresholds |
 //! | `types` | Shared types for context subsystem |
@@ -41,7 +41,7 @@ pub mod compaction_trigger;
 pub mod constants;
 pub mod context_manager;
 pub mod message_store;
-pub mod soul;
+pub mod seed;
 pub mod summarizer;
 pub mod token_estimator;
 pub mod types;
