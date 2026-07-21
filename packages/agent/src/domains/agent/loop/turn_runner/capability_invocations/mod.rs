@@ -3,11 +3,6 @@
 //! This module persists provider-requested direct-tool executions, dispatches
 //! trusted-local kernel or worker functions, and writes the provider-facing
 //! result message. Each registered function owns its typed schema.
-//! A committed context boundary is also an execution-wave boundary: later
-//! serialized waves from the same provider response are not started after a
-//! capability result requests the active turn to stop. Because start rows are
-//! published up front for immediate UI visibility, every skipped later wave is
-//! closed by a terminal non-executed completion row.
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled. Result
@@ -64,7 +59,6 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
 #[derive(Default)]
 pub(super) struct CapabilityInvocationPhaseOutcome {
     pub capability_invocations_executed: usize,
-    pub stop_turn_requested: bool,
     pub interrupted: bool,
     pub error: Option<RuntimeError>,
 }
@@ -359,7 +353,6 @@ pub(super) async fn execute_capability_invocation_phase(
                         direct_tool = %capability_invocation.name,
                         duration_ms = result.duration_ms,
                         is_error = result.result.is_error.unwrap_or(false),
-                        stops_turn = result.stops_turn,
                         "capability invocation execution completed"
                     );
 
@@ -407,7 +400,6 @@ pub(super) async fn execute_capability_invocation_phase(
             );
             break;
         }
-        let wave_requested_turn_stop = wave_requests_turn_stop(wave, &results);
         debug!(
             component = "agent.capability",
             agent_event = "capability_wave_completed",
@@ -419,32 +411,6 @@ pub(super) async fn execute_capability_invocation_phase(
             wave_size = wave.len(),
             "capability execution wave completed"
         );
-        if wave_requested_turn_stop {
-            info!(
-                component = "agent.capability",
-                agent_event = "capability_waves_stopped_at_context_boundary",
-                session_id = params.session_id,
-                run_id = params.run_id.unwrap_or("none"),
-                trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
-                turn = params.turn,
-                wave_index,
-                "later capability waves skipped after a committed context boundary"
-            );
-            let skipped = waves
-                .iter()
-                .skip(wave_index + 1)
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
-            record_skipped_invocations(
-                &skipped,
-                &params,
-                &mut completion_payloads,
-                "context_boundary_committed",
-                "CAPABILITY_INVOCATION_SKIPPED_AFTER_CONTEXT_BOUNDARY",
-            );
-            break;
-        }
     }
 
     if let Err(error) = persist_completion_batch(&params, completion_payloads) {
@@ -468,17 +434,6 @@ pub(super) async fn execute_capability_invocation_phase(
     }
 
     process_capability_results(results, params, interrupted).await
-}
-
-fn wave_requests_turn_stop(
-    wave: &[usize],
-    results: &[Option<ExecutedCapabilityInvocation>],
-) -> bool {
-    wave.iter().any(|&idx| {
-        results[idx]
-            .as_ref()
-            .is_some_and(|executed| executed.result.stops_turn)
-    })
 }
 
 fn executed_completion_payload(
@@ -706,10 +661,6 @@ async fn process_capability_results(
                 content: CapabilityResultMessageContent::Text(provider_text),
                 is_error: if is_error { Some(true) } else { None },
             });
-
-        if exec_result.stops_turn {
-            outcome.stop_turn_requested = true;
-        }
     }
 
     info!(
@@ -720,7 +671,6 @@ async fn process_capability_results(
         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
         turn = params.turn,
         executed_count = outcome.capability_invocations_executed,
-        stop_turn_requested = outcome.stop_turn_requested,
         interrupted = outcome.interrupted,
         "agent capability phase completed"
     );

@@ -3,7 +3,7 @@
 //! Providers see only direct typed kernel and persistent-worker functions.
 //! The removed `capability::execute` wrapper is never projected.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use serde_json::Value;
 
@@ -123,7 +123,6 @@ pub struct PrimitiveExecutionTarget {
     pub model_capability_id: String,
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
-    pub stops_turn: bool,
     pub execution_mode: ExecutionMode,
     /// Whether this target came from the accepted trusted-local tool surface.
     pub trusted_local: bool,
@@ -133,7 +132,6 @@ pub struct PrimitiveExecutionTarget {
 pub struct ResolvedPrimitiveSurface {
     pub capabilities: Vec<ModelCapability>,
     pub targets_by_name: BTreeMap<String, PrimitiveExecutionTarget>,
-    pub turn_stopping_capabilities: HashSet<String>,
     /// Exact provider-neutral catalog evidence used to construct this surface.
     pub snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot,
 }
@@ -162,21 +160,16 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
     .await?;
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
-    let mut turn_stopping_capabilities = HashSet::new();
 
     for resolved_function in resolved.functions {
         let target = PrimitiveExecutionTarget {
             model_capability_id: resolved_function.model_name,
             function_id: resolved_function.definition.id.clone(),
-            stops_turn: resolved_function.stops_turn,
             execution_mode: execution_mode(&resolved_function.definition),
             trusted_local: resolved_function.trusted_local,
             function: resolved_function.definition,
         };
         let capability = model_capability_schema(&target);
-        if target.stops_turn {
-            let _ = turn_stopping_capabilities.insert(target.model_capability_id.clone());
-        }
         let _ = targets_by_name.insert(target.model_capability_id.clone(), target);
         capabilities.push(capability);
     }
@@ -184,7 +177,6 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
     Ok(ResolvedPrimitiveSurface {
         capabilities,
         targets_by_name,
-        turn_stopping_capabilities,
         snapshot: resolved.snapshot,
     })
 }

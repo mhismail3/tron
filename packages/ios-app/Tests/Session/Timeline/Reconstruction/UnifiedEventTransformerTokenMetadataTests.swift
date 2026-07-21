@@ -169,7 +169,7 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
         assertNoResponseMetadata(messages)
     }
 
-    func testCapabilityBeforeTextSuppressesMetadataEvenWithCapabilityStopReason() {
+    func testCapabilityBeforeTextSuppressesMetadataWithInvocationStopReason() {
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 20,
             outputTokens: 80,

@@ -1,6 +1,6 @@
 use super::*;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -34,7 +34,6 @@ fn empty_surface() -> ResolvedPrimitiveSurface {
     ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name: BTreeMap::new(),
-        turn_stopping_capabilities: HashSet::new(),
         snapshot: Default::default(),
     }
 }
@@ -74,7 +73,6 @@ fn transient_capability_result_copy_is_redacted_without_mutating_provider_result
         ]),
         details: Some(json!({"token": token, "status": "active"})),
         is_error: None,
-        stop_turn: None,
     };
 
     let redacted = redacted_capability_result(&result);
@@ -136,14 +134,12 @@ async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
         model_capability_id: "direct_test".to_owned(),
         function_id,
         function,
-        stops_turn: false,
         execution_mode: ExecutionMode::Parallel,
         trusted_local: true,
     };
     let surface = ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name: BTreeMap::from([("direct_test".to_owned(), target)]),
-        turn_stopping_capabilities: HashSet::new(),
         snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot {
             catalog_revision: 17,
             surface_hash: "surface-hash-test".to_owned(),

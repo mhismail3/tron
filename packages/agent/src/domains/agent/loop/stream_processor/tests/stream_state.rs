@@ -84,17 +84,9 @@ async fn duplicate_capability_invocations_deduped_by_id() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(
         result.capability_invocations.len(),
@@ -208,17 +200,9 @@ async fn abort_mid_thinking_preserves_signature() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert!(result.interrupted);
     // The thinking signature must be preserved on the message
@@ -245,7 +229,6 @@ async fn stream_trace_logs_metadata_without_content() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )

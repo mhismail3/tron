@@ -1,8 +1,8 @@
 //! Stream processor — consumes `ModelResponseStream`, accumulates content blocks.
 //!
 //! The heavy lifting lives in [`super::stream_state`]: `StreamState` holds the
-//! accumulators and `handle_normal_event` / `handle_drain_event` classify each
-//! `StreamEvent` into a `StreamAction`. This module provides the public
+//! accumulators and `handle_event` classifies each `StreamEvent` into a
+//! `StreamAction`. This module provides the public
 //! `process_stream` entry point that drives the `tokio::select!` loop.
 //! Final results normalize provider terminal metadata against accumulated
 //! content so persisted replay cannot claim `end_turn` while carrying a
@@ -10,7 +10,6 @@
 //! [`StreamFailure`] containing the content accumulated before the error; the
 //! turn runner owns atomic partial-message plus failure persistence.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
@@ -52,21 +51,16 @@ fn failed(state: StreamState, error: RuntimeError) -> StreamFailure {
 
 /// Process an LLM stream, accumulating content and emitting events.
 ///
-/// When a capability in `turn_stopping_capabilities` completes (via `CapabilityInvocationDraftEnd`), the
-/// processor enters **drain mode**: it stops accumulating content (text,
-/// thinking, further capability invocations) but keeps reading the stream to capture
-/// accurate token usage from the `Done` event. After real streamed content has
-/// been observed, the result is built from accumulators (which contain only
-/// pre-drain content), not from the provider's final message. Final-only
-/// responses still use the provider `Done` message because some providers
-/// synthesize block close events from that same terminal payload.
+/// After real streamed content has been observed, the result is built from
+/// accumulators rather than the provider's final message. Final-only responses
+/// still use the provider `Done` message because some providers synthesize
+/// block close events from that same terminal payload.
 #[cfg(test)]
 pub async fn process_stream(
     stream: ModelResponseStream,
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
-    turn_stopping_capabilities: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
     journal: Option<&mut StreamingJournal>,
 ) -> Result<StreamResult, StreamFailure> {
@@ -75,7 +69,6 @@ pub async fn process_stream(
         session_id,
         emitter,
         cancel,
-        turn_stopping_capabilities,
         sequence_counter,
         journal,
         None,
@@ -92,7 +85,6 @@ pub async fn process_stream_with_trace(
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
-    turn_stopping_capabilities: &HashSet<String>,
     sequence_counter: Option<&AtomicI64>,
     mut journal: Option<&mut StreamingJournal>,
     trace_id: Option<&TraceId>,
@@ -129,25 +121,14 @@ pub async fn process_stream_with_trace(
                 return Err(failed(state, RuntimeError::ModelResponse(e)));
             }
             Some(Ok(stream_event)) => {
-                let action = if state.draining {
-                    state.handle_drain_event(
-                        stream_event,
-                        session_id,
-                        emitter,
-                        sequence_counter,
-                        trace_context,
-                    )
-                } else {
-                    state.handle_normal_event(
-                        stream_event,
-                        session_id,
-                        emitter,
-                        sequence_counter,
-                        turn_stopping_capabilities,
-                        &mut journal,
-                        trace_context,
-                    )
-                };
+                let action = state.handle_event(
+                    stream_event,
+                    session_id,
+                    emitter,
+                    sequence_counter,
+                    &mut journal,
+                    trace_context,
+                );
                 match action {
                     StreamAction::Continue => continue,
                     StreamAction::Done {

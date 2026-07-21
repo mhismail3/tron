@@ -36,6 +36,9 @@
 //! assistant content with `turn.failed`. Durable turn entry precedes cancellable
 //! pre-turn compaction. The compaction handler owns cancellation rollback and a
 //! matching failed completion event before Stop closes the active ordinal.
+//! Direct-tool results always return to provider context; no tool metadata or
+//! result flag can terminate the agent loop. Only provider completion, limits,
+//! cancellation, and runtime failure own terminal control flow.
 
 #![deny(unsafe_code)]
 

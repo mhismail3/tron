@@ -453,6 +453,12 @@ as causal audit metadata. Catalog preparation rejects any changed contract with
 a newer schema. The resulting recoverable tool error advances the agent to a
 freshly resolved internal turn.
 
+A direct tool cannot terminate the agent loop through catalog metadata or a
+special result-envelope flag. Its typed result is committed to provider context
+and the next provider turn sees the freshly resolved surface. Provider terminal
+responses, configured limits, cancellation, and runtime failure are the only
+owners of agent-run termination.
+
 Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
 evidence plus four explicitly different inventories:

@@ -206,7 +206,6 @@ pub(crate) struct EngineSurfaceSnapshot {
 pub(crate) struct ResolvedToolFunction {
     pub(crate) model_name: String,
     pub(crate) definition: FunctionDefinition,
-    pub(crate) stops_turn: bool,
     pub(crate) trusted_local: bool,
 }
 
@@ -368,7 +367,6 @@ pub(crate) async fn resolve_tool_surface(
                 "duplicate model tool name {model_name} in live catalog"
             ));
         }
-        let stops_turn = function_stops_turn(&function);
         snapshot_tools.push(SurfaceToolSnapshot {
             model_name: model_name.clone(),
             function_id: function.id.as_str().to_owned(),
@@ -407,7 +405,6 @@ pub(crate) async fn resolve_tool_surface(
         resolved.push(ResolvedToolFunction {
             model_name,
             definition: function,
-            stops_turn,
             trusted_local,
         });
     }
@@ -583,16 +580,6 @@ fn model_tool_name(function: &FunctionDefinition) -> Option<String> {
 
 fn metadata_bool(function: &FunctionDefinition, key: &str) -> Option<bool> {
     function.metadata.get(key).and_then(Value::as_bool)
-}
-
-fn function_stops_turn(function: &FunctionDefinition) -> bool {
-    metadata_bool(function, "stopsTurn").unwrap_or(false)
-        || function
-            .metadata
-            .get("lifecycle")
-            .and_then(|value| value.get("stopsTurn"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
 }
 
 #[cfg(test)]

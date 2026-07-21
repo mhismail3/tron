@@ -18,7 +18,7 @@ use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message}
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use tokio_util::sync::CancellationToken;
@@ -36,28 +36,9 @@ fn make_exec_result_with_details(
             content,
             details,
             is_error: None,
-            stop_turn: None,
         },
         duration_ms: 100,
-        stops_turn: false,
     }
-}
-
-#[test]
-fn execution_waves_stop_after_a_context_boundary_result() {
-    let mut stopping = make_exec_result(CapabilityResultBody::Text("boundary committed".into()));
-    stopping.stops_turn = true;
-    stopping.result.stop_turn = Some(true);
-    let results = vec![
-        Some(ExecutedCapabilityInvocation {
-            result: stopping,
-            provider_text: "boundary committed".to_owned(),
-        }),
-        None,
-    ];
-
-    assert!(wave_requests_turn_stop(&[0], &results));
-    assert!(!wave_requests_turn_stop(&[1], &results));
 }
 
 #[test]
@@ -221,7 +202,6 @@ async fn phase_engine_surface_with_mode(
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
-            stops_turn: false,
             execution_mode,
             trusted_local: false,
         },
@@ -231,7 +211,6 @@ async fn phase_engine_surface_with_mode(
         ResolvedPrimitiveSurface {
             capabilities: Vec::new(),
             targets_by_name,
-            turn_stopping_capabilities: HashSet::new(),
             snapshot: Default::default(),
         },
     )
@@ -632,92 +611,6 @@ async fn parent_cancellation_during_capability_wave_marks_active_turn_interrupte
         )
         .len(),
         1
-    );
-}
-
-#[tokio::test]
-async fn context_boundary_terminalizes_later_started_invocations_without_executing_them() {
-    let h = phase_persistence_harness().await;
-    let (engine_host, mut surface) =
-        phase_engine_surface_with_mode(ExecutionMode::Serialized("capability-execute".to_owned()))
-            .await;
-    surface
-        .targets_by_name
-        .get_mut("execute")
-        .expect("direct test target")
-        .stops_turn = true;
-    surface
-        .turn_stopping_capabilities
-        .insert("execute".to_owned());
-    let tempdir = tempfile::tempdir().expect("working directory");
-    let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
-    let mut context_manager = context_manager_for_workdir(working_directory);
-    let cancel = CancellationToken::new();
-    let stream_result = stream_result_with_invocations(vec![
-        CapabilityInvocationDraft::new("call-stop", "execute", {
-            let mut args = Map::new();
-            args.insert("operation".to_owned(), json!("log_recent"));
-            args.insert("traceId".to_owned(), json!("stop"));
-            args
-        }),
-        CapabilityInvocationDraft::new("call-later", "execute", {
-            let mut args = Map::new();
-            args.insert("operation".to_owned(), json!("log_recent"));
-            args.insert("traceId".to_owned(), json!("later"));
-            args
-        }),
-    ]);
-
-    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
-        turn: 8,
-        stream_result: &stream_result,
-        context_manager: &mut context_manager,
-        primitive_surface: &surface,
-        session_id: &h.session_id,
-        emitter: &h.emitter,
-        cancel: &cancel,
-        workspace_id: None,
-        persister: Some(&h.persister),
-        sequence_counter: Some(&h.counter),
-        invocation_abort_registry: h.invocation_abort_registry.as_ref(),
-        engine_host: &engine_host,
-        run_id: Some("run-boundary"),
-        provider_type: "openai",
-        trace_id: None,
-        parent_invocation_id: None,
-        worker_causal_depth: 0,
-    })
-    .await;
-
-    assert_eq!(outcome.capability_invocations_executed, 1);
-    assert!(outcome.stop_turn_requested);
-    let starts = persisted_rows(&h.store, &h.session_id, "capability.invocation.started");
-    let completions = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
-    assert_eq!(starts.len(), 2);
-    assert_eq!(completions.len(), 2);
-    let payloads = h
-        .store
-        .resolve_event_payloads(&completions)
-        .expect("resolve completion payloads");
-    let skipped = payloads
-        .iter()
-        .find(|payload| payload["invocationId"] == json!("call-later"))
-        .expect("later invocation terminal completion");
-    assert_eq!(skipped["details"]["status"], json!("skipped"));
-    assert_eq!(skipped["details"]["executed"], json!(false));
-    assert_eq!(
-        skipped["details"]["skipReason"],
-        json!("context_boundary_committed")
-    );
-    assert_eq!(skipped["details"]["providerContextResultWritten"], false);
-    assert!(
-        payloads.iter().all(|payload| {
-            payload["invocationId"] != json!("call-later")
-                || !payload["content"]
-                    .as_str()
-                    .is_some_and(|content| content.contains("done-later"))
-        }),
-        "the skipped handler must never execute"
     );
 }
 

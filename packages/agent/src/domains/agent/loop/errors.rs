@@ -195,8 +195,6 @@ pub enum StopReason {
     EndTurn,
     /// Turn limit reached.
     MaxTurns,
-    /// A turn-stopping primitive call requested the next loop iteration.
-    CapabilityStop,
     /// Unrecoverable error.
     Error,
     /// User abort.
@@ -211,7 +209,6 @@ impl fmt::Display for StopReason {
         match self {
             Self::EndTurn => write!(f, "end_turn"),
             Self::MaxTurns => write!(f, "max_turns"),
-            Self::CapabilityStop => write!(f, "capability_stop"),
             Self::Error => write!(f, "error"),
             Self::Interrupted => write!(f, "interrupted"),
             Self::NoCapabilityInvocationDrafts => write!(f, "no_capability_invocations"),
@@ -329,7 +326,6 @@ mod tests {
         let reasons = vec![
             StopReason::EndTurn,
             StopReason::MaxTurns,
-            StopReason::CapabilityStop,
             StopReason::Error,
             StopReason::Interrupted,
             StopReason::NoCapabilityInvocationDrafts,
@@ -350,10 +346,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&StopReason::MaxTurns).unwrap(),
             "\"max_turns\""
-        );
-        assert_eq!(
-            serde_json::to_string(&StopReason::CapabilityStop).unwrap(),
-            "\"capability_stop\""
         );
         assert_eq!(
             serde_json::to_string(&StopReason::NoCapabilityInvocationDrafts).unwrap(),

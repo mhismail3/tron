@@ -1,8 +1,6 @@
 use super::*;
-mod drain;
 mod stream_state;
 use async_stream::stream;
-use std::collections::HashSet;
 use std::pin::Pin;
 
 use super::super::stream_state::{build_message, finalize_capability_invocation};
@@ -13,10 +11,6 @@ use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
 fn make_emitter() -> Arc<EventEmitter> {
     Arc::new(EventEmitter::new())
-}
-
-fn no_stopping_capabilities() -> HashSet<String> {
-    HashSet::new()
 }
 
 fn stream_from_provider_events(events: Vec<StreamEvent>) -> ModelResponseStream {
@@ -191,7 +185,6 @@ async fn normalized_final_only_text_call_text_uses_stream_order() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -276,7 +269,6 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -366,7 +358,6 @@ async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -441,7 +432,6 @@ async fn distinct_thinking_after_call_remains_a_separate_ordered_block() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -474,7 +464,6 @@ async fn pure_text_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -500,7 +489,6 @@ async fn thinking_plus_text_response() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -537,7 +525,6 @@ async fn text_plus_capability_invocation() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )
@@ -573,17 +560,9 @@ async fn multiple_capability_invocations() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(result.capability_invocations.len(), 2);
     assert_eq!(result.capability_invocations[0].name, "inspect");
@@ -640,17 +619,9 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 11);
     assert_eq!(result.message.content.len(), 4);
@@ -708,17 +679,9 @@ async fn capability_blocks_keep_first_observed_order_when_done_is_reversed() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     let ids: Vec<&str> = result
         .message
@@ -742,16 +705,7 @@ async fn error_mid_stream() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await;
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None).await;
 
     assert!(result.is_err());
     let failure = result.unwrap_err();
@@ -777,17 +731,9 @@ async fn journal_write_failure_stops_before_unrecoverable_live_delta() {
         },
     ]);
 
-    let failure = process_stream(
-        stream,
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        Some(&mut journal),
-    )
-    .await
-    .unwrap_err();
+    let failure = process_stream(stream, "s1", &emitter, &cancel, None, Some(&mut journal))
+        .await
+        .unwrap_err();
 
     assert!(matches!(failure.error, RuntimeError::Persistence(_)));
     assert!(failure.partial.message.content.is_empty());
@@ -815,17 +761,9 @@ async fn abort_mid_stream() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert!(result.interrupted);
     assert_eq!(result.stop_reason, "interrupted");
@@ -861,17 +799,9 @@ async fn retry_event_emission() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
     assert!(!result.interrupted);
 
     let mut saw_retry = false;
@@ -895,16 +825,7 @@ async fn safety_block_returns_error() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await;
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -923,17 +844,9 @@ async fn empty_response() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(
-        Box::pin(s),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
@@ -945,17 +858,9 @@ async fn token_usage_extraction() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(
-        text_stream("hello"),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     let usage = result.token_usage.unwrap();
     assert_eq!(usage.input_tokens, 10);
@@ -968,17 +873,9 @@ async fn message_update_events_emitted() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let _ = process_stream(
-        text_stream("hello"),
-        "s1",
-        &emitter,
-        &cancel,
-        &no_stopping_capabilities(),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, None, None)
+        .await
+        .unwrap();
 
     let mut updates = vec![];
     while let Ok(event) = rx.try_recv() {
@@ -1001,7 +898,6 @@ async fn capability_invocation_generating_event_emitted() {
         "s1",
         &emitter,
         &cancel,
-        &no_stopping_capabilities(),
         None,
         None,
     )

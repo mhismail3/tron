@@ -104,7 +104,6 @@ fn completed_event_from_row(row: &EventRow, payload_value: &Value) -> Option<Tro
         content: CapabilityResultBody::Text(payload.content),
         details: payload.details,
         is_error: Some(payload.is_error),
-        stop_turn: None,
     };
 
     Some(TronEvent::CapabilityInvocationCompleted {

@@ -243,12 +243,6 @@ impl TronAgent {
                 break;
             }
 
-            if result.stop_turn_requested {
-                final_stop_reason = StopReason::CapabilityStop;
-                exited_via_break = true;
-                break;
-            }
-
             if let Some(StopReason::EndTurn | StopReason::NoCapabilityInvocationDrafts) =
                 result.stop_reason
             {

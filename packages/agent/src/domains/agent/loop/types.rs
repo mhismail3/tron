@@ -139,8 +139,6 @@ pub struct TurnResult {
     /// Content captured before interruption.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial_content: Option<String>,
-    /// Whether a capability requested turn stop.
-    pub stop_turn_requested: bool,
     /// LLM model ID used for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -166,7 +164,6 @@ impl Default for TurnResult {
             stop_reason: None,
             interrupted: false,
             partial_content: None,
-            stop_turn_requested: false,
             model: None,
             latency_ms: 0,
             has_thinking: false,
@@ -216,8 +213,6 @@ pub struct CapabilityInvocationExecutionResult {
     pub result: crate::shared::protocol::model_capabilities::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
-    /// Whether this capability requested a turn stop.
-    pub stops_turn: bool,
 }
 
 /// Accumulated result from stream processing.
@@ -307,7 +302,6 @@ mod tests {
         assert!(tr.error.is_none());
         assert_eq!(tr.capability_invocations_executed, 0);
         assert!(!tr.interrupted);
-        assert!(!tr.stop_turn_requested);
         assert!(tr.model.is_none());
         assert_eq!(tr.latency_ms, 0);
         assert!(!tr.has_thinking);

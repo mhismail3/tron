@@ -60,13 +60,10 @@ fn cancellation_failure(session_id: &str) -> FailureEnvelope {
 }
 
 fn determine_turn_stop_reason(
-    stop_turn_requested: bool,
     capability_invocation_count: usize,
     llm_stop_reason: &str,
 ) -> Option<StopReason> {
-    if stop_turn_requested {
-        Some(StopReason::CapabilityStop)
-    } else if capability_invocation_count == 0 {
+    if capability_invocation_count == 0 {
         if llm_stop_reason == "end_turn" {
             Some(StopReason::EndTurn)
         } else {
@@ -358,7 +355,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         trace_id,
         turn,
         capability_count = primitive_surface.capabilities.len(),
-        turn_stopping_capability_count = primitive_surface.turn_stopping_capabilities.len(),
         catalog_revision = primitive_surface.snapshot.catalog_revision,
         surface_hash = %primitive_surface.snapshot.surface_hash,
         fixed_tool_count = primitive_surface.snapshot.fixed_tool_count,
@@ -617,13 +613,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         "streaming journal created"
     );
 
-    // 6. Process stream (drain after turn-stopping capabilities to capture token usage cleanly)
+    // 6. Process the complete provider stream.
     let stream_result = match stream_processor::process_stream_with_trace(
         stream,
         session_id,
         emitter,
         cancel,
-        &primitive_surface.turn_stopping_capabilities,
         sequence_counter,
         journal.as_mut(),
         run_context.engine_trace_id.as_ref(),
@@ -1016,7 +1011,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // Determine stop reason for this turn
     let stop_reason = determine_turn_stop_reason(
-        invocation_phase.stop_turn_requested,
         stream_result.capability_invocations.len(),
         &stream_result.stop_reason,
     );
@@ -1030,7 +1024,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         capability_invocations_executed: invocation_phase.capability_invocations_executed,
         token_usage: stream_result.token_usage,
         stop_reason,
-        stop_turn_requested: invocation_phase.stop_turn_requested,
         model: Some(model_name),
         latency_ms: duration,
         has_thinking,

@@ -71,9 +71,6 @@ pub struct CapabilityResult {
     /// Whether the execution resulted in an error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
-    /// If true, stops the agent turn loop immediately after this invocation completes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_turn: Option<bool>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,7 +84,6 @@ pub fn text_result(text: impl Into<String>, is_error: bool) -> CapabilityResult 
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(text)]),
         details: None,
         is_error: if is_error { Some(true) } else { None },
-        stop_turn: None,
     }
 }
 
@@ -100,7 +96,6 @@ pub fn failure_result(failure: &FailureEnvelope) -> CapabilityResult {
         )]),
         details: Some(failure.details_with_failure()),
         is_error: Some(true),
-        stop_turn: None,
     }
 }
 
@@ -120,7 +115,6 @@ pub fn image_result(
         content: CapabilityResultBody::Blocks(blocks),
         details: None,
         is_error: None,
-        stop_turn: None,
     }
 }
 
@@ -162,7 +156,6 @@ mod tests {
     fn text_result_success() {
         let r = text_result("output", false);
         assert!(r.is_error.is_none());
-        assert!(r.stop_turn.is_none());
     }
 
     #[test]
@@ -217,7 +210,6 @@ mod tests {
             content: CapabilityResultBody::Text("plain output".into()),
             details: None,
             is_error: None,
-            stop_turn: None,
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["content"], "plain output");
@@ -231,10 +223,8 @@ mod tests {
             content: CapabilityResultBody::Text("ok".into()),
             details: Some(json!({"bytes_written": 42})),
             is_error: None,
-            stop_turn: Some(true),
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["details"]["bytes_written"], 42);
-        assert_eq!(json["stopTurn"], true);
     }
 }

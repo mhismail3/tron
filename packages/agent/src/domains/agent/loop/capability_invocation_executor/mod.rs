@@ -170,7 +170,6 @@ fn redacted_capability_result(result: &CapabilityResult) -> CapabilityResult {
         content,
         details: result.details.as_ref().map(redact_sensitive_json),
         is_error: result.is_error,
-        stop_turn: result.stop_turn,
     }
 }
 
@@ -292,11 +291,9 @@ pub async fn execute_capability_invocation(
                 None,
             ),
             duration_ms: duration_ceil_ms(start.elapsed()),
-            stops_turn: false,
         };
     };
 
-    let stops_turn = engine_target.stops_turn;
     let effective_args = Value::Object(capability_invocation.arguments.clone());
     let primitive_identity = primitive_capability_identity(
         &model_primitive_name,
@@ -368,7 +365,6 @@ pub async fn execute_capability_invocation(
         .await
     };
 
-    let result_stops_turn = capability_result.stop_turn.unwrap_or(false);
     let duration_ms = duration_ceil_ms(start.elapsed());
     let resolved_identity = capability_identity_from_result(
         &model_primitive_name,
@@ -399,7 +395,6 @@ pub async fn execute_capability_invocation(
     CapabilityInvocationExecutionResult {
         result: capability_result,
         duration_ms,
-        stops_turn: stops_turn || result_stops_turn,
     }
 }
 
@@ -611,7 +606,6 @@ async fn execute_capability_primitive_via_engine(
         ),
         details: Some(value),
         is_error: None,
-        stop_turn: None,
     };
     attach_engine_outcome(&mut capability_result, replayed_from.as_ref());
     capability_result

@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_capability_start_batch_stops_turn_and_retains_recovery_journal() {
+    async fn failed_capability_start_batch_fails_run_and_retains_recovery_journal() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};

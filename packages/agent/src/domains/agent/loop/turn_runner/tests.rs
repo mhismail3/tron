@@ -4,7 +4,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::engine::{EffectClass, FunctionDefinition, FunctionId, VisibilityScope, WorkerId};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
     let mut targets_by_name = BTreeMap::new();
@@ -22,7 +22,6 @@ fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
             model_capability_id: "worker_list".to_owned(),
             function_id,
             function,
-            stops_turn: false,
             execution_mode: mode,
             trusted_local: false,
         },
@@ -30,7 +29,6 @@ fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
     ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name,
-        turn_stopping_capabilities: HashSet::new(),
         snapshot: Default::default(),
     }
 }
