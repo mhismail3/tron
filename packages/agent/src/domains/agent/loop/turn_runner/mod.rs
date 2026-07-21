@@ -10,7 +10,6 @@ mod capability_invocations;
 mod failure;
 mod params;
 mod persistence;
-mod result;
 mod turn_context;
 
 use std::sync::Arc;
@@ -36,7 +35,6 @@ use self::persistence::{
     emit_response_complete, emit_turn_end, emit_turn_start, persist_completed_assistant_message,
     persist_model_provider_request_audit,
 };
-use self::result::determine_turn_stop_reason;
 use self::turn_context::build_turn_context;
 use crate::domains::agent::r#loop::errors::StopReason;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
@@ -56,6 +54,24 @@ fn cancellation_failure(session_id: &str) -> FailureEnvelope {
         FailureOrigin::AgentRuntime,
     )
     .with_session_id(Some(session_id.to_owned()))
+}
+
+fn determine_turn_stop_reason(
+    stop_turn_requested: bool,
+    capability_invocation_count: usize,
+    llm_stop_reason: &str,
+) -> Option<StopReason> {
+    if stop_turn_requested {
+        Some(StopReason::CapabilityStop)
+    } else if capability_invocation_count == 0 {
+        if llm_stop_reason == "end_turn" {
+            Some(StopReason::EndTurn)
+        } else {
+            Some(StopReason::NoCapabilityInvocationDrafts)
+        }
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -60,8 +60,17 @@ pub(crate) mod r#loop;
 pub(crate) mod prompt;
 pub(crate) use deps::Deps;
 pub use r#loop::{Orchestrator, SessionManager};
-pub(crate) use worker::worker_module;
 
 pub(crate) mod runtime;
 pub(crate) mod stream;
-pub(crate) mod worker;
+
+pub(crate) fn worker_module(
+    deps: &crate::domains::registration::worker::DomainRegistrationContext,
+) -> crate::engine::Result<crate::domains::registration::worker::DomainWorkerModule> {
+    let domain_deps = Deps::from_engine(deps);
+    crate::domains::registration::worker::domain_worker_module(
+        "agent",
+        contract::STREAM_TOPICS,
+        handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+    )
+}

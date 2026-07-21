@@ -150,3 +150,13 @@ fn is_engine_meta_function(function_id: &FunctionId) -> bool {
         DISCOVER_FUNCTION | INSPECT_FUNCTION | WATCH_FUNCTION | INVOKE_FUNCTION | PROMOTE_FUNCTION
     )
 }
+
+fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_owned()
+    }
+}

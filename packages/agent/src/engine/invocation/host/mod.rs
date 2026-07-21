@@ -58,13 +58,11 @@ mod bootstrap;
 mod catalog_handle;
 mod handle;
 mod invocation_handle;
-mod invocation_support;
 mod meta;
 mod meta_invocation;
 mod runtime_host;
 mod substrate_handle;
 
-use invocation_support::*;
 use meta::*;
 pub use meta::{CatalogWatchRequest, CatalogWatchResponse};
 
