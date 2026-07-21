@@ -34,6 +34,12 @@ The source-owned kernel retains only:
 - product settings, auth, context, memory, logging, blobs, and transcription
   needed by current clients.
 
+The authenticated `filesystem` product domain contains only the three iOS
+workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Its old
+parallel agent read/search/diff/write toolbox and resource-backed patch-preview
+workflow were deleted; model filesystem work has one owner in the seven direct
+worker-kernel host primitives.
+
 Higher-level behavior belongs in a worker bundle. The fixed tree no longer
 contains module proposal/validation/install/dependency/lifecycle/runtime
 planes, capability binding and shadow routing, procedural candidates,
