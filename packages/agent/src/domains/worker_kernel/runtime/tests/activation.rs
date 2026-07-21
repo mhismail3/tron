@@ -136,7 +136,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
     while schedule_runs.join_next().await.is_some() {}
     let trigger_kinds = runtime
         .store()
-        .runs(Some(&outcome.worker.worker_id), 10)
+        .runs_filtered(Some(&outcome.worker.worker_id), None, 10)
         .unwrap()
         .into_iter()
         .map(|run| run.trigger_kind)
@@ -187,7 +187,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
     assert_eq!(
         restarted
             .store()
-            .runs(Some("last30days-research"), 10)
+            .runs_filtered(Some("last30days-research"), None, 10)
             .unwrap()
             .len(),
         5
@@ -411,7 +411,10 @@ async fn command_runner_upserts_invokes_and_replays_idempotently() {
         }))
     );
     assert_eq!(replay.invocation_id, first.invocation_id);
-    assert_eq!(runtime.store().runs(None, 10).unwrap().len(), 1);
+    assert_eq!(
+        runtime.store().runs_filtered(None, None, 10).unwrap().len(),
+        1
+    );
     assert_eq!(
         runtime
             .store()

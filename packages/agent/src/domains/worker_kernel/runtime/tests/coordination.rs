@@ -16,7 +16,13 @@ async fn causal_ceiling_rejects_before_persisting_an_invocation() {
     let error = runtime.invoke(too_deep).await.unwrap_err();
 
     assert!(error.contains("causal depth"));
-    assert!(runtime.store().runs(None, 10).unwrap().is_empty());
+    assert!(
+        runtime
+            .store()
+            .runs_filtered(None, None, 10)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -48,7 +54,13 @@ async fn over_depth_engine_event_is_durably_suppressed_and_cursor_advances() {
     runtime.dispatch_events(&mut runs).await;
 
     assert!(runs.is_empty());
-    assert!(runtime.store().runs(None, 10).unwrap().is_empty());
+    assert!(
+        runtime
+            .store()
+            .runs_filtered(None, None, 10)
+            .unwrap()
+            .is_empty()
+    );
     let trace = runtime
         .store()
         .trace(trace_id.as_str())
@@ -114,7 +126,13 @@ async fn invalid_engine_event_projection_disables_worker_instead_of_jamming_curs
     runtime.dispatch_events(&mut runs).await;
 
     assert!(runs.is_empty());
-    assert!(runtime.store().runs(None, 10).unwrap().is_empty());
+    assert!(
+        runtime
+            .store()
+            .runs_filtered(None, None, 10)
+            .unwrap()
+            .is_empty()
+    );
     let summary = runtime
         .store()
         .summary(&outcome.worker.worker_id)
@@ -128,7 +146,7 @@ async fn invalid_engine_event_projection_disables_worker_instead_of_jamming_curs
     assert_eq!(inspection["healthHistory"][0]["source"], "trigger_dispatch");
     let inbox = runtime
         .store()
-        .inbox(Some(&outcome.worker.worker_id), 10)
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
         .unwrap();
     assert!(inbox.iter().any(|item| {
         item["result"]["phase"] == "trigger_dispatch" && item["result"]["disabled"] == true
@@ -173,7 +191,7 @@ async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut observed_limits = false;
     while tokio::time::Instant::now() < deadline {
-        let runs = runtime.store().runs(None, 100).unwrap();
+        let runs = runtime.store().runs_filtered(None, None, 100).unwrap();
         let running = runs.iter().filter(|run| run.status == "running").count();
         let queued = runs.iter().filter(|run| run.status == "queued").count();
         if runtime.engine_limit.available_permits() == 0
@@ -193,7 +211,7 @@ async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
     for worker_id in &worker_ids {
         let running = runtime
             .store()
-            .runs(Some(worker_id), 100)
+            .runs_filtered(Some(worker_id), None, 100)
             .unwrap()
             .iter()
             .filter(|run| run.status == "running")
@@ -205,7 +223,14 @@ async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
         let record = task.await.unwrap().unwrap();
         assert_eq!(record.status, "completed");
     }
-    assert_eq!(runtime.store().runs(None, 100).unwrap().len(), 40);
+    assert_eq!(
+        runtime
+            .store()
+            .runs_filtered(None, None, 100)
+            .unwrap()
+            .len(),
+        40
+    );
 }
 
 #[tokio::test]
@@ -433,7 +458,7 @@ async fn shutdown_cancels_process_trees_and_restart_redelivers_the_interrupted_a
     assert!(error.contains("runtime shutdown"));
     let interrupted = runtime
         .store()
-        .runs(Some(&worker_id), 10)
+        .runs_filtered(Some(&worker_id), None, 10)
         .unwrap()
         .into_iter()
         .next()
@@ -602,7 +627,7 @@ async fn schedule_event_and_authenticated_webhook_share_the_durable_dispatch_pat
 
     let runs = runtime
         .store()
-        .runs(Some(&outcome.worker.worker_id), 20)
+        .runs_filtered(Some(&outcome.worker.worker_id), None, 20)
         .unwrap();
     assert!(runs.iter().any(|run| run.trigger_kind == "webhook"));
     assert!(runs.iter().any(|run| run.trigger_kind == "engine_event"));
@@ -723,7 +748,7 @@ async fn post_activation_failure_disables_worker_and_enters_inbox() {
     assert_eq!(inspection["healthHistory"][0]["status"], "failed");
     let inbox = runtime
         .store()
-        .inbox(Some(&outcome.worker.worker_id), 10)
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
         .unwrap();
     assert_eq!(inbox[0]["severity"], "error");
     assert!(
@@ -782,7 +807,7 @@ async fn canonical_version_tampering_disables_routing_before_execution() {
     assert_eq!(
         runtime
             .store()
-            .inbox(Some(&outcome.worker.worker_id), 10)
+            .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
             .unwrap()
             .len(),
         1
@@ -830,7 +855,7 @@ async fn direct_tool_activation_failure_cannot_leave_an_enabled_unroutable_worke
     assert_eq!(inspection["healthHistory"][0]["status"], "failed");
     let inbox = runtime
         .store()
-        .inbox(Some(&outcome.worker.worker_id), 10)
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
         .unwrap();
     assert_eq!(inbox[0]["severity"], "error");
     assert_eq!(inbox[0]["result"]["phase"], "enable");

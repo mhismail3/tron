@@ -79,12 +79,12 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"workerId":{"type":"string"},"purged":{"type":"boolean"}}
         }),
         "worker_kernel::inbox" => json!({
-            "type":"object","additionalProperties":false,"required":["items"],
-            "properties":{"items":{"type":"array"}}
+            "type":"object","additionalProperties":false,"required":["detail","items","returned","truncated","contentTruncated"],
+            "properties":{"detail":{"type":"string","enum":["summary","full"]},"items":{"type":"array"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::runs" => json!({
-            "type":"object","additionalProperties":false,"required":["runs","attempts","traces"],
-            "properties":{"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"}}
+            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","returned","truncated","contentTruncated"],
+            "properties":{"detail":{"type":"string","enum":["summary","full"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::webhook_rotate" => webhook_credential_response_schema(),
         "worker_kernel::stop_all" => json!({

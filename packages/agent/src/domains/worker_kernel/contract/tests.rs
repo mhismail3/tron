@@ -363,3 +363,58 @@ fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
         );
     }
 }
+
+#[test]
+fn worker_history_defaults_to_compact_bounded_observations() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    for function_id in ["worker_kernel::runs", "worker_kernel::inbox"] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        let request = definition.request_schema.as_ref().expect("request schema");
+        assert_eq!(request["properties"]["limit"]["maximum"], 20);
+        assert_eq!(request["properties"]["detail"]["default"], "summary");
+        assert_eq!(
+            request["properties"]["detail"]["enum"],
+            json!(["summary", "full"])
+        );
+        assert!(definition.description.contains("bounded"));
+        assert!(definition.description.contains("filtered"));
+        let response = definition
+            .response_schema
+            .as_ref()
+            .expect("response schema");
+        assert!(
+            response["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("truncated"))
+        );
+        assert!(
+            response["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("contentTruncated"))
+        );
+    }
+    let runs = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::runs")
+        .and_then(|definition| definition.request_schema.as_ref())
+        .expect("runs request schema");
+    assert_eq!(
+        runs["properties"]["status"]["enum"],
+        json!(["queued", "running", "completed", "failed"])
+    );
+    let inbox = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::inbox")
+        .and_then(|definition| definition.request_schema.as_ref())
+        .expect("inbox request schema");
+    assert_eq!(
+        inbox["properties"]["severity"]["enum"],
+        json!(["info", "error"])
+    );
+    assert_eq!(inbox["properties"]["seen"]["type"], "boolean");
+}

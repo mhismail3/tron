@@ -22,6 +22,10 @@
 //!   no root `operations.rs` catch-all is retained.
 //! - The prompt context is owned by the agent runtime and primitive state; this
 //!   domain does not preload external policy planes.
+//! - Closed `session::*` request contracts contain only fields consumed by the
+//!   owning operation. Session/workspace provenance supplied by `/engine`
+//!   remains transport context and is never duplicated as an ignored payload
+//!   field.
 //! `session::list` is the server-owned session-list query for clients and
 //! supports bounded `(created_at, id)` keyset pagination beneath one opaque
 //! server-issued `snapshotAsOf` boundary (with offset retained for older

@@ -43,9 +43,11 @@ struct WorkerKernelClientTests {
                 return WorkerListResultDTO(workers: [worker()], stopAll: false)
             case "worker_kernel::runs":
                 #expect((payload as? WorkerRunsRequestDTO)?.limit == 25)
+                #expect((payload as? WorkerRunsRequestDTO)?.detail == "full")
                 return WorkerRunsResultDTO(runs: [])
             case "worker_kernel::inbox":
                 #expect((payload as? WorkerRunsRequestDTO)?.workerId == "research")
+                #expect((payload as? WorkerRunsRequestDTO)?.detail == "full")
                 return WorkerInboxResultDTO(items: [])
             default:
                 throw EngineConnectionError.invalidResponse

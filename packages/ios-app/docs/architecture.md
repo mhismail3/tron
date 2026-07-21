@@ -169,6 +169,10 @@ worker metadata from the client. The server supplies internal causal context.
 - request/response DTOs for invocation, per-worker stop, rollback, stop-all,
   purge, and webhook token rotation.
 
+Worker history reads include `detail: "full"` explicitly and request at most 20
+records. The server still applies per-value byte ceilings and reports truncation;
+provider tools omit this field to receive the compact summary projection.
+
 The bundle remains `[String: AnyCodable]` because its JSON schemas, runner, and
 routing metadata are intentionally extensible. Stable operational fields are
 strongly typed.

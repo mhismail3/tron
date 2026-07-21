@@ -116,7 +116,13 @@ async fn hook_owner_does_not_recursively_invoke_itself() {
         .unwrap();
 
     assert_eq!(result, json!({"handled":false}));
-    assert!(runtime.store().runs(None, 10).unwrap().is_empty());
+    assert!(
+        runtime
+            .store()
+            .runs_filtered(None, None, 10)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -242,10 +248,96 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
             actor().with_idempotency_key("read-inbox-source"),
         ))
         .await;
+    assert_eq!(inbox.error, None);
+    assert_eq!(inbox.value.as_ref().unwrap()["detail"], "summary");
+    assert_eq!(
+        inbox.value.as_ref().unwrap()["items"][0]["result"]["preview"],
+        "{\"output\":{\"report\":\"ready\"},\"status\":\"completed\"}"
+    );
     let inbox_id = inbox.value.unwrap()["items"][0]["inboxId"]
         .as_str()
         .unwrap()
         .to_owned();
+    let full_inbox = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::inbox").unwrap(),
+            json!({"workerId":"background-report","limit":20,"detail":"full"}),
+            actor().with_idempotency_key("read-full-inbox-source"),
+        ))
+        .await;
+    assert_eq!(full_inbox.error, None);
+    let full_inbox = full_inbox.value.unwrap();
+    assert_eq!(full_inbox["detail"], "full");
+    assert_eq!(
+        full_inbox["items"][0]["result"],
+        json!({"output":{"report":"ready"},"status":"completed"})
+    );
+    assert_eq!(full_inbox["returned"], 1);
+    assert_eq!(full_inbox["truncated"], false);
+    assert_eq!(full_inbox["contentTruncated"], false);
+
+    let summary_runs = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({"workerId":"background-report"}),
+            actor().with_idempotency_key("read-summary-runs-source"),
+        ))
+        .await;
+    assert_eq!(summary_runs.error, None);
+    let summary_runs = summary_runs.value.unwrap();
+    assert_eq!(summary_runs["detail"], "summary");
+    assert!(summary_runs["runs"][0]["input"]["preview"].is_string());
+    assert_eq!(summary_runs["attempts"], json!({}));
+    assert_eq!(summary_runs["traces"], json!({}));
+
+    let full_runs = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({"workerId":"background-report","detail":"full"}),
+            actor().with_idempotency_key("read-full-runs-source"),
+        ))
+        .await;
+    assert_eq!(full_runs.error, None);
+    let full_runs = full_runs.value.unwrap();
+    assert_eq!(full_runs["runs"][0]["input"], json!({}));
+    assert_eq!(full_runs["runs"][0]["output"], json!({"report":"ready"}));
+    assert!(full_runs["attempts"].as_object().unwrap().len() == 1);
+    assert!(full_runs["traces"].as_object().unwrap().len() == 1);
+
+    let filtered_runs = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::runs").unwrap(),
+            json!({"status":"failed"}),
+            actor().with_idempotency_key("read-failed-runs-source"),
+        ))
+        .await;
+    assert_eq!(filtered_runs.error, None);
+    assert!(
+        filtered_runs.value.unwrap()["runs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let filtered_inbox = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::inbox").unwrap(),
+            json!({"seen":false,"severity":"error"}),
+            actor().with_idempotency_key("read-unseen-error-inbox-source"),
+        ))
+        .await;
+    assert_eq!(filtered_inbox.error, None);
+    assert!(
+        filtered_inbox.value.unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let hook_output = serde_json::to_string(&json!({
         "consumedInboxIds":[inbox_id],
         "narrative":"The background report is ready."

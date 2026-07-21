@@ -601,7 +601,7 @@ mod tests {
                     .engine_host
                     .invoke(crate::engine::Invocation::new_sync(
                         crate::engine::FunctionId::new("worker_kernel::runs").unwrap(),
-                        serde_json::json!({"workerId":"http-webhook-fixture","limit":10}),
+                        serde_json::json!({"workerId":"http-webhook-fixture","limit":10,"detail":"full"}),
                         crate::engine::CausalContext::new(
                             crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
                             crate::engine::ActorKind::Agent,

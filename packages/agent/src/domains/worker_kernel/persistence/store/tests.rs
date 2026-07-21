@@ -518,7 +518,7 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
     );
     assert_eq!(
         store
-            .inbox(Some(&outcome.worker.worker_id), 10)
+            .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
             .unwrap()
             .iter()
             .filter(|item| item["seen"] == false)

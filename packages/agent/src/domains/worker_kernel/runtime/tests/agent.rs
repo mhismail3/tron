@@ -292,7 +292,7 @@ async fn agent_runner_preserves_causal_depth_for_nested_worker_calls() {
     assert!(
         runtime
             .store()
-            .runs(Some("nested-depth-target"), 10)
+            .runs_filtered(Some("nested-depth-target"), None, 10)
             .unwrap()
             .is_empty(),
         "over-depth nested dispatch must fail before persistence"

@@ -14,22 +14,22 @@ pub(crate) const RUNTIME_STREAM_TOPIC: &str = "agent.runtime";
 pub(crate) fn function_definitions() -> EngineResult<Vec<FunctionDefinition>> {
     let mut specs = vec![
         FunctionContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High)
-            .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
             .response_schema(agent_prompt_response_schema())
             .idempotency(IdempotencyContract::session())
             .build()?,
         FunctionContract::new("agent::abort", "agent", EffectClass::ReversibleSideEffect, RiskLevel::High)
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::session())
             .build()?,
         FunctionContract::new("agent::abort_invocation", "agent", EffectClass::ReversibleSideEffect, RiskLevel::Medium)
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"invocationId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","invocationId"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"invocationId":{"type":"string"}},"required":["sessionId","invocationId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::session())
             .build()?,
         FunctionContract::new("agent::status", "agent", EffectClass::PureRead, RiskLevel::Low)
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?
     ];
@@ -74,9 +74,7 @@ fn agent_prompt_apply_request_schema() -> serde_json::Value {
             "sessionId": {"type": "string"},
             "prompt": {"type": "string"},
             "reasoningLevel": {"type": "string"},
-            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
-            "source": {"type": "string"},
-            "workspaceId": {"type": "string"}
+            "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
         }
     })
 }
@@ -134,6 +132,54 @@ mod tests {
                 json!(true),
                 "{function_id} must not encode rejection as a successful response"
             );
+        }
+    }
+
+    #[test]
+    fn agent_contracts_contain_only_behavioral_inputs() {
+        let specs = function_definitions().expect("agent contracts");
+        let expected = [
+            (
+                "agent::prompt",
+                vec!["attachments", "prompt", "reasoningLevel", "sessionId"],
+            ),
+            ("agent::abort", vec!["sessionId"]),
+            ("agent::abort_invocation", vec!["invocationId", "sessionId"]),
+            ("agent::status", vec!["sessionId"]),
+            (
+                "agent::prompt_apply",
+                vec![
+                    "attachments",
+                    "prompt",
+                    "reasoningLevel",
+                    "runId",
+                    "sessionId",
+                ],
+            ),
+            (
+                "agent::run_turn",
+                vec![
+                    "attachments",
+                    "prompt",
+                    "reasoningLevel",
+                    "runId",
+                    "sessionId",
+                ],
+            ),
+        ];
+        for (function_id, expected_properties) in expected {
+            let schema = specs
+                .iter()
+                .find(|definition| definition.id.as_str() == function_id)
+                .and_then(|definition| definition.request_schema.as_ref())
+                .unwrap_or_else(|| panic!("request schema for {function_id}"));
+            let properties = schema["properties"]
+                .as_object()
+                .expect("object properties")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(properties, expected_properties, "{function_id}");
         }
     }
 }

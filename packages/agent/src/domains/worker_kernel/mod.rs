@@ -72,6 +72,10 @@
 //! validated against the candidate set and claimed all-or-none before its
 //! narrative enters provider context, so concurrent sessions cannot inject a
 //! narrative for observations they did not consume.
+//! Model-facing run and inbox reads are compact and bounded by default. An
+//! explicit operator detail request expands at most twenty records and still
+//! caps each retained input, output, or result, preventing durable history from
+//! becoming an unbounded provider-context or transport payload.
 //! The Engine Dashboard exposes active hook ownership. `context_summary`,
 //! `inbox_context`, and `worker_relevance` are production hooks. Each retains a
 //! narrow deterministic recovery path in the kernel so compaction, background

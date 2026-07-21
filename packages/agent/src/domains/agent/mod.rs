@@ -7,6 +7,9 @@
 //! kernel tools plus the relevant engine-global worker tools.
 //! Worker composition carries the optional model responder factory directly;
 //! prompt validation reports `NotAvailable` when that runtime owner is absent.
+//! Public and hidden agent payloads contain only values their handlers consume;
+//! authenticated transport context owns workspace/session provenance instead
+//! of duplicating ignored `workspaceId` or source labels in prompt commands.
 //!
 //! ## Prompt Execution Flow
 //!

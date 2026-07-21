@@ -30,8 +30,14 @@ async fn secret_values_are_injected_then_redacted_from_durable_results() {
     );
     let diagnostics = format!(
         "{}{}",
-        serde_json::to_string(&runtime.store().runs(None, 10).unwrap()).unwrap(),
-        serde_json::to_string(&runtime.store().inbox(None, 10).unwrap()).unwrap()
+        serde_json::to_string(&runtime.store().runs_filtered(None, None, 10).unwrap()).unwrap(),
+        serde_json::to_string(
+            &runtime
+                .store()
+                .inbox_filtered(None, None, None, 10)
+                .unwrap(),
+        )
+        .unwrap()
     );
     assert!(!diagnostics.contains(secret));
     assert!(
@@ -45,7 +51,10 @@ async fn secret_values_are_injected_then_redacted_from_durable_results() {
             .unwrap_err()
             .contains("only through declared logical bindings")
     );
-    assert_eq!(runtime.store().runs(None, 10).unwrap().len(), 1);
+    assert_eq!(
+        runtime.store().runs_filtered(None, None, 10).unwrap().len(),
+        1
+    );
 
     let mut failing = bundle.clone();
     failing
@@ -91,8 +100,14 @@ async fn secret_values_are_injected_then_redacted_from_durable_results() {
         "{}{}{}{}{:?}",
         serde_json::to_string(&runtime.store().inspect(&outcome.worker.worker_id).unwrap())
             .unwrap(),
-        serde_json::to_string(&runtime.store().runs(None, 100).unwrap()).unwrap(),
-        serde_json::to_string(&runtime.store().inbox(None, 100).unwrap()).unwrap(),
+        serde_json::to_string(&runtime.store().runs_filtered(None, None, 100).unwrap()).unwrap(),
+        serde_json::to_string(
+            &runtime
+                .store()
+                .inbox_filtered(None, None, None, 100)
+                .unwrap(),
+        )
+        .unwrap(),
         serde_json::to_string(&events).unwrap(),
         captured_logs.events(),
     );

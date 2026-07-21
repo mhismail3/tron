@@ -29,6 +29,8 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.inspection?.versions.first?.version == "v1")
         #expect(viewModel.runs.first?.invocationId == "prior-run")
         #expect(viewModel.inbox.first?.inboxId == "inbox-1")
+        #expect(repository.runLimits == [20, 20])
+        #expect(repository.inboxLimits == [20, 20])
 
         viewModel.invocationInput = #"{"query":"Tron"}"#
         await viewModel.invoke(repository: repository, connectionState: .connected)
@@ -105,6 +107,8 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var lastInput: [String: Any]?
     var polledCursors: [(topic: String, cursor: UInt64)] = []
     var snapshotSessionIds: [String?] = []
+    var runLimits: [UInt64] = []
+    var inboxLimits: [UInt64] = []
 
     private var worker: WorkerSummaryDTO {
         WorkerSummaryDTO(
@@ -182,11 +186,13 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     }
 
     func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
-        WorkerRunsResultDTO(runs: [invocation(id: "prior-run", output: ["prior": true])])
+        runLimits.append(limit)
+        return WorkerRunsResultDTO(runs: [invocation(id: "prior-run", output: ["prior": true])])
     }
 
     func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
-        WorkerInboxResultDTO(items: [
+        inboxLimits.append(limit)
+        return WorkerInboxResultDTO(items: [
             WorkerInboxItemDTO(
                 inboxId: "inbox-1",
                 invocationId: "prior-run",

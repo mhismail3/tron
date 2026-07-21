@@ -115,6 +115,7 @@ struct WorkerInspectRequestDTO: Codable, Equatable, Sendable {
 struct WorkerRunsRequestDTO: Codable, Equatable, Sendable {
     let workerId: String?
     let limit: UInt64
+    let detail: String
 }
 
 struct WorkerInvokeRequestDTO: Codable, Equatable, Sendable {

@@ -426,7 +426,7 @@ impl WorkerRuntime {
             .host
             .invoke(Invocation::new_sync(
                 FunctionId::new("agent::prompt").map_err(|error| error.to_string())?,
-                json!({"sessionId":session_id,"prompt":prompt,"source":"worker"}),
+                json!({"sessionId":session_id,"prompt":prompt}),
                 context,
             ))
             .await;

@@ -255,7 +255,7 @@ async fn resident_supervisor_disables_an_exited_service_without_another_invocati
     );
     let inbox = runtime
         .store()
-        .inbox(Some(&outcome.worker.worker_id), 10)
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
         .unwrap();
     assert!(inbox.iter().any(|item| {
         item["result"]["phase"] == "resident_supervision" && item["result"]["disabled"] == true

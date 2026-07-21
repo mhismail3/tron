@@ -408,6 +408,16 @@ tool activation, trigger materialization, and resident supervision participate
 in the same one-time attachment path even though they have no invocation row;
 manual results remain explicitly inspectable.
 
+`worker_runs` and `worker_inbox` return compact observations by default: at most
+20 records, with inputs, outputs, and results represented by 512-byte JSON
+previews and no expanded attempt or trace maps. Runs filter directly by status;
+inbox reads filter directly by seen state and severity, so routine health checks
+do not move irrelevant history into model context. `detail: "full"` is an
+explicit operator path capped at 20 records and 8 KiB per retained value; the
+response reports both record truncation and content truncation. Durable state
+remains complete in canonical storage—these are bounded read projections, not
+retention limits.
+
 ## Failure and Recovery
 
 A normal execution failure, timeout, invalid typed output, missing required
@@ -823,6 +833,19 @@ The wire admits client scope and optional idempotency metadata but rejects
 injected internal authority/runtime fields. Bearer rotation continues to force
 client re-pairing.
 
+Closed `session::*` payload schemas admit only values their owning operation
+consumes. Session and workspace provenance belongs to the authenticated
+transport context; it is not duplicated as ignored `sessionId`/`workspaceId`
+payload ceremony. In particular, session creation accepts only working
+directory plus optional model/title, while unscoped listing accepts only its
+actual pagination and filtering inputs.
+
+The same rule applies to `agent::*`: prompt commands admit the session id,
+prompt, optional reasoning level, and attachments actually consumed by the run;
+status/abort commands admit only their behavioral identifiers. Ignored
+workspace and source-label fields are not part of public or hidden agent
+contracts.
+
 Session events are the only durable owner of assistant output. Prompt completion
 emits lifecycle and runtime-stream status without recreating a parallel
 `agent_result` resource. Structured diagnostic logs use short SQLite write
@@ -879,6 +902,8 @@ It exposes:
 Conversational creation remains the authoring interface; the client does not
 contain a bundle editor. The Mac package is a server supervisor/pairing shell,
 so iOS is the only current operational engine client requiring the console.
+The Dashboard explicitly requests the bounded 20-record detail projection for
+runs and inbox items; model calls retain the compact default.
 
 Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token

@@ -112,8 +112,8 @@ final class WorkerConsoleViewModel {
                 sessionId: sessionId,
                 relevanceQuery: nil
             )
-            let globalRuns = try await repository.workerRuns(workerId: nil, limit: 50)
-            let globalInbox = try await repository.workerInbox(workerId: nil, limit: 50)
+            let globalRuns = try await repository.workerRuns(workerId: nil, limit: 20)
+            let globalInbox = try await repository.workerInbox(workerId: nil, limit: 20)
             engineSnapshot = snapshot
             workers = snapshot.workers
             stopAll = snapshot.dispatchStopped
@@ -318,8 +318,8 @@ final class WorkerConsoleViewModel {
         repository: any WorkerKernelRepository
     ) async throws {
         inspection = try await repository.inspectWorker(workerId)
-        runs = try await repository.workerRuns(workerId: workerId, limit: 100).runs
-        inbox = try await repository.workerInbox(workerId: workerId, limit: 100).items
+        runs = try await repository.workerRuns(workerId: workerId, limit: 20).runs
+        inbox = try await repository.workerInbox(workerId: workerId, limit: 20).items
     }
 
     private func mutate(

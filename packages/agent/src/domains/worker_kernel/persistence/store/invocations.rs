@@ -245,20 +245,23 @@ impl WorkerStore {
             .map_err(|error| error.to_string())
     }
 
-    pub fn runs(
+    pub fn runs_filtered(
         &self,
         worker_id: Option<&str>,
+        status: Option<&str>,
         limit: u32,
     ) -> Result<Vec<InvocationRecord>, String> {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(&format!(
-                "{} WHERE (?1 IS NULL OR worker_id=?1) ORDER BY created_at DESC LIMIT ?2",
+                "{} WHERE (?1 IS NULL OR worker_id=?1)
+                    AND (?2 IS NULL OR status=?2)
+                    ORDER BY created_at DESC LIMIT ?3",
                 invocation_select_base()
             ))
             .map_err(|error| error.to_string())?;
         statement
-            .query_map(params![worker_id, limit.min(500)], row_invocation)
+            .query_map(params![worker_id, status, limit.min(500)], row_invocation)
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
@@ -395,28 +398,39 @@ impl WorkerStore {
             .map_err(|error| format!("load worker causal trace: {error}"))
     }
 
-    pub fn inbox(&self, worker_id: Option<&str>, limit: u32) -> Result<Vec<Value>, String> {
+    pub fn inbox_filtered(
+        &self,
+        worker_id: Option<&str>,
+        seen: Option<bool>,
+        severity: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(
                 "SELECT inbox_id,invocation_id,worker_id,severity,result_json,seen,created_at
                  FROM worker_inbox WHERE (?1 IS NULL OR worker_id=?1)
-                 ORDER BY created_at DESC LIMIT ?2",
+                    AND (?2 IS NULL OR seen=?2)
+                    AND (?3 IS NULL OR severity=?3)
+                 ORDER BY created_at DESC LIMIT ?4",
             )
             .map_err(|error| error.to_string())?;
         statement
-            .query_map(params![worker_id, limit.min(500)], |row| {
-                let result: String = row.get(4)?;
-                Ok(json!({
-                    "inboxId": row.get::<_, String>(0)?,
-                    "invocationId": row.get::<_, String>(1)?,
-                    "workerId": row.get::<_, String>(2)?,
-                    "severity": row.get::<_, String>(3)?,
-                    "result": serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
-                    "seen": row.get::<_, i64>(5)? != 0,
-                    "createdAt": row.get::<_, String>(6)?,
-                }))
-            })
+            .query_map(
+                params![worker_id, seen.map(i64::from), severity, limit.min(500)],
+                |row| {
+                    let result: String = row.get(4)?;
+                    Ok(json!({
+                        "inboxId": row.get::<_, String>(0)?,
+                        "invocationId": row.get::<_, String>(1)?,
+                        "workerId": row.get::<_, String>(2)?,
+                        "severity": row.get::<_, String>(3)?,
+                        "result": serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
+                        "seen": row.get::<_, i64>(5)? != 0,
+                        "createdAt": row.get::<_, String>(6)?,
+                    }))
+                },
+            )
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
