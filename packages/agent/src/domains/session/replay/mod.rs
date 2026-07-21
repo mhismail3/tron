@@ -547,10 +547,6 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
         EngineError::PolicyViolation(message) => {
             json!({"kind": "policy_violation", "message": message})
         }
-        EngineError::NotRoutable {
-            function_id,
-            reason,
-        } => json!({"kind": "not_routable", "functionId": function_id, "reason": reason}),
         EngineError::DomainFailure {
             domain,
             code,

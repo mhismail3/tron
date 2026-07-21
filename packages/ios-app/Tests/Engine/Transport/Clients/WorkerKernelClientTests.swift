@@ -95,7 +95,6 @@ struct WorkerKernelClientTests {
                         outputSchema: AnyCodable(["type": "object"]),
                         effectClass: "PureRead",
                         risk: "low",
-                        health: "Healthy",
                         exposed: true,
                         workerId: nil,
                         workerVersion: nil,
@@ -121,7 +120,6 @@ struct WorkerKernelClientTests {
                             outputSchema: AnyCodable(["type": "object"]),
                             effectClass: "ExternalSideEffect",
                             risk: "high",
-                            health: "Healthy",
                             exposed: true,
                             workerId: "research",
                             workerVersion: "v2",
@@ -140,8 +138,7 @@ struct WorkerKernelClientTests {
                             projected: true,
                             selectionReason: "relevance",
                             relevanceScore: 1,
-                            completedRuns: 3,
-                            health: "Healthy"
+                            completedRuns: 3
                         )
                     ]
                 ),

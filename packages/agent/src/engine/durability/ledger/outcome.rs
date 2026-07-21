@@ -138,17 +138,6 @@ impl StoredEngineError {
                 message: error.to_string(),
                 details: serde_json::json!({ "message": message }),
             },
-            EngineError::NotRoutable {
-                function_id,
-                reason,
-            } => Self {
-                kind: "not_routable".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({
-                    "functionId": function_id,
-                    "reason": reason,
-                }),
-            },
             EngineError::DomainFailure {
                 domain,
                 code,

@@ -9,10 +9,9 @@ use crate::engine::{EngineError, InvocationResult};
 use crate::shared::server::errors::{self as codes, CapabilityError};
 use crate::shared::server::failure::{
     ENGINE_DOMAIN_FAILURE, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID,
-    ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE,
-    ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION, ENGINE_STALE_FUNCTION_SURFACE,
-    ENGINE_STORED_INVOCATION_ERROR, FailureCategory, FailureEnvelope, FailureOrigin,
-    RUNTIME_CANCELLED,
+    ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_POLICY_VIOLATION,
+    ENGINE_SCHEMA_VIOLATION, ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::Value;
 
@@ -203,21 +202,6 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             true,
             FailureOrigin::Engine,
         ),
-        EngineError::NotRoutable {
-            function_id,
-            reason,
-        } => FailureEnvelope::new(
-            ENGINE_NOT_ROUTABLE,
-            FailureCategory::Unavailable,
-            error.to_string(),
-            true,
-            true,
-            FailureOrigin::Engine,
-        )
-        .with_details(Some(serde_json::json!({
-            "functionId": function_id,
-            "reason": reason,
-        }))),
         EngineError::DomainFailure {
             domain,
             code,

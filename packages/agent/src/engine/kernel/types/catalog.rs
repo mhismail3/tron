@@ -52,35 +52,3 @@ impl StreamVisibility {
         }
     }
 }
-
-/// Health state for routing and discovery.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FunctionHealth {
-    /// Healthy and routable.
-    Healthy,
-    /// Routable, but callers should prefer healthy alternatives.
-    Degraded,
-    /// Not routable.
-    Unhealthy,
-    /// Unknown health.
-    Unknown,
-}
-
-impl FunctionHealth {
-    /// Whether normal invocation may route to the function.
-    #[must_use]
-    pub fn is_routable(&self) -> bool {
-        matches!(self, Self::Healthy | Self::Degraded)
-    }
-
-    /// Stable operator-facing name.
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Healthy => "Healthy",
-            Self::Degraded => "Degraded",
-            Self::Unhealthy => "Unhealthy",
-            Self::Unknown => "Unknown",
-        }
-    }
-}

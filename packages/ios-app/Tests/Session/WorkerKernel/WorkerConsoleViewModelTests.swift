@@ -160,8 +160,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                         projected: true,
                         selectionReason: "relevance",
                         relevanceScore: 1,
-                        completedRuns: 1,
-                        health: "Healthy"
+                        completedRuns: 1
                     )
                 ]
             ),

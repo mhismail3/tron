@@ -126,15 +126,6 @@ pub enum EngineError {
     #[error("policy violation: {0}")]
     PolicyViolation(String),
 
-    /// A function is present but cannot currently be routed.
-    #[error("function {function_id} is not routable: {reason}")]
-    NotRoutable {
-        /// Function id.
-        function_id: String,
-        /// Reason it cannot be called.
-        reason: String,
-    },
-
     /// A domain capability preserved its native error envelope.
     #[error("domain {domain} failed with {code}: {message}")]
     DomainFailure {

@@ -85,9 +85,7 @@ fn visible_functions_are_sorted_and_hide_internal_functions_from_agents() {
         .unwrap();
     catalog
         .register_function(
-            read_function("alpha::beta", "w1")
-                .with_risk(RiskLevel::Medium)
-                .with_health(FunctionHealth::Degraded),
+            read_function("alpha::beta", "w1").with_risk(RiskLevel::Medium),
             handler(),
         )
         .unwrap();

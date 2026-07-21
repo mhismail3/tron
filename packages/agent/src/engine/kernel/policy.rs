@@ -50,13 +50,6 @@ fn validate_invocation_contract(
         )));
     }
 
-    if !function.health.is_routable() {
-        return Err(EngineError::NotRoutable {
-            function_id: function.id.to_string(),
-            reason: format!("health is {:?}", function.health),
-        });
-    }
-
     if function.effect_class.is_mutating() && invocation.causal_context.idempotency_key.is_none() {
         return Err(EngineError::PolicyViolation(format!(
             "mutating invocation of {} requires an idempotency key",

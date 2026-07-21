@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::{
     ActorContext, ActorId, ActorKind, DirectWorkerToolContract, EngineHostHandle, EngineStateScope,
-    FunctionDefinition, FunctionHealth,
+    FunctionDefinition,
 };
 
 const MAX_RELEVANT_WORKERS: usize = 12;
@@ -156,7 +156,6 @@ pub(crate) struct SurfaceToolSnapshot {
     pub(crate) output_schema: Option<Value>,
     pub(crate) effect_class: String,
     pub(crate) risk: String,
-    pub(crate) health: String,
     pub(crate) exposed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) worker_id: Option<String>,
@@ -184,7 +183,6 @@ pub(crate) struct AvailableWorkerToolSnapshot {
     pub(crate) selection_reason: Option<String>,
     pub(crate) relevance_score: usize,
     pub(crate) completed_runs: u64,
-    pub(crate) health: String,
 }
 
 /// Exact provider-neutral surface resolved for one agent request boundary.
@@ -227,7 +225,6 @@ pub(crate) async fn resolve_tool_surface(
         ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?;
     let actor = ActorContext::new(actor_id, ActorKind::Agent);
     let (catalog_revision, mut functions) = host.visible_functions_with_revision(&actor).await;
-    functions.retain(|function| function.health == FunctionHealth::Healthy);
     functions.sort_by_key(|function| {
         (
             function
@@ -318,7 +315,6 @@ pub(crate) async fn resolve_tool_surface(
                 selection_reason,
                 relevance_score: rank.relevance_score,
                 completed_runs: rank.completed_runs,
-                health: function.health.as_str().to_owned(),
             })
         })
         .collect::<Vec<_>>();
@@ -367,7 +363,6 @@ pub(crate) async fn resolve_tool_surface(
             output_schema: function.response_schema.clone(),
             effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
-            health: function.health.as_str().to_owned(),
             exposed: true,
             worker_id: direct_worker
                 .as_ref()
@@ -445,7 +440,6 @@ pub(crate) async fn fixed_tool_inventory(
             output_schema: function.response_schema.clone(),
             effect_class: function.effect_class.as_str().to_owned(),
             risk: function.risk_level.as_str().to_owned(),
-            health: function.health.as_str().to_owned(),
             exposed,
             worker_id: None,
             worker_version: None,
@@ -514,7 +508,6 @@ mod tests {
             output_schema: Some(serde_json::json!({"type":"object"})),
             effect_class: "PureRead".to_owned(),
             risk: "low".to_owned(),
-            health: "Healthy".to_owned(),
             exposed: true,
             worker_id: Some("demo".to_owned()),
             worker_version: Some("abc".to_owned()),

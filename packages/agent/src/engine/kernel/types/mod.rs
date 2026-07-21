@@ -9,15 +9,15 @@
 //! generic function-metadata escape hatch is intentionally absent.
 //! The live catalog is rebuildable and its definitions are not a persistence
 //! or wire format; only types embedded in real durable records implement serde.
+//! Worker lifecycle owns operational health. A callable function is registered
+//! and routable; disabling or failing its worker removes it from the catalog.
 //! Persistent worker bundles and lifecycle state belong to
 //! `domains::worker_kernel`.
 
 mod catalog;
 mod function;
 
-pub use catalog::{
-    CatalogRevision, FunctionHealth, FunctionRevision, FunctionVisibility, StreamVisibility,
-};
+pub use catalog::{CatalogRevision, FunctionRevision, FunctionVisibility, StreamVisibility};
 pub use function::FunctionDefinition;
 pub use function::{
     DedupeScope, DirectWorkerToolContract, EffectClass, IdempotencyContract, IdempotencyScope,

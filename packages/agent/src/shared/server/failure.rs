@@ -29,7 +29,6 @@ pub const ENGINE_STALE_FUNCTION_SURFACE: &str = "ENGINE_STALE_FUNCTION_SURFACE";
 /// Engine policy rejected a request.
 pub const ENGINE_POLICY_VIOLATION: &str = "ENGINE_POLICY_VIOLATION";
 /// Engine function exists but cannot currently be routed.
-pub const ENGINE_NOT_ROUTABLE: &str = "ENGINE_NOT_ROUTABLE";
 /// Engine domain capability preserved a native failure envelope.
 pub const ENGINE_DOMAIN_FAILURE: &str = "ENGINE_DOMAIN_FAILURE";
 /// Engine handler returned an application failure.

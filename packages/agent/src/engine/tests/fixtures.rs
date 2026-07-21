@@ -27,9 +27,9 @@ pub(in crate::engine::tests) use crate::engine::kernel::ids::{
     ActorId, FunctionId, InvocationId, TraceId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
-    CatalogRevision, DedupeScope, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ReplayBehavior,
-    RiskLevel, StreamVisibility,
+    CatalogRevision, DedupeScope, EffectClass, FunctionDefinition, FunctionRevision,
+    FunctionVisibility, IdempotencyContract, IdempotencyScope, ReplayBehavior, RiskLevel,
+    StreamVisibility,
 };
 pub(in crate::engine::tests) use crate::engine::{
     EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,

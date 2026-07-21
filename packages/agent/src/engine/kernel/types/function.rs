@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{FunctionHealth, FunctionRevision, FunctionVisibility};
+use super::{FunctionRevision, FunctionVisibility};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
 
 /// Side-effect class of a function.
@@ -220,8 +220,6 @@ pub struct FunctionDefinition {
     pub risk_level: RiskLevel,
     /// Idempotency contract.
     pub idempotency: Option<IdempotencyContract>,
-    /// Health.
-    pub health: FunctionHealth,
     /// Optional typed provider-tool projection.
     pub model_tool: Option<ModelToolContract>,
 }
@@ -247,7 +245,6 @@ impl FunctionDefinition {
             effect_class,
             risk_level: RiskLevel::Low,
             idempotency: None,
-            health: FunctionHealth::Healthy,
             model_tool: None,
         }
     }
@@ -263,13 +260,6 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_risk(mut self, risk: RiskLevel) -> Self {
         self.risk_level = risk;
-        self
-    }
-
-    /// Set health.
-    #[must_use]
-    pub fn with_health(mut self, health: FunctionHealth) -> Self {
-        self.health = health;
         self
     }
 

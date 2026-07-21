@@ -347,24 +347,6 @@ async fn invocation_enforces_health_and_idempotency_key() {
         ))
         .await;
     assert!(ok.error.is_none());
-
-    catalog
-        .register_function(
-            write_function("alpha::write", "w1").with_health(FunctionHealth::Unhealthy),
-            handler(),
-        )
-        .unwrap();
-    let unhealthy = catalog
-        .invoke_sync(Invocation::new_sync(
-            fid("alpha::write"),
-            json!({}),
-            mutating_causal("write-2"),
-        ))
-        .await;
-    assert!(matches!(
-        unhealthy.error,
-        Some(EngineError::NotRoutable { .. })
-    ));
 }
 
 #[tokio::test]

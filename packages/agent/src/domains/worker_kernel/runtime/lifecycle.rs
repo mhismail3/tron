@@ -368,8 +368,7 @@ impl WorkerRuntime {
         .with_risk(RiskLevel::High)
         .with_idempotency(IdempotencyContract::session())
         .with_request_schema(active.bundle.input_schema.clone())
-        .with_response_schema(active.bundle.output_schema.clone())
-        .with_health(FunctionHealth::Healthy);
+        .with_response_schema(active.bundle.output_schema.clone());
         definition.model_tool = Some(ModelToolContract {
             name: active.summary.tool_name,
             callable: true,
@@ -413,7 +412,6 @@ impl WorkerRuntime {
             &self.host,
             worker_id,
             json!({
-                "health": summary.health,
                 "updatedAt": summary.updated_at,
                 "successEvidence": self.store.success_evidence(worker_id)?,
             }),

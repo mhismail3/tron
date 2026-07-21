@@ -602,7 +602,6 @@ mod tests {
                     output_schema: Some(serde_json::json!({"type":"object"})),
                     effect_class: "ExternalSideEffect".to_owned(),
                     risk: "high".to_owned(),
-                    health: "Healthy".to_owned(),
                     exposed: true,
                     worker_id: Some("recent".to_owned()),
                     worker_version: Some("abcdef1234567890".to_owned()),

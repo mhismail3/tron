@@ -431,13 +431,15 @@ holding one provider call open for the worker's two-hour execution ceiling.
 
 Every enabled worker is also registered as a stable direct typed tool using the
 bundle's `toolName`, input schema, output schema, description, routing metadata,
-provenance, health, version, and recent success evidence.
+provenance, version, and recent success evidence.
 
 The provider-visible function description contains only version-stable purpose,
-active version, and provenance. Health and success evidence live in a durable,
-rebuildable observation overlay. Completing a run updates that overlay rather
-than re-registering the function, so ordinary success cannot increment the
-catalog revision or stale an in-flight provider surface.
+active version, and provenance. Success evidence lives in a durable, rebuildable
+observation overlay. Completing a run updates that overlay rather than
+re-registering the function, so ordinary success cannot increment the catalog
+revision or stale an in-flight provider surface. Worker health remains in
+canonical worker state and inbox history; failed workers are unregistered, so
+the callable catalog has no duplicate synthetic health state.
 
 At each provider request boundary, the worker-kernel-owned resolver captures the
 catalog revision and ranks dynamic workers by explicit session promotion,
@@ -485,10 +487,10 @@ evidence plus four explicitly different inventories:
 
 - eight server-owned compiled component roles, categorized as kernel, product
   infrastructure, or the protected core-change boundary;
-- all 27 fixed tools with their exact schemas, revisions, effect/risk/health,
+- all 27 fixed tools with their exact schemas, revisions, effect/risk,
   primitive group, and whether autonomy currently exposes them;
 - every published direct worker tool, including its promoted/projected state,
-  selection reason, relevance evidence, health, and immutable worker version;
+  selection reason, relevance evidence, and immutable worker version;
 - canonical engine worker summaries, stop-all state, and autonomy state.
 
 The selected `surface.tools` array is the exact next provider projection; the

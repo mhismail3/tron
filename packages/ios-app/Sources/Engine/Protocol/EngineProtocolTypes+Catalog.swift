@@ -14,7 +14,6 @@ struct EngineSurfaceToolDTO: Codable, Equatable, Identifiable, Sendable {
     let outputSchema: AnyCodable?
     let effectClass: String
     let risk: String
-    let health: String
     let exposed: Bool
     let workerId: String?
     let workerVersion: String?
@@ -35,7 +34,6 @@ struct AvailableWorkerToolDTO: Codable, Equatable, Identifiable, Sendable {
     let selectionReason: String?
     let relevanceScore: UInt64
     let completedRuns: UInt64
-    let health: String
 
     var id: String { workerId }
 }

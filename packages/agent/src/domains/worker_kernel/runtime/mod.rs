@@ -45,7 +45,7 @@ use crate::domains::session::event_store::EventStore;
 use crate::domains::settings::SettingsRuntime;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, DirectWorkerToolContract, EffectClass, EngineHostHandle,
-    FunctionDefinition, FunctionHealth, FunctionId, FunctionVisibility, IdempotencyContract,
+    FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
     InProcessFunctionHandler, Invocation, ModelToolContract, PublishStreamEvent, RiskLevel,
     StreamActorScope, StreamCursor, StreamVisibility, TraceId, WorkerId,
 };

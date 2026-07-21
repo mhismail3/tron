@@ -8,7 +8,7 @@ use crate::engine::EngineError;
 use crate::shared::server::errors::{self as codes, CapabilityError};
 use crate::shared::server::failure::{
     ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA,
-    ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION,
+    ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED, ENGINE_POLICY_VIOLATION,
     ENGINE_SCHEMA_VIOLATION, ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
     FailureCategory, FailureOrigin, RUNTIME_CANCELLED,
 };
@@ -132,14 +132,6 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             EngineError::PolicyViolation("denied".to_owned()),
             ENGINE_POLICY_VIOLATION,
             FailureCategory::InvalidRequest,
-        ),
-        (
-            EngineError::NotRoutable {
-                function_id: "demo::run".to_owned(),
-                reason: "worker offline".to_owned(),
-            },
-            ENGINE_NOT_ROUTABLE,
-            FailureCategory::Unavailable,
         ),
         (
             EngineError::DomainFailure {

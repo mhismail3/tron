@@ -54,6 +54,10 @@ sends only `workingDirectory`, `model`, and `title`; obsolete automation-era
 `source`/`profile` metadata and the unsupported `contextFiles` field are not
 encoded or silently ignored.
 
+Catalog tools are callable registrations, not a second lifecycle plane, so
+their DTOs contain no synthetic health state. Canonical worker summaries retain
+the operational health used by the dashboard and lifecycle controls.
+
 The local `EventDatabase` is a reconstructable projection under the app's
 Documents `.tron/database/prod.db` path. `EventStoreManager` serializes global
 stream replacement, reconstruction, and shutdown; server switching replaces
