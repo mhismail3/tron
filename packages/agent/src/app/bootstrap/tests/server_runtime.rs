@@ -135,11 +135,11 @@ fn startup_ensures_bearer_token_exists() {
     assert_eq!(read_back, token);
 }
 #[test]
-fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
+fn constitution_creates_runtime_roots_without_inert_auth_state() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join(".tron");
     crate::shared::foundation::constitution::ensure_tron_home_at(&home)
-        .expect("seed Constitution home");
+        .expect("recover Constitution home directories");
 
     assert!(
         home.join(crate::shared::foundation::paths::dirs::INTERNAL)
@@ -147,7 +147,10 @@ fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
             .exists(),
         "internal/run/ holds runtime locks that normal server startup may create"
     );
-    assert!(home.join("profiles/auth.json").is_file());
+    assert!(
+        !home.join("profiles/auth.json").exists(),
+        "bearer-token startup owns first auth-state creation"
+    );
     assert!(
         !home.join("settings.toml").exists(),
         "compiled defaults must not create a self-referential settings fixture"

@@ -11,14 +11,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::paths::{dirs, files};
+use super::paths::dirs;
 
 /// Ensure a specific Tron Home is structurally complete.
 pub fn ensure_tron_home_at(home: &Path) -> io::Result<()> {
     for directory in primitive_dirs(home) {
         fs::create_dir_all(directory)?;
     }
-    seed_private_auth_if_absent(home)
+    Ok(())
 }
 
 fn primitive_dirs(home: &Path) -> Vec<PathBuf> {
@@ -35,42 +35,19 @@ fn primitive_dirs(home: &Path) -> Vec<PathBuf> {
     ]
 }
 
-fn seed_private_auth_if_absent(home: &Path) -> io::Result<()> {
-    use std::io::Write as _;
-
-    let path = home.join(dirs::PROFILES).join(files::AUTH_JSON);
-    if path.exists() {
-        return Ok(());
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::other("auth path has no parent"))?;
-    let mut staged = tempfile::Builder::new()
-        .prefix(".auth.seed.")
-        .tempfile_in(parent)?;
-    staged.write_all(b"{}\n")?;
-    staged.as_file().sync_all()?;
-    match staged.persist_noclobber(&path) {
-        Ok(_) => {}
-        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error.error),
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn seeding_creates_only_primitive_roots_and_private_auth() {
+    fn constitution_creates_only_primitive_roots() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join(".tron");
         ensure_tron_home_at(&home).unwrap();
 
         assert!(home.join("internal/database").is_dir());
         assert!(home.join("workspace/vault").is_dir());
-        assert!(home.join("profiles/auth.json").is_file());
+        assert!(!home.join("profiles/auth.json").exists());
         assert!(!home.join("workspace/projects").exists());
         assert!(!home.join("workspace/reports").exists());
         assert!(!home.join("workspace/renders").exists());
@@ -85,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn seeding_never_overwrites_auth_or_settings() {
+    fn constitution_never_overwrites_auth_or_settings() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join(".tron");
         ensure_tron_home_at(&home).unwrap();

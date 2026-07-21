@@ -10,10 +10,9 @@
 //!   `tron auth rotate` (CLI) or the
 //!   menu-bar action in the Mac wrapper. File mode is `0o600` and writes
 //!   are owned by the provider-credentials store so provider credentials and the
-//!   pairing bearer share one secure auth document. Constitution first creates
-//!   a private exact `{}` compatibility sentinel required by profile validation;
-//!   first server boot immediately materializes it into the full auth schema
-//!   plus `bearerToken`.
+//!   pairing bearer share one secure auth document. First server boot creates
+//!   the full auth schema plus `bearerToken`; an older exact `{}` install
+//!   sentinel is materialized rather than discarded.
 //!
 //! - **`run/.onboarded`** sentinel at [`crate::shared::foundation::paths::onboarded_marker_path()`].
 //!   Empty marker file. Touched by the Mac wizard at the end of its

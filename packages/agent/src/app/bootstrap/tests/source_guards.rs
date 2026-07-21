@@ -86,7 +86,7 @@ fn rust_files_under_path(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     files
 }
 #[test]
-fn ordinary_startup_delegates_to_constitution_seeders() {
+fn ordinary_startup_delegates_directory_recovery_to_constitution() {
     let source = include_str!("../mod.rs");
     assert!(source.contains("ensure_tron_home"));
     assert!(!source.contains("startup_system_subdirs"));

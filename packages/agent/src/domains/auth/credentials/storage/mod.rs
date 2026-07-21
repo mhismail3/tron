@@ -1,10 +1,8 @@
 //! Auth storage file I/O.
 //!
 //! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions
-//! (`0o600`). Constitution creates an exact empty compatibility sentinel for
-//! profile validation; this owner materializes the normal schema on the first
-//! write. A missing file remains a legitimate direct-write case, and the loader
-//! retains sentinel compatibility for interrupted or older installs.
+//! (`0o600`). A missing file is a legitimate first-write case. The loader also
+//! materializes the exact empty sentinel left by interrupted or older installs.
 
 use std::path::{Path, PathBuf};
 

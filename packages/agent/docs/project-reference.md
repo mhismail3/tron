@@ -482,7 +482,9 @@ Engine settings are one sparse strict document at `~/.tron/settings.toml` over
 compiled typed defaults. Named profiles, inheritance, `active.toml`, profile
 classes, and the compiled auth registry do not exist in the running engine.
 Provider credentials remain separately protected in
-`~/.tron/profiles/auth.json`.
+`~/.tron/profiles/auth.json`. Home-directory recovery creates only required
+directories; bearer-token startup atomically creates the auth document on first
+use instead of seeding an inert `{}` file.
 
 The settings schema admits only values with an independent production
 consumer. Tests, serialization, dashboard display, or schema presence alone do

@@ -4,12 +4,10 @@
 //! - **API key**: Direct key-based auth
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
-//! Auth state is persisted to `~/.tron/profiles/auth.json` with secure file
-//! permissions. Constitution creates an exact empty compatibility sentinel at
-//! mode `0o600` for profile validation; the first auth-domain write materializes
-//! the full schema. Storage loading retains that sentinel interpretation for
-//! interrupted or older installs. Non-empty malformed auth files remain hard
-//! errors so real credentials are never silently overwritten.
+//! Auth state is created on first use at `~/.tron/profiles/auth.json` with
+//! secure file permissions. Storage loading materializes the exact empty
+//! sentinel left by interrupted or older installs. Non-empty malformed auth
+//! files remain hard errors so real credentials are never silently overwritten.
 //! `OAuthTokens::expires_at` stores the provider's actual expiry; provider
 //! refresh paths apply their safety buffer once when deciding to renew.
 //!
