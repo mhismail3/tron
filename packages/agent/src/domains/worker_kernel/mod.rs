@@ -51,7 +51,10 @@
 //! Provider calls pin the advertised function revision and immutable worker
 //! version; catalog preparation rejects drift and lets the next internal turn
 //! resolve a fresh surface. Session discovery promotions live in durable scoped
-//! engine state, so restart does not erase a worker the session already found.
+//! engine state, are recency ordered and version bound, and survive restart.
+//! Both stored promotions and the final dynamic provider surface have hard
+//! bounds, so repeated discovery cannot grow an unbounded tool request or
+//! revive a retired worker id at a different version.
 //! The authenticated `engine::surface_snapshot` read returns that same
 //! provider-neutral projection, every published worker's projection status,
 //! the complete fixed-tool inventory, compiled engine-component roles, and

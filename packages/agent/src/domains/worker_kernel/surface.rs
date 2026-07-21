@@ -17,6 +17,7 @@ use crate::engine::{
 };
 
 const MAX_RELEVANT_WORKERS: usize = 12;
+const MAX_STORED_SESSION_PROMOTIONS: usize = 50;
 const SURFACE_FORMAT_VERSION: u32 = 1;
 
 const PROMOTION_NAMESPACE: &str = "worker_kernel.surface_promotions";
@@ -28,31 +29,74 @@ pub(crate) async fn promote_worker_for_session(
     host: &EngineHostHandle,
     session_id: &str,
     worker_id: &str,
+    worker_version: &str,
 ) -> Result<(), String> {
+    let scope = EngineStateScope::Session(session_id.to_owned());
     host.write_engine_state(
-        EngineStateScope::Session(session_id.to_owned()),
+        scope.clone(),
         PROMOTION_NAMESPACE,
         worker_id,
-        serde_json::json!({"promoted":true}),
+        serde_json::json!({"workerVersion":worker_version}),
     )
     .await
-    .map(|_| ())
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    let promotions = session_worker_promotion_entries(host, session_id).await?;
+    for promotion in promotions.into_iter().skip(MAX_STORED_SESSION_PROMOTIONS) {
+        host.delete_engine_state(scope.clone(), PROMOTION_NAMESPACE, &promotion.worker_id)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 pub(super) async fn session_worker_promotions(
     host: &EngineHostHandle,
     session_id: &str,
 ) -> Result<BTreeSet<String>, String> {
-    host.list_engine_state(
-        EngineStateScope::Session(session_id.to_owned()),
-        PROMOTION_NAMESPACE,
-        None,
-        1_024,
-    )
-    .await
-    .map(|entries| entries.into_iter().map(|entry| entry.key).collect())
-    .map_err(|error| error.to_string())
+    session_worker_promotion_entries(host, session_id)
+        .await
+        .map(|entries| entries.into_iter().map(|entry| entry.worker_id).collect())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionWorkerPromotion {
+    worker_id: String,
+    worker_version: Option<String>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+async fn session_worker_promotion_entries(
+    host: &EngineHostHandle,
+    session_id: &str,
+) -> Result<Vec<SessionWorkerPromotion>, String> {
+    let mut entries = host
+        .list_engine_state(
+            EngineStateScope::Session(session_id.to_owned()),
+            PROMOTION_NAMESPACE,
+            None,
+            500,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|entry| SessionWorkerPromotion {
+            worker_id: entry.key,
+            worker_version: entry
+                .value
+                .get("workerVersion")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            updated_at: entry.updated_at,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| left.worker_id.cmp(&right.worker_id))
+    });
+    Ok(entries)
 }
 
 /// Publish rebuildable operational evidence without changing the worker's
@@ -206,7 +250,7 @@ pub(crate) async fn resolve_tool_surface(
         )
     });
 
-    let promoted = session_worker_promotions(host, session_id).await?;
+    let promotion_entries = session_worker_promotion_entries(host, session_id).await?;
     let evidence = worker_surface_evidence(host, &functions).await?;
     let dynamic_documents = functions
         .iter()
@@ -219,15 +263,39 @@ pub(crate) async fn resolve_tool_surface(
         })
         .collect::<Vec<_>>();
     let available_worker_count = dynamic_documents.len();
-    let ranked = super::retrieval::rank_workers(dynamic_documents, relevance_query, &promoted);
-    let query_is_empty = super::retrieval::query_is_empty(relevance_query);
-    let mut selected_dynamic = ranked
+    let applicable_promotions = promotion_entries
         .iter()
-        .filter(|rank| rank.promoted)
-        .map(|rank| (rank.key.clone(), "session_promotion"))
-        .collect::<BTreeMap<_, _>>();
+        .filter(|promotion| {
+            functions.iter().any(|function| {
+                function.metadata.get("workerId").and_then(Value::as_str)
+                    == Some(promotion.worker_id.as_str())
+                    && function
+                        .metadata
+                        .get("workerVersion")
+                        .and_then(Value::as_str)
+                        == promotion.worker_version.as_deref()
+            })
+        })
+        .map(|promotion| promotion.worker_id.clone())
+        .collect::<BTreeSet<_>>();
+    let ranked =
+        super::retrieval::rank_workers(dynamic_documents, relevance_query, &applicable_promotions);
+    let query_is_empty = super::retrieval::query_is_empty(relevance_query);
+    let mut selected_dynamic = BTreeMap::new();
+    for promotion in &promotion_entries {
+        if selected_dynamic.len() >= MAX_RELEVANT_WORKERS {
+            break;
+        }
+        let Some(rank) = ranked
+            .iter()
+            .find(|rank| rank.worker_id == promotion.worker_id && rank.promoted)
+        else {
+            continue;
+        };
+        let _ = selected_dynamic.insert(rank.key.clone(), "session_promotion");
+    }
     for rank in &ranked {
-        if rank.promoted
+        if selected_dynamic.contains_key(&rank.key)
             || (!query_is_empty && rank.relevance_score == 0)
             || selected_dynamic.len() >= MAX_RELEVANT_WORKERS
         {
@@ -557,5 +625,27 @@ mod tests {
         let mut changed = tool;
         changed.function_revision = 2;
         assert_ne!(first, surface_hash(&[changed]).expect("changed hash"));
+    }
+
+    #[tokio::test]
+    async fn session_promotion_storage_prunes_oldest_records() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        for index in 0..55 {
+            promote_worker_for_session(
+                &host,
+                "promotion-retention",
+                &format!("worker-{index:02}"),
+                "v1",
+            )
+            .await
+            .expect("promotion");
+        }
+
+        let promotions = session_worker_promotions(&host, "promotion-retention")
+            .await
+            .expect("promotions");
+        assert_eq!(promotions.len(), MAX_STORED_SESSION_PROMOTIONS);
+        assert!(promotions.contains("worker-54"));
+        assert!(!promotions.contains("worker-00"));
     }
 }

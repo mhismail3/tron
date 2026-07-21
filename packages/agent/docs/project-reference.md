@@ -430,9 +430,12 @@ catalog revision and ranks dynamic workers by explicit session promotion,
 weighted name/description/intent/example/provenance relevance, recent
 successes, recency, and identity. `worker_discover` uses the exact same scorer;
 there is no second discovery policy. The deterministic local scorer is the
-always-available fallback seam for a future semantic-router worker. Automatic
-projection selects at most 12 workers while every explicit session promotion
-remains selected. The resolver records the
+always-available fallback seam for a future semantic-router worker. The entire
+dynamic provider surface selects at most 12 workers: recent explicit
+promotions enter first, then relevant/default candidates fill remaining slots.
+Promotion records are version-bound, recency-ordered, and retained to a bounded
+50 per session, preventing stale worker-id revival and unbounded provider tool
+growth. The resolver records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
 surface hash. The model receives a compact revision/count/projected-worker
 primer in addition to native direct tool schemas. A `worker_discover` result

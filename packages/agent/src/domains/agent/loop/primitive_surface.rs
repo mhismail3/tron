@@ -19,7 +19,7 @@ pub(crate) async fn promote_worker_for_session(
     session_id: &str,
     worker_id: &str,
 ) {
-    crate::domains::worker_kernel::promote_worker_for_session(host, session_id, worker_id)
+    crate::domains::worker_kernel::promote_worker_for_session(host, session_id, worker_id, "v1")
         .await
         .expect("promote worker for test session");
 }
@@ -301,6 +301,7 @@ mod tests {
             "modelPrimitiveName": tool_name,
             "workerDynamic": dynamic,
             "workerId": worker_id,
+            "workerVersion": "v1",
             "workerRouting": routing,
             "workerProvenance": {"source": "test fixture"},
             "workerSuccessEvidence": {"completedRuns": 3}
@@ -563,6 +564,90 @@ mod tests {
                 .selection_reason,
             "session_promotion"
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_promotions_keep_the_complete_dynamic_surface_bounded() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
+            .expect("worker kernel");
+        for index in 0..15 {
+            let worker_id = format!("promoted-{index:02}");
+            register_worker_primitive(
+                &host,
+                &format!("dynamic_promoted_{index:02}"),
+                &format!("promoted_tool_{index:02}"),
+                "Explicitly promoted worker",
+                true,
+                &worker_id,
+                serde_json::json!({"keywords": ["unrelated"]}),
+            );
+            promote_worker_for_session(&host, "bounded-session", &worker_id).await;
+        }
+
+        let surface = resolve_provider_primitive_surface_for_query(
+            &host,
+            "bounded-session",
+            None,
+            Some("astronomy ephemeris"),
+        )
+        .await
+        .expect("bounded surface");
+
+        assert_eq!(surface.snapshot.projected_worker_count, 12);
+        assert_eq!(
+            surface
+                .snapshot
+                .available_workers
+                .iter()
+                .filter(|worker| worker.projected)
+                .count(),
+            12
+        );
+        assert!(surface.targets_by_name.contains_key("promoted_tool_14"));
+        assert!(!surface.targets_by_name.contains_key("promoted_tool_00"));
+    }
+
+    #[tokio::test]
+    async fn promotion_for_an_old_worker_version_does_not_revive_a_recreated_worker() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
+            .expect("worker kernel");
+        register_worker_primitive(
+            &host,
+            "dynamic_recreated",
+            "recreated_tool",
+            "Recreated worker",
+            true,
+            "recreated",
+            serde_json::json!({"keywords": ["format"]}),
+        );
+        crate::domains::worker_kernel::promote_worker_for_session(
+            &host,
+            "recreated-session",
+            "recreated",
+            "retired-version",
+        )
+        .await
+        .expect("stale promotion record");
+
+        let surface = resolve_provider_primitive_surface_for_query(
+            &host,
+            "recreated-session",
+            None,
+            Some("astronomy ephemeris"),
+        )
+        .await
+        .expect("surface");
+        assert!(!surface.targets_by_name.contains_key("recreated_tool"));
+        let worker = surface
+            .snapshot
+            .available_workers
+            .iter()
+            .find(|worker| worker.worker_id == "recreated")
+            .expect("available worker");
+        assert!(!worker.promoted);
+        assert!(!worker.projected);
     }
 
     #[test]

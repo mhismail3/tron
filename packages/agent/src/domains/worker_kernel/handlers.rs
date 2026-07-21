@@ -175,6 +175,7 @@ async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
             deps.runtime.host(),
             session_id,
             &outcome.worker.worker_id,
+            &outcome.worker.active_version,
         )
         .await?;
     }
@@ -351,10 +352,14 @@ async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String>
         .collect::<Vec<_>>();
     if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
         for rank in &ranked {
+            let Some((worker, _, _)) = payloads.get(&rank.worker_id) else {
+                continue;
+            };
             super::surface::promote_worker_for_session(
                 deps.runtime.host(),
                 session_id,
                 &rank.worker_id,
+                &worker.active_version,
             )
             .await?;
         }

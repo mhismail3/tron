@@ -50,6 +50,20 @@ impl EngineHostHandle {
             .list(scope, namespace, key_prefix, limit)
     }
 
+    /// Delete one kernel-owned runtime-overlay entry.
+    pub(crate) async fn delete_engine_state(
+        &self,
+        scope: EngineStateScope,
+        namespace: &str,
+        key: &str,
+    ) -> Result<bool> {
+        let store = self.inner.lock().await.primitives.state.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("state store lock poisoned".to_owned()))?
+            .delete(scope, namespace, key)
+    }
+
     /// Read durable engine rows for one session without invoking any functions.
     pub(crate) async fn replay_snapshot(
         &self,
