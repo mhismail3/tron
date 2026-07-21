@@ -64,7 +64,6 @@ macro_rules! engine_id {
 }
 
 engine_id!(WorkerId, "worker");
-engine_id!(TriggerId, "trigger");
 engine_id!(InvocationId, "invocation");
 engine_id!(ActorId, "actor");
 engine_id!(TraceId, "trace");

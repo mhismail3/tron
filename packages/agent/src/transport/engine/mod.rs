@@ -7,8 +7,8 @@
 //! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 //!
-//! Public transports do not accept caller-provided runtime metadata; it remains
-//! reserved for trusted engine and agent-owned execution paths.
+//! Public transports construct causal context themselves; they cannot inject
+//! engine-owned execution inputs.
 
 pub mod socket;
 
@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn public_transport_context_cannot_inject_runtime_metadata() {
+    fn public_transport_context_has_no_trusted_execution_inputs() {
         let envelope = build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id: "request-1".to_owned(),
             params_payload: json!({
@@ -227,15 +227,17 @@ mod tests {
         })
         .expect("transport envelope builds");
 
-        assert!(envelope.causal_context.runtime_metadata.is_empty());
+        assert_eq!(envelope.causal_context.working_directory(), None);
+        assert_eq!(envelope.causal_context.advertised_function_revision(), None);
+        assert_eq!(envelope.causal_context.advertised_worker_version(), None);
+        assert_eq!(envelope.causal_context.trigger_depth(), 0);
     }
 
     #[test]
-    fn public_engine_invoke_keeps_authenticated_client_identity_and_no_runtime_metadata() {
+    fn public_engine_invoke_keeps_authenticated_client_identity() {
         let envelope = build_invoke("agent::prompt_apply");
 
         assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
         assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
-        assert!(envelope.causal_context.runtime_metadata.is_empty());
     }
 }

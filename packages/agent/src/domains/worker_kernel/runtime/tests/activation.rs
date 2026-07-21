@@ -72,7 +72,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::dynamic_last30days-research").unwrap(),
             json!({"topic":"worker autonomy","asOf":"2026-07-19"}),
-            CausalContext::trusted_local(
+            CausalContext::new(
                 ActorId::new("agent:last30days-replay").unwrap(),
                 ActorKind::Agent,
                 TraceId::new("trace-last30days-direct").unwrap(),
@@ -169,7 +169,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::dynamic_last30days-research").unwrap(),
             json!({"topic":"persistent workers","asOf":"2026-07-19"}),
-            CausalContext::trusted_local(
+            CausalContext::new(
                 ActorId::new("agent:last30days-restart").unwrap(),
                 ActorKind::Agent,
                 TraceId::new("trace-last30days-restart").unwrap(),
@@ -443,7 +443,7 @@ async fn command_runner_upserts_invokes_and_replays_idempotently() {
             ))
             .unwrap(),
             json!({"topic":"direct typed tool"}),
-            CausalContext::trusted_local(
+            CausalContext::new(
                 ActorId::new("agent:worker-direct-test").unwrap(),
                 ActorKind::Agent,
                 TraceId::new("worker-direct-trace").unwrap(),

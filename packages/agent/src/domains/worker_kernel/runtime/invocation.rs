@@ -514,7 +514,7 @@ impl WorkerRuntime {
             serde_json::to_string_pretty(&invocation.input).map_err(|error| error.to_string())?,
             secret_dir.display(),
         );
-        let context = CausalContext::trusted_local(
+        let context = CausalContext::new(
             ActorId::new(format!("worker:{}", worker.summary.worker_id))
                 .map_err(|error| error.to_string())?,
             ActorKind::Worker,
@@ -525,10 +525,7 @@ impl WorkerRuntime {
             "worker-agent:{}",
             hex::encode(Sha256::digest(invocation.idempotency_key.as_bytes()))
         ))
-        .with_runtime_metadata(
-            RUNTIME_METADATA_TRIGGER_DEPTH,
-            invocation.causal_depth.saturating_add(1).to_string(),
-        );
+        .with_trigger_depth(invocation.causal_depth.saturating_add(1));
         let mut agent_run_guard =
             AbortAgentRunOnDrop::new(Arc::clone(&self.orchestrator), session_id.clone());
         // Subscribe before prompt admission. A provider construction failure can

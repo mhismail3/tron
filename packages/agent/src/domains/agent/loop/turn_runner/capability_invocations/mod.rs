@@ -1,8 +1,9 @@
 //! Capability invocation phase for one agent turn.
 //!
 //! This module persists provider-requested direct-tool executions, dispatches
-//! trusted-local kernel or worker functions, and writes the provider-facing
-//! result message. Each registered function owns its typed schema.
+//! kernel or worker functions with Agent identity, and writes the
+//! provider-facing result message. Each registered function owns its typed
+//! schema.
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled. Result
@@ -50,7 +51,6 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub invocation_abort_registry: &'a InvocationAbortRegistry,
     pub engine_host: &'a crate::engine::EngineHostHandle,
     pub run_id: Option<&'a str>,
-    pub provider_type: &'a str,
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
     pub worker_causal_depth: u32,
@@ -314,7 +314,6 @@ pub(super) async fn execute_capability_invocation_phase(
                         invocation_abort_registry: params.invocation_abort_registry,
                         engine_host: params.engine_host,
                         run_id: params.run_id,
-                        provider_type: params.provider_type,
                         trace_id: params.trace_id,
                         parent_invocation_id: params.parent_invocation_id,
                         worker_causal_depth: params.worker_causal_depth,

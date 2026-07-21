@@ -22,10 +22,11 @@
 //! # Invariants
 //!
 //! Model-visible actions are direct typed worker-kernel functions or enabled
-//! persistent workers. Local calls are trusted-local observations and do not
-//! derive per-call authority grants. Remote transport authentication remains a
-//! transport concern. Source changes remain isolated core proposals until a
-//! later explicit user message approves application.
+//! persistent workers. Local calls execute directly with concrete actor
+//! identity and do not derive per-call authority grants or trust markers.
+//! Remote transport authentication remains a transport concern. Source changes
+//! remain isolated core proposals until a later explicit user message approves
+//! application.
 
 pub mod agent;
 pub mod auth;

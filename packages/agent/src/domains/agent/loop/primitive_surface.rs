@@ -69,14 +69,14 @@ pub(crate) async fn take_worker_inbox_context(
     parent_invocation_id: Option<&InvocationId>,
 ) -> Option<String> {
     let target = surface.targets_by_name.get("worker_inbox")?;
-    if !target.trusted_local {
+    if !target.model_callable {
         return None;
     }
     // INVARIANT: inbox attachment is an engine-owned projection step, not a
     // model tool call. Attribute the observation to the session while using an
     // internal runtime actor so the hidden operation satisfies its visibility
     // boundary without pretending to be a model tool call.
-    let mut context = CausalContext::trusted_local(
+    let mut context = CausalContext::new(
         ActorId::new("system:agent-runtime").ok()?,
         ActorKind::System,
         trace_id.cloned().unwrap_or_else(TraceId::generate),
@@ -124,8 +124,8 @@ pub struct PrimitiveExecutionTarget {
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
     pub execution_mode: ExecutionMode,
-    /// Whether this target came from the accepted trusted-local tool surface.
-    pub trusted_local: bool,
+    /// Whether this function is explicitly registered for model invocation.
+    pub model_callable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -166,7 +166,7 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
             model_capability_id: resolved_function.model_name,
             function_id: resolved_function.definition.id.clone(),
             execution_mode: execution_mode(&resolved_function.definition),
-            trusted_local: resolved_function.trusted_local,
+            model_callable: resolved_function.model_callable,
             function: resolved_function.definition,
         };
         let capability = model_capability_schema(&target);
@@ -400,7 +400,7 @@ mod tests {
         assert!(surface.targets_by_name.contains_key("worker_upsert"));
         assert!(surface.targets_by_name.contains_key("recent_research"));
         assert!(!surface.targets_by_name.contains_key("format_notes"));
-        assert!(surface.targets_by_name["recent_research"].trusted_local);
+        assert!(surface.targets_by_name["recent_research"].model_callable);
         assert_eq!(surface.snapshot.fixed_tool_count, 1);
         assert_eq!(surface.snapshot.projected_worker_count, 1);
         assert_eq!(surface.snapshot.available_worker_count, 2);

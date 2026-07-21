@@ -16,7 +16,7 @@ use super::{
 };
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{InvocationId, TriggerId};
+use crate::engine::kernel::ids::InvocationId;
 use crate::engine::kernel::types::CatalogRevision;
 
 mod rows;
@@ -223,12 +223,11 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                 "INSERT INTO engine_invocations
                    (invocation_id, function_id, worker_id, function_revision,
                     catalog_revision, actor_id, actor_kind_json, trace_id,
-                    parent_invocation_id, trigger_id,
-                    session_id, workspace_id, idempotency_scope_kind,
+                    parent_invocation_id, session_id, workspace_id, idempotency_scope_kind,
                     idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                     result_json, error_json, timestamp)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
                 params![
                     record.invocation_id.as_str(),
                     record.function_id.as_str(),
@@ -242,7 +241,6 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         .parent_invocation_id
                         .as_ref()
                         .map(InvocationId::as_str),
-                    record.trigger_id.as_ref().map(TriggerId::as_str),
                     record.session_id.as_deref(),
                     record.workspace_id.as_deref(),
                     record
@@ -288,8 +286,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .prepare(
                 "SELECT invocation_id, function_id, worker_id, function_revision,
                         catalog_revision, actor_id, actor_kind_json, trace_id,
-                        parent_invocation_id, trigger_id,
-                        session_id, workspace_id, idempotency_scope_kind,
+                        parent_invocation_id, session_id, workspace_id, idempotency_scope_kind,
                         idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                         result_json, error_json, timestamp
                  FROM engine_invocations
@@ -315,8 +312,7 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .prepare(
                 "SELECT invocation_id, function_id, worker_id, function_revision,
                         catalog_revision, actor_id, actor_kind_json, trace_id,
-                        parent_invocation_id, trigger_id,
-                        session_id, workspace_id, idempotency_scope_kind,
+                        parent_invocation_id, session_id, workspace_id, idempotency_scope_kind,
                         idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                         result_json, error_json, timestamp
                  FROM engine_invocations

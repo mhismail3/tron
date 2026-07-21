@@ -144,10 +144,11 @@ fn invoke_message_maps_to_engine_invoke_payload_context() {
 }
 
 #[test]
-fn invoke_message_rejects_authority_and_runtime_metadata_context() {
+fn invoke_message_rejects_unrecognized_execution_context() {
     for forbidden in [
         json!({"authorityScopes": ["system.read"]}),
-        json!({"runtimeMetadata": {"agent.runId": "run-1"}}),
+        json!({"trustedLocal": true}),
+        json!({"workingDirectory": "/tmp"}),
     ] {
         let value = json!({
             "type": "invoke",
@@ -157,7 +158,7 @@ fn invoke_message_rejects_authority_and_runtime_metadata_context() {
             "context": forbidden
         });
         let error = serde_json::from_value::<InvokeMessage>(value)
-            .expect_err("public context authority/runtime metadata must be rejected");
+            .expect_err("public context must reject engine-owned execution inputs");
         assert!(
             error.to_string().contains("unknown field"),
             "unexpected context rejection error: {error}"

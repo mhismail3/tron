@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::engine::{Invocation, RUNTIME_METADATA_WORKING_DIRECTORY};
+use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
@@ -480,8 +480,7 @@ pub(super) fn resolve_path(invocation: &Invocation, value: &str) -> Result<PathB
     }
     let base = invocation
         .causal_context
-        .runtime_metadata
-        .get(RUNTIME_METADATA_WORKING_DIRECTORY)
+        .working_directory()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     Ok(base.join(path))

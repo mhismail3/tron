@@ -5,7 +5,6 @@ use serde_json::{Value, json};
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::Invocation;
-use crate::engine::RUNTIME_METADATA_TRIGGER_DEPTH;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
@@ -419,12 +418,7 @@ async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, St
         input,
         idempotency_key: key,
         trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
-        causal_depth: invocation
-            .causal_context
-            .runtime_metadata
-            .get(RUNTIME_METADATA_TRIGGER_DEPTH)
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(0),
+        causal_depth: invocation.causal_context.trigger_depth(),
         trigger_kind: "manual".to_owned(),
     };
     let record = match invocation

@@ -23,7 +23,7 @@ fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
             function_id,
             function,
             execution_mode: mode,
-            trusted_local: false,
+            model_callable: false,
         },
     );
     ResolvedPrimitiveSurface {

@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
-use crate::engine::{InProcessFunctionHandler, Invocation, RUNTIME_METADATA_TRIGGER_DEPTH};
+use crate::engine::{InProcessFunctionHandler, Invocation};
 use crate::shared::protocol::events::TronEvent;
 
 use super::super::process::{
@@ -71,12 +71,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
             ));
         }
         let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
-        let depth = invocation
-            .causal_context
-            .runtime_metadata
-            .get(RUNTIME_METADATA_TRIGGER_DEPTH)
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(0);
+        let depth = invocation.causal_context.trigger_depth();
         let idempotency_key = invocation
             .causal_context
             .idempotency_key

@@ -52,15 +52,9 @@ pub use durability::streams::{
 pub use invocation::host::EngineHostHandle;
 pub use invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
-    RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION, RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
-    RUNTIME_METADATA_EXPECTED_WORKER_VERSION, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
-    RUNTIME_METADATA_PROVIDER_INVOCATION_ID, RUNTIME_METADATA_PROVIDER_TYPE,
-    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_SURFACE_HASH, RUNTIME_METADATA_TRIGGER_DEPTH,
-    RUNTIME_METADATA_TRIGGER_PATH, RUNTIME_METADATA_TRUSTED_LOCAL, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY,
 };
 pub use kernel::errors::{EngineError, Result};
-pub use kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
+pub use kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
 pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payload;
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{

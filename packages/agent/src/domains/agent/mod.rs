@@ -25,8 +25,8 @@
 //! 5. The turn runner builds provider input from session state and supplies
 //!    direct typed kernel tools plus a compact relevant-worker projection. It
 //!    never supplies the removed `capability::execute` wrapper.
-//! 6. Provider tool calls are written as session truth and invoked as child
-//!    trusted-local typed engine invocations. An agent-runner child also
+//! 6. Provider tool calls are written as session truth and invoked as typed
+//!    engine invocations with Agent identity. An agent-runner child also
 //!    inherits its parent worker's causal depth, and the executor copies that
 //!    depth onto nested direct tools so composition cannot reset loop limits.
 //! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;

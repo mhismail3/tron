@@ -10,18 +10,21 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::invocation::model::{
     InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
-    RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION, RUNTIME_METADATA_EXPECTED_WORKER_VERSION,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::WorkerId;
-use crate::engine::kernel::types::{FunctionDefinition, FunctionRevision, IdempotencyScope};
+use crate::engine::kernel::types::{
+    CatalogRevision, FunctionDefinition, FunctionRevision, IdempotencyScope,
+};
 use crate::engine::kernel::{policy, schema};
 
 /// A sync invocation that passed routing, policy, schema, and idempotency
 /// reservation checks and is ready to execute outside the catalog lock.
 pub(in crate::engine) struct PreparedSyncInvocation {
-    /// Invocation with its causal catalog revision captured at prepare time.
+    /// Invocation accepted at prepare time.
     pub invocation: Invocation,
+    /// Catalog revision captured at prepare time.
+    pub catalog_revision: CatalogRevision,
     /// Function contract captured at prepare time.
     pub function: FunctionDefinition,
     /// In-process handler captured at prepare time.
@@ -60,7 +63,7 @@ impl LiveCatalog {
         self.prepare_invocation(invocation)
     }
 
-    fn prepare_invocation(&mut self, mut invocation: Invocation) -> PreparedSyncInvocationDecision {
+    fn prepare_invocation(&mut self, invocation: Invocation) -> PreparedSyncInvocationDecision {
         let Some(entry) = self.functions.get(&invocation.function_id) else {
             let worker_id = WorkerId::new("missing").expect("valid static id");
             let result = InvocationResult::error(
@@ -81,8 +84,6 @@ impl LiveCatalog {
         };
         let function = entry.definition.clone();
         let handler = Arc::clone(&entry.handler);
-
-        invocation.causal_context.catalog_revision = self.revision;
 
         if let Err(err) = validate_advertised_surface(&function, &invocation)
             .and_then(|_| policy::validate_invocation(&function, &invocation))
@@ -187,6 +188,7 @@ impl LiveCatalog {
 
         PreparedSyncInvocationDecision::Execute(Box::new(PreparedSyncInvocation {
             invocation,
+            catalog_revision: self.revision,
             function,
             handler,
             idempotency,
@@ -202,11 +204,11 @@ impl LiveCatalog {
     ) -> InvocationResult {
         let PreparedSyncInvocation {
             invocation,
+            catalog_revision: captured_revision,
             function,
             idempotency,
             ..
         } = prepared;
-        let captured_revision = invocation.causal_context.catalog_revision;
 
         let result = match handler_result {
             Ok(value) => {
@@ -307,34 +309,24 @@ fn validate_advertised_surface(
     function: &FunctionDefinition,
     invocation: &Invocation,
 ) -> Result<()> {
-    let Some(expected_revision) = invocation
-        .causal_context
-        .runtime_metadata(RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION)
-    else {
+    let Some(expected_revision) = invocation.causal_context.advertised_function_revision() else {
         return Ok(());
     };
-    let expected_revision = expected_revision.parse::<u64>().map_err(|_| {
-        EngineError::PolicyViolation(format!(
-            "invalid runtime function revision pin for {}",
-            function.id
-        ))
-    })?;
     let expected_worker_version = invocation
         .causal_context
-        .runtime_metadata(RUNTIME_METADATA_EXPECTED_WORKER_VERSION)
+        .advertised_worker_version()
         .map(ToOwned::to_owned);
     let actual_worker_version = function
         .metadata
         .get("workerVersion")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
-    if expected_revision == function.revision.0 && expected_worker_version == actual_worker_version
-    {
+    if expected_revision == function.revision && expected_worker_version == actual_worker_version {
         return Ok(());
     }
     Err(EngineError::StaleFunctionSurface {
         function_id: function.id.to_string(),
-        expected_revision,
+        expected_revision: expected_revision.0,
         actual_revision: function.revision.0,
         expected_worker_version,
         actual_worker_version,

@@ -225,7 +225,7 @@ async fn worker_webhook_handler(
         .filter(|value| !value.is_empty() && value.len() <= 256)
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("worker-webhook:{}", uuid::Uuid::now_v7()));
-    let context = crate::engine::CausalContext::trusted_local(
+    let context = crate::engine::CausalContext::new(
         match crate::engine::ActorId::new("worker:webhook") {
             Ok(id) => id,
             Err(error) => return internal_webhook_error(error.to_string()),
@@ -555,7 +555,7 @@ mod tests {
                         "provenance":[{"source":"test:http-webhook"}]
                     }
                 }),
-                crate::engine::CausalContext::trusted_local(
+                crate::engine::CausalContext::new(
                     crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
                     crate::engine::ActorKind::Agent,
                     crate::engine::TraceId::new("webhook-http-create").unwrap(),
@@ -602,7 +602,7 @@ mod tests {
                     .invoke(crate::engine::Invocation::new_sync(
                         crate::engine::FunctionId::new("worker_kernel::runs").unwrap(),
                         serde_json::json!({"workerId":"http-webhook-fixture","limit":10}),
-                        crate::engine::CausalContext::trusted_local(
+                        crate::engine::CausalContext::new(
                             crate::engine::ActorId::new("agent:webhook-http-test").unwrap(),
                             crate::engine::ActorKind::Agent,
                             crate::engine::TraceId::new("webhook-http-runs").unwrap(),

@@ -447,11 +447,12 @@ restart; promotions are session-scoped durable engine state and survive server
 restarts. A newly upserted worker registers immediately.
 
 Each model-originated invocation carries the function revision and immutable
-worker version that were advertised, plus the catalog revision and surface hash
-as causal audit metadata. Catalog preparation rejects any changed contract with
-`ENGINE_STALE_FUNCTION_SURFACE`; it never sends old provider arguments through
-a newer schema. The resulting recoverable tool error advances the agent to a
-freshly resolved internal turn.
+worker version that were advertised. Catalog preparation rejects any changed
+contract with `ENGINE_STALE_FUNCTION_SURFACE`; it never sends old provider
+arguments through a newer schema. Catalog revision and surface hash remain in
+the provider-surface snapshot instead of being copied into an ephemeral
+invocation metadata bag. The resulting recoverable tool error advances the
+agent to a freshly resolved internal turn.
 
 A direct tool cannot terminate the agent loop through catalog metadata or a
 special result-envelope flag. Its typed result is committed to provider context
@@ -479,16 +480,19 @@ fixed tools. The operation is deliberately not projected as model vocabulary.
 
 ## Local Authority and Provenance
 
-When autonomous workers are enabled, local model calls use a trusted-local causal context.
-The invocation executor records actor, session, workspace, model/provider call,
-trace, parent invocation, working directory, turn, and deterministic
-idempotency metadata. None of those observations is a permission grant.
+When autonomous workers are enabled, local model calls enter directly with
+their Agent or Worker actor identity. The durable engine record owns actor,
+session, workspace, trace, parent invocation, and deterministic idempotency
+evidence; the worker dispatcher owns trigger/delivery evidence, and session
+events separately own model/provider-call lifecycle. None of those observations
+is a permission grant.
 
-The causal model represents that distinction directly: it carries actor,
-session/workspace, trace, parent, trigger, delivery, idempotency, and trusted
-runtime metadata, but no grant id or permission scope. Catalog discovery actor
-context likewise contains no grant field. Public transport cannot inject the
-trusted-local marker or other runtime metadata.
+The live causal model represents that distinction directly. Stable causal
+evidence is accompanied by four explicit engine-owned execution inputs: working
+directory, advertised function revision, advertised worker version, and
+worker-trigger depth. There is no generic runtime-metadata map, synthetic trust
+marker, grant id, or permission scope. Public transport constructs client causal
+context itself and cannot inject those execution inputs.
 
 Engine settings are one sparse strict document at `~/.tron/settings.toml` over
 compiled typed defaults. Named profiles, inheritance, `active.toml`, profile
@@ -546,7 +550,7 @@ The remaining boundaries are practical:
 ## Authentication and Secrets
 
 Remote clients still authenticate to `/engine` with the paired bearer token;
-the trusted-local execution change does not weaken transport authentication.
+permissive local execution does not weaken transport authentication.
 OAuth refresh is owned by `domains/auth/credentials/`. Refreshes serialize
 through a process-local refresh mutex and then an auth-file `flock`. Refreshes
 re-read `auth.json` after the lock and fail the refresh if persistence fails.

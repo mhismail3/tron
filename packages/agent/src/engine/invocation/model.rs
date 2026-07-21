@@ -2,59 +2,17 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
 use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
-/// Runtime metadata key carrying the trusted session working directory.
-///
-/// This is engine-owned context, not model-supplied payload. Domain workers use it
-/// when a relative path needs to resolve against the active session workspace.
-pub const RUNTIME_METADATA_WORKING_DIRECTORY: &str = "agent.workingDirectory";
-/// Runtime metadata key carrying the provider/model tool-call id that caused an
-/// engine invocation.
-pub const RUNTIME_METADATA_PROVIDER_INVOCATION_ID: &str = "agent.providerInvocationId";
-/// Runtime metadata key carrying the resolved model provider type.
-pub const RUNTIME_METADATA_PROVIDER_TYPE: &str = "agent.providerType";
-/// Runtime metadata key carrying the current agent run id.
-pub const RUNTIME_METADATA_RUN_ID: &str = "agent.runId";
-/// Runtime metadata key carrying the model-facing primitive name.
-pub const RUNTIME_METADATA_MODEL_PRIMITIVE_NAME: &str = "agent.modelPrimitiveName";
-/// Runtime metadata key pinning a model tool call to the function revision
-/// advertised in the provider request that produced it.
-pub const RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION: &str = "agent.expectedFunctionRevision";
-/// Runtime metadata key pinning a projected worker call to the immutable worker
-/// version advertised in the provider request that produced it.
-pub const RUNTIME_METADATA_EXPECTED_WORKER_VERSION: &str = "agent.expectedWorkerVersion";
-/// Runtime metadata key recording the exact provider surface hash that exposed
-/// a model tool. This is audit evidence; the per-function revision/version
-/// pins are the routing guard.
-pub const RUNTIME_METADATA_SURFACE_HASH: &str = "agent.surfaceHash";
-/// Runtime metadata key recording the catalog revision observed when a model
-/// tool surface was resolved.
-pub const RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION: &str = "agent.advertisedCatalogRevision";
-/// Runtime metadata key carrying the current model turn number.
-pub const RUNTIME_METADATA_TURN: &str = "agent.turn";
-/// Runtime metadata key carrying the current trigger cascade depth.
-pub const RUNTIME_METADATA_TRIGGER_DEPTH: &str = "engine.triggerDepth";
-/// Runtime metadata key carrying the JSON trigger-id path for loop detection.
-pub const RUNTIME_METADATA_TRIGGER_PATH: &str = "engine.triggerPath";
-/// Runtime-owned marker for an accepted local agent or worker invocation.
-///
-/// This is deliberately not an authority grant. It records that the accepted
-/// caller came from the local agent/worker runtime while retaining actor and
-/// causal observations.
-pub const RUNTIME_METADATA_TRUSTED_LOCAL: &str = "engine.trustedLocal";
-
 /// Causal context carried by every invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CausalContext {
     /// Actor id.
     pub actor_id: ActorId,
@@ -68,16 +26,16 @@ pub struct CausalContext {
     pub session_id: Option<String>,
     /// Optional workspace id.
     pub workspace_id: Option<String>,
-    /// Catalog revision observed at dispatch.
-    pub catalog_revision: CatalogRevision,
-    /// Trigger id, if trigger-caused.
-    pub trigger_id: Option<TriggerId>,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
-    /// Engine-internal runtime metadata. This is not model-supplied payload and
-    /// is used to carry trusted run context into primitive workers.
-    #[serde(default)]
-    pub runtime_metadata: BTreeMap<String, String>,
+    /// Trusted session directory used to resolve relative host paths.
+    working_directory: Option<String>,
+    /// Function revision advertised to the model that produced this call.
+    advertised_function_revision: Option<FunctionRevision>,
+    /// Immutable worker version advertised with the projected worker tool.
+    advertised_worker_version: Option<String>,
+    /// Current worker-trigger cascade depth.
+    trigger_depth: u32,
 }
 
 impl CausalContext {
@@ -91,33 +49,12 @@ impl CausalContext {
             parent_invocation_id: None,
             session_id: None,
             workspace_id: None,
-            catalog_revision: CatalogRevision(0),
-            trigger_id: None,
             idempotency_key: None,
-            runtime_metadata: BTreeMap::new(),
+            working_directory: None,
+            advertised_function_revision: None,
+            advertised_worker_version: None,
+            trigger_depth: 0,
         }
-    }
-
-    /// Create an observational context with no trusted execution marker.
-    #[must_use]
-    pub fn observed(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
-        Self::new(actor_id, actor_kind, trace_id)
-    }
-
-    /// Create a trusted-local causal context.
-    #[must_use]
-    pub fn trusted_local(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
-        Self::observed(actor_id, actor_kind, trace_id)
-            .with_runtime_metadata(RUNTIME_METADATA_TRUSTED_LOCAL, "true")
-    }
-
-    /// Whether the engine admitted this invocation through the trusted-local
-    /// worker-first path.
-    #[must_use]
-    pub fn is_trusted_local(&self) -> bool {
-        self.runtime_metadata
-            .get(RUNTIME_METADATA_TRUSTED_LOCAL)
-            .is_some_and(|value| value == "true")
     }
 
     /// Set the session id.
@@ -141,14 +78,6 @@ impl CausalContext {
         self
     }
 
-    /// Set the trigger id in engine invocation tests.
-    #[cfg(test)]
-    #[must_use]
-    pub(in crate::engine) fn with_trigger_id(mut self, trigger_id: TriggerId) -> Self {
-        self.trigger_id = Some(trigger_id);
-        self
-    }
-
     /// Add an idempotency key.
     #[must_use]
     pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
@@ -156,26 +85,60 @@ impl CausalContext {
         self
     }
 
-    /// Attach engine-internal runtime metadata.
+    /// Set the trusted session directory used by host path primitives.
     #[must_use]
-    pub fn with_runtime_metadata(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
-        let _ = self.runtime_metadata.insert(key.into(), value.into());
+    pub fn with_working_directory(mut self, working_directory: impl Into<String>) -> Self {
+        self.working_directory = Some(working_directory.into());
         self
     }
 
-    /// Read engine-internal runtime metadata.
+    /// Read the trusted session directory used by host path primitives.
     #[must_use]
-    pub fn runtime_metadata(&self, key: &str) -> Option<&str> {
-        self.runtime_metadata.get(key).map(String::as_str)
+    pub fn working_directory(&self) -> Option<&str> {
+        self.working_directory.as_deref()
+    }
+
+    /// Pin execution to the exact function and worker versions advertised to
+    /// the model that produced the call.
+    #[must_use]
+    pub fn with_advertised_function(
+        mut self,
+        function_revision: FunctionRevision,
+        worker_version: Option<String>,
+    ) -> Self {
+        self.advertised_function_revision = Some(function_revision);
+        self.advertised_worker_version = worker_version;
+        self
+    }
+
+    /// Read the advertised function revision pin.
+    #[must_use]
+    pub fn advertised_function_revision(&self) -> Option<FunctionRevision> {
+        self.advertised_function_revision
+    }
+
+    /// Read the advertised immutable worker version pin.
+    #[must_use]
+    pub fn advertised_worker_version(&self) -> Option<&str> {
+        self.advertised_worker_version.as_deref()
+    }
+
+    /// Set the worker-trigger cascade depth.
+    #[must_use]
+    pub fn with_trigger_depth(mut self, trigger_depth: u32) -> Self {
+        self.trigger_depth = trigger_depth;
+        self
+    }
+
+    /// Read the worker-trigger cascade depth.
+    #[must_use]
+    pub fn trigger_depth(&self) -> u32 {
+        self.trigger_depth
     }
 }
 
 /// Invocation request.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Invocation {
     /// Invocation id.
     pub id: InvocationId,
@@ -316,8 +279,6 @@ pub struct InvocationRecord {
     pub trace_id: TraceId,
     /// Parent invocation.
     pub parent_invocation_id: Option<InvocationId>,
-    /// Trigger id.
-    pub trigger_id: Option<TriggerId>,
     /// Session scope active when the invocation completed.
     pub session_id: Option<String>,
     /// Workspace scope active when the invocation completed.
@@ -367,7 +328,6 @@ impl InvocationRecord {
             actor_kind: invocation.causal_context.actor_kind.clone(),
             trace_id: invocation.causal_context.trace_id.clone(),
             parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
-            trigger_id: invocation.causal_context.trigger_id.clone(),
             session_id: invocation.causal_context.session_id.clone(),
             workspace_id: invocation.causal_context.workspace_id.clone(),
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
@@ -404,17 +364,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trusted_local_context_round_trips_runtime_marker() {
-        let context = CausalContext::trusted_local(
-            ActorId::new("agent:trusted-local-test").unwrap(),
+    fn causal_context_owns_explicit_runtime_inputs() {
+        let context = CausalContext::new(
+            ActorId::new("agent:runtime-context-test").unwrap(),
             ActorKind::Agent,
-            TraceId::new("trusted-local-test").unwrap(),
-        );
+            TraceId::new("runtime-context-test").unwrap(),
+        )
+        .with_working_directory("/tmp/runtime-context-test")
+        .with_advertised_function(FunctionRevision(3), Some("worker-version".to_owned()))
+        .with_trigger_depth(4);
 
-        assert!(context.is_trusted_local());
-        let encoded = serde_json::to_value(&context).unwrap();
-        let decoded: CausalContext = serde_json::from_value(encoded).unwrap();
-        assert!(decoded.is_trusted_local());
+        assert_eq!(
+            context.working_directory(),
+            Some("/tmp/runtime-context-test")
+        );
+        assert_eq!(
+            context.advertised_function_revision(),
+            Some(FunctionRevision(3))
+        );
+        assert_eq!(context.advertised_worker_version(), Some("worker-version"));
+        assert_eq!(context.trigger_depth(), 4);
     }
 
     #[test]

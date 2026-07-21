@@ -24,7 +24,7 @@ pub(in crate::engine::tests) use crate::engine::invocation::model::{
 pub(in crate::engine::tests) use crate::engine::kernel::errors::{EngineError, Result};
 pub(in crate::engine::tests) use crate::engine::kernel::ids;
 pub(in crate::engine::tests) use crate::engine::kernel::ids::{
-    ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
+    ActorId, FunctionId, InvocationId, TraceId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
     CatalogRevision, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
@@ -93,7 +93,6 @@ impl InProcessFunctionHandler for EchoHandler {
     async fn invoke(&self, invocation: Invocation) -> Result<Value> {
         Ok(json!({
             "echo": invocation.payload,
-            "catalogRevision": invocation.causal_context.catalog_revision.0,
         }))
     }
 }
@@ -120,7 +119,6 @@ impl InProcessFunctionHandler for BlockingHandler {
         self.release.notified().await;
         Ok(json!({
             "payload": invocation.payload,
-            "catalogRevision": invocation.causal_context.catalog_revision.0,
         }))
     }
 }

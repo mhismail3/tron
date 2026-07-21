@@ -294,11 +294,24 @@ fn trusted_agent_internal_child_context(
     invocation: &Invocation,
     idempotency_prefix: &str,
 ) -> crate::engine::CausalContext {
-    let mut context = invocation.causal_context.clone();
-    context.actor_id = crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id");
-    context.actor_kind = crate::engine::ActorKind::System;
-    context.parent_invocation_id = Some(invocation.id.clone());
-    context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
+    let parent = &invocation.causal_context;
+    let mut context = crate::engine::CausalContext::new(
+        crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id"),
+        crate::engine::ActorKind::System,
+        parent.trace_id.clone(),
+    )
+    .with_parent_invocation(invocation.id.clone())
+    .with_idempotency_key(format!("{idempotency_prefix}:{}", invocation.id))
+    .with_trigger_depth(parent.trigger_depth());
+    if let Some(session_id) = &parent.session_id {
+        context = context.with_session_id(session_id.clone());
+    }
+    if let Some(workspace_id) = &parent.workspace_id {
+        context = context.with_workspace_id(workspace_id.clone());
+    }
+    if let Some(working_directory) = parent.working_directory() {
+        context = context.with_working_directory(working_directory);
+    }
     context
 }
 
@@ -352,7 +365,13 @@ mod tests {
                 TraceId::new("prompt-parent").expect("trace id"),
             )
             .with_session_id("session-a")
-            .with_workspace_id("workspace-a"),
+            .with_workspace_id("workspace-a")
+            .with_working_directory("/tmp/session-a")
+            .with_advertised_function(
+                crate::engine::FunctionRevision(7),
+                Some("parent-worker-version".to_owned()),
+            )
+            .with_trigger_depth(3),
         );
 
         let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
@@ -362,6 +381,10 @@ mod tests {
         assert_eq!(child.parent_invocation_id, Some(parent.id));
         assert_eq!(child.session_id.as_deref(), Some("session-a"));
         assert_eq!(child.workspace_id.as_deref(), Some("workspace-a"));
+        assert_eq!(child.working_directory(), Some("/tmp/session-a"));
+        assert_eq!(child.trigger_depth(), 3);
+        assert_eq!(child.advertised_function_revision(), None);
+        assert_eq!(child.advertised_worker_version(), None);
         assert!(
             child
                 .idempotency_key

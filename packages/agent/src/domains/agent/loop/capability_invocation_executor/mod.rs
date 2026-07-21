@@ -1,11 +1,11 @@
 //! Direct model-tool executor for the worker-first surface.
 //!
-//! Accepted local agent calls enter the engine as trusted-local observations;
-//! this path does not derive, mint, inspect, or consume capability grants. The
-//! engine still records actor, session, trace, parent, provider call, working
-//! directory, and deterministic idempotency metadata. Direct kernel functions
-//! and active workers own their request/response schemas and reliability
-//! contracts at registration.
+//! Accepted local agent calls enter the engine directly with Agent identity;
+//! this path does not derive, mint, inspect, or consume capability grants or a
+//! synthetic trust marker. The engine still records actor, session, trace,
+//! parent, and deterministic idempotency metadata. Direct kernel functions and
+//! active workers own their request/response schemas and reliability contracts
+//! at registration.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -28,12 +28,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
 use crate::engine::{
-    ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
-    RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION, RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
-    RUNTIME_METADATA_EXPECTED_WORKER_VERSION, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
-    RUNTIME_METADATA_PROVIDER_INVOCATION_ID, RUNTIME_METADATA_PROVIDER_TYPE,
-    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_SURFACE_HASH, RUNTIME_METADATA_TRIGGER_DEPTH,
-    RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
+    ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId, TraceId,
 };
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
 use crate::shared::protocol::content::CapabilityResultContent;
@@ -245,7 +240,6 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     pub invocation_abort_registry: &'a InvocationAbortRegistry,
     pub engine_host: &'a EngineHostHandle,
     pub run_id: Option<&'a str>,
-    pub provider_type: &'a str,
     pub trace_id: Option<&'a TraceId>,
     pub parent_invocation_id: Option<&'a InvocationId>,
     /// Depth inherited from a parent worker invocation. Propagating this
@@ -353,12 +347,9 @@ pub async fn execute_capability_invocation(
             ctx.workspace_id,
             ctx.turn,
             ctx.run_id,
-            ctx.provider_type,
             ctx.trace_id,
             ctx.parent_invocation_id,
             ctx.worker_causal_depth,
-            ctx.primitive_surface.snapshot.catalog_revision,
-            &ctx.primitive_surface.snapshot.surface_hash,
             effective_args,
             &per_invocation_cancel,
         )
@@ -406,14 +397,8 @@ fn emit(ctx: &CapabilityInvocationExecutionContext<'_>, event: TronEvent) {
     }
 }
 
-fn with_agent_working_directory_metadata(
-    context: CausalContext,
-    working_directory: &str,
-) -> CausalContext {
-    context.with_runtime_metadata(
-        RUNTIME_METADATA_WORKING_DIRECTORY,
-        working_directory.to_owned(),
-    )
+fn with_agent_working_directory(context: CausalContext, working_directory: &str) -> CausalContext {
+    context.with_working_directory(working_directory)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -427,12 +412,9 @@ async fn execute_capability_primitive_via_engine(
     workspace_id: Option<&str>,
     turn: i64,
     run_id: Option<&str>,
-    provider_type: &str,
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     worker_causal_depth: u32,
-    advertised_catalog_revision: u64,
-    surface_hash: &str,
     effective_args: Value,
     cancellation: &CancellationToken,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
@@ -486,49 +468,18 @@ async fn execute_capability_primitive_via_engine(
         .cloned()
         .unwrap_or_else(TraceId::generate);
     let function_id = target.function_id.clone();
-    let base_context = CausalContext::trusted_local(actor_id, ActorKind::Agent, trace_id.clone());
-    let mut causal_context =
-        with_agent_working_directory_metadata(base_context, &working_directory)
-            .with_runtime_metadata(
-                RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-                invocation_id.to_owned(),
-            )
-            .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, provider_type.to_owned())
-            .with_runtime_metadata(
-                RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
-                model_primitive_name.to_owned(),
-            )
-            .with_runtime_metadata(RUNTIME_METADATA_TURN, turn.to_string())
-            .with_runtime_metadata(
-                RUNTIME_METADATA_TRIGGER_DEPTH,
-                worker_causal_depth.to_string(),
-            )
-            .with_runtime_metadata(
-                RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
-                target.function.revision.0.to_string(),
-            )
-            .with_runtime_metadata(
-                RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION,
-                advertised_catalog_revision.to_string(),
-            )
-            .with_runtime_metadata(RUNTIME_METADATA_SURFACE_HASH, surface_hash.to_owned())
-            .with_session_id(session_id.to_owned())
-            .with_idempotency_key(idempotency_key);
-    if let Some(worker_version) = target
+    let base_context = CausalContext::new(actor_id, ActorKind::Agent, trace_id.clone());
+    let worker_version = target
         .function
         .metadata
         .get("workerVersion")
         .and_then(Value::as_str)
-    {
-        causal_context = causal_context.with_runtime_metadata(
-            RUNTIME_METADATA_EXPECTED_WORKER_VERSION,
-            worker_version.to_owned(),
-        );
-    }
-    if let Some(run_id) = run_id {
-        causal_context =
-            causal_context.with_runtime_metadata(RUNTIME_METADATA_RUN_ID, run_id.to_owned());
-    }
+        .map(ToOwned::to_owned);
+    let mut causal_context = with_agent_working_directory(base_context, &working_directory)
+        .with_advertised_function(target.function.revision, worker_version)
+        .with_trigger_depth(worker_causal_depth)
+        .with_session_id(session_id.to_owned())
+        .with_idempotency_key(idempotency_key);
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
     }

@@ -8,7 +8,7 @@ use super::{IdempotencyEntry, IdempotencyKey, StoredEngineError, StoredInvocatio
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
 use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 pub(super) const SQLITE_SCHEMA: &str = r#"
@@ -60,7 +60,6 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   actor_kind_json          TEXT NOT NULL,
   trace_id                 TEXT NOT NULL,
   parent_invocation_id     TEXT,
-  trigger_id               TEXT,
   session_id               TEXT,
   workspace_id             TEXT,
   idempotency_scope_kind   TEXT,
@@ -89,7 +88,6 @@ pub(super) struct RawInvocationRow {
     pub(super) actor_kind_json: String,
     pub(super) trace_id: String,
     pub(super) parent_invocation_id: Option<String>,
-    pub(super) trigger_id: Option<String>,
     pub(super) session_id: Option<String>,
     pub(super) workspace_id: Option<String>,
     pub(super) idempotency_scope_kind: Option<String>,
@@ -135,7 +133,6 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
             .parent_invocation_id
             .map(InvocationId::new)
             .transpose()?,
-        trigger_id: row.trigger_id.map(TriggerId::new).transpose()?,
         session_id: row.session_id,
         workspace_id: row.workspace_id,
         idempotency_key: row.idempotency_key,

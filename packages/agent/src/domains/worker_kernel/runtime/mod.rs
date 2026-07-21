@@ -46,8 +46,8 @@ use crate::domains::settings::SettingsRuntime;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
     FunctionHealth, FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation,
-    PublishStreamEvent, RUNTIME_METADATA_TRIGGER_DEPTH, RiskLevel, StreamActorScope, StreamCursor,
-    TraceId, VisibilityScope, WorkerId,
+    PublishStreamEvent, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
+    WorkerId,
 };
 
 struct ResidentProcess {

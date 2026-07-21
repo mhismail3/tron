@@ -30,36 +30,35 @@ impl SqliteEngineLedgerStore {
                 .map_err(|err| sqlite_err("inv.actor_kind", err))?,
             trace_id: row.get(7).map_err(|err| sqlite_err("inv.trace", err))?,
             parent_invocation_id: row.get(8).map_err(|err| sqlite_err("inv.parent", err))?,
-            trigger_id: row.get(9).map_err(|err| sqlite_err("inv.trigger", err))?,
-            session_id: row.get(10).map_err(|err| sqlite_err("inv.session", err))?,
+            session_id: row.get(9).map_err(|err| sqlite_err("inv.session", err))?,
             workspace_id: row
-                .get(11)
+                .get(10)
                 .map_err(|err| sqlite_err("inv.workspace", err))?,
             idempotency_scope_kind: row
-                .get(12)
+                .get(11)
                 .map_err(|err| sqlite_err("inv.scope_kind", err))?,
             idempotency_scope_value: row
-                .get(13)
+                .get(12)
                 .map_err(|err| sqlite_err("inv.scope_value", err))?,
             idempotency_key: row
-                .get(14)
+                .get(13)
                 .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
             replayed_from: row
-                .get(15)
+                .get(14)
                 .map_err(|err| sqlite_err("inv.replayed_from", err))?,
             succeeded: row
-                .get(16)
+                .get(15)
                 .map_err(|err| sqlite_err("inv.succeeded", err))?,
             result_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(17).map_err(|err| sqlite_err("inv.result", err))?,
+                row.get(16).map_err(|err| sqlite_err("inv.result", err))?,
             )?,
             error_json: resolve_optional_stored_json_string(
                 &self.conn,
-                row.get(18).map_err(|err| sqlite_err("inv.error", err))?,
+                row.get(17).map_err(|err| sqlite_err("inv.error", err))?,
             )?,
             timestamp: row
-                .get(19)
+                .get(18)
                 .map_err(|err| sqlite_err("inv.timestamp", err))?,
         })
     }

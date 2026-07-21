@@ -887,6 +887,7 @@ fn verify_retired_schema(connection: &Connection) -> Result<(), String> {
             "resource_lease_ids_json",
             "compensation_status",
             "produced_resource_refs_json",
+            "trigger_id",
         ] {
             if columns.contains(retired) {
                 return Err(format!("retired invocation column {retired} remains"));

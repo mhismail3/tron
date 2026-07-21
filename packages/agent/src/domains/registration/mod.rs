@@ -417,7 +417,7 @@ mod tests {
         let invocation = Invocation::new_sync(
             FunctionId::new("worker_kernel::list").expect("function id"),
             json!({}),
-            CausalContext::trusted_local(
+            CausalContext::new(
                 ActorId::new("agent:worker-first-test").expect("actor id"),
                 ActorKind::Agent,
                 TraceId::generate(),
@@ -730,7 +730,7 @@ mod tests {
     }
 
     fn trusted_local_context(trace: &str) -> CausalContext {
-        CausalContext::trusted_local(
+        CausalContext::new(
             ActorId::new("agent:live-autonomy-toggle-test").expect("actor id"),
             ActorKind::Agent,
             TraceId::new(trace).expect("trace id"),

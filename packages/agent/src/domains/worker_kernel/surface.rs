@@ -206,7 +206,7 @@ pub(crate) struct EngineSurfaceSnapshot {
 pub(crate) struct ResolvedToolFunction {
     pub(crate) model_name: String,
     pub(crate) definition: FunctionDefinition,
-    pub(crate) trusted_local: bool,
+    pub(crate) model_callable: bool,
 }
 
 /// Function contracts plus the exact catalog evidence used to select them.
@@ -353,8 +353,8 @@ pub(crate) async fn resolve_tool_surface(
         let Some(model_name) = model_tool_name(&function) else {
             continue;
         };
-        let trusted_local = metadata_bool(&function, "modelPrimitive").unwrap_or(false);
-        if !trusted_local {
+        let model_callable = metadata_bool(&function, "modelPrimitive").unwrap_or(false);
+        if !model_callable {
             continue;
         }
         if !seen_names.insert(model_name.clone()) {
@@ -400,7 +400,7 @@ pub(crate) async fn resolve_tool_surface(
         resolved.push(ResolvedToolFunction {
             model_name,
             definition: function,
-            trusted_local,
+            model_callable,
         });
     }
 

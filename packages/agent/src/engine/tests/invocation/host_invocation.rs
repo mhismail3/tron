@@ -28,15 +28,7 @@ async fn invocation_rejects_a_function_surface_that_changed_after_advertisement(
     let invocation = Invocation::new_sync(
         fid("alpha::read"),
         json!({"x": 1}),
-        causal()
-            .with_runtime_metadata(
-                crate::engine::RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION,
-                advertised_revision.0.to_string(),
-            )
-            .with_runtime_metadata(
-                crate::engine::RUNTIME_METADATA_EXPECTED_WORKER_VERSION,
-                "worker-v1",
-            ),
+        causal().with_advertised_function(advertised_revision, Some("worker-v1".to_owned())),
     );
 
     let result = catalog.invoke_sync(invocation).await;
@@ -65,15 +57,13 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
         .unwrap();
 
     let parent = super::ids::InvocationId::new("parent-invocation").unwrap();
-    let trigger = TriggerId::new("trigger-a").unwrap();
     let invocation = Invocation::new_sync(
         fid("alpha::read"),
         json!({"x": 1}),
         causal()
             .with_session_id("session-a")
             .with_workspace_id("workspace-a")
-            .with_parent_invocation(parent.clone())
-            .with_trigger_id(trigger.clone()),
+            .with_parent_invocation(parent.clone()),
     );
     let result = catalog.invoke_sync(invocation).await;
     assert!(result.error.is_none());
@@ -93,7 +83,6 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
     assert_eq!(records[0].actor_id, actor("agent"));
     assert_eq!(records[0].trace_id, trace("trace"));
     assert_eq!(records[0].parent_invocation_id, Some(parent));
-    assert_eq!(records[0].trigger_id, Some(trigger));
     assert_eq!(records[0].catalog_revision, catalog.revision());
     assert_eq!(records[0].function_revision, FunctionRevision(1));
     assert!(records[0].succeeded);

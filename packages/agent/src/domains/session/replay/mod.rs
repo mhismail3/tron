@@ -348,7 +348,6 @@ struct ReplayInvocationRecord {
     actor_kind: Value,
     trace_id: String,
     parent_invocation_id: Option<String>,
-    trigger_id: Option<String>,
     session_id: Option<String>,
     workspace_id: Option<String>,
     idempotency_key: Option<String>,
@@ -378,7 +377,6 @@ impl ReplayInvocationRecord {
                 .parent_invocation_id
                 .as_ref()
                 .map(ToString::to_string),
-            trigger_id: record.trigger_id.as_ref().map(ToString::to_string),
             session_id: record.session_id.clone(),
             workspace_id: record.workspace_id.clone(),
             idempotency_key: record.idempotency_key.clone(),

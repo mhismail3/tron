@@ -56,7 +56,6 @@ fn execution_context<'a>(
         invocation_abort_registry: aborts,
         engine_host: host,
         run_id: Some("run-test"),
-        provider_type: "test-provider",
         trace_id: None,
         parent_invocation_id: None,
         worker_causal_depth: 0,
@@ -102,7 +101,7 @@ async fn unknown_direct_tool_fails_before_engine_execution() {
 }
 
 #[tokio::test]
-async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
+async fn direct_tool_uses_typed_payload_and_agent_context() {
     let host = EngineHostHandle::new_in_memory().unwrap();
     let function_id = FunctionId::new("worker_kernel::direct_test").unwrap();
     let mut function = FunctionDefinition::new(
@@ -135,7 +134,7 @@ async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
         function_id,
         function,
         execution_mode: ExecutionMode::Parallel,
-        trusted_local: true,
+        model_callable: true,
     };
     let surface = ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
@@ -167,35 +166,15 @@ async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
     assert_eq!(result.result.details.as_ref().unwrap()["typed"], "ok");
     let invocation = captured.lock().clone().expect("captured direct invocation");
     assert_eq!(invocation.payload, json!({"value":"hello"}));
-    assert!(invocation.causal_context.is_trusted_local());
+    assert_eq!(invocation.causal_context.actor_kind, ActorKind::Agent);
     assert_eq!(invocation.causal_context.trace_id, trace);
     assert_eq!(invocation.causal_context.parent_invocation_id, Some(parent));
+    assert_eq!(invocation.causal_context.trigger_depth(), 7);
     assert_eq!(
-        invocation
-            .causal_context
-            .runtime_metadata
-            .get(crate::engine::RUNTIME_METADATA_TRIGGER_DEPTH)
-            .map(String::as_str),
-        Some("7")
+        invocation.causal_context.advertised_function_revision(),
+        Some(crate::engine::FunctionRevision(1))
     );
-    assert_eq!(
-        invocation
-            .causal_context
-            .runtime_metadata(crate::engine::RUNTIME_METADATA_EXPECTED_FUNCTION_REVISION),
-        Some("1")
-    );
-    assert_eq!(
-        invocation
-            .causal_context
-            .runtime_metadata(crate::engine::RUNTIME_METADATA_ADVERTISED_CATALOG_REVISION),
-        Some("17")
-    );
-    assert_eq!(
-        invocation
-            .causal_context
-            .runtime_metadata(crate::engine::RUNTIME_METADATA_SURFACE_HASH),
-        Some("surface-hash-test")
-    );
+    assert_eq!(invocation.causal_context.advertised_worker_version(), None);
     assert!(
         invocation
             .causal_context

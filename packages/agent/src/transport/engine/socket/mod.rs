@@ -7,9 +7,9 @@
 //! invoke messages are translated into
 //! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
 //! through the canonical engine transport path. Public context is limited to
-//! session/workspace/trace correlation; authority scopes and runtime metadata
-//! are not accepted on the wire. Model providers receive their own direct typed
-//! tool surface rather than this authenticated client transport.
+//! session/workspace/trace correlation; authority scopes and trusted execution
+//! inputs are not accepted on the wire. Model providers receive their own
+//! direct typed tool surface rather than this authenticated client transport.
 //!
 //! A peer remains live while it returns Pong or any other inbound activity.
 //! Missing activity after a sent Ping retires the socket; teardown cancels its
