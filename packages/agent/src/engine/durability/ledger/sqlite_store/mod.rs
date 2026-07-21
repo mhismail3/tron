@@ -6,10 +6,9 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sqlite_codec::{
-    INVOCATION_INDEX_SCHEMA, INVOCATION_TABLE_SCHEMA, RawCatalogChangeRow, RawIdempotencyRow,
-    SQLITE_SCHEMA, ensure_column, ledger_failure, optional_stored_error_json,
-    optional_stored_json_string, raw_catalog_change, raw_idempotency_entry,
-    resolve_optional_stored_json_string, sqlite_err, to_json_string,
+    INVOCATION_INDEX_SCHEMA, INVOCATION_TABLE_SCHEMA, RawIdempotencyRow, SQLITE_SCHEMA,
+    ensure_column, ledger_failure, optional_stored_error_json, optional_stored_json_string,
+    raw_idempotency_entry, resolve_optional_stored_json_string, sqlite_err, to_json_string,
 };
 use super::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
@@ -17,8 +16,8 @@ use super::{
 };
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{InvocationId, TriggerId, WorkerId};
-use crate::engine::kernel::types::{CatalogChange, CatalogRevision};
+use crate::engine::kernel::ids::{InvocationId, TriggerId};
+use crate::engine::kernel::types::CatalogRevision;
 
 mod rows;
 
@@ -43,7 +42,7 @@ impl SqliteEngineLedgerStore {
 
     /// Wrap a connection and initialize the engine-ledger schema.
     pub fn from_connection(conn: Connection) -> Result<Self> {
-        let store = Self { conn };
+        let mut store = Self { conn };
         store.initialize_schema()?;
         Ok(store)
     }
@@ -55,7 +54,7 @@ impl SqliteEngineLedgerStore {
         &self.conn
     }
 
-    fn initialize_schema(&self) -> Result<()> {
+    fn initialize_schema(&mut self) -> Result<()> {
         crate::shared::storage::apply_runtime_pragmas(&self.conn)
             .map_err(|err| ledger_failure("ledger.storage_pragmas", err.to_string()))?;
         crate::shared::storage::ensure_storage_schema(&self.conn)
@@ -63,6 +62,7 @@ impl SqliteEngineLedgerStore {
         self.conn
             .execute_batch(SQLITE_SCHEMA)
             .map_err(|err| sqlite_err("initialize_schema", err))?;
+        self.migrate_legacy_catalog_changes()?;
         self.conn
             .execute_batch(INVOCATION_TABLE_SCHEMA)
             .map_err(|err| sqlite_err("initialize_invocation_table", err))?;
@@ -71,6 +71,45 @@ impl SqliteEngineLedgerStore {
             .map_err(|err| sqlite_err("initialize_invocation_index", err))?;
         ensure_column(&self.conn, "engine_invocations", "session_id", "TEXT")?;
         ensure_column(&self.conn, "engine_invocations", "workspace_id", "TEXT")?;
+        Ok(())
+    }
+
+    fn migrate_legacy_catalog_changes(&mut self) -> Result<()> {
+        let transaction = self
+            .conn
+            .transaction()
+            .map_err(|err| sqlite_err("catalog_revision_migration.begin", err))?;
+        let legacy_table_exists = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_catalog_changes')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|err| sqlite_err("catalog_revision_migration.inspect", err))?;
+        if legacy_table_exists {
+            let legacy_revision = transaction
+                .query_row(
+                    "SELECT COALESCE(MAX(after_revision), 0) FROM engine_catalog_changes",
+                    [],
+                    |row| row.get::<_, u64>(0),
+                )
+                .map_err(|err| sqlite_err("catalog_revision_migration.read", err))?;
+            transaction
+                .execute(
+                    "UPDATE engine_catalog_revision SET revision = MAX(revision, ?1) WHERE singleton = 1",
+                    [legacy_revision],
+                )
+                .map_err(|err| sqlite_err("catalog_revision_migration.update", err))?;
+            transaction
+                .execute_batch(
+                    "DROP INDEX IF EXISTS idx_engine_catalog_changes_after;
+                     DROP TABLE engine_catalog_changes;",
+                )
+                .map_err(|err| sqlite_err("catalog_revision_migration.drop", err))?;
+        }
+        transaction
+            .commit()
+            .map_err(|err| sqlite_err("catalog_revision_migration.commit", err))?;
         Ok(())
     }
 
@@ -132,143 +171,49 @@ impl SqliteEngineLedgerStore {
 }
 
 impl EngineLedgerStore for SqliteEngineLedgerStore {
-    fn append_catalog_change(&mut self, change: &CatalogChange) -> Result<()> {
+    fn catalog_revision(&self) -> Result<CatalogRevision> {
         self.conn
+            .query_row(
+                "SELECT revision FROM engine_catalog_revision WHERE singleton = 1",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
+            .map(CatalogRevision)
+            .map_err(|err| sqlite_err("catalog_revision", err))
+    }
+
+    fn advance_catalog_revision(
+        &mut self,
+        expected: CatalogRevision,
+        next: CatalogRevision,
+    ) -> Result<()> {
+        if next != expected.next() {
+            return Err(ledger_failure(
+                "advance_catalog_revision",
+                format!(
+                    "requested revision {} does not follow expected revision {}",
+                    next.0, expected.0
+                ),
+            ));
+        }
+        let updated = self
+            .conn
             .execute(
-                "INSERT INTO engine_catalog_changes
-                   (id, before_revision, after_revision, kind_json, subject_id,
-                    subject_kind_json, class_json, visibility_json, session_id,
-                    workspace_id, owner_worker_id, timestamp)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    change.id,
-                    change.before.0,
-                    change.after.0,
-                    to_json_string("append_catalog_change.kind", &change.kind)?,
-                    change.subject_id,
-                    to_json_string("append_catalog_change.subject_kind", &change.subject_kind)?,
-                    to_json_string("append_catalog_change.class", &change.class)?,
-                    to_json_string("append_catalog_change.visibility", &change.visibility)?,
-                    change.session_id.as_deref(),
-                    change.workspace_id.as_deref(),
-                    change.owner_worker.as_ref().map(WorkerId::as_str),
-                    change.timestamp.to_rfc3339(),
-                ],
+                "UPDATE engine_catalog_revision SET revision = ?1 WHERE singleton = 1 AND revision = ?2",
+                params![next.0, expected.0],
             )
-            .map_err(|err| sqlite_err("append_catalog_change", err))?;
-        Ok(())
-    }
-
-    fn list_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, before_revision, after_revision, kind_json, subject_id,
-                        subject_kind_json, class_json, visibility_json, session_id,
-                        workspace_id, owner_worker_id, timestamp
-                 FROM engine_catalog_changes
-                 ORDER BY after_revision ASC",
-            )
-            .map_err(|err| sqlite_err("list_catalog_changes.prepare", err))?;
-        let mut rows = stmt
-            .query([])
-            .map_err(|err| sqlite_err("list_catalog_changes.query", err))?;
-        let mut changes = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .map_err(|err| sqlite_err("list_catalog_changes.next", err))?
-        {
-            changes.push(raw_catalog_change(RawCatalogChangeRow {
-                id: row.get(0).map_err(|err| sqlite_err("catalog.id", err))?,
-                before_revision: row
-                    .get(1)
-                    .map_err(|err| sqlite_err("catalog.before", err))?,
-                after_revision: row.get(2).map_err(|err| sqlite_err("catalog.after", err))?,
-                kind_json: row.get(3).map_err(|err| sqlite_err("catalog.kind", err))?,
-                subject_id: row
-                    .get(4)
-                    .map_err(|err| sqlite_err("catalog.subject", err))?,
-                subject_kind_json: row
-                    .get(5)
-                    .map_err(|err| sqlite_err("catalog.subject_kind", err))?,
-                class_json: row.get(6).map_err(|err| sqlite_err("catalog.class", err))?,
-                visibility_json: row
-                    .get(7)
-                    .map_err(|err| sqlite_err("catalog.visibility", err))?,
-                session_id: row
-                    .get(8)
-                    .map_err(|err| sqlite_err("catalog.session", err))?,
-                workspace_id: row
-                    .get(9)
-                    .map_err(|err| sqlite_err("catalog.workspace", err))?,
-                owner_worker_id: row
-                    .get(10)
-                    .map_err(|err| sqlite_err("catalog.owner", err))?,
-                timestamp: row
-                    .get(11)
-                    .map_err(|err| sqlite_err("catalog.timestamp", err))?,
-            })?);
+            .map_err(|err| sqlite_err("advance_catalog_revision", err))?;
+        if updated == 1 {
+            return Ok(());
         }
-        Ok(changes)
-    }
-
-    fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, before_revision, after_revision, kind_json, subject_id,
-                        subject_kind_json, class_json, visibility_json, session_id,
-                        workspace_id, owner_worker_id, timestamp
-                 FROM engine_catalog_changes
-                 WHERE after_revision > ?1
-                 ORDER BY after_revision ASC
-                 LIMIT ?2",
-            )
-            .map_err(|err| sqlite_err("catalog_changes_after.prepare", err))?;
-        let mut rows = stmt
-            .query(params![revision.0, limit as i64])
-            .map_err(|err| sqlite_err("catalog_changes_after.query", err))?;
-        let mut changes = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .map_err(|err| sqlite_err("catalog_changes_after.next", err))?
-        {
-            changes.push(raw_catalog_change(RawCatalogChangeRow {
-                id: row.get(0).map_err(|err| sqlite_err("catalog.id", err))?,
-                before_revision: row
-                    .get(1)
-                    .map_err(|err| sqlite_err("catalog.before", err))?,
-                after_revision: row.get(2).map_err(|err| sqlite_err("catalog.after", err))?,
-                kind_json: row.get(3).map_err(|err| sqlite_err("catalog.kind", err))?,
-                subject_id: row
-                    .get(4)
-                    .map_err(|err| sqlite_err("catalog.subject", err))?,
-                subject_kind_json: row
-                    .get(5)
-                    .map_err(|err| sqlite_err("catalog.subject_kind", err))?,
-                class_json: row.get(6).map_err(|err| sqlite_err("catalog.class", err))?,
-                visibility_json: row
-                    .get(7)
-                    .map_err(|err| sqlite_err("catalog.visibility", err))?,
-                session_id: row
-                    .get(8)
-                    .map_err(|err| sqlite_err("catalog.session", err))?,
-                workspace_id: row
-                    .get(9)
-                    .map_err(|err| sqlite_err("catalog.workspace", err))?,
-                owner_worker_id: row
-                    .get(10)
-                    .map_err(|err| sqlite_err("catalog.owner", err))?,
-                timestamp: row
-                    .get(11)
-                    .map_err(|err| sqlite_err("catalog.timestamp", err))?,
-            })?);
-        }
-        Ok(changes)
+        let actual = self.catalog_revision()?;
+        Err(ledger_failure(
+            "advance_catalog_revision",
+            format!(
+                "expected durable revision {}, found {}",
+                expected.0, actual.0
+            ),
+        ))
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {

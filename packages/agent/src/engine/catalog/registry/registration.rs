@@ -7,26 +7,17 @@ use crate::engine::invocation::model::InProcessFunctionHandler;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
 use crate::engine::kernel::policy;
-use crate::engine::kernel::types::{
-    CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision,
-};
+use crate::engine::kernel::types::{FunctionDefinition, FunctionRevision};
 
-use super::catalog_changes::function_change_subject;
 use super::{FunctionEntry, LiveCatalog, RESERVED_ENGINE_NAMESPACE, RESERVED_ENGINE_WORKER_ID};
 
 impl LiveCatalog {
-    /// Restore the monotonic catalog revision from durable change history.
+    /// Restore the monotonic catalog revision from durable state.
     ///
     /// Callable definitions are rebuilt by their fixed bootstrap or canonical
     /// worker bundles; the ledger never owns a second catalog definition plane.
     pub(in crate::engine) fn hydrate_catalog_revision_from_ledger(&mut self) -> Result<()> {
-        let changes = self.ledger.list_catalog_changes()?;
-        self.revision = changes
-            .iter()
-            .map(|change| change.after)
-            .max()
-            .unwrap_or(CatalogRevision(0));
-
+        self.revision = self.ledger.catalog_revision()?;
         Ok(())
     }
 
@@ -39,7 +30,7 @@ impl LiveCatalog {
         validate_reserved_function_namespace(&definition)?;
         policy::validate_function_registration(&definition)?;
 
-        let kind = if let Some(existing) = self.functions.get(&definition.id) {
+        if let Some(existing) = self.functions.get(&definition.id) {
             if existing.definition.owner_worker != definition.owner_worker {
                 return Err(EngineError::OwnerMismatch {
                     kind: "function",
@@ -49,15 +40,12 @@ impl LiveCatalog {
                 });
             }
             definition.revision = existing.definition.revision.next();
-            CatalogChangeKind::FunctionUpdated
         } else {
             definition.revision = FunctionRevision(1);
-            CatalogChangeKind::FunctionRegistered
-        };
+        }
 
         let revision = definition.revision;
-        let subject = function_change_subject(&definition);
-        self.record_change(kind, subject)?;
+        self.advance_revision()?;
         let _ = self.functions.insert(
             definition.id.clone(),
             FunctionEntry {
@@ -108,9 +96,15 @@ impl LiveCatalog {
                 attempted_owner: owner.to_string(),
             });
         }
-        let subject = function_change_subject(&entry.definition);
-        self.record_change(CatalogChangeKind::FunctionUnregistered, subject)?;
+        self.advance_revision()?;
         let _ = self.functions.remove(id).expect("entry exists");
+        Ok(())
+    }
+
+    fn advance_revision(&mut self) -> Result<()> {
+        let next = self.revision.next();
+        self.ledger.advance_catalog_revision(self.revision, next)?;
+        self.revision = next;
         Ok(())
     }
 }

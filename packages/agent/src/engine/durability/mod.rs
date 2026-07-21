@@ -4,7 +4,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `ledger` | Invocation, idempotency, and catalog-change truth. |
+//! | `ledger` | Invocation/idempotency truth and the catalog revision scalar. |
 //! | `replay` | Read-only session replay snapshot DTOs for engine-owned rows. |
 //! | `state` | Scoped kernel key-value state for runtime overlays. |
 //! | `streams` | Durable stream events read through caller-owned cursors. |

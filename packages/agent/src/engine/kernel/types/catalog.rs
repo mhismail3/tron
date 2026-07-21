@@ -1,9 +1,8 @@
 //! Catalog-wide type contracts.
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::engine::kernel::ids::{ActorId, WorkerId};
+use crate::engine::kernel::ids::ActorId;
 
 macro_rules! revision_type {
     ($name:ident) => {
@@ -72,93 +71,6 @@ impl VisibilityScope {
             Self::Session | Self::Workspace | Self::System | Self::Agent
         )
     }
-}
-
-/// Catalog subject type.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CatalogSubjectKind {
-    /// Function catalog entry.
-    Function,
-}
-
-impl CatalogSubjectKind {
-    /// Static display string.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Function => "function",
-        }
-    }
-}
-
-/// Coarse class for catalog-change evidence.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CatalogChangeClass {
-    /// Worker or capability availability changed.
-    Availability,
-    /// Function contract changed.
-    Contract,
-    /// Visibility/promotion changed.
-    Visibility,
-    /// Health changed.
-    Health,
-}
-
-impl CatalogChangeClass {
-    /// Static display string.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Availability => "availability",
-            Self::Contract => "contract",
-            Self::Visibility => "visibility",
-            Self::Health => "health",
-        }
-    }
-}
-
-/// Catalog change event.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CatalogChange {
-    /// Change id.
-    pub id: String,
-    /// Revision before the change.
-    pub before: CatalogRevision,
-    /// Revision after the change.
-    pub after: CatalogRevision,
-    /// Change kind.
-    pub kind: CatalogChangeKind,
-    /// Subject id.
-    pub subject_id: String,
-    /// Subject kind.
-    pub subject_kind: CatalogSubjectKind,
-    /// Coarse change class.
-    pub class: CatalogChangeClass,
-    /// Subject visibility at the time of the change.
-    pub visibility: VisibilityScope,
-    /// Subject session scope at the time of the change.
-    pub session_id: Option<String>,
-    /// Subject workspace scope at the time of the change.
-    pub workspace_id: Option<String>,
-    /// Owner worker, when applicable.
-    pub owner_worker: Option<WorkerId>,
-    /// Timestamp.
-    pub timestamp: DateTime<Utc>,
-}
-
-/// Kind of catalog change.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CatalogChangeKind {
-    /// Function was registered.
-    FunctionRegistered,
-    /// Function contract or metadata changed.
-    FunctionUpdated,
-    /// Function unregistered.
-    FunctionUnregistered,
-    /// Catalog entry visibility changed.
-    VisibilityChanged,
-    /// Catalog entry health changed.
-    HealthChanged,
 }
 
 /// Health state for routing and discovery.

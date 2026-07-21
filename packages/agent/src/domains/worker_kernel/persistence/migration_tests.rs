@@ -247,30 +247,27 @@ fn assert_migrated_state(database: &Path, root: &Path) {
         ),
         "\"Reject\""
     );
-    assert_eq!(
-        connection
-            .query_row("SELECT COUNT(*) FROM engine_catalog_changes", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        scalar_text(&connection, "SELECT kind_json FROM engine_catalog_changes"),
-        "\"FunctionRegistered\""
-    );
     assert!(!table_present(&connection, "engine_stream_subscriptions"));
     drop(connection);
     let ledger =
         crate::engine::durability::ledger::SqliteEngineLedgerStore::open(database).unwrap();
-    assert!(
-        crate::engine::EngineLedgerStore::list_catalog_changes(&ledger)
-            .unwrap()
-            .iter()
-            .all(|change| change.subject_kind == crate::engine::CatalogSubjectKind::Function)
+    assert_eq!(
+        crate::engine::EngineLedgerStore::catalog_revision(&ledger).unwrap(),
+        crate::engine::CatalogRevision(1)
     );
     drop(ledger);
     let connection = Connection::open(database).unwrap();
+    assert!(!table_present(&connection, "engine_catalog_changes"));
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT revision FROM engine_catalog_revision WHERE singleton = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
     let shared_blob_count: i64 = connection
         .query_row(
             "SELECT b.ref_count FROM blobs b JOIN storage_payload_refs r ON r.payload_blob_id=b.id

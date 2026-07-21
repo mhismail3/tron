@@ -64,9 +64,8 @@ pub use kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, Wor
 pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payload;
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
-    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind,
-    EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
+    CatalogRevision, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
+    IdempotencyContract, IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
 };
 
 #[cfg(test)]

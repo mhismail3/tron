@@ -22,8 +22,6 @@ use crate::engine::catalog::discovery::ActorContext;
 use crate::engine::catalog::registry::{
     LiveCatalog, PreparedSyncInvocation, PreparedSyncInvocationDecision,
 };
-#[cfg(test)]
-use crate::engine::durability::ledger::EngineLedgerStore;
 use crate::engine::durability::ledger::SqliteEngineLedgerStore;
 use crate::engine::durability::streams::{
     EngineStreamPage, PublishStreamEvent, StreamActorScope, StreamCursor,

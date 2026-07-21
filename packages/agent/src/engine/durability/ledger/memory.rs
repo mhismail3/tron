@@ -9,12 +9,12 @@ use crate::engine::durability::ledger::{
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::InvocationId;
-use crate::engine::kernel::types::{CatalogChange, CatalogRevision};
+use crate::engine::kernel::types::CatalogRevision;
 
 /// In-memory ledger store used by `LiveCatalog::new`.
 #[derive(Default)]
 pub struct InMemoryEngineLedgerStore {
-    catalog_changes: Vec<CatalogChange>,
+    catalog_revision: CatalogRevision,
     invocations: Vec<InvocationRecord>,
     idempotency: BTreeMap<IdempotencyKey, IdempotencyEntry>,
 }
@@ -28,27 +28,26 @@ impl InMemoryEngineLedgerStore {
 }
 
 impl EngineLedgerStore for InMemoryEngineLedgerStore {
-    fn append_catalog_change(&mut self, change: &CatalogChange) -> Result<()> {
-        self.catalog_changes.push(change.clone());
+    fn catalog_revision(&self) -> Result<CatalogRevision> {
+        Ok(self.catalog_revision)
+    }
+
+    fn advance_catalog_revision(
+        &mut self,
+        expected: CatalogRevision,
+        next: CatalogRevision,
+    ) -> Result<()> {
+        if self.catalog_revision != expected || next != expected.next() {
+            return Err(ledger_failure(
+                "advance_catalog_revision",
+                format!(
+                    "expected durable revision {}, found {}; requested next {}",
+                    expected.0, self.catalog_revision.0, next.0
+                ),
+            ));
+        }
+        self.catalog_revision = next;
         Ok(())
-    }
-
-    fn list_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
-        Ok(self.catalog_changes.clone())
-    }
-
-    fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>> {
-        Ok(self
-            .catalog_changes
-            .iter()
-            .filter(|change| change.after > revision)
-            .take(limit)
-            .cloned()
-            .collect())
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {

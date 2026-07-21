@@ -514,10 +514,11 @@ complete executable legacy bundles as inactive candidates, reports incomplete
 proposals, and removes the old grant/resource/lease/compensation tables and
 invocation columns in one transaction. Neither path retains a synthetic grant,
 compatibility adapter, nullable permission observation, or permissive legacy
-parser in steady-state execution. The same transaction removes catalog-change
-rows owned by the deleted generic trigger and catalog-worker registries while
-retaining function-change evidence; startup does not decode obsolete variants
-merely to discard them later. It also drops the former durable WebSocket
+parser in steady-state execution. The same transaction removes legacy catalog
+rows owned by the deleted generic trigger and catalog-worker registries.
+Engine-ledger startup imports the last retained revision into one monotonic
+scalar and drops the append-only history table; it does not keep an unconsumed
+self-description plane. It also drops the former durable WebSocket
 subscription table. Durable stream events remain, while current sockets keep
 subscription identity and cursors in authenticated connection-local state and
 explicit replay callers own their cursors.

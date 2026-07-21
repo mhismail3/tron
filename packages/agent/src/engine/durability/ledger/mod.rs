@@ -1,8 +1,8 @@
 //! Durable ledger contracts for engine causality and idempotency.
 //!
 //! The ledger is intentionally narrower than the live catalog. It persists
-//! audit records, invocation attempts, idempotency reservations/results, catalog
-//! changes. Callable definitions are rebuilt from fixed bootstrap contracts and
+//! invocation attempts, idempotency reservations/results, and one monotonic
+//! catalog revision. Callable definitions are rebuilt from fixed bootstrap contracts and
 //! canonical worker bundles rather than duplicated in this ledger. Session
 //! replay reads invocation rows and idempotency entries through this boundary so
 //! replay does not query SQLite internals from domain code.
@@ -17,7 +17,7 @@
 //! storage boundary even when a caller manually constructs a record.
 //! The worker-first retirement migration removes historical authority, lease,
 //! compensation, produced-resource, and generic-trigger records in one
-//! transaction while preserving current catalog, causal, and outcome evidence.
+//! transaction while preserving causal and outcome evidence.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -26,7 +26,7 @@ use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::{FunctionId, InvocationId};
 use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionRevision, IdempotencyScope, ReplayBehavior,
+    CatalogRevision, FunctionRevision, IdempotencyScope, ReplayBehavior,
 };
 
 mod memory;
@@ -200,18 +200,15 @@ pub enum IdempotencyReservationOutcome {
 
 /// Storage boundary for engine audit, invocation, and idempotency records.
 pub trait EngineLedgerStore: Send {
-    /// Append a catalog change record.
-    fn append_catalog_change(&mut self, change: &CatalogChange) -> Result<()>;
+    /// Read the durable monotonic catalog revision.
+    fn catalog_revision(&self) -> Result<CatalogRevision>;
 
-    /// List all catalog changes in revision order.
-    fn list_catalog_changes(&self) -> Result<Vec<CatalogChange>>;
-
-    /// List catalog changes after a revision, up to `limit`.
-    fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>>;
+    /// Atomically advance the durable catalog revision.
+    fn advance_catalog_revision(
+        &mut self,
+        expected: CatalogRevision,
+        next: CatalogRevision,
+    ) -> Result<()>;
 
     /// Append an invocation record.
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()>;

@@ -4,7 +4,6 @@ use super::*;
 fn empty_catalog_starts_at_revision_zero() {
     let catalog = LiveCatalog::new();
     assert_eq!(catalog.revision(), CatalogRevision(0));
-    assert!(catalog.ledger_catalog_changes().unwrap().is_empty());
 }
 
 #[test]
@@ -70,20 +69,12 @@ fn mutating_function_requires_idempotency() {
 }
 
 #[test]
-fn catalog_changes_increment_by_one_and_record_subjects() {
+fn catalog_revision_increments_for_registration() {
     let mut catalog = LiveCatalog::new();
     catalog
         .register_function(read_function("alpha::read", "w1"), handler())
         .unwrap();
-    let changes = catalog.ledger_catalog_changes().unwrap();
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].before.0, 0);
-    assert_eq!(changes[0].after.0, 1);
-    assert_eq!(changes[0].kind, CatalogChangeKind::FunctionRegistered);
-    assert_eq!(changes[0].subject_id, "alpha::read");
-    assert_eq!(changes[0].subject_kind, CatalogSubjectKind::Function);
-    assert_eq!(changes[0].class, CatalogChangeClass::Availability);
-    assert_eq!(changes[0].visibility, VisibilityScope::Agent);
+    assert_eq!(catalog.revision(), CatalogRevision(1));
 }
 
 #[test]
@@ -224,11 +215,6 @@ fn unregister_function_removes_the_function_and_advances_revision() {
 
     assert!(catalog.function(&fid("alpha::read")).is_none());
     assert_eq!(catalog.revision().0, before.0 + 1);
-    let changes = catalog.ledger_catalog_changes().unwrap();
-    assert_eq!(
-        changes.last().unwrap().kind,
-        CatalogChangeKind::FunctionUnregistered
-    );
 }
 
 #[test]
@@ -245,18 +231,17 @@ fn engine_namespace_is_reserved_for_the_engine_owner() {
 }
 
 #[test]
-fn catalog_change_ledger_failure_does_not_mutate_registered_catalog_entries() {
-    let mut catalog = LiveCatalog::with_ledger_store(Box::new(CatalogChangeFailingLedger));
+fn catalog_revision_failure_does_not_mutate_registered_catalog_entries() {
+    let mut catalog = LiveCatalog::with_ledger_store(Box::new(CatalogRevisionFailingLedger));
 
     let result = catalog.register_function(read_function("alpha::read", "w1"), handler());
     assert!(matches!(
         result,
         Err(EngineError::LedgerFailure {
-            operation: "append_catalog_change",
+            operation: "advance_catalog_revision",
             ..
         })
     ));
     assert_eq!(catalog.revision(), CatalogRevision(0));
     assert!(catalog.function(&fid("alpha::read")).is_none());
-    assert!(catalog.ledger_catalog_changes().unwrap().is_empty());
 }

@@ -584,18 +584,5 @@ async fn sqlite_engine_host_handle_reopens_catalog_revision() {
 
     let reopened = super::host::EngineHostHandle::open_sqlite(&ledger_path).unwrap();
     let host = reopened.lock().await;
-    let changes = host
-        .catalog()
-        .catalog_changes_after(CatalogRevision(0), 500)
-        .unwrap();
-    assert!(
-        changes
-            .iter()
-            .any(|change| change.subject_id == "alpha::read")
-    );
-    assert!(
-        changes
-            .iter()
-            .all(|change| change.subject_id != "engine::invoke")
-    );
+    assert_eq!(host.catalog().revision(), CatalogRevision(1));
 }

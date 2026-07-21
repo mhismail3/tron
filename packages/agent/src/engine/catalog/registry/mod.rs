@@ -13,11 +13,8 @@ use crate::engine::durability::ledger::{
 use crate::engine::invocation::model::{InProcessFunctionHandler, InvocationRecord};
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::FunctionId;
-#[cfg(test)]
-use crate::engine::kernel::types::CatalogChange;
 use crate::engine::kernel::types::{CatalogRevision, FunctionDefinition};
 
-mod catalog_changes;
 mod idempotency;
 mod invocation;
 mod registration;
@@ -67,22 +64,6 @@ impl LiveCatalog {
     #[cfg(test)]
     pub(in crate::engine) fn ledger_invocations(&self) -> Result<Vec<InvocationRecord>> {
         self.ledger.list_invocations()
-    }
-
-    /// Durable catalog changes recorded by the engine ledger for crate unit tests.
-    #[cfg(test)]
-    pub(in crate::engine) fn catalog_changes_after(
-        &self,
-        revision: CatalogRevision,
-        limit: usize,
-    ) -> Result<Vec<CatalogChange>> {
-        self.ledger.catalog_changes_after(revision, limit)
-    }
-
-    /// All durable catalog changes recorded by the engine ledger.
-    #[cfg(test)]
-    pub fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
-        self.ledger.list_catalog_changes()
     }
 
     /// Durable invocation records for one session in append order.

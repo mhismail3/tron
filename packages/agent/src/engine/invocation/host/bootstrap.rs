@@ -8,15 +8,6 @@ impl EngineHost {
         Self::from_catalog_and_primitives(LiveCatalog::new(), PrimitiveStores::in_memory())
     }
 
-    /// Create a host with a caller-supplied ledger.
-    #[cfg(test)]
-    pub(in crate::engine) fn with_ledger_store(ledger: Box<dyn EngineLedgerStore>) -> Result<Self> {
-        Self::from_catalog_and_primitives(
-            LiveCatalog::with_ledger_store(ledger),
-            PrimitiveStores::in_memory(),
-        )
-    }
-
     /// Open a host whose ledger and primitive stores share one SQLite file.
     pub(in crate::engine) fn open_sqlite(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();

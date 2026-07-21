@@ -9,10 +9,7 @@ use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogChangeClass, CatalogRevision, CatalogSubjectKind, FunctionRevision,
-    IdempotencyScope, VisibilityScope,
-};
+use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 pub(super) const SQLITE_SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -25,26 +22,11 @@ DROP TABLE IF EXISTS engine_catalog_workers;
 DELETE FROM storage_payload_refs WHERE owner_kind = 'engine_queue_item';
 DROP TABLE IF EXISTS engine_queue_items;
 
-CREATE TABLE IF NOT EXISTS engine_catalog_changes (
-  id              TEXT PRIMARY KEY,
-  before_revision INTEGER NOT NULL,
-  after_revision  INTEGER NOT NULL,
-  kind_json       TEXT NOT NULL,
-  subject_id      TEXT NOT NULL,
-  subject_kind_json TEXT NOT NULL,
-  class_json      TEXT NOT NULL,
-  visibility_json TEXT NOT NULL,
-  session_id      TEXT,
-  workspace_id    TEXT,
-  owner_worker_id TEXT,
-  timestamp       TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS engine_catalog_revision (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  revision  INTEGER NOT NULL
 );
-
--- The removed generic trigger catalog no longer has a decoder or runtime
--- owner. Worker trigger evidence lives in worker-kernel operational tables.
-DELETE FROM engine_catalog_changes
-WHERE kind_json IN ('"TriggerRegistered"', '"TriggerTypeRegistered"')
-   OR subject_kind_json IN ('"Trigger"', '"TriggerType"');
+INSERT OR IGNORE INTO engine_catalog_revision(singleton, revision) VALUES (1, 0);
 
 CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   function_id           TEXT NOT NULL,
@@ -63,9 +45,6 @@ CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   updated_at            TEXT NOT NULL,
   PRIMARY KEY (function_id, scope_kind, scope_value, idempotency_key)
 );
-
-CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
-  ON engine_catalog_changes(after_revision);
 
 "#;
 
@@ -99,21 +78,6 @@ pub(super) const INVOCATION_INDEX_SCHEMA: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_engine_invocations_trace
   ON engine_invocations(trace_id);
 "#;
-
-pub(super) struct RawCatalogChangeRow {
-    pub(super) id: String,
-    pub(super) before_revision: u64,
-    pub(super) after_revision: u64,
-    pub(super) kind_json: String,
-    pub(super) subject_id: String,
-    pub(super) subject_kind_json: String,
-    pub(super) class_json: String,
-    pub(super) visibility_json: String,
-    pub(super) session_id: Option<String>,
-    pub(super) workspace_id: Option<String>,
-    pub(super) owner_worker_id: Option<String>,
-    pub(super) timestamp: String,
-}
 
 pub(super) struct RawInvocationRow {
     pub(super) invocation_id: String,
@@ -153,29 +117,6 @@ pub(super) struct RawIdempotencyRow {
     pub(super) outcome_error_json: Option<String>,
     pub(super) created_at: String,
     pub(super) updated_at: String,
-}
-
-pub(super) fn raw_catalog_change(row: RawCatalogChangeRow) -> Result<CatalogChange> {
-    Ok(CatalogChange {
-        id: row.id,
-        before: CatalogRevision(row.before_revision),
-        after: CatalogRevision(row.after_revision),
-        kind: from_json_string("catalog_change.kind", &row.kind_json)?,
-        subject_id: row.subject_id,
-        subject_kind: from_json_string::<CatalogSubjectKind>(
-            "catalog_change.subject_kind",
-            &row.subject_kind_json,
-        )?,
-        class: from_json_string::<CatalogChangeClass>("catalog_change.class", &row.class_json)?,
-        visibility: from_json_string::<VisibilityScope>(
-            "catalog_change.visibility",
-            &row.visibility_json,
-        )?,
-        session_id: row.session_id,
-        workspace_id: row.workspace_id,
-        owner_worker: row.owner_worker_id.map(WorkerId::new).transpose()?,
-        timestamp: parse_time("catalog_change.timestamp", &row.timestamp)?,
-    })
 }
 
 pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationRecord> {

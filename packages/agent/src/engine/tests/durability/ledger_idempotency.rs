@@ -20,7 +20,7 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
     }
 
     let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-    assert_eq!(store.list_catalog_changes().unwrap().len(), 1);
+    assert_eq!(store.catalog_revision().unwrap(), CatalogRevision(1));
     assert_eq!(store.list_invocations().unwrap().len(), 1);
 
     let reservation = IdempotencyReservation {
@@ -439,6 +439,7 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
 
     let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
     let mut restarted = LiveCatalog::with_ledger_store(Box::new(store));
+    restarted.hydrate_catalog_revision_from_ledger().unwrap();
     let persisted = restarted.ledger_invocations().unwrap();
     assert_eq!(persisted.len(), 1);
     assert_eq!(persisted[0].invocation_id, first_invocation_id);
@@ -533,40 +534,4 @@ async fn idempotency_reservation_failure_prevents_handler_execution() {
         })
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn sqlite_ledger_reopen_preserves_watch_scope_metadata() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("tron.sqlite");
-    {
-        let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-        let mut host = EngineHost::with_ledger_store(Box::new(store)).unwrap();
-        host.catalog_mut()
-            .register_function(
-                FunctionDefinition::new(
-                    fid("alpha::session"),
-                    wid("w1"),
-                    "session function",
-                    VisibilityScope::Session,
-                    EffectClass::PureRead,
-                )
-                .with_provenance(
-                    Provenance::new(actor("agent"), "test").with_session_id("session-a"),
-                ),
-                handler(),
-            )
-            .unwrap();
-    }
-
-    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-    let changes = store
-        .catalog_changes_after(CatalogRevision(0), 500)
-        .unwrap();
-    assert!(changes.iter().any(|change| {
-        change.subject_kind == CatalogSubjectKind::Function
-            && change.class == CatalogChangeClass::Availability
-            && change.visibility == VisibilityScope::Session
-            && change.session_id.as_deref() == Some("session-a")
-    }));
 }

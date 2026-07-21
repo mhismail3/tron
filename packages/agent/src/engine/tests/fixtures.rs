@@ -27,9 +27,8 @@ pub(in crate::engine::tests) use crate::engine::kernel::ids::{
     ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
-    CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind, EffectClass,
-    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract, IdempotencyScope,
-    Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
+    CatalogRevision, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
+    IdempotencyContract, IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
 };
 pub(in crate::engine::tests) use crate::engine::{
     EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,
@@ -158,23 +157,16 @@ impl InProcessFunctionHandler for CountingHandler {
 pub(in crate::engine::tests) struct ReserveFailingLedger;
 
 impl EngineLedgerStore for ReserveFailingLedger {
-    fn append_catalog_change(
+    fn catalog_revision(&self) -> Result<CatalogRevision> {
+        Ok(CatalogRevision(0))
+    }
+
+    fn advance_catalog_revision(
         &mut self,
-        _change: &crate::engine::kernel::types::CatalogChange,
+        _expected: CatalogRevision,
+        _next: CatalogRevision,
     ) -> Result<()> {
         Ok(())
-    }
-
-    fn list_catalog_changes(&self) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
-        Ok(Vec::new())
-    }
-
-    fn catalog_changes_after(
-        &self,
-        _revision: CatalogRevision,
-        _limit: usize,
-    ) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
-        Ok(Vec::new())
     }
 
     fn append_invocation(
@@ -219,29 +211,22 @@ impl EngineLedgerStore for ReserveFailingLedger {
     }
 }
 
-pub(in crate::engine::tests) struct CatalogChangeFailingLedger;
+pub(in crate::engine::tests) struct CatalogRevisionFailingLedger;
 
-impl EngineLedgerStore for CatalogChangeFailingLedger {
-    fn append_catalog_change(
+impl EngineLedgerStore for CatalogRevisionFailingLedger {
+    fn catalog_revision(&self) -> Result<CatalogRevision> {
+        Ok(CatalogRevision(0))
+    }
+
+    fn advance_catalog_revision(
         &mut self,
-        _change: &crate::engine::kernel::types::CatalogChange,
+        _expected: CatalogRevision,
+        _next: CatalogRevision,
     ) -> Result<()> {
         Err(EngineError::LedgerFailure {
-            operation: "append_catalog_change",
+            operation: "advance_catalog_revision",
             message: "injected failure".to_owned(),
         })
-    }
-
-    fn list_catalog_changes(&self) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
-        Ok(Vec::new())
-    }
-
-    fn catalog_changes_after(
-        &self,
-        _revision: CatalogRevision,
-        _limit: usize,
-    ) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
-        Ok(Vec::new())
     }
 
     fn append_invocation(
@@ -302,26 +287,17 @@ pub(in crate::engine::tests) fn mutating_causal(key: &str) -> CausalContext {
 }
 
 pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {
-    let change = crate::engine::kernel::types::CatalogChange {
-        id: "catalog_change_test".to_owned(),
-        before: CatalogRevision(0),
-        after: CatalogRevision(1),
-        kind: CatalogChangeKind::FunctionRegistered,
-        subject_id: "alpha::read".to_owned(),
-        subject_kind: CatalogSubjectKind::Function,
-        class: CatalogChangeClass::Availability,
-        visibility: VisibilityScope::Agent,
-        session_id: None,
-        workspace_id: None,
-        owner_worker: Some(wid("w1")),
-        timestamp: chrono::Utc::now(),
-    };
-    store.append_catalog_change(&change).unwrap();
-    assert_eq!(store.list_catalog_changes().unwrap(), vec![change.clone()]);
-    assert_eq!(
-        store.catalog_changes_after(CatalogRevision(0), 10).unwrap(),
-        vec![change]
+    assert_eq!(store.catalog_revision().unwrap(), CatalogRevision(0));
+    store
+        .advance_catalog_revision(CatalogRevision(0), CatalogRevision(1))
+        .unwrap();
+    assert_eq!(store.catalog_revision().unwrap(), CatalogRevision(1));
+    assert!(
+        store
+            .advance_catalog_revision(CatalogRevision(0), CatalogRevision(1))
+            .is_err()
     );
+    assert_eq!(store.catalog_revision().unwrap(), CatalogRevision(1));
 
     let invocation = Invocation::new_sync(
         fid("alpha::read"),
