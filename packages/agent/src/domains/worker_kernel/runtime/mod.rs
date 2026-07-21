@@ -5,6 +5,9 @@
 //! supervision. The concern modules below extend that one coordinator without
 //! duplicating state. `support` owns stateless bounded I/O, artifact integrity,
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
+//! `admission` owns schema-checked durable enqueue, idempotent replay, and
+//! observational waits; `invocation` owns claimed delivery, concurrency, and
+//! terminal completion so admission never becomes an execution side channel.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -32,6 +35,7 @@ use super::types::{
 use support::*;
 
 mod activation;
+mod admission;
 mod dispatch;
 mod events;
 mod hooks;
