@@ -73,6 +73,12 @@ const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
         order: 40,
     },
     CorePrimitiveDescriptor {
+        operation_key: "filesystem_edit",
+        model_name: "filesystem_edit",
+        group: CorePrimitiveGroup::Host,
+        order: 45,
+    },
+    CorePrimitiveDescriptor {
         operation_key: "process_run",
         model_name: "process_run",
         group: CorePrimitiveGroup::Host,
@@ -113,6 +119,12 @@ const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
         model_name: "worker_invoke",
         group: CorePrimitiveGroup::WorkerControl,
         order: 140,
+    },
+    CorePrimitiveDescriptor {
+        operation_key: "await",
+        model_name: "worker_await",
+        group: CorePrimitiveGroup::WorkerControl,
+        order: 145,
     },
     CorePrimitiveDescriptor {
         operation_key: "stop",
@@ -301,8 +313,8 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         "worker_kernel::filesystem_list",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"},"maxResults":{"type":"integer","minimum":1,"maximum":5000}}}),
-        "List a local directory directly with the trusted local user's access.",
+        json!({"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"},"maxResults":{"type":"integer","minimum":1,"maximum":5000},"maxWalkEntries":{"type":"integer","minimum":1,"maximum":50000}}}),
+        "List a local directory with deterministic ordering and explicit result and traversal ceilings.",
     )?);
     specs.push(spec(
         "worker_kernel::filesystem_search_text",
@@ -328,14 +340,41 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         "worker_kernel::filesystem_write",
         EffectClass::IdempotentWrite,
         RiskLevel::High,
-        json!({"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"},"createParents":{"type":"boolean"}}}),
-        "Write a complete local text file directly with the trusted local user's access.",
+        json!({"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"},"createParents":{"type":"boolean"},"expectedSha256":{"type":"string","description":"Optional compare-and-swap precondition. Use sha256:<hex>, raw hex, or absent when creating a new file."}}}),
+        "Atomically publish a complete local text file. Supply expectedSha256 after reading when overwriting concurrent work would be unsafe.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::filesystem_edit",
+        EffectClass::IdempotentWrite,
+        RiskLevel::High,
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "required":["path","replacements"],
+            "properties":{
+                "path":{"type":"string"},
+                "expectedSha256":{"type":"string","description":"Optional compare-and-swap precondition from filesystem_read or a prior mutation."},
+                "replacements":{
+                    "type":"array","minItems":1,"maxItems":128,
+                    "items":{
+                        "type":"object","additionalProperties":false,
+                        "required":["oldText","newText"],
+                        "properties":{
+                            "oldText":{"type":"string","minLength":1},
+                            "newText":{"type":"string"},
+                            "expectedOccurrences":{"type":"integer","minimum":1,"maximum":10000}
+                        }
+                    }
+                }
+            }
+        }),
+        "Apply bounded exact-text replacements to one UTF-8 file and atomically publish only when every expected occurrence and optional checksum still match.",
     )?);
     specs.push(spec(
         "worker_kernel::process_run",
         EffectClass::ExternalSideEffect,
         RiskLevel::High,
-        json!({"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"array","minItems":1,"items":{"type":"string"}},"cwd":{"type":"string"},"stdin":{},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}}}),
+        json!({"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"array","minItems":1,"maxItems":256,"items":{"type":"string"}},"cwd":{"type":"string"},"stdin":{},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":7200}}}),
         "Run a local command directly with normal user permissions and bounded output.",
     )?);
     specs.push(spec(
@@ -412,8 +451,15 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         "worker_kernel::invoke",
         EffectClass::ExternalSideEffect,
         RiskLevel::High,
-        json!({"type":"object","additionalProperties":false,"required":["workerId","input"],"properties":{"workerId":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"}}}),
-        "Invoke an enabled persistent worker by id with typed JSON input.",
+        json!({"type":"object","additionalProperties":false,"required":["workerId","input"],"properties":{"workerId":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"},"mode":{"type":"string","enum":["wait","enqueue"],"description":"wait returns the terminal record; enqueue returns immediately after durable admission."}}}),
+        "Invoke an enabled persistent worker by id with typed JSON input. Use mode=enqueue for parallel or long-running work, then worker_await when its result is needed.",
+    )?);
+    specs.push(spec(
+        "worker_kernel::await",
+        EffectClass::PureRead,
+        RiskLevel::Low,
+        json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":7200}}}),
+        "Wait boundedly for one durable worker invocation. A wait timeout returns current state and never cancels the worker.",
     )?);
     for (method, description) in [
         (
@@ -577,7 +623,7 @@ fn spec(
 ) -> crate::engine::Result<CapabilitySpec> {
     let mut contract = CapabilityContract::new(function, WORKER, effect, risk, None)
         .request_schema(request)
-        .response_schema(open_response())
+        .response_schema(response_schema(function))
         .description(description)
         .tags(vec!["kernel", "worker", "self-extension", "persistent"]);
     if effect.requires_idempotency() {
@@ -586,6 +632,144 @@ fn spec(
             .idempotency_mode(TransportIdempotencyMode::ExplicitRequired);
     }
     contract.build()
+}
+
+fn response_schema(function: &str) -> Value {
+    match function {
+        "worker_kernel::filesystem_read" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["path","content","bytes","retainedBytes","truncated"],
+            "properties":{"path":{"type":"string"},"content":{"type":"string"},"bytes":{},"retainedBytes":{"type":"integer"},"truncated":{"type":"boolean"}}
+        }),
+        "worker_kernel::filesystem_list" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["path","entries","visitedEntries","resultLimitReached","walkLimitReached","truncated"],
+            "properties":{"path":{"type":"string"},"entries":{"type":"array"},"visitedEntries":{"type":"integer"},"resultLimitReached":{"type":"boolean"},"walkLimitReached":{"type":"boolean"},"truncated":{"type":"boolean"}}
+        }),
+        "worker_kernel::filesystem_search_text" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["query","path","matches","visitedEntries","skippedDirectories","resultLimitReached","walkLimitReached","timeLimitReached","truncated"],
+            "properties":{"query":{"type":"string"},"path":{"type":"string"},"matches":{"type":"array"},"visitedEntries":{"type":"integer"},"skippedDirectories":{"type":"integer"},"resultLimitReached":{"type":"boolean"},"walkLimitReached":{"type":"boolean"},"timeLimitReached":{"type":"boolean"},"truncated":{"type":"boolean"}}
+        }),
+        "worker_kernel::filesystem_write" => mutation_file_response_schema(false),
+        "worker_kernel::filesystem_edit" => mutation_file_response_schema(true),
+        "worker_kernel::process_run" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["command","cwd","status","success","stdout","stderr","stdoutTruncated","stderrTruncated"],
+            "properties":{"command":{"type":"array"},"cwd":{"type":"string"},"status":{},"success":{"type":"boolean"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutTruncated":{"type":"boolean"},"stderrTruncated":{"type":"boolean"}}
+        }),
+        "worker_kernel::web_fetch" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["url","status","contentType","contentLength","observedBytes","retainedBytes","truncated","content"],
+            "properties":{"url":{"type":"string"},"status":{"type":"integer"},"contentType":{},"contentLength":{},"observedBytes":{"type":"integer"},"retainedBytes":{"type":"integer"},"truncated":{"type":"boolean"},"content":{"type":"string"}}
+        }),
+        "worker_kernel::core_proposal_create"
+        | "worker_kernel::core_proposal_inspect"
+        | "worker_kernel::core_proposal_apply" => core_proposal_response_schema(),
+        "worker_kernel::core_proposal_list" => json!({
+            "type":"object","additionalProperties":false,"required":["proposals"],
+            "properties":{"proposals":{"type":"array","items":core_proposal_response_schema()}}
+        }),
+        "worker_kernel::upsert" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["worker","version","created","replacedWorkerId","webhooks"],
+            "properties":{"worker":worker_summary_response_schema(),"version":{"type":"string"},"created":{"type":"boolean"},"replacedWorkerId":{},"webhooks":{"type":"array"},"sourceImport":{"type":"object"}}
+        }),
+        "worker_kernel::discover" => json!({
+            "type":"object","additionalProperties":false,"required":["query","workers"],
+            "properties":{"query":{"type":"string"},"workers":{"type":"array"}}
+        }),
+        "worker_kernel::list" => json!({
+            "type":"object","additionalProperties":false,"required":["workers","stopAll"],
+            "properties":{"workers":{"type":"array","items":worker_summary_response_schema()},"stopAll":{"type":"boolean"}}
+        }),
+        "worker_kernel::inspect" => json!({
+            "type":"object","additionalProperties":false,
+            "required":["worker","bundle","route","versions","triggers","healthHistory","audit","versionDirectory"],
+            "properties":{"worker":worker_summary_response_schema(),"bundle":{"type":"object"},"route":{},"versions":{"type":"array"},"triggers":{"type":"array"},"healthHistory":{"type":"array"},"audit":{"type":"array"},"versionDirectory":{"type":"string"}}
+        }),
+        "worker_kernel::invoke" => invocation_response_schema(),
+        "worker_kernel::await" => json!({
+            "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
+            "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
+        }),
+        "worker_kernel::stop"
+        | "worker_kernel::disable"
+        | "worker_kernel::enable"
+        | "worker_kernel::retire" => worker_summary_response_schema(),
+        "worker_kernel::rollback" => json!({
+            "type":"object","additionalProperties":false,"required":["worker","webhooks"],
+            "properties":{"worker":worker_summary_response_schema(),"webhooks":{"type":"array"}}
+        }),
+        "worker_kernel::purge" => json!({
+            "type":"object","additionalProperties":false,"required":["workerId","purged"],
+            "properties":{"workerId":{"type":"string"},"purged":{"type":"boolean"}}
+        }),
+        "worker_kernel::inbox" => json!({
+            "type":"object","additionalProperties":false,"required":["items"],
+            "properties":{"items":{"type":"array"}}
+        }),
+        "worker_kernel::runs" => json!({
+            "type":"object","additionalProperties":false,"required":["runs","attempts","traces"],
+            "properties":{"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"}}
+        }),
+        "worker_kernel::webhook_rotate" => webhook_credential_response_schema(),
+        "worker_kernel::stop_all" => json!({
+            "type":"object","additionalProperties":false,"required":["stopped"],
+            "properties":{"stopped":{"type":"boolean"}}
+        }),
+        _ => open_response(),
+    }
+}
+
+fn mutation_file_response_schema(include_replacements: bool) -> Value {
+    let mut properties = serde_json::Map::from_iter([
+        ("path".to_owned(), json!({"type":"string"})),
+        ("bytes".to_owned(), json!({"type":"integer"})),
+        ("changed".to_owned(), json!({"type":"boolean"})),
+        ("previousSha256".to_owned(), json!({})),
+        ("sha256".to_owned(), json!({"type":"string"})),
+    ]);
+    let mut required = vec!["path", "bytes", "changed", "previousSha256", "sha256"];
+    if include_replacements {
+        let _ = properties.insert("replacementsApplied".to_owned(), json!({"type":"integer"}));
+        required.push("replacementsApplied");
+    } else {
+        let _ = properties.insert("written".to_owned(), json!({"type":"boolean"}));
+        required.push("written");
+    }
+    json!({"type":"object","additionalProperties":false,"required":required,"properties":properties})
+}
+
+fn worker_summary_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["workerId","name","description","toolName","runnerKind","activeVersion","enabled","retired","health","triggerCount","updatedAt"],
+        "properties":{"workerId":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"toolName":{"type":"string"},"runnerKind":{"type":"string"},"activeVersion":{"type":"string"},"enabled":{"type":"boolean"},"retired":{"type":"boolean"},"health":{"type":"string"},"triggerCount":{"type":"integer"},"updatedAt":{"type":"string"}}
+    })
+}
+
+fn invocation_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","attemptCount","createdAt","startedAt","completedAt"],
+        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+    })
+}
+
+fn webhook_credential_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,"required":["triggerId","path","token"],
+        "properties":{"triggerId":{"type":"string"},"path":{"type":"string"},"token":{"type":"string"}}
+    })
+}
+
+fn core_proposal_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["proposalId","title","intent","repositoryPath","worktreePath","branch","commit","testCommand","testOutput","status","createdAt","appliedAt","appliedCommit","approvalSessionId","approvalMessageId"],
+        "properties":{"proposalId":{"type":"string"},"title":{"type":"string"},"intent":{"type":"string"},"repositoryPath":{"type":"string"},"worktreePath":{"type":"string"},"branch":{"type":"string"},"commit":{"type":"string"},"testCommand":{"type":"array"},"testOutput":{"type":"string"},"status":{"type":"string"},"createdAt":{"type":"string"},"appliedAt":{},"appliedCommit":{},"approvalSessionId":{},"approvalMessageId":{}}
+    })
 }
 
 fn worker_id_schema(include_version: bool) -> Value {
@@ -1057,5 +1241,31 @@ mod tests {
                 .unwrap_or_default()
                 .contains("shutdown responsive")
         );
+    }
+
+    #[test]
+    fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
+        let specs = capabilities().expect("worker-kernel contracts");
+        for descriptor in core_primitives() {
+            let function_id = format!("worker_kernel::{}", descriptor.operation_key);
+            let spec = specs
+                .iter()
+                .find(|spec| spec.function_id.as_str() == function_id)
+                .unwrap_or_else(|| panic!("missing contract for {}", descriptor.model_name));
+            let response = spec
+                .response_schema
+                .as_ref()
+                .unwrap_or_else(|| panic!("missing response schema for {}", descriptor.model_name));
+            assert_eq!(
+                response["additionalProperties"], false,
+                "{} response must reject undeclared top-level fields",
+                descriptor.model_name
+            );
+            assert!(
+                response["required"].is_array(),
+                "{} response must name required observations",
+                descriptor.model_name
+            );
+        }
     }
 }

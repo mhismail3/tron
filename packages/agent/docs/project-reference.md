@@ -44,11 +44,13 @@ The engine still uses generic words such as “capability invocation” in provi
 tool-call events and client rendering. Those names describe the model protocol;
 they do not imply the removed authorization or operation-catalog system.
 
-The model-facing fixed surface currently has 25 direct primitives grouped as
-six host operations, fifteen worker-control operations, and four core-change
+The model-facing fixed surface currently has 27 direct primitives grouped as
+seven host operations, sixteen worker-control operations, and four core-change
 operations. A single typed manifest owns their provider names, groups, and
 stable order; registration, provider projection, introspection, and exact-set
-tests do not maintain parallel name lists.
+tests do not maintain parallel name lists. Every fixed primitive rejects
+undeclared top-level input and output fields; closed response contracts keep
+provider observations small and mechanically dependable.
 
 ## Autonomy Modes
 
@@ -339,11 +341,20 @@ for private authoring examples.
 | Model tool | Engine owner | Purpose |
 |---|---|---|
 | `filesystem_read` | `worker_kernel::filesystem_read` | Bounded UTF-8 read |
-| `filesystem_list` | `worker_kernel::filesystem_list` | Directory listing |
+| `filesystem_list` | `worker_kernel::filesystem_list` | Deterministically ordered directory listing with result and traversal ceilings |
 | `filesystem_search_text` | `worker_kernel::filesystem_search_text` | Recursive literal search with time, walk, result, hidden-tree, and heavy-directory controls |
-| `filesystem_write` | `worker_kernel::filesystem_write` | Complete local text write |
+| `filesystem_write` | `worker_kernel::filesystem_write` | Same-directory atomic full write with optional checksum/absence precondition |
+| `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
-| `web_fetch` | `worker_kernel::web_fetch` | Explicit bounded HTTP(S) fetch with provenance |
+| `web_fetch` | `worker_kernel::web_fetch` | Explicit HTTP(S) fetch that stops reading at its content ceiling and returns provenance |
+
+Filesystem reads, listings, searches, writes, and edits execute off the async
+runtime thread. Reads never load the remainder of a truncated file; listing
+never accumulates an unbounded directory; writes stage, sync, recheck the
+observed prior state immediately before publication, rename within the target
+directory, and sync that directory. `filesystem_edit` rejects stale or
+ambiguous replacements before touching the target, so agents can edit a small
+region without echoing an entire file through tool JSON.
 
 ### Worker operations
 
@@ -354,6 +365,7 @@ for private authoring examples.
 | `worker_list` | `worker_kernel::list` |
 | `worker_inspect` | `worker_kernel::inspect` |
 | `worker_invoke` | `worker_kernel::invoke` |
+| `worker_await` | `worker_kernel::await` |
 | `worker_stop` | `worker_kernel::stop` |
 | `worker_disable` / `worker_enable` | `worker_kernel::disable` / `enable` |
 | `worker_rollback` | `worker_kernel::rollback` |
@@ -362,18 +374,31 @@ for private authoring examples.
 | `worker_webhook_rotate` | `worker_kernel::webhook_rotate` |
 | `worker_stop_all` | `worker_kernel::stop_all` |
 
+`worker_invoke` defaults to `mode: wait`. `mode: enqueue` returns immediately
+after durable admission and starts best-effort delivery; the ordinary durable
+dispatcher remains restart recovery. `worker_await` observes one invocation
+until terminal state or a bounded timeout, and a wait timeout never cancels the
+work. These two operations let a model launch parallel or long work without
+holding one provider call open for the worker's two-hour execution ceiling.
+
 Every enabled worker is also registered as a stable direct typed tool using the
 bundle's `toolName`, input schema, output schema, description, routing metadata,
 provenance, health, version, and recent success evidence.
 
-The provider-visible tool description carries a compact health, active-version,
-provenance, completed-run, and last-success summary. Those observations are
-therefore available to the model choosing among the relevant tools, rather than
-being hidden selection metadata.
+The provider-visible function description contains only version-stable purpose,
+active version, and provenance. Health and success evidence live in a durable,
+rebuildable observation overlay. Completing a run updates that overlay rather
+than re-registering the function, so ordinary success cannot increment the
+catalog revision or stale an in-flight provider surface.
 
 At each provider request boundary, the worker-kernel-owned resolver captures the
-catalog revision and ranks dynamic workers by explicit session promotion, query
-overlap, recent successes, and identity, selecting at most 12. It records the
+catalog revision and ranks dynamic workers by explicit session promotion,
+weighted name/description/intent/example/provenance relevance, recent
+successes, recency, and identity. `worker_discover` uses the exact same scorer;
+there is no second discovery policy. The deterministic local scorer is the
+always-available fallback seam for a future semantic-router worker. Automatic
+projection selects at most 12 workers while every explicit session promotion
+remains selected. The resolver records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
 surface hash. The model receives a compact revision/count/projected-worker
 primer in addition to native direct tool schemas. A `worker_discover` result
@@ -394,7 +419,7 @@ evidence plus four explicitly different inventories:
 
 - eight server-owned compiled component roles, categorized as kernel, product
   infrastructure, or the protected core-change boundary;
-- all 25 fixed tools with their exact schemas, revisions, effect/risk/health,
+- all 27 fixed tools with their exact schemas, revisions, effect/risk/health,
   primitive group, and whether autonomy currently exposes them;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, health, and immutable worker version;

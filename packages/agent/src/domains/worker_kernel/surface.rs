@@ -20,6 +20,7 @@ const MAX_RELEVANT_WORKERS: usize = 12;
 const SURFACE_FORMAT_VERSION: u32 = 1;
 
 const PROMOTION_NAMESPACE: &str = "worker_kernel.surface_promotions";
+const EVIDENCE_NAMESPACE: &str = "worker_kernel.surface_evidence";
 
 /// Make one worker unconditionally available to the next provider turn in a
 /// session.
@@ -39,7 +40,7 @@ pub(crate) async fn promote_worker_for_session(
     .map_err(|error| error.to_string())
 }
 
-async fn session_worker_promotions(
+pub(super) async fn session_worker_promotions(
     host: &EngineHostHandle,
     session_id: &str,
 ) -> Result<BTreeSet<String>, String> {
@@ -52,6 +53,49 @@ async fn session_worker_promotions(
     .await
     .map(|entries| entries.into_iter().map(|entry| entry.key).collect())
     .map_err(|error| error.to_string())
+}
+
+/// Publish rebuildable operational evidence without changing the worker's
+/// function contract revision. This keeps successful runs from invalidating a
+/// model surface that is already in flight.
+pub(super) async fn publish_worker_surface_evidence(
+    host: &EngineHostHandle,
+    worker_id: &str,
+    evidence: Value,
+) -> Result<(), String> {
+    host.write_engine_state(
+        EngineStateScope::System,
+        EVIDENCE_NAMESPACE,
+        worker_id,
+        evidence,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+async fn worker_surface_evidence(
+    host: &EngineHostHandle,
+    functions: &[FunctionDefinition],
+) -> Result<BTreeMap<String, Value>, String> {
+    let mut evidence = BTreeMap::new();
+    for worker_id in functions
+        .iter()
+        .filter(|function| metadata_bool(function, "workerDynamic").unwrap_or(false))
+        .filter_map(|function| function.metadata.get("workerId").and_then(Value::as_str))
+    {
+        if evidence.contains_key(worker_id) {
+            continue;
+        }
+        if let Some(entry) = host
+            .read_engine_state(EngineStateScope::System, EVIDENCE_NAMESPACE, worker_id)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            let _ = evidence.insert(worker_id.to_owned(), entry.value);
+        }
+    }
+    Ok(evidence)
 }
 
 /// Provider-neutral evidence for one tool on a resolved model surface.
@@ -163,103 +207,68 @@ pub(crate) async fn resolve_tool_surface(
     });
 
     let promoted = session_worker_promotions(host, session_id).await?;
-    let query_terms = relevance_query.map(relevance_terms).unwrap_or_default();
-    let mut dynamic = functions
+    let evidence = worker_surface_evidence(host, &functions).await?;
+    let dynamic_documents = functions
         .iter()
         .filter(|function| metadata_bool(function, "workerDynamic").unwrap_or(false))
-        .map(|function| {
-            let worker_id = function
-                .metadata
-                .get("workerId")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let searchable = format!(
-                "{} {} {}",
-                function.description,
-                function
-                    .metadata
-                    .get("workerRouting")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-                function
-                    .metadata
-                    .get("workerProvenance")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-            )
-            .to_ascii_lowercase();
-            let relevance = query_terms
-                .iter()
-                .filter(|term| searchable.contains(term.as_str()))
-                .count();
-            let successes = function
-                .metadata
-                .pointer("/workerSuccessEvidence/completedRuns")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            (
-                promoted.contains(worker_id),
-                relevance,
-                successes,
-                function.id.clone(),
+        .filter_map(|function| {
+            retrieval_document(
+                function,
+                evidence.get(function.metadata.get("workerId")?.as_str()?),
             )
         })
         .collect::<Vec<_>>();
-    let available_worker_count = dynamic.len();
-    dynamic.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| right.2.cmp(&left.2))
-            .then_with(|| left.3.as_str().cmp(right.3.as_str()))
-    });
-    let mut selected_dynamic = dynamic
+    let available_worker_count = dynamic_documents.len();
+    let ranked = super::retrieval::rank_workers(dynamic_documents, relevance_query, &promoted);
+    let query_is_empty = super::retrieval::query_is_empty(relevance_query);
+    let mut selected_dynamic = ranked
         .iter()
-        .filter(|(is_promoted, _, _, _)| *is_promoted)
-        .map(|(_, _, _, id)| (id.clone(), "session_promotion"))
+        .filter(|rank| rank.promoted)
+        .map(|rank| (rank.key.clone(), "session_promotion"))
         .collect::<BTreeMap<_, _>>();
-    for (is_promoted, relevance, _, id) in &dynamic {
-        if *is_promoted
-            || (!query_terms.is_empty() && *relevance == 0)
+    for rank in &ranked {
+        if rank.promoted
+            || (!query_is_empty && rank.relevance_score == 0)
             || selected_dynamic.len() >= MAX_RELEVANT_WORKERS
         {
             continue;
         }
-        let reason = if *relevance > 0 {
+        let reason = if rank.relevance_score > 0 {
             "relevance"
         } else {
             "default"
         };
-        let _ = selected_dynamic.insert(id.clone(), reason);
+        let _ = selected_dynamic.insert(rank.key.clone(), reason);
     }
-    let available_workers = dynamic
+    let available_workers = ranked
         .iter()
-        .filter_map(|(is_promoted, relevance, successes, id)| {
-            let function = functions.iter().find(|function| function.id == *id)?;
-            let worker_id = function.metadata.get("workerId")?.as_str()?.to_owned();
+        .filter_map(|rank| {
+            let function = functions
+                .iter()
+                .find(|function| function.id.as_str() == rank.key)?;
             let model_name = model_tool_name(function)?;
-            let selection_reason = selected_dynamic.get(id).map(|reason| (*reason).to_owned());
+            let selection_reason = selected_dynamic
+                .get(function.id.as_str())
+                .map(|reason| (*reason).to_owned());
             Some(AvailableWorkerToolSnapshot {
-                worker_id,
+                worker_id: rank.worker_id.clone(),
                 model_name,
-                function_id: id.as_str().to_owned(),
+                function_id: function.id.as_str().to_owned(),
                 function_revision: function.revision.0,
                 worker_version: function
                     .metadata
                     .get("workerVersion")
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned),
-                promoted: *is_promoted,
+                promoted: rank.promoted,
                 projected: selection_reason.is_some(),
                 selection_reason,
-                relevance_score: *relevance,
-                completed_runs: *successes,
+                relevance_score: rank.relevance_score,
+                completed_runs: rank.completed_runs,
                 health: serialized_key(&function.health),
             })
         })
         .collect::<Vec<_>>();
-
     let mut seen_names = BTreeSet::new();
     let mut resolved = Vec::new();
     let mut snapshot_tools = Vec::new();
@@ -272,7 +281,7 @@ pub(crate) async fn resolve_tool_surface(
         }
         let is_dynamic = metadata_bool(&function, "workerDynamic").unwrap_or(false);
         let selection_reason = if is_dynamic {
-            let Some(reason) = selected_dynamic.get(&function.id) else {
+            let Some(reason) = selected_dynamic.get(function.id.as_str()) else {
                 continue;
             };
             *reason
@@ -415,12 +424,81 @@ fn surface_hash(tools: &[SurfaceToolSnapshot]) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
-fn relevance_terms(value: &str) -> BTreeSet<String> {
-    value
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .map(str::to_ascii_lowercase)
-        .filter(|term| term.len() > 2)
-        .collect()
+fn retrieval_document(
+    function: &FunctionDefinition,
+    evidence: Option<&Value>,
+) -> Option<super::retrieval::WorkerRetrievalDocument> {
+    let worker_id = function.metadata.get("workerId")?.as_str()?.to_owned();
+    let name = function
+        .metadata
+        .get("workerName")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| model_tool_name(function))
+        .unwrap_or_default();
+    let routing = function.metadata.get("workerRouting");
+    let intents = routing
+        .and_then(|routing| routing.get("intents"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect();
+    let examples = routing
+        .and_then(|routing| routing.get("examples"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect();
+    let provenance = function
+        .metadata
+        .get("workerProvenance")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|source| {
+            let name = source.get("source")?.as_str()?;
+            Some(
+                source
+                    .get("revision")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| name.to_owned(), |revision| format!("{name}@{revision}")),
+            )
+        })
+        .collect();
+    Some(super::retrieval::WorkerRetrievalDocument {
+        key: function.id.as_str().to_owned(),
+        worker_id,
+        name,
+        description: function.description.clone(),
+        intents,
+        examples,
+        provenance,
+        completed_runs: evidence
+            .and_then(|evidence| evidence.pointer("/successEvidence/completedRuns"))
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                function
+                    .metadata
+                    .pointer("/workerSuccessEvidence/completedRuns")
+                    .and_then(Value::as_u64)
+            })
+            .unwrap_or(0),
+        updated_at: evidence
+            .and_then(|evidence| evidence.get("updatedAt"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                function
+                    .metadata
+                    .get("workerUpdatedAt")
+                    .and_then(Value::as_str)
+            })
+            .unwrap_or_default()
+            .to_owned(),
+    })
 }
 
 fn is_provider_primitive(function: &FunctionDefinition) -> bool {

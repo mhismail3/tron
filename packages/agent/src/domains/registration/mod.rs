@@ -513,6 +513,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn host_write_edit_and_read_are_atomic_bounded_direct_primitives() {
+        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let root = tempfile::tempdir().expect("host primitive temp root");
+        let path = root.path().join("value.txt");
+        let write = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::filesystem_write").expect("write function"),
+                json!({"path":path,"content":"alpha alpha","expectedSha256":"absent"}),
+                trusted_local_context("host-write-direct"),
+            ))
+            .await;
+        assert_eq!(write.error, None, "direct write failed: {:?}", write.error);
+        let write = write.value.expect("write response");
+        assert_eq!(write["changed"], true);
+        let checksum = write["sha256"].as_str().expect("write checksum");
+
+        let edit = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::filesystem_edit").expect("edit function"),
+                json!({
+                    "path":path,
+                    "expectedSha256":checksum,
+                    "replacements":[{"oldText":"alpha","newText":"beta","expectedOccurrences":2}]
+                }),
+                trusted_local_context("host-edit-direct"),
+            ))
+            .await;
+        assert_eq!(edit.error, None, "direct edit failed: {:?}", edit.error);
+        assert_eq!(edit.value.as_ref().unwrap()["replacementsApplied"], 2);
+
+        let read = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::filesystem_read").expect("read function"),
+                json!({"path":path,"maxBytes":5}),
+                trusted_local_context("host-read-direct"),
+            ))
+            .await;
+        assert_eq!(read.error, None, "direct read failed: {:?}", read.error);
+        let read = read.value.expect("read response");
+        assert_eq!(read["content"], "beta ");
+        assert_eq!(read["truncated"], true);
+
+        let stale = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::filesystem_edit").expect("edit function"),
+                json!({
+                    "path":path,
+                    "expectedSha256":checksum,
+                    "replacements":[{"oldText":"beta","newText":"lost","expectedOccurrences":2}]
+                }),
+                trusted_local_context("host-edit-stale"),
+            ))
+            .await;
+        assert!(stale.error.is_some());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "beta beta");
+    }
+
+    #[tokio::test]
     async fn engine_surface_snapshot_is_invocable_but_not_model_visible() {
         let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
         let result = ctx
@@ -541,17 +603,17 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 25);
+        assert_eq!(fixed_tools.len(), 27);
         assert!(fixed_tools.iter().all(|tool| tool["exposed"] == true));
         assert_eq!(
             fixed_tools
                 .iter()
                 .filter(|tool| tool["primitiveGroup"] == "host")
                 .count(),
-            6
+            7
         );
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 25);
+        assert_eq!(value["surface"]["fixedToolCount"], 27);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["workers"].is_array());
@@ -599,7 +661,7 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 25);
+        assert_eq!(fixed_tools.len(), 27);
         assert!(fixed_tools.iter().all(|tool| tool["exposed"] == false));
         assert_eq!(value["surface"]["fixedToolCount"], 0);
     }

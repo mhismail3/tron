@@ -21,7 +21,21 @@ impl EngineHostHandle {
             .set(scope, namespace.into(), key.into(), value)
     }
 
-    /// List kernel-owned state entries for a runtime overlay.
+    /// Read one kernel-owned state entry for a runtime overlay.
+    pub(crate) async fn read_engine_state(
+        &self,
+        scope: EngineStateScope,
+        namespace: &str,
+        key: &str,
+    ) -> Result<Option<EngineStateEntry>> {
+        let store = self.inner.lock().await.primitives.state.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("state store lock poisoned".to_owned()))?
+            .get(scope, namespace, key)
+    }
+
+    /// List a bounded set of kernel-owned state entries for a runtime overlay.
     pub(crate) async fn list_engine_state(
         &self,
         scope: EngineStateScope,

@@ -145,7 +145,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
                 format: 1,
                 catalogRevision: 42,
                 surfaceHash: "surface-test",
-                fixedToolCount: 25,
+                fixedToolCount: 27,
                 projectedWorkerCount: 1,
                 availableWorkerCount: 1,
                 tools: [],

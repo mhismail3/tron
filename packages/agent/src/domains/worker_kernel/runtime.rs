@@ -344,6 +344,8 @@ impl WorkerRuntime {
         let mut recording_failures = Vec::new();
         if let Err(recording_error) = self.store.mark_failed(worker_id, phase, &reason) {
             recording_failures.push(format!("disable failed worker: {recording_error}"));
+        } else if let Err(recording_error) = self.refresh_worker_surface_evidence(worker_id).await {
+            recording_failures.push(format!("refresh failed worker evidence: {recording_error}"));
         }
         if let Err(recording_error) = self.store.record_system_inbox(
             worker_id,
@@ -566,6 +568,54 @@ impl WorkerRuntime {
         self.enqueue_request(request).map(|(record, _)| record)
     }
 
+    /// Persist an invocation and start an immediate best-effort delivery task.
+    /// The durable dispatcher remains authoritative recovery if this task is
+    /// cancelled by shutdown before producing a terminal record.
+    pub fn enqueue_and_dispatch(
+        self: &Arc<Self>,
+        request: InvokeRequest,
+    ) -> Result<InvocationRecord, String> {
+        let (queued, replayed) = self.enqueue_request(request)?;
+        if queued.status == "queued" {
+            let runtime = Arc::clone(self);
+            let delivery = queued.clone();
+            let task = tokio::spawn(async move {
+                let _ = runtime.execute_queued(delivery).await;
+            });
+            drop(task);
+        } else if !replayed {
+            return Err(format!(
+                "new worker invocation '{}' was not durably queued",
+                queued.invocation_id
+            ));
+        }
+        Ok(queued)
+    }
+
+    /// Observe one durable invocation until terminal state or a bounded wait
+    /// expires. Timeout is observational: it never cancels durable work.
+    pub async fn await_invocation(
+        &self,
+        invocation_id: &str,
+        timeout: Duration,
+    ) -> Result<(InvocationRecord, bool), String> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let record = self
+                .store
+                .invocation(invocation_id)?
+                .ok_or_else(|| format!("worker invocation '{invocation_id}' was not found"))?;
+            if matches!(record.status.as_str(), "completed" | "failed") {
+                return Ok((record, false));
+            }
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return Ok((record, true));
+            }
+            tokio::time::sleep((deadline - now).min(Duration::from_millis(50))).await;
+        }
+    }
+
     fn enqueue_request(&self, request: InvokeRequest) -> Result<(InvocationRecord, bool), String> {
         if !self.autonomous_enabled() {
             return Err(
@@ -733,6 +783,9 @@ impl WorkerRuntime {
                 if !was_stopped {
                     self.store
                         .mark_failed(&queued.worker_id, "execution", &redacted)?;
+                    let _ = self
+                        .refresh_worker_surface_evidence(&queued.worker_id)
+                        .await;
                     self.unregister_dynamic_tool(&queued.worker_id).await;
                     self.stop_residents(Some(&queued.worker_id)).await;
                     self.publish_event(
@@ -769,7 +822,9 @@ impl WorkerRuntime {
         )
         .await;
         if completed.status == "completed" {
-            let _ = self.register_dynamic_tool(&completed.worker_id).await;
+            let _ = self
+                .refresh_worker_surface_evidence(&completed.worker_id)
+                .await;
         }
         Ok(completed)
     }
@@ -794,6 +849,9 @@ impl WorkerRuntime {
         );
         self.store
             .mark_failed(&queued.worker_id, "integrity", &reason)?;
+        let _ = self
+            .refresh_worker_surface_evidence(&queued.worker_id)
+            .await;
         self.cancel_worker(&queued.worker_id);
         self.unregister_dynamic_tool(&queued.worker_id).await;
         self.stop_residents(Some(&queued.worker_id)).await;
@@ -1485,7 +1543,7 @@ impl WorkerRuntime {
             return Ok(());
         }
         let active = self.store.load_active(worker_id)?;
-        let success_evidence = self.store.success_evidence(worker_id)?;
+        self.refresh_worker_surface_evidence(worker_id).await?;
         let provenance = active
             .bundle
             .provenance
@@ -1500,15 +1558,8 @@ impl WorkerRuntime {
             .collect::<Vec<_>>()
             .join(", ");
         let model_description = format!(
-            "{}\nPersistent worker evidence: health={}; activeVersion={}; completedRuns={}; lastCompletedAt={}; provenance={}",
-            active.summary.description,
-            active.summary.health,
-            active.summary.active_version,
-            success_evidence["completedRuns"].as_u64().unwrap_or(0),
-            success_evidence["lastCompletedAt"]
-                .as_str()
-                .unwrap_or("none"),
-            provenance,
+            "{}\nPersistent worker: activeVersion={}; provenance={}",
+            active.summary.description, active.summary.active_version, provenance,
         );
         let function_id = FunctionId::new(format!("worker_kernel::dynamic_{worker_id}"))
             .map_err(|error| error.to_string())?;
@@ -1528,12 +1579,13 @@ impl WorkerRuntime {
             "modelPrimitive": true,
             "modelPrimitiveName": active.summary.tool_name,
             "workerId": active.summary.worker_id,
+            "workerName": active.summary.name,
             "workerVersion": active.summary.active_version,
+            "workerUpdatedAt": active.summary.updated_at,
             "workerDynamic": true,
             "workerRouting": active.bundle.routing,
             "workerProvenance": active.bundle.provenance,
             "workerHealth": active.summary.health,
-            "workerSuccessEvidence": success_evidence,
             "trustedLocalKernel": true,
             "contextPrimerLevel": "relevant",
         });
@@ -1552,6 +1604,23 @@ impl WorkerRuntime {
             self.unregister_dynamic_tool(worker_id).await;
         }
         Ok(())
+    }
+
+    async fn refresh_worker_surface_evidence(&self, worker_id: &str) -> Result<(), String> {
+        let summary = self
+            .store
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        super::surface::publish_worker_surface_evidence(
+            &self.host,
+            worker_id,
+            json!({
+                "health": summary.health,
+                "updatedAt": summary.updated_at,
+                "successEvidence": self.store.success_evidence(worker_id)?,
+            }),
+        )
+        .await
     }
 
     async fn unregister_dynamic_tool(&self, worker_id: &str) {
@@ -2762,6 +2831,43 @@ print(json.dumps({
     }
 
     #[tokio::test]
+    async fn enqueue_and_await_compose_long_work_without_blocking_admission() {
+        let (runtime, _home) = test_runtime(None);
+        let bundle = command_bundle(vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "sleep 0.2; cat".to_owned(),
+        ]);
+        let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+        let started = tokio::time::Instant::now();
+        let admitted = runtime
+            .enqueue_and_dispatch(request(
+                &outcome.worker.worker_id,
+                json!({"mode":"parallel"}),
+                "enqueue-await",
+            ))
+            .unwrap();
+        assert_eq!(admitted.status, "queued");
+        assert!(started.elapsed() < Duration::from_millis(100));
+
+        let (current, timed_out) = runtime
+            .await_invocation(&admitted.invocation_id, Duration::ZERO)
+            .await
+            .unwrap();
+        assert!(matches!(current.status.as_str(), "queued" | "running"));
+        assert!(timed_out);
+
+        let (completed, timed_out) = runtime
+            .await_invocation(&admitted.invocation_id, Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(!timed_out);
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.output, Some(json!({"mode":"parallel"})));
+    }
+
+    #[tokio::test]
     async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../../../tests/fixtures/last30days_worker_gap.json"
@@ -3097,6 +3203,20 @@ print(json.dumps({
             "import json,os,sys; value=json.load(sys.stdin); value['idempotencyKey']=os.environ['TRON_WORKER_IDEMPOTENCY_KEY']; value['traceId']=os.environ['TRON_WORKER_TRACE_ID']; print(json.dumps(value))".to_owned(),
         ];
         let outcome = runtime.upsert(command_bundle(command), None).await.unwrap();
+        let inspection_actor = crate::engine::ActorContext::new(
+            ActorId::new("system:worker-tool-evidence-test").unwrap(),
+            ActorKind::System,
+        );
+        let function_id = FunctionId::new(format!(
+            "worker_kernel::dynamic_{}",
+            outcome.worker.worker_id
+        ))
+        .unwrap();
+        let initial_definition = runtime
+            .host
+            .inspect_function(&function_id, Some(&inspection_actor))
+            .await
+            .unwrap();
         let first = runtime
             .invoke(request(
                 &outcome.worker.worker_id,
@@ -3179,25 +3299,29 @@ print(json.dumps({
                 "traceId":"worker-direct-trace",
             }))
         );
-        let inspection_actor = crate::engine::ActorContext::new(
-            ActorId::new("system:worker-tool-evidence-test").unwrap(),
-            ActorKind::System,
-        );
         let definition = runtime
             .host
-            .inspect_function(
-                &FunctionId::new(format!(
-                    "worker_kernel::dynamic_{}",
-                    outcome.worker.worker_id
-                ))
-                .unwrap(),
-                Some(&inspection_actor),
+            .inspect_function(&function_id, Some(&inspection_actor))
+            .await
+            .unwrap();
+        assert_eq!(definition.revision, initial_definition.revision);
+        assert!(!definition.description.contains("completedRuns="));
+        assert!(definition.description.contains("test:deterministic@1"));
+        let surface = runtime
+            .engine_surface_snapshot(
+                Some("worker-direct-session"),
+                None,
+                Some("workers direct typed tool"),
             )
             .await
             .unwrap();
-        assert!(definition.description.contains("health=healthy"));
-        assert!(definition.description.contains("completedRuns=2"));
-        assert!(definition.description.contains("test:deterministic@1"));
+        let available = surface["surface"]["availableWorkers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|worker| worker["workerId"] == outcome.worker.worker_id)
+            .unwrap();
+        assert_eq!(available["completedRuns"], 2);
     }
 
     #[tokio::test]

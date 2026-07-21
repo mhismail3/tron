@@ -107,7 +107,7 @@ struct WorkerKernelClientTests {
                     format: 1,
                     catalogRevision: 42,
                     surfaceHash: "abc123",
-                    fixedToolCount: 25,
+                    fixedToolCount: 27,
                     projectedWorkerCount: 1,
                     availableWorkerCount: 3,
                     tools: [

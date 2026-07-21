@@ -17,8 +17,10 @@
 //! |--------|---------|
 //! | `contract` | Fixed direct worker-management contracts |
 //! | `handlers` | Model/client operation bindings |
+//! | `host` | Bounded trusted-local filesystem, process, and network primitives |
 //! | `persistence` | Canonical bundles, snapshots, index reconstruction, and durable operational ledgers |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
+//! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
 //! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
@@ -34,7 +36,8 @@
 //! Failure while registering an already-published direct tool disables it and
 //! records the failure rather than leaving an enabled but unreachable worker.
 //! One typed core-primitive manifest owns the fixed provider names, groups, and
-//! stable order. Every provider request records the exact catalog revision,
+//! stable order, and every fixed primitive has a closed top-level response
+//! contract. Every provider request records the exact catalog revision,
 //! function revisions, selected worker versions, reasons, and surface hash.
 //! Provider calls pin the advertised function revision and immutable worker
 //! version; catalog preparation rejects drift and lets the next internal turn
@@ -47,6 +50,11 @@
 //! Fixed inventory remains inspectable while autonomy is off and marks each
 //! tool unexposed, so operator introspection never masquerades as provider
 //! availability.
+//! Explicit discovery and automatic projection use one deterministic weighted
+//! retrieval implementation. Mutable run/health evidence is a rebuildable
+//! engine-state overlay, not function-contract text; successful work therefore
+//! cannot churn catalog revisions. Fixed invocation supports durable enqueue
+//! plus bounded await so parallel workers do not monopolize provider calls.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute
@@ -73,11 +81,14 @@
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
 //! remain eligible for one-time attachment to the next relevant session.
-//! The unrestricted trusted-local text search still has reliability ceilings:
-//! it runs off the async executor, defaults to five seconds and 20,000 walked
-//! entries, skips hidden/heavy child trees unless requested, and reports every
-//! truncation cause. An agent abort or server shutdown therefore cannot be held
-//! indefinitely by a home-directory search.
+//! Trusted-local host operations are unrestricted by policy but bounded for
+//! reliability. File reads, directory listings, searches, writes, and edits run
+//! off the async executor. Writes and exact occurrence-checked edits stage,
+//! sync, recheck prior state, rename in the target directory, and sync the
+//! directory before reporting success. Text search defaults to five seconds and
+//! 20,000 walked entries, skips hidden/heavy child trees unless requested, and
+//! reports every truncation cause. An agent abort or server shutdown therefore
+//! cannot be held indefinitely by a home-directory search.
 //! Executable child I/O is concurrent and bounded. Unix process groups make
 //! cancellation kill descendants; trusted-local `PATH` restores conventional
 //! host tools hidden by service launchers. Details belong to `process`.
@@ -114,8 +125,10 @@ use crate::domains::registration::worker::{
 mod contract;
 mod core_proposals;
 mod handlers;
+mod host;
 mod persistence;
 mod process;
+mod retrieval;
 mod runtime;
 mod surface;
 mod types;
@@ -259,13 +272,13 @@ mod tests {
     #[test]
     fn core_primitive_manifest_is_exact_unique_and_grouped() {
         let descriptors = contract::core_primitives();
-        assert_eq!(descriptors.len(), 25);
+        assert_eq!(descriptors.len(), 27);
         assert_eq!(
             descriptors
                 .iter()
                 .filter(|descriptor| descriptor.group == contract::CorePrimitiveGroup::Host)
                 .count(),
-            6
+            7
         );
         assert_eq!(
             descriptors
@@ -274,7 +287,7 @@ mod tests {
                     descriptor.group == contract::CorePrimitiveGroup::WorkerControl
                 })
                 .count(),
-            15
+            16
         );
         assert_eq!(
             descriptors

@@ -1,48 +1,20 @@
+use std::path::Path;
 use std::sync::Arc;
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::{Duration, Instant},
-};
 
 use serde_json::{Value, json};
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::Invocation;
-use crate::engine::{RUNTIME_METADATA_TRIGGER_DEPTH, RUNTIME_METADATA_WORKING_DIRECTORY};
+use crate::engine::RUNTIME_METADATA_TRIGGER_DEPTH;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
-use super::contract::{
-    DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS, DEFAULT_TEXT_SEARCH_WALK_ENTRIES,
-    MAX_TEXT_SEARCH_TIMEOUT_SECONDS, MAX_TEXT_SEARCH_WALK_ENTRIES,
-};
-use super::process::{
-    MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
-};
+use super::host;
 use super::runtime::WorkerRuntime;
 use super::types::{InvokeRequest, WorkerBundle};
 
-const DEFAULT_TEXT_SEARCH_RESULTS: usize = 200;
-const MAX_TEXT_SEARCH_RESULTS: usize = 1_000;
-const MAX_TEXT_SEARCH_FILE_BYTES: u64 = 1_048_576;
 const MAX_WORKER_SOURCE_FILES: usize = 1_024;
 const MAX_WORKER_SOURCE_BYTES: u64 = 16 * 1_048_576;
-const DEFAULT_IGNORED_SEARCH_DIRECTORIES: &[&str] = &[
-    ".git",
-    ".cache",
-    ".build",
-    ".venv",
-    "Library",
-    "DerivedData",
-    "Pods",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "vendor",
-    "venv",
-];
 
 #[derive(Clone)]
 pub(super) struct Deps {
@@ -53,12 +25,13 @@ operation_bindings! {
     deps = Deps;
     hidden = [];
     bindings = [
-        "filesystem_read" => |invocation, deps| { response(invocation, filesystem_read(invocation, deps).await) },
-        "filesystem_list" => |invocation, deps| { response(invocation, filesystem_list(invocation, deps).await) },
-        "filesystem_search_text" => |invocation, deps| { response(invocation, filesystem_search_text(invocation, deps).await) },
-        "filesystem_write" => |invocation, deps| { response(invocation, filesystem_write(invocation, deps).await) },
-        "process_run" => |invocation, deps| { response(invocation, process_run(invocation, deps).await) },
-        "web_fetch" => |invocation, deps| { response(invocation, web_fetch(invocation, deps).await) },
+        "filesystem_read" => |invocation, deps| { response(invocation, host::filesystem_read(invocation, &deps.runtime).await) },
+        "filesystem_list" => |invocation, deps| { response(invocation, host::filesystem_list(invocation, &deps.runtime).await) },
+        "filesystem_search_text" => |invocation, deps| { response(invocation, host::filesystem_search_text(invocation, &deps.runtime).await) },
+        "filesystem_write" => |invocation, deps| { response(invocation, host::filesystem_write(invocation, &deps.runtime).await) },
+        "filesystem_edit" => |invocation, deps| { response(invocation, host::filesystem_edit(invocation, &deps.runtime).await) },
+        "process_run" => |invocation, deps| { response(invocation, host::process_run(invocation, &deps.runtime).await) },
+        "web_fetch" => |invocation, deps| { response(invocation, host::web_fetch(invocation, &deps.runtime).await) },
         "core_proposal_create" => |invocation, deps| { response(invocation, core_proposal_create(invocation, deps).await) },
         "core_proposal_list" => |invocation, deps| { response(invocation, core_proposal_list(invocation, deps).await) },
         "core_proposal_inspect" => |invocation, deps| { response(invocation, core_proposal_inspect(invocation, deps).await) },
@@ -68,6 +41,7 @@ operation_bindings! {
         "list" => |invocation, deps| { response(invocation, list(invocation, deps).await) },
         "inspect" => |invocation, deps| { response(invocation, inspect(invocation, deps).await) },
         "invoke" => |invocation, deps| { response(invocation, invoke_worker(invocation, deps).await) },
+        "await" => |invocation, deps| { response(invocation, await_worker(invocation, deps).await) },
         "stop" => |invocation, deps| { response(invocation, stop_worker(invocation, deps).await) },
         "disable" => |invocation, deps| { response(invocation, set_enabled(invocation, deps, false).await) },
         "enable" => |invocation, deps| { response(invocation, set_enabled(invocation, deps, true).await) },
@@ -152,355 +126,6 @@ async fn core_proposal_apply(invocation: &Invocation, deps: &Deps) -> Result<Val
     .map_err(|error| error.to_string())
 }
 
-async fn filesystem_read(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
-    let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
-    let max_bytes = invocation
-        .payload
-        .get("maxBytes")
-        .and_then(Value::as_u64)
-        .unwrap_or(262_144)
-        .min(4_194_304) as usize;
-    let bytes =
-        std::fs::read(&path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    let truncated = bytes.len() > max_bytes;
-    let content = String::from_utf8_lossy(&bytes[..bytes.len().min(max_bytes)]).into_owned();
-    Ok(json!({"path":path,"content":content,"bytes":bytes.len(),"truncated":truncated}))
-}
-
-async fn filesystem_list(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
-    let requested = invocation
-        .payload
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or(".");
-    let path = resolve_path(invocation, requested)?;
-    let max = invocation
-        .payload
-        .get("maxResults")
-        .and_then(Value::as_u64)
-        .unwrap_or(500)
-        .min(5_000) as usize;
-    let mut entries = std::fs::read_dir(&path)
-        .map_err(|error| format!("list {}: {error}", path.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| {
-            let metadata = entry.metadata().ok();
-            json!({
-                "name": entry.file_name().to_string_lossy(),
-                "path": entry.path(),
-                "isDirectory": metadata.as_ref().is_some_and(std::fs::Metadata::is_dir),
-                "size": metadata.as_ref().map(std::fs::Metadata::len),
-            })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
-    let truncated = entries.len() > max;
-    entries.truncate(max);
-    Ok(json!({"path":path,"entries":entries,"truncated":truncated}))
-}
-
-async fn filesystem_search_text(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
-    let requested = invocation
-        .payload
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or(".");
-    let path = resolve_path(invocation, requested)?;
-    let query = required_string(&invocation.payload, "query")?;
-    let max = invocation
-        .payload
-        .get("maxResults")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_TEXT_SEARCH_RESULTS as u64)
-        .clamp(1, MAX_TEXT_SEARCH_RESULTS as u64) as usize;
-    let max_walk_entries = invocation
-        .payload
-        .get("maxWalkEntries")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_TEXT_SEARCH_WALK_ENTRIES as u64)
-        .clamp(1, MAX_TEXT_SEARCH_WALK_ENTRIES as u64) as usize;
-    let timeout = Duration::from_secs(
-        invocation
-            .payload
-            .get("timeoutSeconds")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS)
-            .clamp(1, MAX_TEXT_SEARCH_TIMEOUT_SECONDS),
-    );
-    let include_hidden = invocation
-        .payload
-        .get("includeHidden")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let include_ignored_directories = invocation
-        .payload
-        .get("includeIgnoredDirectories")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    run_blocking_task("worker_kernel::filesystem_search_text", move || {
-        bounded_text_search(
-            &path,
-            &query,
-            max,
-            max_walk_entries,
-            timeout,
-            include_hidden,
-            include_ignored_directories,
-        )
-        .map_err(|message| CapabilityError::Internal { message })
-    })
-    .await
-    .map_err(|error| error.to_string())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn bounded_text_search(
-    path: &Path,
-    query: &str,
-    max_results: usize,
-    max_walk_entries: usize,
-    timeout: Duration,
-    include_hidden: bool,
-    include_ignored_directories: bool,
-) -> Result<Value, String> {
-    let started = Instant::now();
-    let mut matches = Vec::new();
-    let mut visited_entries = 0usize;
-    let mut skipped_directories = 0usize;
-    let mut result_limit_reached = false;
-    let mut walk_limit_reached = false;
-    let mut time_limit_reached = false;
-    let root = path.to_path_buf();
-    let mut walker = walkdir::WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            if entry.path() == root {
-                return true;
-            }
-            let name = entry.file_name().to_string_lossy();
-            let hidden = name.starts_with('.');
-            let ignored = entry.file_type().is_dir()
-                && DEFAULT_IGNORED_SEARCH_DIRECTORIES.contains(&name.as_ref());
-            let include = (include_hidden || !hidden) && (include_ignored_directories || !ignored);
-            if !include && entry.file_type().is_dir() {
-                skipped_directories += 1;
-            }
-            include
-        });
-
-    'walk: loop {
-        if started.elapsed() >= timeout {
-            time_limit_reached = true;
-            break;
-        }
-        let Some(entry) = walker.next() else {
-            break;
-        };
-        let Ok(entry) = entry else { continue };
-        if visited_entries >= max_walk_entries {
-            walk_limit_reached = true;
-            break;
-        }
-        visited_entries += 1;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        if metadata.len() > MAX_TEXT_SEARCH_FILE_BYTES {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        for (index, line) in content.lines().enumerate() {
-            if started.elapsed() >= timeout {
-                time_limit_reached = true;
-                break 'walk;
-            }
-            if line.contains(query) {
-                matches.push(json!({"path":entry.path(),"line":index + 1,"text":line}));
-                if matches.len() >= max_results {
-                    result_limit_reached = true;
-                    break 'walk;
-                }
-            }
-        }
-    }
-    drop(walker);
-    Ok(json!({
-        "query":query,
-        "path":path,
-        "matches":matches,
-        "visitedEntries":visited_entries,
-        "skippedDirectories":skipped_directories,
-        "resultLimitReached":result_limit_reached,
-        "walkLimitReached":walk_limit_reached,
-        "timeLimitReached":time_limit_reached,
-        "truncated":result_limit_reached || walk_limit_reached || time_limit_reached,
-    }))
-}
-
-async fn filesystem_write(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
-    let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
-    let content = invocation
-        .payload
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "content is required".to_owned())?;
-    if invocation
-        .payload
-        .get("createParents")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        && let Some(parent) = path.parent()
-    {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    std::fs::write(&path, content).map_err(|error| format!("write {}: {error}", path.display()))?;
-    Ok(json!({"path":path,"bytes":content.len(),"written":true}))
-}
-
-async fn process_run(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
-    let command = invocation
-        .payload
-        .get("command")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "command must be an array".to_owned())?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| "command entries must be strings".to_owned())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let (program, arguments) = command
-        .split_first()
-        .ok_or_else(|| "command must contain a program".to_owned())?;
-    let cwd = invocation
-        .payload
-        .get("cwd")
-        .and_then(Value::as_str)
-        .map_or_else(
-            || resolve_path(invocation, "."),
-            |path| resolve_path(invocation, path),
-        )?;
-    let timeout = invocation
-        .payload
-        .get("timeoutSeconds")
-        .and_then(Value::as_u64)
-        .unwrap_or(300)
-        .min(7_200);
-    let mut process = tokio::process::Command::new(program);
-    process
-        .args(arguments)
-        .current_dir(&cwd)
-        .env("PATH", trusted_local_command_path(None)?)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let child =
-        ProcessTree::spawn(&mut process).map_err(|error| format!("start process: {error}"))?;
-    let input = invocation.payload.get("stdin").map(|input| {
-        input.as_str().map_or_else(
-            || serde_json::to_vec(input).unwrap_or_default(),
-            |text| text.as_bytes().to_vec(),
-        )
-    });
-    let output = wait_with_bounded_output(
-        child,
-        input,
-        Duration::from_secs(timeout),
-        format!("process timed out after {timeout} seconds"),
-        MAX_PROCESS_CAPTURE_BYTES,
-    )
-    .await
-    .map_err(|error| format!("wait for process: {error}"))?;
-    if let Some((kind, error)) = output.input_error
-        && kind != std::io::ErrorKind::BrokenPipe
-    {
-        return Err(format!("write process input: {error}"));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Ok(json!({
-        "command":command,"cwd":cwd,"status":output.status.code(),"success":output.status.success(),
-        "stdout":stdout,"stderr":stderr,
-        "stdoutTruncated":output.stdout_truncated,"stderrTruncated":output.stderr_truncated
-    }))
-}
-
-async fn web_fetch(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
-    let url = required_string(&invocation.payload, "url")?;
-    let parsed = url::Url::parse(&url).map_err(|error| format!("invalid URL: {error}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("web_fetch supports only HTTP and HTTPS".to_owned());
-    }
-    let max = invocation
-        .payload
-        .get("maxBytes")
-        .and_then(Value::as_u64)
-        .unwrap_or(1_048_576)
-        .min(4_194_304) as usize;
-    let mut response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|error| error.to_string())?
-        .get(parsed)
-        .send()
-        .await
-        .map_err(|error| format!("fetch URL: {error}"))?;
-    let status = response.status();
-    let final_url = response.url().to_string();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(ToOwned::to_owned);
-    let mut content = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(max as u64) as usize,
-    );
-    let mut total = 0_u64;
-    let mut truncated = false;
-    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
-        total = total.saturating_add(chunk.len() as u64);
-        let remaining = max.saturating_sub(content.len());
-        let retained = remaining.min(chunk.len());
-        content.extend_from_slice(&chunk[..retained]);
-        truncated |= retained < chunk.len();
-    }
-    let content = String::from_utf8_lossy(&content).into_owned();
-    Ok(
-        json!({"url":final_url,"status":status.as_u16(),"contentType":content_type,"bytes":total,"truncated":truncated,"content":content}),
-    )
-}
-
-fn resolve_path(invocation: &Invocation, value: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    let base = invocation
-        .causal_context
-        .runtime_metadata
-        .get(RUNTIME_METADATA_WORKING_DIRECTORY)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    Ok(base.join(path))
-}
-
 fn require_autonomous(deps: &Deps) -> Result<(), String> {
     if deps.runtime.autonomous_enabled() {
         Ok(())
@@ -523,7 +148,7 @@ async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     )
     .map_err(|error| format!("decode worker bundle: {error}"))?;
     let source_import = if invocation.payload.get("sourceDirectory").is_some() {
-        let source_directory = resolve_path(
+        let source_directory = host::resolve_path(
             invocation,
             &required_string(&invocation.payload, "sourceDirectory")?,
         )?;
@@ -664,79 +289,93 @@ fn import_source_directory(
 }
 
 async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    let query = required_string(&invocation.payload, "query")?.to_ascii_lowercase();
+    let query = required_string(&invocation.payload, "query")?;
     let limit = invocation
         .payload
         .get("limit")
         .and_then(Value::as_u64)
         .unwrap_or(12)
         .min(50) as usize;
-    let query_terms = terms(&query);
-    let mut workers = deps
+    let promoted = match invocation.causal_context.session_id.as_deref() {
+        Some(session_id) => {
+            super::surface::session_worker_promotions(deps.runtime.host(), session_id).await?
+        }
+        None => std::collections::BTreeSet::new(),
+    };
+    let mut payloads = std::collections::BTreeMap::new();
+    let mut documents = Vec::new();
+    for worker in deps
         .runtime
         .store()
         .list(false)?
         .into_iter()
         .filter(|worker| worker.enabled)
-        .filter_map(|worker| {
-            let active = deps.runtime.store().load_active(&worker.worker_id).ok()?;
-            let evidence = deps
-                .runtime
-                .store()
-                .success_evidence(&worker.worker_id)
-                .ok()?;
-            let text = format!(
-                "{} {} {} {}",
-                worker.name,
-                worker.description,
-                serde_json::to_string(&active.bundle.routing).unwrap_or_default(),
-                serde_json::to_string(&active.bundle.provenance).unwrap_or_default(),
-            )
-            .to_ascii_lowercase();
-            let score = query_terms
+    {
+        let Ok(active) = deps.runtime.store().load_active(&worker.worker_id) else {
+            continue;
+        };
+        let Ok(evidence) = deps.runtime.store().success_evidence(&worker.worker_id) else {
+            continue;
+        };
+        documents.push(super::retrieval::WorkerRetrievalDocument {
+            key: worker.worker_id.clone(),
+            worker_id: worker.worker_id.clone(),
+            name: worker.name.clone(),
+            description: worker.description.clone(),
+            intents: active.bundle.routing.intents.clone(),
+            examples: active.bundle.routing.examples.clone(),
+            provenance: active
+                .bundle
+                .provenance
                 .iter()
-                .filter(|term| text.contains(term.as_str()))
-                .count();
-            let successes = evidence
+                .map(|source| {
+                    source.revision.as_ref().map_or_else(
+                        || source.source.clone(),
+                        |revision| format!("{}@{revision}", source.source),
+                    )
+                })
+                .collect(),
+            completed_runs: evidence
                 .get("completedRuns")
                 .and_then(Value::as_u64)
-                .unwrap_or(0);
-            Some((score, successes, worker, active.bundle, evidence))
-        })
-        .filter(|(score, _, _, _, _)| *score > 0 || query_terms.is_empty())
+                .unwrap_or(0),
+            updated_at: worker.updated_at.clone(),
+        });
+        let _ = payloads.insert(worker.worker_id.clone(), (worker, active.bundle, evidence));
+    }
+    let include_unmatched = super::retrieval::query_is_empty(Some(&query));
+    let ranked = super::retrieval::rank_workers(documents, Some(&query), &promoted)
+        .into_iter()
+        .filter(|rank| include_unmatched || rank.relevance_score > 0)
+        .take(limit)
         .collect::<Vec<_>>();
-    workers.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| right.2.updated_at.cmp(&left.2.updated_at))
-    });
-    workers.truncate(limit);
     if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
-        for (_, _, worker, _, _) in &workers {
-            crate::domains::worker_kernel::promote_worker_for_session(
+        for rank in &ranked {
+            super::surface::promote_worker_for_session(
                 deps.runtime.host(),
                 session_id,
-                &worker.worker_id,
+                &rank.worker_id,
             )
             .await?;
         }
     }
     Ok(json!({
         "query": query,
-        "workers": workers.into_iter().map(|(score, _, worker, bundle, evidence)| json!({
-            "score":score,
-            "worker":worker,
-            "inputSchema":bundle.input_schema,
-            "outputSchema":bundle.output_schema,
-            "routing":bundle.routing,
-            "provenance":bundle.provenance,
-            "successEvidence":evidence,
-        })).collect::<Vec<_>>()
+        "workers": ranked.into_iter().filter_map(|rank| {
+            let (worker, bundle, evidence) = payloads.remove(&rank.worker_id)?;
+            Some(json!({
+                "score":rank.relevance_score,
+                "promoted":rank.promoted,
+                "worker":worker,
+                "inputSchema":bundle.input_schema,
+                "outputSchema":bundle.output_schema,
+                "routing":bundle.routing,
+                "provenance":bundle.provenance,
+                "successEvidence":evidence,
+            }))
+        }).collect::<Vec<_>>()
     }))
 }
-
 async fn list(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     let include_retired = invocation
         .payload
@@ -770,24 +409,50 @@ async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, St
         .map(ToOwned::to_owned)
         .or_else(|| invocation.causal_context.idempotency_key.clone())
         .unwrap_or_else(|| format!("manual:{}", invocation.id));
-    serde_json::to_value(
-        deps.runtime
-            .invoke(InvokeRequest {
-                worker_id,
-                input,
-                idempotency_key: key,
-                trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
-                causal_depth: invocation
-                    .causal_context
-                    .runtime_metadata
-                    .get(RUNTIME_METADATA_TRIGGER_DEPTH)
-                    .and_then(|value| value.parse::<u32>().ok())
-                    .unwrap_or(0),
-                trigger_kind: "manual".to_owned(),
-            })
-            .await?,
-    )
-    .map_err(|error| error.to_string())
+    let request = InvokeRequest {
+        worker_id,
+        input,
+        idempotency_key: key,
+        trace_id: invocation.causal_context.trace_id.as_str().to_owned(),
+        causal_depth: invocation
+            .causal_context
+            .runtime_metadata
+            .get(RUNTIME_METADATA_TRIGGER_DEPTH)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0),
+        trigger_kind: "manual".to_owned(),
+    };
+    let record = match invocation
+        .payload
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("wait")
+    {
+        "enqueue" => deps.runtime.enqueue_and_dispatch(request)?,
+        "wait" => deps.runtime.invoke(request).await?,
+        mode => return Err(format!("unsupported worker invocation mode '{mode}'")),
+    };
+    serde_json::to_value(record).map_err(|error| error.to_string())
+}
+
+async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
+    require_autonomous(deps)?;
+    let timeout = std::time::Duration::from_secs(
+        invocation
+            .payload
+            .get("timeoutSeconds")
+            .and_then(Value::as_u64)
+            .unwrap_or(30)
+            .min(7_200),
+    );
+    let (record, timed_out) = deps
+        .runtime
+        .await_invocation(
+            &required_string(&invocation.payload, "invocationId")?,
+            timeout,
+        )
+        .await?;
+    Ok(json!({"invocation":record,"timedOut":timed_out}))
 }
 
 async fn set_enabled(invocation: &Invocation, deps: &Deps, enabled: bool) -> Result<Value, String> {
@@ -964,14 +629,6 @@ fn required_content(value: &Value, field: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{field} is required"))
 }
 
-fn terms(value: &str) -> Vec<String> {
-    value
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|term| term.len() > 2)
-        .map(str::to_owned)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -984,56 +641,6 @@ mod tests {
             Ok(patch.to_owned())
         );
         assert!(required_content(&json!({"patch":"  \n"}), "patch").is_err());
-    }
-
-    #[test]
-    fn bounded_text_search_skips_hidden_and_heavy_directories_by_default() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::write(root.path().join("visible.txt"), "needle\n").unwrap();
-        std::fs::create_dir_all(root.path().join(".hidden")).unwrap();
-        std::fs::write(root.path().join(".hidden/secret.txt"), "needle\n").unwrap();
-        std::fs::create_dir_all(root.path().join("target")).unwrap();
-        std::fs::write(root.path().join("target/generated.txt"), "needle\n").unwrap();
-
-        let result = bounded_text_search(
-            root.path(),
-            "needle",
-            20,
-            100,
-            Duration::from_secs(1),
-            false,
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(result["matches"].as_array().unwrap().len(), 1);
-        assert_eq!(result["skippedDirectories"], 2);
-        assert_eq!(result["truncated"], false);
-    }
-
-    #[test]
-    fn bounded_text_search_reports_walk_and_time_ceilings() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::write(root.path().join("one.txt"), "needle\n").unwrap();
-        std::fs::write(root.path().join("two.txt"), "needle\n").unwrap();
-
-        let walked = bounded_text_search(
-            root.path(),
-            "needle",
-            20,
-            1,
-            Duration::from_secs(1),
-            true,
-            true,
-        )
-        .unwrap();
-        assert_eq!(walked["walkLimitReached"], true);
-        assert_eq!(walked["truncated"], true);
-
-        let timed = bounded_text_search(root.path(), "needle", 20, 100, Duration::ZERO, true, true)
-            .unwrap();
-        assert_eq!(timed["timeLimitReached"], true);
-        assert_eq!(timed["visitedEntries"], 0);
     }
 
     #[test]
