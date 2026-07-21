@@ -31,4 +31,10 @@ enum EngineDashboardPresentation {
         default: "Available"
         }
     }
+
+    static func routingEvidence(_ worker: AvailableWorkerToolDTO) -> String {
+        let reason = selectionReason(worker.selectionReason)
+        let runs = "\(worker.completedRuns) completed run\(worker.completedRuns == 1 ? "" : "s")"
+        return "\(reason) · score \(worker.relevanceScore) · \(runs)"
+    }
 }

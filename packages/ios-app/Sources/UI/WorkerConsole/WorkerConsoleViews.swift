@@ -481,6 +481,11 @@ private struct WorkerConsoleRow: View {
                         }
                     }
                     .lineLimit(1)
+
+                    Text("\(surface.modelName) · r\(surface.functionRevision) · \(EngineDashboardPresentation.routingEvidence(surface))")
+                        .font(TronTypography.code(size: TronTypography.sizeSM))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(2)
                 }
             }
 

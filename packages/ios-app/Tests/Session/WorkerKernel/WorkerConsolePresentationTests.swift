@@ -75,6 +75,22 @@ struct WorkerConsolePresentationTests {
                 == "Relevant to the current task"
         )
         #expect(EngineDashboardPresentation.selectionReason(nil) == "Available")
+        #expect(
+            EngineDashboardPresentation.routingEvidence(
+                AvailableWorkerToolDTO(
+                    workerId: "research",
+                    modelName: "worker_research",
+                    functionId: "worker_kernel::dynamic_research",
+                    functionRevision: 2,
+                    workerVersion: "version",
+                    promoted: false,
+                    projected: true,
+                    selectionReason: "relevance",
+                    relevanceScore: 7,
+                    completedRuns: 3
+                )
+            ) == "Relevant to the current task · score 7 · 3 completed runs"
+        )
     }
 
     private func worker(

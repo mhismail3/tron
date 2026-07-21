@@ -31,9 +31,21 @@ pub(crate) fn surface_context_primer(
         .tools
         .iter()
         .filter(|tool| tool.worker_id.is_some())
-        .map(|tool| match &tool.worker_version {
-            Some(version) => format!("{}@{}", tool.model_name, short_hash(version)),
-            None => tool.model_name.clone(),
+        .map(|tool| {
+            let identity = match &tool.worker_version {
+                Some(version) => format!("{}@{}", tool.model_name, short_hash(version)),
+                None => tool.model_name.clone(),
+            };
+            let evidence = tool.worker_id.as_deref().and_then(|worker_id| {
+                snapshot
+                    .available_workers
+                    .iter()
+                    .find(|worker| worker.worker_id == worker_id)
+            });
+            evidence.map_or(identity.clone(), |worker| {
+                let reason = worker.selection_reason.as_deref().unwrap_or("available");
+                format!("{identity} [{reason}; runs={}]", worker.completed_runs)
+            })
         })
         .collect::<Vec<_>>();
     let projected = if projected.is_empty() {
@@ -599,11 +611,25 @@ mod tests {
                     primitive_group: None,
                     selection_reason: "relevance".to_owned(),
                 }],
-                available_workers: Vec::new(),
+                available_workers: vec![
+                    crate::domains::worker_kernel::AvailableWorkerToolSnapshot {
+                        worker_id: "recent".to_owned(),
+                        model_name: "worker_recent_research".to_owned(),
+                        function_id: "worker_kernel::dynamic_recent".to_owned(),
+                        function_revision: 2,
+                        worker_version: Some("abcdef1234567890".to_owned()),
+                        promoted: false,
+                        projected: true,
+                        selection_reason: Some("relevance".to_owned()),
+                        relevance_score: 8,
+                        completed_runs: 4,
+                    },
+                ],
             });
         assert!(primer.contains("r42"));
         assert!(primer.contains("1/7 workers"));
         assert!(primer.contains("worker_recent_research@abcdef12"));
+        assert!(primer.contains("[relevance; runs=4]"));
         assert!(primer.contains("worker_discover"));
     }
 }

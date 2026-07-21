@@ -163,7 +163,7 @@ pub(crate) use persistence::{
 };
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]
-pub(crate) use surface::SurfaceToolSnapshot;
+pub(crate) use surface::{AvailableWorkerToolSnapshot, SurfaceToolSnapshot};
 pub(crate) use surface::{EngineSurfaceSnapshot, promote_worker_for_session, resolve_tool_surface};
 
 pub(crate) struct Registration {

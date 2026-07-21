@@ -44,7 +44,7 @@ struct EngineSurfaceCard: View {
                                 .foregroundStyle(.tronTextPrimary)
                                 .lineLimit(1)
                             Spacer()
-                            Text(EngineDashboardPresentation.selectionReason(worker.selectionReason))
+                            Text(EngineDashboardPresentation.routingEvidence(worker))
                                 .font(TronTypography.sans(size: TronTypography.sizeSM))
                                 .foregroundStyle(.tronTextMuted)
                                 .lineLimit(1)
@@ -95,6 +95,7 @@ struct EngineCoreToolCard: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 9) {
                 metadata("Function", tool.functionId)
+                metadata("Owner", tool.ownerWorker)
                 metadata("Revision", "\(tool.functionRevision)")
                 schema("Input schema", tool.inputSchema)
                 if let output = tool.outputSchema {

@@ -137,6 +137,9 @@ separately maintained description of its own source architecture. UI code does n
 reconstruct model visibility from raw catalog `[AnyCodable]` entries. The exact
 `surface.tools` projection is kept distinct from fixed/published inventories;
 when autonomy is off, fixed tools remain inspectable but explicitly unexposed.
+The dashboard renders fixed-function ownership and worker routing reason, score,
+and completed-run evidence; the same bounded routing evidence reaches the model
+in the per-turn surface primer without changing catalog revisions after a run.
 The client models current surface truth only; it has no catalog-watch, catalog-
 change-history, or raw catalog snapshot DTO plane.
 
