@@ -1030,6 +1030,3 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         ..Default::default()
     }
 }
-
-#[cfg(test)]
-mod tests;

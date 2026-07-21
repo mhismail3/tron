@@ -1,15 +1,15 @@
 //! Generic capability-contract builders.
 //!
 //! Domain contracts are the primitive manifest for retained in-process workers:
-//! they declare the canonical function id, schema, risk/effect, and
-//! metadata that the registry projects into contracts.
+//! they declare the canonical function id, schema, risk/effect, and emitted
+//! stream topics.
 //!
 //! Domain `contract.rs` files own their function inventory, schemas, risk,
-//! idempotency, and stream metadata. This
+//! idempotency, and stream declarations. This
 //! module contains only method-agnostic construction helpers used to turn those
 //! local records into engine definitions.
 
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
@@ -43,10 +43,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) stream_topics: Vec<&'static str>,
     /// Human-readable discovery description.
     pub(crate) description: Option<&'static str>,
-    /// Optional presentation metadata for chip/sheet summaries. Renderers may
-    /// use hints such as `themeColor`, but capability identity always comes
-    /// from the contract.
-    pub(crate) presentation_hints: Option<Value>,
 }
 
 impl CapabilityContract {
@@ -75,7 +71,6 @@ impl CapabilityContract {
             idempotency: None,
             stream_topics: Vec::new(),
             description: None,
-            presentation_hints: None,
         }
     }
 
@@ -136,7 +131,6 @@ impl CapabilityContract {
             idempotency: self.idempotency,
             stream_topics: self.stream_topics,
             description: self.description,
-            presentation_hints: self.presentation_hints,
         })
     }
 }
@@ -162,46 +156,5 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     if let Some(schema) = &spec.response_schema {
         definition = definition.with_response_schema(schema.clone());
     }
-    let presentation_hints = presentation_hints_for_capability(spec);
-    definition.metadata = json!({
-        "streamTopics": spec.stream_topics,
-        "presentationHints": presentation_hints,
-    });
     definition
-}
-
-fn presentation_hints_for_capability(spec: &CapabilitySpec) -> Value {
-    let mut hints = spec
-        .presentation_hints
-        .as_ref()
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_else(Map::new);
-    if !hints.contains_key("themeColor") {
-        if let Some(color) = default_theme_color(spec.function_id.as_str()) {
-            hints.insert("themeColor".to_owned(), Value::String(color.to_owned()));
-        }
-    }
-    Value::Object(hints)
-}
-
-fn default_theme_color(function_id: &str) -> Option<&'static str> {
-    let namespace = function_id
-        .split_once("::")
-        .map(|(namespace, _)| namespace)?;
-    match namespace {
-        "capability" => Some("#10B981"),
-        "agent" => Some("#8B5CF6"),
-        "auth" => Some("#0EA5E9"),
-        "blob" => Some("#64748B"),
-        "catalog_discovery" => Some("#14B8A6"),
-        "context" => Some("#F97316"),
-        "logs" => Some("#22C55E"),
-        "message" => Some("#A855F7"),
-        "model" => Some("#38BDF8"),
-        "session" => Some("#F59E0B"),
-        "settings" => Some("#94A3B8"),
-        "system" => Some("#14B8A6"),
-        _ => None,
-    }
 }

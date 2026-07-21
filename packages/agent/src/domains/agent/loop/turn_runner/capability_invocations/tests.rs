@@ -177,9 +177,7 @@ impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
     }
 }
 
-async fn phase_engine_surface_with_mode(
-    execution_mode: ExecutionMode,
-) -> (EngineHostHandle, ResolvedPrimitiveSurface) {
+async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
     let function_id = FunctionId::new("capability::phase_lifecycle").expect("function id");
     let function = FunctionDefinition::new(
@@ -202,7 +200,6 @@ async fn phase_engine_surface_with_mode(
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
-            execution_mode,
             model_callable: false,
         },
     );
@@ -214,10 +211,6 @@ async fn phase_engine_surface_with_mode(
             snapshot: Default::default(),
         },
     )
-}
-
-async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) {
-    phase_engine_surface_with_mode(ExecutionMode::Parallel).await
 }
 
 fn context_manager_for_workdir(working_directory: &str) -> ContextManager {
@@ -551,7 +544,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
 }
 
 #[tokio::test]
-async fn parent_cancellation_during_capability_wave_marks_active_turn_interrupted() {
+async fn parent_cancellation_during_parallel_capability_batch_marks_active_turn_interrupted() {
     let h = phase_persistence_harness().await;
     let (engine_host, surface) = phase_engine_surface().await;
     let tempdir = tempfile::tempdir().expect("working directory");

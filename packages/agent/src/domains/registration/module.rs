@@ -65,6 +65,7 @@ impl DomainRegistrationContext {
 pub(crate) struct DomainFunctionRegistration {
     pub(crate) definition: FunctionDefinition,
     pub(crate) handler: Arc<dyn InProcessFunctionHandler>,
+    pub(crate) stream_topics: Vec<&'static str>,
 }
 
 pub(crate) struct DomainModule {

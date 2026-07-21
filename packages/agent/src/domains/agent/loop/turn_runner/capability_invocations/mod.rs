@@ -15,8 +15,10 @@
 //! row in that batch fails. A direct operation may return a one-time credential
 //! to the active model turn, but capability arguments, result content, and
 //! details are redacted before any durable row or lifecycle broadcast is built.
+//! Provider-requested calls in one batch execute concurrently; worker/kernel
+//! implementations own their real queueing and concurrency ceilings. There is
+//! no metadata-driven serialized execution mode.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
@@ -26,7 +28,6 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
-use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::session::event_store::EventType;
@@ -35,7 +36,7 @@ use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, trace, warn};
+use tracing::{info, trace, warn};
 
 pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
@@ -246,62 +247,30 @@ pub(super) async fn execute_capability_invocation_phase(
         "capability invocation batch emitted"
     );
 
-    let waves = build_execution_waves(
-        &params.stream_result.capability_invocations,
-        params.primitive_surface,
-    );
-    info!(
-        component = "agent.capability",
-        agent_event = "capability_execution_waves_built",
-        session_id = params.session_id,
-        run_id = params.run_id.unwrap_or("none"),
-        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
-        turn = params.turn,
-        wave_count = waves.len(),
-        invocation_count = params.stream_result.capability_invocations.len(),
-        "capability execution waves built"
-    );
     let mut results: Vec<Option<ExecutedCapabilityInvocation>> =
         (0..params.stream_result.capability_invocations.len())
             .map(|_| None)
             .collect();
     let mut completion_payloads = vec![None; params.stream_result.capability_invocations.len()];
-    let mut interrupted = false;
+    let interrupted;
 
-    for (wave_index, wave) in waves.iter().enumerate() {
-        if params.cancel.is_cancelled() {
-            interrupted = true;
-            let skipped = waves
-                .iter()
-                .skip(wave_index)
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
-            record_skipped_invocations(
-                &skipped,
-                &params,
-                &mut completion_payloads,
-                "agent_run_cancelled",
-                "CAPABILITY_INVOCATION_CANCELLED",
-            );
-            break;
-        }
-        debug!(
-            component = "agent.capability",
-            agent_event = "capability_wave_started",
-            session_id = params.session_id,
-            run_id = params.run_id.unwrap_or("none"),
-            trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
-            turn = params.turn,
-            wave_index,
-            wave_size = wave.len(),
-            "capability execution wave started"
+    if params.cancel.is_cancelled() {
+        interrupted = true;
+        let skipped = (0..params.stream_result.capability_invocations.len()).collect::<Vec<_>>();
+        record_skipped_invocations(
+            &skipped,
+            &params,
+            &mut completion_payloads,
+            "agent_run_cancelled",
+            "CAPABILITY_INVOCATION_CANCELLED",
         );
-
-        let futures: Vec<_> = wave
+    } else {
+        let futures: Vec<_> = params
+            .stream_result
+            .capability_invocations
             .iter()
-            .map(|&idx| {
-                let capability_invocation = &params.stream_result.capability_invocations[idx];
+            .enumerate()
+            .map(|(idx, capability_invocation)| {
                 let capability_ctx =
                     capability_invocation_executor::CapabilityInvocationExecutionContext {
                         primitive_surface: params.primitive_surface,
@@ -382,34 +351,7 @@ pub(super) async fn execute_capability_invocation_phase(
             results[idx] = Some(result);
             completion_payloads[idx] = completion_payload;
         }
-        if params.cancel.is_cancelled() {
-            interrupted = true;
-            let skipped = waves
-                .iter()
-                .skip(wave_index + 1)
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
-            record_skipped_invocations(
-                &skipped,
-                &params,
-                &mut completion_payloads,
-                "agent_run_cancelled",
-                "CAPABILITY_INVOCATION_CANCELLED",
-            );
-            break;
-        }
-        debug!(
-            component = "agent.capability",
-            agent_event = "capability_wave_completed",
-            session_id = params.session_id,
-            run_id = params.run_id.unwrap_or("none"),
-            trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
-            turn = params.turn,
-            wave_index,
-            wave_size = wave.len(),
-            "capability execution wave completed"
-        );
+        interrupted = params.cancel.is_cancelled();
     }
 
     if let Err(error) = persist_completion_batch(&params, completion_payloads) {
@@ -674,48 +616,6 @@ async fn process_capability_results(
         "agent capability phase completed"
     );
     outcome
-}
-
-pub(super) fn build_execution_waves(
-    capability_invocations: &[crate::shared::protocol::messages::CapabilityInvocationDraft],
-    primitive_surface: &ResolvedPrimitiveSurface,
-) -> Vec<Vec<usize>> {
-    let modes: Vec<_> = capability_invocations
-        .iter()
-        .map(|tc| {
-            primitive_surface
-                .targets_by_name
-                .get(&tc.name)
-                .map_or(ExecutionMode::Parallel, |target| {
-                    target.execution_mode.clone()
-                })
-        })
-        .collect();
-
-    if modes.iter().all(|m| matches!(m, ExecutionMode::Parallel)) {
-        return vec![(0..capability_invocations.len()).collect()];
-    }
-
-    let mut waves: Vec<Vec<usize>> = Vec::with_capacity(4);
-    waves.push(Vec::new());
-    let mut group_wave: HashMap<String, usize> = HashMap::new();
-
-    for (idx, mode) in modes.iter().enumerate() {
-        match mode {
-            ExecutionMode::Parallel => waves[0].push(idx),
-            ExecutionMode::Serialized(group) => {
-                let wave_idx = group_wave.get(group).copied().unwrap_or(0);
-                while waves.len() <= wave_idx {
-                    waves.push(vec![]);
-                }
-                waves[wave_idx].push(idx);
-                let _ = group_wave.insert(group.clone(), wave_idx + 1);
-            }
-        }
-    }
-
-    waves.retain(|wave| !wave.is_empty());
-    waves
 }
 
 fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> String {

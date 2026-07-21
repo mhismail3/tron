@@ -58,9 +58,9 @@ pub use kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, WorkerId};
 pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payload;
 pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
-    CatalogRevision, DedupeScope, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ReplayBehavior,
-    RiskLevel, StreamVisibility,
+    CatalogRevision, DedupeScope, DirectWorkerToolContract, EffectClass, FunctionDefinition,
+    FunctionHealth, FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope,
+    ModelToolContract, ReplayBehavior, RiskLevel, StreamVisibility,
 };
 
 #[cfg(test)]

@@ -242,21 +242,21 @@ impl WorkerRuntime {
                 )
             })?;
             let mut next = registration.definition.clone();
-            let metadata = next.metadata.as_object_mut().ok_or_else(|| {
+            let model_tool = next.model_tool.as_mut().ok_or_else(|| {
                 format!(
-                    "worker kernel metadata for {} is not an object",
+                    "worker kernel function {} has no model-tool contract",
                     next.id.as_str()
                 )
             })?;
-            let _ = metadata.insert("modelPrimitive".to_owned(), Value::Bool(enabled));
+            model_tool.callable = enabled;
             let mut rollback = registration.definition;
-            let rollback_metadata = rollback.metadata.as_object_mut().ok_or_else(|| {
+            let rollback_model_tool = rollback.model_tool.as_mut().ok_or_else(|| {
                 format!(
-                    "worker kernel metadata for {} is not an object",
+                    "worker kernel function {} has no model-tool contract",
                     rollback.id.as_str()
                 )
             })?;
-            let _ = rollback_metadata.insert("modelPrimitive".to_owned(), Value::Bool(previous));
+            rollback_model_tool.callable = previous;
             prepared.push((next, rollback, handler));
         }
 
@@ -349,11 +349,12 @@ impl WorkerRuntime {
                     |revision| format!("{}@{revision}", source.source),
                 )
             })
-            .collect::<Vec<_>>()
-            .join(", ");
+            .collect::<Vec<_>>();
         let model_description = format!(
             "{}\nPersistent worker: activeVersion={}; provenance={}",
-            active.summary.description, active.summary.active_version, provenance,
+            active.summary.description,
+            active.summary.active_version,
+            provenance.join(", "),
         );
         let function_id = FunctionId::new(format!("worker_kernel::dynamic_{worker_id}"))
             .map_err(|error| error.to_string())?;
@@ -369,16 +370,20 @@ impl WorkerRuntime {
         .with_request_schema(active.bundle.input_schema.clone())
         .with_response_schema(active.bundle.output_schema.clone())
         .with_health(FunctionHealth::Healthy);
-        definition.metadata = json!({
-            "modelPrimitive": true,
-            "modelPrimitiveName": active.summary.tool_name,
-            "workerId": active.summary.worker_id,
-            "workerName": active.summary.name,
-            "workerVersion": active.summary.active_version,
-            "workerUpdatedAt": active.summary.updated_at,
-            "workerDynamic": true,
-            "workerRouting": active.bundle.routing,
-            "workerProvenance": active.bundle.provenance,
+        definition.model_tool = Some(ModelToolContract {
+            name: active.summary.tool_name,
+            callable: true,
+            order: None,
+            group: None,
+            worker: Some(DirectWorkerToolContract {
+                worker_id: active.summary.worker_id,
+                worker_name: active.summary.name,
+                worker_version: active.summary.active_version,
+                updated_at: active.summary.updated_at,
+                intents: active.bundle.routing.intents,
+                examples: active.bundle.routing.examples,
+                provenance,
+            }),
         });
         self.host
             .register_function(

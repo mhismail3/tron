@@ -64,6 +64,7 @@ where
             Ok(DomainFunctionRegistration {
                 definition: function_definition_for_capability(&spec),
                 handler,
+                stream_topics: spec.stream_topics,
             })
         })
         .collect()

@@ -46,7 +46,9 @@
 //! records the failure rather than leaving an enabled but unreachable worker.
 //! One typed core-primitive manifest owns the fixed provider names, groups, and
 //! stable order, and every fixed primitive has a closed top-level response
-//! contract. Every provider request records the exact catalog revision,
+//! contract. Function definitions carry one closed typed model-tool projection;
+//! magic metadata keys cannot silently add tools, routing modes, or test-only
+//! ranking inputs. Every provider request records the exact catalog revision,
 //! function revisions, selected worker versions, reasons, and surface hash.
 //! Provider calls pin the advertised function revision and immutable worker
 //! version; catalog preparation rejects drift and lets the next internal turn
@@ -130,7 +132,6 @@
 //! Unit tests live beside each concern; cross-domain replay, migration,
 //! provider-tool, transport, and client proofs live under `packages/agent/tests`.
 
-use serde_json::Value;
 use std::sync::Arc;
 
 use crate::domains::registration::module::{
@@ -189,12 +190,6 @@ pub(crate) fn registration(
         },
     )?;
     for registration in &mut functions {
-        let mut metadata = registration
-            .definition
-            .metadata
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
         let operation = registration
             .definition
             .id
@@ -203,30 +198,20 @@ pub(crate) fn registration(
             .map(|(_, operation)| operation)
             .unwrap_or_default();
         if let Some(descriptor) = contract::core_primitive_for_operation(operation) {
-            let _ = metadata.insert("modelPrimitive".to_owned(), Value::Bool(autonomous));
-            let _ = metadata.insert(
-                "modelPrimitiveName".to_owned(),
-                Value::String(descriptor.model_name.to_owned()),
-            );
-            let _ = metadata.insert(
-                "modelPrimitiveGroup".to_owned(),
-                Value::String(descriptor.group.as_str().to_owned()),
-            );
-            let _ = metadata.insert("capabilityOrder".to_owned(), Value::from(descriptor.order));
+            registration.definition.model_tool = Some(crate::engine::ModelToolContract {
+                name: descriptor.model_name.to_owned(),
+                callable: autonomous,
+                order: Some(descriptor.order),
+                group: Some(descriptor.group.as_str().to_owned()),
+                worker: None,
+            });
         }
-        registration.definition.metadata = Value::Object(metadata);
     }
     runtime
         .configure_kernel_primitives(
             functions
                 .iter()
-                .filter(|registration| {
-                    registration
-                        .definition
-                        .metadata
-                        .get("modelPrimitiveName")
-                        .is_some()
-                })
+                .filter(|registration| registration.definition.model_tool.is_some())
                 .map(|registration| {
                     (
                         registration.definition.clone(),

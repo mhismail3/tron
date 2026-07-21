@@ -109,21 +109,11 @@ pub(crate) async fn take_worker_inbox_context(
     ))
 }
 
-/// Controls how one model protocol call is scheduled relative to others.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ExecutionMode {
-    /// Execute concurrently with all other parallel primitive calls.
-    Parallel,
-    /// Execute sequentially within a named group.
-    Serialized(String),
-}
-
 #[derive(Clone, Debug)]
 pub struct PrimitiveExecutionTarget {
     pub model_capability_id: String,
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
-    pub execution_mode: ExecutionMode,
     /// Whether this function is explicitly registered for model invocation.
     pub model_callable: bool,
 }
@@ -159,7 +149,6 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
         let target = PrimitiveExecutionTarget {
             model_capability_id: resolved_function.model_name,
             function_id: resolved_function.definition.id.clone(),
-            execution_mode: execution_mode(&resolved_function.definition),
             model_callable: resolved_function.model_callable,
             function: resolved_function.definition,
         };
@@ -175,34 +164,7 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
     })
 }
 
-fn execution_mode(function: &FunctionDefinition) -> ExecutionMode {
-    let Some(mode) = function
-        .metadata
-        .get("capabilityExecutionMode")
-        .and_then(Value::as_object)
-    else {
-        return ExecutionMode::Parallel;
-    };
-    match mode.get("kind").and_then(Value::as_str) {
-        Some("serialized") => ExecutionMode::Serialized(
-            mode.get("group")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                .to_owned(),
-        ),
-        _ => ExecutionMode::Parallel,
-    }
-}
-
 fn model_capability_schema(target: &PrimitiveExecutionTarget) -> ModelCapability {
-    if let Some(capability) = target
-        .function
-        .metadata
-        .get("capabilitySchema")
-        .and_then(|value| serde_json::from_value::<ModelCapability>(value.clone()).ok())
-    {
-        return capability;
-    }
     ModelCapability {
         name: target.model_capability_id.clone(),
         description: target.function.description.clone(),
@@ -271,15 +233,34 @@ mod tests {
             "required": ["query"],
             "additionalProperties": false
         }));
-        definition.metadata = serde_json::json!({
-            "modelPrimitive": true,
-            "modelPrimitiveName": tool_name,
-            "workerDynamic": dynamic,
-            "workerId": worker_id,
-            "workerVersion": "v1",
-            "workerRouting": routing,
-            "workerProvenance": {"source": "test fixture"},
-            "workerSuccessEvidence": {"completedRuns": 3}
+        definition.model_tool = Some(crate::engine::ModelToolContract {
+            name: tool_name.to_owned(),
+            callable: true,
+            order: None,
+            group: None,
+            worker: dynamic.then(|| crate::engine::DirectWorkerToolContract {
+                worker_id: worker_id.to_owned(),
+                worker_name: tool_name.to_owned(),
+                worker_version: "v1".to_owned(),
+                updated_at: String::new(),
+                intents: routing
+                    .get("intents")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect(),
+                examples: routing
+                    .get("examples")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect(),
+                provenance: vec!["test fixture".to_owned()],
+            }),
         });
         host.register_function_for_setup(definition, Arc::new(InboxAttachHandler))
             .expect("worker function");
@@ -288,15 +269,13 @@ mod tests {
     #[tokio::test]
     async fn non_model_functions_are_not_projected() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        let mut old_builtin_like_function = FunctionDefinition::new(
+        let old_builtin_like_function = FunctionDefinition::new(
             FunctionId::new("demo::read").expect("function id"),
             WorkerId::new("demo").expect("worker id"),
             "Should not be provider-facing",
             crate::engine::FunctionVisibility::Public,
             EffectClass::PureRead,
         );
-        old_builtin_like_function.metadata =
-            serde_json::json!({"modelPrimitiveName": "old_filesystem_read"});
         host.register_function_for_setup(old_builtin_like_function, Arc::new(InboxAttachHandler))
             .expect("nonprimitive function");
 

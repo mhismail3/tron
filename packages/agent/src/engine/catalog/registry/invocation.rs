@@ -317,9 +317,10 @@ fn validate_advertised_surface(
         .advertised_worker_version()
         .map(ToOwned::to_owned);
     let actual_worker_version = function
-        .metadata
-        .get("workerVersion")
-        .and_then(Value::as_str)
+        .model_tool
+        .as_ref()
+        .and_then(|tool| tool.worker.as_ref())
+        .map(|worker| worker.worker_version.as_str())
         .map(ToOwned::to_owned);
     if expected_revision == function.revision && expected_worker_version == actual_worker_version {
         return Ok(());

@@ -60,6 +60,16 @@ tests do not maintain parallel name lists. Every fixed primitive rejects
 undeclared top-level input and output fields; closed response contracts keep
 provider observations small and mechanically dependable.
 
+Callable function definitions have no generic metadata map. A closed typed
+model-tool contract owns the model name, autonomy exposure, fixed group/order,
+and—only for direct workers—the worker id, immutable version, routing phrases,
+update time, and compact provenance. Stream-topic declarations stay in the
+setup-only domain registration record. This removes magic-key discovery and
+prevents unproduced flags or test fixtures from changing production routing.
+Calls emitted together by a provider execute concurrently. The dispatcher and
+individual implementations own actual queueing and concurrency ceilings; the
+agent loop has no metadata-driven serialized-wave mode.
+
 ### Primitive admission rule
 
 A fixed model tool is admitted only when it passes one of two tests:

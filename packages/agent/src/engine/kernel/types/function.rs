@@ -147,6 +147,43 @@ impl IdempotencyScope {
     }
 }
 
+/// Typed model-tool projection attached only to functions intended for a
+/// provider request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelToolContract {
+    /// Stable model-facing tool name.
+    pub name: String,
+    /// Whether autonomous mode currently exposes this tool.
+    pub callable: bool,
+    /// Stable ordering for fixed kernel tools. Dynamic workers have no fixed
+    /// order because relevance owns their placement.
+    pub order: Option<u16>,
+    /// Fixed primitive family shown by engine introspection.
+    pub group: Option<String>,
+    /// Direct-worker routing and retrieval data, when this function projects a
+    /// persistent worker.
+    pub worker: Option<DirectWorkerToolContract>,
+}
+
+/// Typed routing evidence for a persistent worker's direct model tool.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectWorkerToolContract {
+    /// Stable worker id.
+    pub worker_id: String,
+    /// Human-readable worker name.
+    pub worker_name: String,
+    /// Immutable active content version.
+    pub worker_version: String,
+    /// Canonical worker update timestamp.
+    pub updated_at: String,
+    /// Declared routing intents.
+    pub intents: Vec<String>,
+    /// Declared routing examples.
+    pub examples: Vec<String>,
+    /// Compact source-and-revision provenance strings.
+    pub provenance: Vec<String>,
+}
+
 /// Function catalog definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionDefinition {
@@ -172,8 +209,8 @@ pub struct FunctionDefinition {
     pub idempotency: Option<IdempotencyContract>,
     /// Health.
     pub health: FunctionHealth,
-    /// Escape-hatch metadata.
-    pub metadata: Value,
+    /// Optional typed provider-tool projection.
+    pub model_tool: Option<ModelToolContract>,
 }
 
 impl FunctionDefinition {
@@ -198,7 +235,7 @@ impl FunctionDefinition {
             risk_level: RiskLevel::Low,
             idempotency: None,
             health: FunctionHealth::Healthy,
-            metadata: Value::Null,
+            model_tool: None,
         }
     }
 

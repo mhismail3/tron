@@ -19,11 +19,30 @@ async fn sync_invocation_succeeds_and_records_revisions() {
 async fn invocation_rejects_a_function_surface_that_changed_after_advertisement() {
     let mut catalog = LiveCatalog::new();
     let mut first = read_function("alpha::read", "w1");
-    first.metadata = json!({"workerVersion":"worker-v1"});
+    first.model_tool = Some(crate::engine::ModelToolContract {
+        name: "worker_alpha".to_owned(),
+        callable: true,
+        order: None,
+        group: None,
+        worker: Some(crate::engine::DirectWorkerToolContract {
+            worker_id: "alpha".to_owned(),
+            worker_name: "Alpha".to_owned(),
+            worker_version: "worker-v1".to_owned(),
+            updated_at: String::new(),
+            intents: Vec::new(),
+            examples: Vec::new(),
+            provenance: Vec::new(),
+        }),
+    });
     let advertised_revision = catalog.register_function(first.clone(), handler()).unwrap();
 
     let mut second = first;
-    second.metadata = json!({"workerVersion":"worker-v2"});
+    second
+        .model_tool
+        .as_mut()
+        .and_then(|tool| tool.worker.as_mut())
+        .expect("worker tool")
+        .worker_version = "worker-v2".to_owned();
     let current_revision = catalog.register_function(second, handler()).unwrap();
     let invocation = Invocation::new_sync(
         fid("alpha::read"),

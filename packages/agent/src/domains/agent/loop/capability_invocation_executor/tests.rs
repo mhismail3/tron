@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::primitive_surface::{
-    ExecutionMode, PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
+    PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, RiskLevel, WorkerId,
@@ -133,7 +133,6 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         model_capability_id: "direct_test".to_owned(),
         function_id,
         function,
-        execution_mode: ExecutionMode::Parallel,
         model_callable: true,
     };
     let surface = ResolvedPrimitiveSurface {

@@ -48,8 +48,6 @@ pub struct CapabilitySpec {
     pub stream_topics: Vec<&'static str>,
     /// Discovery description supplied by the owning domain.
     pub description: Option<&'static str>,
-    /// Generic trace/result presentation hints supplied by the owning domain.
-    pub presentation_hints: Option<serde_json::Value>,
 }
 
 pub(crate) fn worker_id(value: &str) -> EngineResult<WorkerId> {

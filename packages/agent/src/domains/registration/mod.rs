@@ -18,6 +18,8 @@
 //! Domain method names are internal operation keys for service routing only.
 //! Only canonical function ids are registered. Every handler binding is owned
 //! by a domain contract; composition has no hidden-operation exceptions.
+//! Emitted stream topics remain setup-only registration data and never enter a
+//! callable function contract as generic metadata.
 
 pub(crate) mod bindings;
 pub(crate) mod catalog;
@@ -238,22 +240,7 @@ fn validate_function_stream_topics(
     function: &DomainFunctionRegistration,
     declared: &BTreeSet<&'static str>,
 ) -> EngineResult<()> {
-    let Some(topics) = function.definition.metadata.get("streamTopics") else {
-        return Ok(());
-    };
-    let Some(topics) = topics.as_array() else {
-        return Err(EngineError::PolicyViolation(format!(
-            "function {} streamTopics metadata must be an array",
-            function.definition.id.as_str()
-        )));
-    };
-    for topic in topics {
-        let Some(topic) = topic.as_str() else {
-            return Err(EngineError::PolicyViolation(format!(
-                "function {} streamTopics metadata contains a non-string topic",
-                function.definition.id.as_str()
-            )));
-        };
+    for topic in &function.stream_topics {
         if !declared.contains(topic) {
             return Err(EngineError::PolicyViolation(format!(
                 "function {} emits undeclared domain stream topic {topic} for component {}",
@@ -295,19 +282,19 @@ mod tests {
         declared_topics: &'static [&'static str],
         function_topics: Vec<&'static str>,
     ) -> DomainModule {
-        let mut definition = FunctionDefinition::new(
+        let definition = FunctionDefinition::new(
             FunctionId::new("test::op").expect("function id"),
             WorkerId::new("test").expect("worker id"),
             "test op",
             FunctionVisibility::Public,
             EffectClass::PureRead,
         );
-        definition.metadata = json!({ "streamTopics": function_topics });
         DomainModule {
             owner: WorkerId::new("test").expect("worker id"),
             functions: vec![DomainFunctionRegistration {
                 definition,
                 handler: Arc::new(NoopHandler),
+                stream_topics: function_topics,
             }],
             stream_topics: declared_topics,
         }

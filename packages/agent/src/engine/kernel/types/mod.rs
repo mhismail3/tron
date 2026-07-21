@@ -5,6 +5,8 @@
 //! two concrete idempotency extents. These are deliberately distinct types:
 //! catalog admission, duplicate suppression, and event delivery are unrelated
 //! runtime decisions and must not grow back into a generic authority scope.
+//! Provider projection is likewise a closed typed model/worker contract; a
+//! generic function-metadata escape hatch is intentionally absent.
 //! Persistent worker bundles and lifecycle state belong to
 //! `domains::worker_kernel`.
 
@@ -16,5 +18,6 @@ pub use catalog::{
 };
 pub use function::FunctionDefinition;
 pub use function::{
-    DedupeScope, EffectClass, IdempotencyContract, IdempotencyScope, ReplayBehavior, RiskLevel,
+    DedupeScope, DirectWorkerToolContract, EffectClass, IdempotencyContract, IdempotencyScope,
+    ModelToolContract, ReplayBehavior, RiskLevel,
 };

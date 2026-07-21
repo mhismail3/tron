@@ -12,8 +12,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, EngineHostHandle, EngineStateScope, FunctionDefinition,
-    FunctionHealth,
+    ActorContext, ActorId, ActorKind, DirectWorkerToolContract, EngineHostHandle, EngineStateScope,
+    FunctionDefinition, FunctionHealth,
 };
 
 const MAX_RELEVANT_WORKERS: usize = 12;
@@ -125,8 +125,8 @@ async fn worker_surface_evidence(
     let mut evidence = BTreeMap::new();
     for worker_id in functions
         .iter()
-        .filter(|function| metadata_bool(function, "workerDynamic").unwrap_or(false))
-        .filter_map(|function| function.metadata.get("workerId").and_then(Value::as_str))
+        .filter_map(direct_worker_contract)
+        .map(|worker| worker.worker_id.as_str())
     {
         if evidence.contains_key(worker_id) {
             continue;
@@ -231,10 +231,10 @@ pub(crate) async fn resolve_tool_surface(
     functions.sort_by_key(|function| {
         (
             function
-                .metadata
-                .get("capabilityOrder")
-                .and_then(Value::as_u64)
-                .unwrap_or(u64::MAX),
+                .model_tool
+                .as_ref()
+                .and_then(|tool| tool.order)
+                .unwrap_or(u16::MAX),
             function.id.as_str().to_owned(),
         )
     });
@@ -243,12 +243,13 @@ pub(crate) async fn resolve_tool_surface(
     let evidence = worker_surface_evidence(host, &functions).await?;
     let dynamic_documents = functions
         .iter()
-        .filter(|function| metadata_bool(function, "workerDynamic").unwrap_or(false))
         .filter_map(|function| {
-            retrieval_document(
+            let worker = direct_worker_contract(function)?;
+            Some(retrieval_document(
                 function,
-                evidence.get(function.metadata.get("workerId")?.as_str()?),
-            )
+                worker,
+                evidence.get(&worker.worker_id),
+            ))
         })
         .collect::<Vec<_>>();
     let available_worker_count = dynamic_documents.len();
@@ -256,13 +257,11 @@ pub(crate) async fn resolve_tool_surface(
         .iter()
         .filter(|promotion| {
             functions.iter().any(|function| {
-                function.metadata.get("workerId").and_then(Value::as_str)
-                    == Some(promotion.worker_id.as_str())
-                    && function
-                        .metadata
-                        .get("workerVersion")
-                        .and_then(Value::as_str)
-                        == promotion.worker_version.as_deref()
+                direct_worker_contract(function).is_some_and(|worker| {
+                    worker.worker_id == promotion.worker_id
+                        && Some(worker.worker_version.as_str())
+                            == promotion.worker_version.as_deref()
+                })
             })
         })
         .map(|promotion| promotion.worker_id.clone())
@@ -312,11 +311,8 @@ pub(crate) async fn resolve_tool_surface(
                 model_name,
                 function_id: function.id.as_str().to_owned(),
                 function_revision: function.revision.0,
-                worker_version: function
-                    .metadata
-                    .get("workerVersion")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned),
+                worker_version: direct_worker_contract(function)
+                    .map(|worker| worker.worker_version.clone()),
                 promoted: rank.promoted,
                 projected: selection_reason.is_some(),
                 selection_reason,
@@ -333,7 +329,8 @@ pub(crate) async fn resolve_tool_surface(
         if !is_provider_primitive(&function) || function.request_schema.is_none() {
             continue;
         }
-        let is_dynamic = metadata_bool(&function, "workerDynamic").unwrap_or(false);
+        let direct_worker = direct_worker_contract(&function).cloned();
+        let is_dynamic = direct_worker.is_some();
         let selection_reason = if is_dynamic {
             let Some(reason) = selected_dynamic.get(function.id.as_str()) else {
                 continue;
@@ -345,7 +342,10 @@ pub(crate) async fn resolve_tool_surface(
         let Some(model_name) = model_tool_name(&function) else {
             continue;
         };
-        let model_callable = metadata_bool(&function, "modelPrimitive").unwrap_or(false);
+        let model_callable = function
+            .model_tool
+            .as_ref()
+            .is_some_and(|tool| tool.callable);
         if !model_callable {
             continue;
         }
@@ -369,24 +369,16 @@ pub(crate) async fn resolve_tool_surface(
             risk: function.risk_level.as_str().to_owned(),
             health: serialized_key(&function.health),
             exposed: true,
-            worker_id: is_dynamic.then(|| {
-                function
-                    .metadata
-                    .get("workerId")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned()
-            }),
-            worker_version: function
-                .metadata
-                .get("workerVersion")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
+            worker_id: direct_worker
+                .as_ref()
+                .map(|worker| worker.worker_id.clone()),
+            worker_version: direct_worker
+                .as_ref()
+                .map(|worker| worker.worker_version.clone()),
             primitive_group: function
-                .metadata
-                .get("modelPrimitiveGroup")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
+                .model_tool
+                .as_ref()
+                .and_then(|tool| tool.group.clone()),
             selection_reason: selection_reason.to_owned(),
         });
         resolved.push(ResolvedToolFunction {
@@ -478,95 +470,39 @@ fn surface_hash(tools: &[SurfaceToolSnapshot]) -> Result<String, String> {
 
 fn retrieval_document(
     function: &FunctionDefinition,
+    worker: &DirectWorkerToolContract,
     evidence: Option<&Value>,
-) -> Option<super::retrieval::WorkerRetrievalDocument> {
-    let worker_id = function.metadata.get("workerId")?.as_str()?.to_owned();
-    let name = function
-        .metadata
-        .get("workerName")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .or_else(|| model_tool_name(function))
-        .unwrap_or_default();
-    let routing = function.metadata.get("workerRouting");
-    let intents = routing
-        .and_then(|routing| routing.get("intents"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(ToOwned::to_owned)
-        .collect();
-    let examples = routing
-        .and_then(|routing| routing.get("examples"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(ToOwned::to_owned)
-        .collect();
-    let provenance = function
-        .metadata
-        .get("workerProvenance")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|source| {
-            let name = source.get("source")?.as_str()?;
-            Some(
-                source
-                    .get("revision")
-                    .and_then(Value::as_str)
-                    .map_or_else(|| name.to_owned(), |revision| format!("{name}@{revision}")),
-            )
-        })
-        .collect();
-    Some(super::retrieval::WorkerRetrievalDocument {
+) -> super::retrieval::WorkerRetrievalDocument {
+    super::retrieval::WorkerRetrievalDocument {
         key: function.id.as_str().to_owned(),
-        worker_id,
-        name,
+        worker_id: worker.worker_id.clone(),
+        name: worker.worker_name.clone(),
         description: function.description.clone(),
-        intents,
-        examples,
-        provenance,
+        intents: worker.intents.clone(),
+        examples: worker.examples.clone(),
+        provenance: worker.provenance.clone(),
         completed_runs: evidence
             .and_then(|evidence| evidence.pointer("/successEvidence/completedRuns"))
             .and_then(Value::as_u64)
-            .or_else(|| {
-                function
-                    .metadata
-                    .pointer("/workerSuccessEvidence/completedRuns")
-                    .and_then(Value::as_u64)
-            })
             .unwrap_or(0),
         updated_at: evidence
             .and_then(|evidence| evidence.get("updatedAt"))
             .and_then(Value::as_str)
-            .or_else(|| {
-                function
-                    .metadata
-                    .get("workerUpdatedAt")
-                    .and_then(Value::as_str)
-            })
-            .unwrap_or_default()
+            .unwrap_or(&worker.updated_at)
             .to_owned(),
-    })
+    }
 }
 
 fn is_provider_primitive(function: &FunctionDefinition) -> bool {
-    metadata_bool(function, "modelPrimitive").unwrap_or(false)
+    function.model_tool.is_some()
 }
 
 fn model_tool_name(function: &FunctionDefinition) -> Option<String> {
-    function
-        .metadata
-        .get("modelPrimitiveName")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
+    function.model_tool.as_ref().map(|tool| tool.name.clone())
 }
 
-fn metadata_bool(function: &FunctionDefinition, key: &str) -> Option<bool> {
-    function.metadata.get(key).and_then(Value::as_bool)
+fn direct_worker_contract(function: &FunctionDefinition) -> Option<&DirectWorkerToolContract> {
+    function.model_tool.as_ref()?.worker.as_ref()
 }
 
 #[cfg(test)]

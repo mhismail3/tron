@@ -471,10 +471,10 @@ async fn execute_capability_primitive_via_engine(
     let base_context = CausalContext::new(actor_id, ActorKind::Agent, trace_id.clone());
     let worker_version = target
         .function
-        .metadata
-        .get("workerVersion")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+        .model_tool
+        .as_ref()
+        .and_then(|tool| tool.worker.as_ref())
+        .map(|worker| worker.worker_version.clone());
     let mut causal_context = with_agent_working_directory(base_context, &working_directory)
         .with_advertised_function(target.function.revision, worker_version)
         .with_trigger_depth(worker_causal_depth)

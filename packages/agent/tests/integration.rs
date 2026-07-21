@@ -483,8 +483,9 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
         .await;
     let model_tools = functions
         .iter()
-        .filter(|function| function.metadata["modelPrimitive"] == true)
-        .filter_map(|function| function.metadata["modelPrimitiveName"].as_str())
+        .filter_map(|function| function.model_tool.as_ref())
+        .filter(|tool| tool.callable)
+        .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>();
     assert!(model_tools.contains(&"worker_upsert"), "{model_tools:?}");
     assert!(model_tools.contains(&"worker_list"), "{model_tools:?}");
