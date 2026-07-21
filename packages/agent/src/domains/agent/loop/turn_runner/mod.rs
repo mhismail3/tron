@@ -4,7 +4,10 @@
 //! the model. Engine/UI/audit metadata stays in `details`, but model-facing
 //! `execute` observations are projected into result text by
 //! `capability_invocations::projection` so every provider can reason about
-//! direct primitive results without gaining a second capability API.
+//! direct primitive results without gaining a second capability API. Every
+//! provider turn resolves its tool surface from a bounded evolving intent query
+//! containing the current user request, visible assistant plan, tool names and
+//! arguments, and text results; binary data and hidden thinking are excluded.
 
 mod capability_invocations;
 mod failure;
@@ -35,7 +38,7 @@ use self::persistence::{
     emit_response_complete, emit_turn_end, emit_turn_start, persist_completed_assistant_message,
     persist_model_provider_request_audit,
 };
-use self::turn_context::build_turn_context;
+use self::turn_context::{build_turn_context, worker_relevance_query};
 use crate::domains::agent::r#loop::errors::StopReason;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
@@ -308,16 +311,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         };
     }
 
-    let relevance_query = context_manager
-        .messages_slice()
-        .iter()
-        .rev()
-        .find_map(|message| match message {
-            crate::shared::protocol::messages::Message::User { content, .. } => {
-                serde_json::to_string(content).ok()
-            }
-            _ => None,
-        });
+    let relevance_query = worker_relevance_query(context_manager.messages_slice());
     let primitive_surface = match primitive_surface::resolve_provider_primitive_surface_for_query(
         engine_host,
         session_id,

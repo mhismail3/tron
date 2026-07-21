@@ -435,7 +435,10 @@ dynamic provider surface selects at most 12 workers: recent explicit
 promotions enter first, then relevant/default candidates fill remaining slots.
 Promotion records are version-bound, recency-ordered, and retained to a bounded
 50 per session, preventing stale worker-id revival and unbounded provider tool
-growth. The resolver records the
+growth. Each internal provider turn reranks against a bounded evolving intent
+query made from the current user request plus visible assistant plan, direct
+tool call, and text-result hints; it excludes binary content and hidden
+thinking. The resolver records the
 exact fixed functions, selected worker versions, selection reasons, and a stable
 surface hash. The model receives a compact revision/count/projected-worker
 primer in addition to native direct tool schemas. A `worker_discover` result
