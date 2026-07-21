@@ -11,9 +11,9 @@ use super::super::types::{WorkerBundle, WorkerState, WorkerTrigger};
 use super::store::validate_bundle;
 
 const REBUILD_FORMAT: &str = "tron.worker_index_rebuild.v1";
-const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v4";
-const IMPORT_MARKER_KEY: &str = "worker_first_retirement_v4";
-const IMPORT_REPORT_FILE: &str = "legacy-import-report.v4.json";
+const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v5";
+const IMPORT_MARKER_KEY: &str = "worker_first_retirement_v5";
+const IMPORT_REPORT_FILE: &str = "legacy-import-report.v5.json";
 const RETIRED_TABLES: &[&str] = &[
     "engine_resource_events",
     "engine_resource_links",
@@ -57,6 +57,7 @@ struct ImportReport {
     unconvertible_records: Vec<Value>,
     invocation_ledger_rebuilt: bool,
     catalog_changes_retired: usize,
+    stream_subscriptions_retired: usize,
     idempotency_rows_rewritten: usize,
     payload_refs_removed: usize,
     payload_blobs_removed: usize,
@@ -489,7 +490,7 @@ fn prepare_worker_first_retirement_with_fault(
         collect_legacy_candidates(&connection, &root, &imported_at)?;
     let mut report = ImportReport {
         format: IMPORT_FORMAT.to_owned(),
-        schema_version: 4,
+        schema_version: 5,
         imported_at,
         source_database: source.display().to_string(),
         source_sha256,
@@ -500,6 +501,7 @@ fn prepare_worker_first_retirement_with_fault(
         unconvertible_records,
         invocation_ledger_rebuilt: false,
         catalog_changes_retired: 0,
+        stream_subscriptions_retired: 0,
         idempotency_rows_rewritten: 0,
         payload_refs_removed: 0,
         payload_blobs_removed: 0,
@@ -521,6 +523,7 @@ fn prepare_worker_first_retirement_with_fault(
     report.invocation_ledger_rebuilt =
         crate::engine::retire_legacy_invocation_columns(&transaction)?;
     report.catalog_changes_retired = retire_legacy_catalog_changes(&transaction)?;
+    report.stream_subscriptions_retired = retire_legacy_stream_subscriptions(&transaction)?;
     let cleanup = crate::shared::storage::retire_payload_refs_by_owner_kind(
         &transaction,
         &[
@@ -623,6 +626,24 @@ fn retire_legacy_catalog_changes(transaction: &rusqlite::Transaction<'_>) -> Res
             [],
         )
         .map_err(|error| format!("retire legacy trigger catalog history: {error}"))
+}
+
+fn retire_legacy_stream_subscriptions(
+    transaction: &rusqlite::Transaction<'_>,
+) -> Result<usize, String> {
+    if !table_exists(transaction, "engine_stream_subscriptions")? {
+        return Ok(0);
+    }
+    transaction
+        .execute(
+            "UPDATE engine_stream_subscriptions SET active=0
+             WHERE active=1 AND (
+                subscription_id LIKE 'engine-ws:%'
+                OR subscription_id LIKE 'engine-ws-stateless:%'
+             )",
+            [],
+        )
+        .map_err(|error| format!("retire legacy transport stream subscriptions: {error}"))
 }
 
 fn collect_legacy_candidates(
@@ -901,6 +922,24 @@ fn verify_retired_schema(connection: &Connection) -> Result<(), String> {
         if trigger_changes != 0 {
             return Err(format!(
                 "{trigger_changes} retired trigger catalog changes remain"
+            ));
+        }
+    }
+    if table_exists(connection, "engine_stream_subscriptions")? {
+        let active_transport_subscriptions: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM engine_stream_subscriptions
+                 WHERE active=1 AND (
+                    subscription_id LIKE 'engine-ws:%'
+                    OR subscription_id LIKE 'engine-ws-stateless:%'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("verify retired transport subscriptions: {error}"))?;
+        if active_transport_subscriptions != 0 {
+            return Err(format!(
+                "{active_transport_subscriptions} retired transport subscriptions remain active"
             ));
         }
     }

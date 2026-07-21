@@ -4,8 +4,10 @@
 //! backend owns rebuildable routing indexes plus durable operational ledgers.
 //! Database and snapshot implementation types stay private to this module.
 //! Retirement also deletes catalog-change rows for the removed generic trigger
-//! registry; current worker/function history remains as observational evidence,
-//! and no compatibility decoder can revive the superseded trigger plane.
+//! registry and deactivates connection rows from the removed durable WebSocket
+//! subscription design. Current worker/function history and caller-owned
+//! durable subscriptions remain as evidence; no steady-state compatibility
+//! adapter can revive either superseded plane.
 //!
 //! Callers use [`WorkerStore`] and the narrow startup/offline snapshot
 //! functions re-exported here.

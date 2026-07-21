@@ -201,10 +201,11 @@ fn assert_migrated_state(database: &Path, root: &Path) {
     let report: Value =
         serde_json::from_slice(&fs::read(root.join(IMPORT_REPORT_FILE)).unwrap()).unwrap();
     assert_eq!(report["format"], IMPORT_FORMAT);
-    assert_eq!(report["schemaVersion"], 4);
+    assert_eq!(report["schemaVersion"], 5);
     assert_eq!(report["sourceCounts"]["resources"], 2);
     assert_eq!(report["sourceCounts"]["invocations"], 1);
     assert_eq!(report["catalogChangesRetired"], 2);
+    assert_eq!(report["streamSubscriptionsRetired"], 2);
     assert_eq!(report["importedCandidates"].as_array().unwrap().len(), 1);
     assert_eq!(report["unconvertibleRecords"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -258,6 +259,23 @@ fn assert_migrated_state(database: &Path, root: &Path) {
     assert_eq!(
         scalar_text(&connection, "SELECT kind_json FROM engine_catalog_changes"),
         "\"FunctionRegistered\""
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM engine_stream_subscriptions WHERE active=0",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        scalar_text(
+            &connection,
+            "SELECT subscription_id FROM engine_stream_subscriptions WHERE active=1"
+        ),
+        "caller-durable-subscription"
     );
     drop(connection);
     let ledger =
@@ -323,6 +341,10 @@ CREATE TABLE engine_idempotency_entries(
 CREATE TABLE retained_sessions(id TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE engine_state_entries(id TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE engine_stream_events(id TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE engine_stream_subscriptions(
+ subscription_id TEXT PRIMARY KEY,topic TEXT NOT NULL,cursor INTEGER NOT NULL,
+ visibility TEXT NOT NULL,session_id TEXT,workspace_id TEXT,active INTEGER NOT NULL,
+ created_at TEXT NOT NULL);
 INSERT INTO engine_resource_type_definitions VALUES('worker_package');
 INSERT INTO engine_resource_type_definitions VALUES('module_proposal');
 INSERT INTO engine_resource_links VALUES('link-one');
@@ -345,5 +367,14 @@ INSERT INTO engine_queue_items VALUES('queue-one');
 INSERT INTO retained_sessions VALUES('session-one','retained-session');
 INSERT INTO engine_state_entries VALUES('state-one','retained-state');
 INSERT INTO engine_stream_events VALUES('stream-one','retained-stream');
+INSERT INTO engine_stream_subscriptions VALUES(
+ 'engine-ws:019f83d7-a536-7c00-8000-000000000001:019f83d7-a536-7c00-8000-000000000002',
+ 'events.session',10,'system',NULL,NULL,1,'2026-01-01T00:00:00Z');
+INSERT INTO engine_stream_subscriptions VALUES(
+ 'engine-ws-stateless:019f83d7-a536-7c00-8000-000000000003:019f83d7-a536-7c00-8000-000000000004',
+ 'events.session',11,'system',NULL,NULL,1,'2026-01-01T00:00:00Z');
+INSERT INTO engine_stream_subscriptions VALUES(
+ 'caller-durable-subscription','events.session',12,'system',NULL,NULL,1,
+ '2026-01-01T00:00:00Z');
 INSERT INTO engine_idempotency_entries VALUES('legacy::write','session','session-one','key-one','fingerprint',1,'"Compensate"','"Completed"','invocation-one','invocation-one',NULL,NULL,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
 "#;

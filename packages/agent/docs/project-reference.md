@@ -503,7 +503,10 @@ compatibility adapter, nullable permission observation, or permissive legacy
 parser in steady-state execution. The same transaction removes catalog-change
 rows owned by the deleted generic trigger registry while retaining current
 worker/function catalog evidence; startup does not decode obsolete trigger
-variants merely to discard them later.
+variants merely to discard them later. It also deactivates transport-owned
+subscription rows from the former durable WebSocket design. Current sockets
+keep their cursors in connection-local state, so steady-state startup has no
+legacy subscription scanner.
 
 There are no local operation claims, resource selectors, synthetic
 grants, or agent-kind rejections. Executable workers can change local files and

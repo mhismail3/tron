@@ -106,16 +106,6 @@ impl InMemoryEngineStreamStore {
         Ok(was_active)
     }
 
-    /// List ids for active subscriptions so their owning runtime can reconcile
-    /// its own ephemeral namespace without teaching the store owner semantics.
-    pub(crate) fn active_subscription_ids(&self) -> Vec<String> {
-        self.subscriptions
-            .iter()
-            .filter(|(_, subscription)| subscription.active)
-            .map(|(subscription_id, _)| subscription_id.clone())
-            .collect()
-    }
-
     /// Poll a subscription after a cursor.
     pub fn poll(
         &self,

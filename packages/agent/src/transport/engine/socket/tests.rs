@@ -42,75 +42,6 @@ fn client_lease_owns_exact_registry_lifetime() {
     assert_eq!(clients.connection_count(), 0);
 }
 
-#[tokio::test]
-async fn legacy_socket_reconciliation_is_exact_and_idempotent() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("tron.sqlite");
-    let host = EngineHostHandle::open_sqlite(&path).unwrap();
-    let client_id = uuid::Uuid::now_v7().to_string();
-    let instance_id = uuid::Uuid::now_v7().to_string();
-    let stateless_client_id = uuid::Uuid::now_v7().to_string();
-    let stateless_instance_id = uuid::Uuid::now_v7().to_string();
-    let legacy = format!("engine-ws:{client_id}:{instance_id}");
-    let legacy_stateless =
-        format!("engine-ws-stateless:{stateless_client_id}:{stateless_instance_id}");
-    let retained = [
-        "caller-durable-subscription".to_owned(),
-        format!("engine-wsx:{client_id}:{instance_id}"),
-        format!("{legacy}:extra"),
-        format!("engine-ws:{}:{instance_id}", client_id.to_uppercase()),
-        format!("engine-ws:{}:{instance_id}", client_id.replace('-', "")),
-        "engine-ws:550e8400-e29b-41d4-a716-446655440000:550e8400-e29b-41d4-a716-446655440001"
-            .to_owned(),
-    ];
-
-    for (index, subscription_id) in std::iter::once(legacy.clone())
-        .chain(std::iter::once(legacy_stateless.clone()))
-        .chain(retained.iter().cloned())
-        .enumerate()
-    {
-        host.subscribe_stream(
-            subscription_id,
-            "events.session".to_owned(),
-            StreamCursor(index as u64 + 10),
-            VisibilityScope::System,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    }
-
-    assert_eq!(retire_legacy_socket_subscriptions(&host).await.unwrap(), 2);
-    assert_eq!(retire_legacy_socket_subscriptions(&host).await.unwrap(), 0);
-
-    let actor = StreamActorScope::admin();
-    for subscription_id in [&legacy, &legacy_stateless] {
-        assert!(matches!(
-            host.poll_stream(subscription_id, None, 1, &actor).await,
-            Err(EngineError::PolicyViolation(message)) if message.contains("inactive")
-        ));
-    }
-    for subscription_id in &retained {
-        host.poll_stream(subscription_id, None, 1, &actor)
-            .await
-            .unwrap();
-    }
-
-    let conn = rusqlite::Connection::open(&path).unwrap();
-    for (subscription_id, expected_cursor) in [(&legacy, 10_i64), (&legacy_stateless, 11_i64)] {
-        let (active, cursor): (i64, i64) = conn
-            .query_row(
-                "SELECT active, cursor FROM engine_stream_subscriptions WHERE subscription_id = ?1",
-                [subscription_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(active, 0);
-        assert_eq!(cursor, expected_cursor);
-    }
-}
-
 #[tokio::test(start_paused = true)]
 async fn child_task_drain_aborts_a_stalled_socket_task() {
     let mut child_tasks = JoinSet::new();
@@ -422,15 +353,6 @@ async fn topic_poll_reads_without_creating_subscription_state() {
         Some("agent.ready")
     );
     assert!(session.subscriptions.lock().await.is_empty());
-    assert!(
-        session
-            .ctx
-            .engine_host
-            .active_stream_subscription_ids()
-            .await
-            .unwrap()
-            .is_empty()
-    );
 }
 
 #[tokio::test]

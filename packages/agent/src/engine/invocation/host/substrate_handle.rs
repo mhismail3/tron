@@ -150,23 +150,4 @@ impl EngineHostHandle {
             .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
             .poll_topic(topic, after, limit, actor)
     }
-
-    /// Unsubscribe directly from the engine stream store.
-    pub async fn unsubscribe_stream(&self, subscription_id: &str) -> Result<bool> {
-        let store = self.inner.lock().await.primitives.streams.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .unsubscribe(subscription_id)
-    }
-
-    /// List active subscription ids for runtime-owned legacy reconciliation.
-    /// The transport owner decides which exact ids belong to its namespace.
-    pub(crate) async fn active_stream_subscription_ids(&self) -> Result<Vec<String>> {
-        let store = self.inner.lock().await.primitives.streams.clone();
-        store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .active_subscription_ids()
-    }
 }

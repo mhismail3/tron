@@ -73,13 +73,6 @@ impl StreamStoreBackend {
         }
     }
 
-    pub(in crate::engine) fn active_subscription_ids(&self) -> Result<Vec<String>> {
-        match self {
-            Self::InMemory(store) => Ok(store.active_subscription_ids()),
-            Self::Sqlite(store) => store.active_subscription_ids(),
-        }
-    }
-
     pub(in crate::engine) fn poll(
         &self,
         subscription_id: &str,

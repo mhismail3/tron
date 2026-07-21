@@ -3,8 +3,7 @@
 //! The thin `main.rs` entry point handles process-level dispatch. This module
 //! owns long-running server initialization so bootstrap, snapshot-first legacy
 //! settings/database retirement, service construction, shutdown registration,
-//! legacy transport-state reconciliation, and background task wiring stay
-//! below one audited boundary.
+//! and background task wiring stay below one audited boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -426,16 +425,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;
-    let retired_socket_subscriptions =
-        crate::transport::engine::socket::retire_legacy_socket_subscriptions(&engine_host)
-            .await
-            .context("Failed to reconcile legacy engine WebSocket subscriptions")?;
-    if retired_socket_subscriptions > 0 {
-        tracing::info!(
-            retired = retired_socket_subscriptions,
-            "retired legacy durable engine WebSocket subscriptions"
-        );
-    }
 
     // Phase 3: Core services (orchestrator, providers, primitive agent deps)
     let services = init_services(event_store, &settings).await?;
