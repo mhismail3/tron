@@ -37,9 +37,7 @@ use crate::shared::server::context::ServerRuntimeContext;
 use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
-use crate::domains::{
-    agent, auth, blob, filesystem, logs, message, model, session, settings, system, worker_kernel,
-};
+use crate::domains::{agent, auth, filesystem, model, product, session, settings, worker_kernel};
 
 #[must_use = "activate after transport-trigger registration"]
 pub(crate) struct DomainLifecycleActivation {
@@ -122,15 +120,15 @@ fn compose_domains(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition
     let worker_kernel_runtime = worker_kernel_registration.runtime.clone();
     let engine_functions = worker_kernel_registration.engine_functions;
     let mut functions = Vec::new();
-    functions.extend(system::function_registrations(&deps)?);
+    functions.extend(product::system::function_registrations(&deps)?);
     functions.extend(worker_kernel_registration.functions);
     functions.extend(filesystem::function_registrations(&deps)?);
-    functions.extend(blob::function_registrations(&deps)?);
-    functions.extend(message::function_registrations(&deps)?);
+    functions.extend(product::blob::function_registrations(&deps)?);
+    functions.extend(product::message::function_registrations(&deps)?);
     functions.extend(settings::function_registrations(&deps)?);
     functions.extend(auth::function_registrations(&deps)?);
     functions.extend(agent::function_registrations(&deps)?);
-    functions.extend(logs::function_registrations(&deps)?);
+    functions.extend(product::logs::function_registrations(&deps)?);
     functions.extend(session::function_registrations(&deps)?);
     functions.extend(model::function_registrations(&deps)?);
     validate_domain_composition(&functions)?;

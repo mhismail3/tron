@@ -1,4 +1,4 @@
-//! logs domain worker.
+//! Authenticated client diagnostics ingestion and reads.
 //!
 //! This module owns the small logs namespace contract and handler binding.
 //! Durable log storage is accessed through the event-store facade so request

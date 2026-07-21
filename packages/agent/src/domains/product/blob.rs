@@ -1,4 +1,4 @@
-//! blob domain worker.
+//! Authenticated blob transport for client attachments.
 //!
 //! This module owns the small blob namespace end-to-end: contract metadata,
 //! handler binding, and operation execution. Handlers borrow the shared event

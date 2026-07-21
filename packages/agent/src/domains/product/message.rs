@@ -1,4 +1,4 @@
-//! message domain worker.
+//! Authenticated message mutation for conversation clients.
 //!
 //! This module owns the small message namespace end-to-end: contract metadata,
 //! registration dependencies, handler binding, and operation execution.

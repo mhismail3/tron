@@ -10,9 +10,9 @@
 //! | Domain | Fixed responsibility |
 //! |--------|----------------------|
 //! | `agent`, `model` | Model turns and provider protocol |
-//! | `session`, `message`, `logs` | Durable conversation and event truth |
-//! | `auth`, `settings`, `system` | Authenticated product configuration |
-//! | `blob` | Client attachment infrastructure |
+//! | `session` | Durable conversation and event truth |
+//! | `auth`, `settings` | Authenticated product configuration |
+//! | `product` | Fixed client-only blob, logs, message, and system operations |
 //! | `filesystem` | Native workspace browsing used by clients |
 //! | `worker_kernel` | Worker bundles, runners, dispatch, inbox, and core proposals |
 //! | `registration` | Composition validation for this fixed set |
@@ -28,14 +28,11 @@
 
 pub mod agent;
 pub mod auth;
-pub mod blob;
 pub mod filesystem;
-pub mod logs;
-pub mod message;
 pub mod model;
+pub(crate) mod product;
 pub mod registration;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;
-pub mod system;
 pub mod worker_kernel;

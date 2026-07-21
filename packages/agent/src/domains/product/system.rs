@@ -1,4 +1,4 @@
-//! system domain worker.
+//! Authenticated server compatibility and status operations.
 //!
 //! This module owns the small system namespace end-to-end: contract metadata,
 //! registration dependencies, handler binding, and operation execution.
