@@ -4,25 +4,16 @@
 //! source of truth for delayed work. Client event delivery is handled directly
 //! by `/engine` subscriptions over the stream primitive.
 //! Runtime stream projection writes retained agent, auth/settings, session,
-//! queue, and catalog changes into engine streams. The heartbeat service cleans
-//! local external-worker capabilities and cancels their owning sockets so the
-//! live catalog reflects what can actually run. External-worker WebSocket
-//! writers use bounded outbound queues; callers see transport failures instead
-//! of unbounded buffering when a worker stops draining messages.
-
-use std::time::Duration;
+//! queue, and catalog changes into engine streams. Persistent worker execution
+//! and supervision live in the worker kernel rather than a parallel transport
+//! lifecycle.
 
 use crate::app::bootstrap::server::TronServer;
 use queue_drainer::EngineQueueDrainerService;
-use worker_heartbeat::ExternalWorkerHeartbeatService;
 
-pub mod external_workers;
 mod queue_drainer;
 pub mod setup;
 pub mod streams;
-mod worker_heartbeat;
-
-const EXTERNAL_WORKER_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Runtime-owned engine services.
 pub struct EngineRuntimeServices;
@@ -41,12 +32,5 @@ impl EngineRuntimeServices {
             );
             shutdown.register_task(tokio::spawn(service.run()));
         }
-
-        let heartbeat = ExternalWorkerHeartbeatService::new(
-            server.external_workers().clone(),
-            shutdown.token(),
-            EXTERNAL_WORKER_HEARTBEAT_TIMEOUT,
-        );
-        shutdown.register_task(tokio::spawn(heartbeat.run()));
     }
 }

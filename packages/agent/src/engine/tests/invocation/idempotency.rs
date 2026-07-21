@@ -42,7 +42,6 @@ async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload
     let mut host = EngineHost::new().unwrap();
 
     for (function_id, scope) in [
-        ("worker::disconnect", "worker.write"),
         ("ui::submit_action", "ui.write"),
         ("engine::promote", "engine.promote.workspace"),
         ("queue::enqueue", "queue.write"),
@@ -88,11 +87,10 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
         .collect::<Vec<_>>();
     assert!(
         missing.is_empty(),
-        "mutating worker/ui/promotion/queue/resource surfaces missing idempotency: {missing:?}"
+        "mutating ui/promotion/queue/resource surfaces missing idempotency: {missing:?}"
     );
 
     for required in [
-        "worker::disconnect",
         "ui::submit_action",
         "engine::promote",
         "queue::enqueue",
@@ -115,7 +113,6 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
 
 fn hmh_f1_surface(function_id: &str) -> bool {
     function_id == "engine::promote"
-        || function_id.starts_with("worker::")
         || function_id.starts_with("ui::")
         || function_id.starts_with("queue::")
         || function_id.starts_with("resource::")

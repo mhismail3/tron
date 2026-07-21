@@ -96,12 +96,6 @@ enum PreparedDelegatedInvocationDecision {
     Finished(Box<InvocationResult>),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum InvocationRecordingPolicy {
-    RecordAll,
-    SkipRetryableQueueDeliveryFailure,
-}
-
 pub(in crate::engine) struct QueueTargetInvocation {
     pub result: InvocationResult,
     pub recorded_invocation: bool,

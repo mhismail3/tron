@@ -39,13 +39,10 @@ pub(in crate::engine::tests) use crate::engine::kernel::types::{
     ReplayBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
-pub(in crate::engine::tests) use crate::engine::runtime::external_workers as external;
 pub(in crate::engine::tests) use crate::engine::{
-    CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHostHandle, EngineQueueDrainer,
-    EngineResourceLeaseStatus, EngineTriggerRuntime, PublishStreamEvent, RegisterFunction,
-    RegisterTrigger, StreamActorScope, StreamCursor, TriggerDispatchRequest, WorkerDisconnect,
-    WorkerHello, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleState, WorkerProtocolMessage,
-    WorkerRegistrationMode, WorkerStreamPublish,
+    CatalogWatchRequest, EngineHostHandle, EngineQueueDrainer, EngineResourceLeaseStatus,
+    EngineTriggerRuntime, PublishStreamEvent, StreamActorScope, StreamCursor,
+    TriggerDispatchRequest,
 };
 
 pub(in crate::engine::tests) fn wid(value: &str) -> WorkerId {
@@ -86,40 +83,6 @@ pub(in crate::engine::tests) fn read_function(id: &str, owner: &str) -> Function
         VisibilityScope::Agent,
         EffectClass::PureRead,
     )
-}
-
-pub(in crate::engine::tests) fn external_visible_function(
-    mut function: FunctionDefinition,
-) -> FunctionDefinition {
-    let namespace = function.id.namespace().to_owned();
-    let local_name = function
-        .id
-        .as_str()
-        .split_once("::")
-        .map(|(_, local)| local)
-        .unwrap_or(function.id.as_str())
-        .to_owned();
-    function.request_schema = Some(json!({
-        "type": "object",
-        "additionalProperties": true
-    }));
-    function.response_schema = Some(json!({
-        "type": "object",
-        "additionalProperties": true
-    }));
-    function.metadata = json!({
-        "contractId": function.id.as_str(),
-        "implementationId": format!("session_generated.{namespace}.{local_name}"),
-        "pluginId": format!("session_generated.{}", function.owner_worker.as_str()),
-        "trustTier": "session_generated",
-        "contextPrimerLevel": "catalog",
-        "runtimeRequirements": {
-            "workerKind": "external",
-            "deliveryModes": ["Sync"]
-        },
-        "examples": []
-    });
-    function
 }
 
 pub(in crate::engine::tests) fn write_function(id: &str, owner: &str) -> FunctionDefinition {
@@ -252,33 +215,6 @@ impl EngineLedgerStore for ReserveFailingLedger {
         Ok(Vec::new())
     }
 
-    fn upsert_durable_worker_definition(&mut self, _definition: &WorkerDefinition) -> Result<()> {
-        Ok(())
-    }
-
-    fn remove_durable_worker_definition(&mut self, _worker_id: &WorkerId) -> Result<()> {
-        Ok(())
-    }
-
-    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
-        Ok(Vec::new())
-    }
-
-    fn upsert_durable_function_definition(
-        &mut self,
-        _definition: &FunctionDefinition,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    fn remove_durable_function_definition(&mut self, _function_id: &FunctionId) -> Result<()> {
-        Ok(())
-    }
-
-    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
-        Ok(Vec::new())
-    }
-
     fn append_invocation(
         &mut self,
         _record: &crate::engine::invocation::model::InvocationRecord,
@@ -343,33 +279,6 @@ impl EngineLedgerStore for CatalogChangeFailingLedger {
         _revision: CatalogRevision,
         _limit: usize,
     ) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
-        Ok(Vec::new())
-    }
-
-    fn upsert_durable_worker_definition(&mut self, _definition: &WorkerDefinition) -> Result<()> {
-        Ok(())
-    }
-
-    fn remove_durable_worker_definition(&mut self, _worker_id: &WorkerId) -> Result<()> {
-        Ok(())
-    }
-
-    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
-        Ok(Vec::new())
-    }
-
-    fn upsert_durable_function_definition(
-        &mut self,
-        _definition: &FunctionDefinition,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    fn remove_durable_function_definition(&mut self, _function_id: &FunctionId) -> Result<()> {
-        Ok(())
-    }
-
-    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
         Ok(Vec::new())
     }
 

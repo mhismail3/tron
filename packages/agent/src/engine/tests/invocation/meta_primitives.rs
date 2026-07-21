@@ -134,7 +134,7 @@ async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
 }
 
 #[tokio::test]
-async fn primitive_catalog_and_worker_read_functions_share_engine_path() {
+async fn primitive_catalog_read_function_reports_bootstrapped_engine_catalog() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let system_context = |trace_id: &str, scope: &str| {
         CausalContext::new(
@@ -159,23 +159,7 @@ async fn primitive_catalog_and_worker_read_functions_share_engine_path() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|function| function["id"] == "worker::list")
-    );
-
-    let workers = handle
-        .invoke(host_invocation(
-            "worker::list",
-            json!({}),
-            system_context("primitive-trace", "worker.read"),
-        ))
-        .await;
-    assert_eq!(workers.error, None);
-    assert!(
-        workers.value.as_ref().unwrap()["workers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|worker| worker["id"] == "worker")
+            .any(|function| function["id"] == "catalog::list")
     );
 }
 

@@ -142,8 +142,6 @@ fn rust_engine_subsystem_roots_are_owned() {
         "packages/agent/src/engine/primitives/resource/mod.rs",
         "packages/agent/src/engine/primitives/ui/mod.rs",
         "packages/agent/src/engine/runtime/mod.rs",
-        "packages/agent/src/engine/runtime/external_workers/mod.rs",
-        "packages/agent/src/engine/runtime/worker_protocol.rs",
     ];
     let banned_paths = [
         "packages/agent/src/engine/capabilities.rs",
@@ -174,6 +172,8 @@ fn rust_engine_subsystem_roots_are_owned() {
         "packages/agent/src/engine/types.rs",
         "packages/agent/src/engine/primitives/resource.rs",
         "packages/agent/src/engine/primitives/ui.rs",
+        "packages/agent/src/engine/runtime/external_workers/mod.rs",
+        "packages/agent/src/engine/runtime/worker_protocol.rs",
     ];
 
     let missing: Vec<_> = required_files

@@ -31,9 +31,6 @@ use crate::app::health::{self, HealthResponse};
 use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::transport::engine::socket::{EngineClientRegistry, run_engine_ws_session};
 use crate::transport::http::auth::{BearerTokenStore, verify_bearer_header};
-use crate::transport::runtime::external_workers::{
-    SharedExternalWorkerRuntime, run_external_worker_socket,
-};
 
 /// Generates `UUIDv7` request IDs.
 #[derive(Clone)]
@@ -63,8 +60,6 @@ pub struct AppState {
     pub metrics_handle: Arc<PrometheusHandle>,
     /// Bearer-token verifier for engine WebSocket upgrades.
     pub auth_store: Arc<BearerTokenStore>,
-    /// Shared local external-worker runtime.
-    pub external_workers: SharedExternalWorkerRuntime,
     /// Connected `/engine` clients.
     pub engine_clients: Arc<EngineClientRegistry>,
 }
@@ -76,7 +71,6 @@ pub struct TronServer {
     runtime_context: Arc<ServerRuntimeContext>,
     metrics_handle: Arc<PrometheusHandle>,
     auth_store: Arc<BearerTokenStore>,
-    external_workers: SharedExternalWorkerRuntime,
     engine_clients: Arc<EngineClientRegistry>,
     start_time: Instant,
 }
@@ -93,9 +87,6 @@ impl TronServer {
         runtime_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
         runtime_context.set_ws_port(config.port);
         let auth_store = Arc::new(BearerTokenStore::new(runtime_context.auth_path.clone()));
-        let external_workers = Arc::new(tokio::sync::Mutex::new(
-            crate::engine::EngineExternalWorkerRuntime::new(runtime_context.engine_host.clone()),
-        ));
         let engine_clients = Arc::new(EngineClientRegistry::new());
         Self {
             config,
@@ -103,7 +94,6 @@ impl TronServer {
             runtime_context: Arc::new(runtime_context),
             metrics_handle: Arc::new(metrics_handle),
             auth_store,
-            external_workers,
             engine_clients,
             start_time: Instant::now(),
         }
@@ -118,7 +108,6 @@ impl TronServer {
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
             auth_store: self.auth_store.clone(),
-            external_workers: self.external_workers.clone(),
             engine_clients: self.engine_clients.clone(),
         };
 
@@ -131,12 +120,7 @@ impl TronServer {
                     .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
             )
             .route(
-                "/engine/workers",
-                get(engine_worker_upgrade_handler)
-                    .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
-            )
-            .route(
-                "/engine/workers/webhooks/{worker_id}/{trigger_id}",
+                "/engine/webhooks/workers/{worker_id}/{trigger_id}",
                 post(worker_webhook_handler),
             )
             .route("/health/deep", get(deep_health_handler))
@@ -198,11 +182,6 @@ impl TronServer {
     /// Get the runtime context.
     pub fn runtime_context(&self) -> &Arc<ServerRuntimeContext> {
         &self.runtime_context
-    }
-
-    /// Get the local external-worker runtime.
-    pub fn external_workers(&self) -> &SharedExternalWorkerRuntime {
-        &self.external_workers
     }
 
     /// Get the connected engine client registry.
@@ -343,43 +322,6 @@ async fn engine_upgrade_handler(
         }))
 }
 
-/// GET /engine/workers — local engine worker WebSocket upgrade handler.
-async fn engine_worker_upgrade_handler(
-    ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, StatusCode> {
-    ensure_worker_peer_is_loopback(addr)?;
-    let shutdown = state.shutdown;
-    let shutdown_token = shutdown.token();
-    let runtime = state.external_workers;
-    let (socket_tx, socket_rx) = tokio::sync::oneshot::channel();
-    let session_shutdown = shutdown_token.clone();
-    let session_task = tokio::spawn(async move {
-        tokio::select! {
-            biased;
-            () = shutdown_token.cancelled() => {}
-            socket = socket_rx => {
-                if let Ok(socket) = socket {
-                    run_external_worker_socket(socket, runtime, session_shutdown).await;
-                }
-            }
-        }
-    });
-    shutdown.register_task(session_task);
-    Ok(ws.on_upgrade(move |socket| async move {
-        let _ = socket_tx.send(socket);
-    }))
-}
-
-fn ensure_worker_peer_is_loopback(addr: SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        tracing::warn!(%addr, "rejected non-loopback engine worker connection");
-        return Err(StatusCode::FORBIDDEN);
-    }
-    Ok(())
-}
-
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.engine_clients.connection_count();
@@ -498,12 +440,6 @@ mod tests {
         ws_upgrade_request_to("/engine", auth)
     }
 
-    fn worker_ws_upgrade_request(auth: Option<String>, addr: SocketAddr) -> Request<Body> {
-        let mut request = ws_upgrade_request_to("/engine/workers", auth);
-        request.extensions_mut().insert(ConnectInfo(addr));
-        request
-    }
-
     #[tokio::test]
     async fn server_with_default_config() {
         let server = make_server();
@@ -594,22 +530,6 @@ mod tests {
         let authorized = ws_upgrade_request_to("/engine", Some(format!("Bearer {token}")));
         let authorized_resp = app.oneshot(authorized).await.unwrap();
         assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn engine_worker_endpoint_requires_bearer_before_loopback_upgrade() {
-        let (server, _dir, token) = make_server_with_auth();
-        let app = server.router();
-        let loopback: SocketAddr = "127.0.0.1:41000".parse().unwrap();
-
-        let missing = worker_ws_upgrade_request(None, loopback);
-        let missing_resp = app.clone().oneshot(missing).await.unwrap();
-        assert_eq!(missing_resp.status(), StatusCode::UNAUTHORIZED);
-
-        let authorized = worker_ws_upgrade_request(Some(format!("Bearer {token}")), loopback);
-        let authorized_resp = app.oneshot(authorized).await.unwrap();
-        assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
-        assert_ne!(authorized_resp.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -751,20 +671,6 @@ mod tests {
             app.oneshot(remote).await.unwrap().status(),
             StatusCode::FORBIDDEN
         );
-    }
-
-    #[test]
-    fn engine_worker_loopback_guard_rejects_non_loopback_peer() {
-        let non_loopback: SocketAddr = "203.0.113.7:41000".parse().unwrap();
-        let loopback_v4: SocketAddr = "127.0.0.1:41000".parse().unwrap();
-        let loopback_v6: SocketAddr = "[::1]:41000".parse().unwrap();
-
-        assert_eq!(
-            ensure_worker_peer_is_loopback(non_loopback).unwrap_err(),
-            StatusCode::FORBIDDEN
-        );
-        assert!(ensure_worker_peer_is_loopback(loopback_v4).is_ok());
-        assert!(ensure_worker_peer_is_loopback(loopback_v6).is_ok());
     }
 
     #[tokio::test]

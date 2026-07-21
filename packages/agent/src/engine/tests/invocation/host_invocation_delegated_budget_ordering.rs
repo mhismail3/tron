@@ -63,60 +63,6 @@ async fn engine_host_handle_engine_invoke_spends_parent_budget_before_regular_ch
 }
 
 #[tokio::test]
-async fn engine_host_handle_engine_invoke_spends_parent_budget_before_host_dispatched_child() {
-    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
-    let worker_id = wid("volatile-budget-worker");
-    handle
-        .register_worker(worker("volatile-budget-worker", "budget_worker"), true)
-        .await
-        .unwrap();
-    derive_budget_invocation_grant(
-        &handle,
-        "delegated-worker-one-shot",
-        1,
-        &["engine::invoke", "worker::disconnect"],
-        &["engine", "worker"],
-        &["worker.write"],
-    )
-    .await;
-
-    let result = handle
-        .invoke(host_invocation(
-            "engine::invoke",
-            json!({
-                "functionId": "worker::disconnect",
-                "payload": {"workerId": worker_id.as_str()},
-                "idempotencyKey": "delegated-worker-disconnect"
-            }),
-            budget_context("delegated-worker-one-shot", "delegated-worker-wrapper")
-                .with_scope("worker.write"),
-        ))
-        .await;
-
-    assert_eq!(result.error, None);
-    let value = result.value.as_ref().unwrap();
-    assert_eq!(value["child"]["functionId"], "worker::disconnect");
-    assert!(
-        value["child"]["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("budget remainingInvocations is exhausted"),
-        "{value:?}"
-    );
-    assert_eq!(
-        handle.worker_is_volatile(&worker_id).await,
-        Some(true),
-        "host-dispatched child must not disconnect the volatile worker after parent budget use"
-    );
-    let consumed = handle
-        .inspect_authority_grant(&grant("delegated-worker-one-shot"))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(consumed.budget["remainingInvocations"], json!(0));
-}
-
-#[tokio::test]
 async fn engine_host_handle_engine_invoke_exhausted_parent_budget_stops_before_child_prepare() {
     let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
     handle

@@ -187,11 +187,6 @@ impl StoredEngineError {
                     "details": details,
                 }),
             },
-            EngineError::WorkerTransportFailure { code, message } => Self {
-                kind: "worker_transport_failure".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({ "code": code, "message": message }),
-            },
             EngineError::InvocationCancelled => Self {
                 kind: "invocation_cancelled".to_owned(),
                 message: error.to_string(),
@@ -312,22 +307,6 @@ impl StoredEngineError {
                 code,
                 message,
                 details,
-            };
-        }
-        if self.kind == "worker_transport_failure" {
-            return EngineError::WorkerTransportFailure {
-                code: self
-                    .details
-                    .get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or("WORKER_TRANSPORT_FAILURE")
-                    .to_owned(),
-                message: self
-                    .details
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or(&self.message)
-                    .to_owned(),
             };
         }
         if self.kind == "invocation_cancelled" {

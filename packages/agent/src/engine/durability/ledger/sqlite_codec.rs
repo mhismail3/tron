@@ -19,6 +19,12 @@ use crate::engine::kernel::types::{
 pub(super) const SQLITE_SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
 
+-- Clean-cut migration: the removed external-worker plane formerly owned these
+-- shadow definitions. Canonical fixed contracts and worker bundles now rebuild
+-- the live catalog, so retaining either table would create a second owner.
+DROP TABLE IF EXISTS engine_catalog_functions;
+DROP TABLE IF EXISTS engine_catalog_workers;
+
 CREATE TABLE IF NOT EXISTS engine_catalog_changes (
   id              TEXT PRIMARY KEY,
   before_revision INTEGER NOT NULL,
@@ -32,19 +38,6 @@ CREATE TABLE IF NOT EXISTS engine_catalog_changes (
   workspace_id    TEXT,
   owner_worker_id TEXT,
   timestamp       TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS engine_catalog_workers (
-  worker_id       TEXT PRIMARY KEY,
-  definition_json TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS engine_catalog_functions (
-  function_id     TEXT PRIMARY KEY,
-  owner_worker_id TEXT NOT NULL,
-  definition_json TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
@@ -68,8 +61,6 @@ CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
 CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
   ON engine_catalog_changes(after_revision);
 
-CREATE INDEX IF NOT EXISTS idx_engine_catalog_functions_owner
-  ON engine_catalog_functions(owner_worker_id);
 "#;
 
 /// Canonical invocation table SQL reused by the nullable-authority migration.

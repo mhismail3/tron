@@ -418,23 +418,6 @@ fn swift_owner_classes_with_task_fields_expose_cancellation_paths() {
     );
 }
 
-#[test]
-fn external_worker_outbound_scheduling_is_bounded_in_source() {
-    let source = read_repo_file("packages/agent/src/transport/runtime/external_workers.rs");
-    for required in [
-        "EXTERNAL_WORKER_OUTBOUND_CAPACITY",
-        "mpsc::channel::<Message>(EXTERNAL_WORKER_OUTBOUND_CAPACITY)",
-        "EXTERNAL_WORKER_OUTBOUND_SEND_TIMEOUT",
-        "WORKER_OUTBOUND_BACKPRESSURE_TIMEOUT",
-        "worker_invocation_fails_when_outbound_queue_stays_full",
-    ] {
-        assert!(
-            source.contains(required),
-            "external worker bounded scheduling proof missing `{required}`"
-        );
-    }
-}
-
 fn assert_contains_in_order(name: &str, source: &str, needles: &[&str]) {
     let mut cursor = 0;
     for needle in needles {

@@ -1,6 +1,6 @@
 //! Engine transport bearer-token authentication middleware.
 //!
-//! Gates `/engine` and `/engine/workers` upgrades behind a bearer token stored as `bearerToken`
+//! Gates `/engine` upgrades behind a bearer token stored as `bearerToken`
 //! in `~/.tron/profiles/auth.json`. The token is created lazily by
 //! [`crate::app::lifecycle::onboarding::load_or_create_bearer_token`] at server
 //! startup; the upgrade handlers ask this module to verify the

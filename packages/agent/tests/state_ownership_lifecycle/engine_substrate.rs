@@ -56,10 +56,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
     let ledger = read_repo_file("packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs");
     for required in [
         "append_catalog_change",
-        "upsert_durable_worker_definition",
-        "remove_durable_worker_definition",
-        "upsert_durable_function_definition",
-        "remove_durable_function_definition",
         "append_invocation",
         "resource_lease_ids_json",
         "compensation_status",

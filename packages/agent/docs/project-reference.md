@@ -28,7 +28,8 @@ The source-owned kernel retains only:
 - durable session state, events, named-secret injection, provenance, and audit;
 - worker bundles, immutable versions, runners, dispatch, triggers, inbox, and
   management;
-- authenticated `/engine` transport and loopback external-worker transport;
+- authenticated `/engine` transport and loopback token-authenticated worker
+  webhook ingress;
 - private iOS device-token custody;
 - isolated core-change proposal creation and explicitly approved application;
 - product settings, auth, context, memory, logging, blobs, and transcription
@@ -259,7 +260,7 @@ All invocation sources enter the same durable queue:
   filter; configured input supplies defaults and matching top-level payload
   keys declared by the worker input schema override them, with no framework
   envelope;
-- `POST /engine/workers/webhooks/<worker-id>/<trigger-id>` from loopback with
+- `POST /engine/webhooks/workers/<worker-id>/<trigger-id>` from loopback with
   `X-Tron-Worker-Token` or `Authorization: Bearer` and optional
   `X-Tron-Idempotency-Key`.
 
@@ -565,8 +566,6 @@ kernel does not move these shared engine records into its disposable index.
 |---|---|
 | `blobs` | content-addressed durable payloads |
 | `engine_catalog_changes` | catalog change stream |
-| `engine_catalog_functions` | durable external function definitions |
-| `engine_catalog_workers` | durable external worker definitions |
 | `engine_compensation_records` | engine compensation evidence; nullable non-local grant observation |
 | `engine_grant_events` | retained non-local authority audit history |
 | `engine_grants` | retained non-local authority grants |

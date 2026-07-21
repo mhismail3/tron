@@ -10,8 +10,6 @@ use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, WorkerId};
 pub enum WorkerKind {
     /// In-process Rust worker.
     InProcess,
-    /// Future external worker.
-    External,
     /// Future sandbox worker.
     Sandbox,
     /// Agent worker.

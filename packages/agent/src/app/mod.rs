@@ -18,7 +18,7 @@
 //! - [`bootstrap::run`] is the binary-owned startup entry after `main.rs`
 //!   parses [`cli::Cli`].
 //! - [`bootstrap::server::TronServer`] owns the Axum router, runtime context,
-//!   shutdown handle, external-worker runtime, and engine client registry.
+//!   shutdown handle and engine client registry.
 //! - [`health::health_check`] and [`health::deep_health_check`] provide the
 //!   liveness/readiness probes used by wrappers, scripts, and CI.
 //! - [`lifecycle::shutdown::ShutdownCoordinator`] is the shared shutdown token

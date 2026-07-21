@@ -26,7 +26,6 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
-        primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
     ])
 }
@@ -43,7 +42,6 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(grant::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(ui::registrations()?);
-    registrations.extend(worker::registrations()?);
     registrations.extend(storage::registrations()?);
     Ok(registrations)
 }

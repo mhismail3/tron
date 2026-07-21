@@ -1,8 +1,8 @@
 //! Engine stream primitive.
 //!
 //! Streams are resumable cursor views over engine-visible change records. They
-//! are not a transport: engine clients, agent capabilities, and external workers can
-//! all poll the same stream cursor model. Package-owned lifecycle topics such
+//! are not a transport: authenticated engine clients and retained internal
+//! services poll the same stream cursor model. Package-owned lifecycle topics such
 //! as `catalog.discovery` and `approval.lifecycle` publish durable evidence
 //! transitions through this substrate without becoming typed session events.
 //! Durable consumers own subscription rows through subscribe/poll/ack. An

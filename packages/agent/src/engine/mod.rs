@@ -15,7 +15,7 @@
 //! | durability | SQLite/in-memory state, queues, streams, and resources |
 //! | authority | Foundational grant/lease records for authenticated boundaries |
 //! | primitives | Generic resource, state, stream, and transport primitives |
-//! | runtime | Low-level trigger and external transport protocol support |
+//! | runtime | Low-level trigger dispatch support |
 //!
 //! ## Invariants
 //!
@@ -117,15 +117,7 @@ pub use kernel::types::{
     TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
     WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
-pub use runtime::external_workers::EngineExternalWorkerRuntime;
-pub(crate) use runtime::external_workers::ExternalWorkerInvoker;
 pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
-pub use runtime::worker_protocol::{
-    CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
-    WorkerAuthPolicy, WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat,
-    WorkerHello, WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
-    WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
-};
 
 /// Return whether a grant id is one of the engine-owned bootstrap roots.
 #[must_use]

@@ -63,9 +63,7 @@ impl EngineHostHandle {
 
     /// Invoke a target claimed by the engine queue runtime.
     ///
-    /// Retryable non-mutating worker transport failures return an error result
-    /// without committing a target invocation row; the queue lifecycle event is
-    /// the durable truth for that delivery attempt.
+    /// The invocation ledger records every claimed target attempt.
     pub(in crate::engine) async fn invoke_queue_target(
         &self,
         invocation: Invocation,
@@ -97,12 +95,8 @@ impl EngineHostHandle {
             }
         };
 
-        self.execute_prepared_regular_with_recording_policy(
-            *prepared,
-            InvocationRecordingPolicy::SkipRetryableQueueDeliveryFailure,
-            None,
-        )
-        .await
+        self.execute_prepared_regular_with_recording_policy(*prepared, None)
+            .await
     }
 
     /// Invoke a target prepared by the trigger runtime.
@@ -141,19 +135,14 @@ impl EngineHostHandle {
         prepared: PreparedSyncInvocation,
         cancellation: Option<&CancellationToken>,
     ) -> InvocationResult {
-        self.execute_prepared_regular_with_recording_policy(
-            prepared,
-            InvocationRecordingPolicy::RecordAll,
-            cancellation,
-        )
-        .await
-        .result
+        self.execute_prepared_regular_with_recording_policy(prepared, cancellation)
+            .await
+            .result
     }
 
     async fn execute_prepared_regular_with_recording_policy(
         &self,
         prepared: PreparedSyncInvocation,
-        recording_policy: InvocationRecordingPolicy,
         cancellation: Option<&CancellationToken>,
     ) -> QueueTargetInvocation {
         let compensation_contract = prepared.function.compensation.clone();
@@ -169,23 +158,6 @@ impl EngineHostHandle {
             Ok(None) => self.invoke_prepared_handler(&prepared, cancellation).await,
             Err(error) => Err(error),
         };
-        if recording_policy == InvocationRecordingPolicy::SkipRetryableQueueDeliveryFailure
-            && let Some(error) = queue_retryable_delivery_failure(&prepared, &handler_result)
-        {
-            return QueueTargetInvocation {
-                result: InvocationResult::error(
-                    &prepared.invocation,
-                    prepared.function.owner_worker.clone(),
-                    prepared.function.revision,
-                    prepared.invocation.causal_context.catalog_revision,
-                    error,
-                ),
-                recorded_invocation: false,
-                resource_lease_ids: Vec::new(),
-                compensation_status: None,
-                compensation_id: None,
-            };
-        }
         let compensation_status = prepared
             .function
             .compensation

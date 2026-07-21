@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::sqlite_codec::{
     INVOCATION_COLUMNS, INVOCATION_INDEX_SCHEMA, INVOCATION_TABLE_SCHEMA,
     LEGACY_TRUSTED_LOCAL_AUTHORITY_OBSERVATION, RawCatalogChangeRow, RawIdempotencyRow,
-    SQLITE_SCHEMA, ensure_column, from_json_string, ledger_failure, optional_stored_error_json,
+    SQLITE_SCHEMA, ensure_column, ledger_failure, optional_stored_error_json,
     optional_stored_json_string, raw_catalog_change, raw_idempotency_entry,
     resolve_optional_stored_json_string, sqlite_err, to_json_string,
 };
@@ -18,10 +18,8 @@ use super::{
 };
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, InvocationId, TriggerId, WorkerId};
-use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, WorkerDefinition,
-};
+use crate::engine::kernel::ids::{InvocationId, TriggerId, WorkerId};
+use crate::engine::kernel::types::{CatalogChange, CatalogRevision};
 
 mod rows;
 
@@ -306,133 +304,6 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             })?);
         }
         Ok(changes)
-    }
-
-    fn upsert_durable_worker_definition(&mut self, definition: &WorkerDefinition) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "INSERT INTO engine_catalog_workers
-                   (worker_id, definition_json, updated_at)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(worker_id) DO UPDATE SET
-                   definition_json = excluded.definition_json,
-                   updated_at = excluded.updated_at",
-                params![
-                    definition.id.as_str(),
-                    to_json_string("upsert_durable_worker_definition", definition)?,
-                    now,
-                ],
-            )
-            .map_err(|err| sqlite_err("upsert_durable_worker_definition", err))?;
-        Ok(())
-    }
-
-    fn remove_durable_worker_definition(&mut self, worker_id: &WorkerId) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM engine_catalog_workers WHERE worker_id = ?1",
-                params![worker_id.as_str()],
-            )
-            .map_err(|err| sqlite_err("remove_durable_worker_definition", err))?;
-        self.conn
-            .execute(
-                "DELETE FROM engine_catalog_functions WHERE owner_worker_id = ?1",
-                params![worker_id.as_str()],
-            )
-            .map_err(|err| sqlite_err("remove_durable_worker_functions", err))?;
-        Ok(())
-    }
-
-    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT definition_json
-                 FROM engine_catalog_workers
-                 ORDER BY worker_id ASC",
-            )
-            .map_err(|err| sqlite_err("list_durable_worker_definitions.prepare", err))?;
-        let mut rows = stmt
-            .query([])
-            .map_err(|err| sqlite_err("list_durable_worker_definitions.query", err))?;
-        let mut definitions = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .map_err(|err| sqlite_err("list_durable_worker_definitions.next", err))?
-        {
-            let definition_json: String = row
-                .get(0)
-                .map_err(|err| sqlite_err("durable_worker.definition", err))?;
-            definitions.push(from_json_string(
-                "list_durable_worker_definitions.definition",
-                &definition_json,
-            )?);
-        }
-        Ok(definitions)
-    }
-
-    fn upsert_durable_function_definition(
-        &mut self,
-        definition: &FunctionDefinition,
-    ) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "INSERT INTO engine_catalog_functions
-                   (function_id, owner_worker_id, definition_json, updated_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(function_id) DO UPDATE SET
-                   owner_worker_id = excluded.owner_worker_id,
-                   definition_json = excluded.definition_json,
-                   updated_at = excluded.updated_at",
-                params![
-                    definition.id.as_str(),
-                    definition.owner_worker.as_str(),
-                    to_json_string("upsert_durable_function_definition", definition)?,
-                    now,
-                ],
-            )
-            .map_err(|err| sqlite_err("upsert_durable_function_definition", err))?;
-        Ok(())
-    }
-
-    fn remove_durable_function_definition(&mut self, function_id: &FunctionId) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM engine_catalog_functions WHERE function_id = ?1",
-                params![function_id.as_str()],
-            )
-            .map_err(|err| sqlite_err("remove_durable_function_definition", err))?;
-        Ok(())
-    }
-
-    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT definition_json
-                 FROM engine_catalog_functions
-                 ORDER BY function_id ASC",
-            )
-            .map_err(|err| sqlite_err("list_durable_function_definitions.prepare", err))?;
-        let mut rows = stmt
-            .query([])
-            .map_err(|err| sqlite_err("list_durable_function_definitions.query", err))?;
-        let mut definitions = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .map_err(|err| sqlite_err("list_durable_function_definitions.next", err))?
-        {
-            let definition_json: String = row
-                .get(0)
-                .map_err(|err| sqlite_err("durable_function.definition", err))?;
-            definitions.push(from_json_string(
-                "list_durable_function_definitions.definition",
-                &definition_json,
-            )?);
-        }
-        Ok(definitions)
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {
@@ -754,8 +625,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
 mod tests {
     use super::*;
     use crate::engine::{
-        ActorId, ActorKind, CatalogRevision, CausalContext, FunctionRevision, Invocation,
-        InvocationResult, TraceId,
+        ActorId, ActorKind, CatalogRevision, CausalContext, FunctionId, FunctionRevision,
+        Invocation, InvocationResult, TraceId,
     };
     use serde_json::json;
 

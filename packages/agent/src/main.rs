@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! tron::app           Bootstrap, HTTP shell, health, metrics, onboarding, shutdown
-//! tron::transport     /engine and /engine/workers protocol surfaces
+//! tron::transport     authenticated /engine and worker-webhook surfaces
 //! tron::engine        Live capability fabric, host lifecycle, engine ledger
 //! tron::domains       Worker-owned contracts, handlers, operations, services
 //! tron::platform      OS/vendor integrations retained by the primitive loop

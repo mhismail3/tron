@@ -33,18 +33,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
         self.meta_watch(invocation)
     }
 
-    fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition> {
-        self.catalog.inspect_worker(id)
-    }
-
-    fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
-        self.catalog.worker_is_volatile(id)
-    }
-
-    fn unregister_worker(&mut self, id: &WorkerId, owner_actor: &str) -> Result<()> {
-        self.catalog.unregister_worker(id, owner_actor)
-    }
-
     fn inspect_resource(
         &self,
         resource_id: &str,

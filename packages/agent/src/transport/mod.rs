@@ -20,7 +20,7 @@
 //! |--------|---------|
 //! | [`http`] | HTTP-adjacent auth gate for WebSocket upgrades |
 //! | [`engine`] | `/engine` contracts, request routing, socket sessions, and stream cursors |
-//! | [`runtime`] | Runtime services, external-worker transport, stream projection, and setup |
+//! | [`runtime`] | Runtime services, stream projection, and setup |
 //!
 //! ## Entry Points
 //!
@@ -52,19 +52,17 @@
 //!   remain stranded after task cancellation.
 //! - Transport must not implement domain behavior or call handler-shaped
 //!   shortcuts; it dispatches canonical engine requests only.
-//! - `/engine/workers` is loopback/local external-worker transport; registration
-//!   and invocation authority still live in the engine runtime. Every upgraded
-//!   worker socket is shutdown-owned before upgrade completion; shutdown closes
-//!   outbound admission, drains pending calls, retires runtime state, and joins
-//!   the writer before reporting the session complete.
+//! - Worker webhooks are loopback-only and independently authenticated with
+//!   rotatable per-trigger tokens. Persistent worker execution never enters a
+//!   parallel transport-owned lifecycle.
 //! - Live subscriptions without explicit cursors start at the topic tail; stored
 //!   replay requires explicit cursors.
 //!
 //! ## Test Ownership
 //!
 //! Socket/session behavior lives under `transport/engine/socket/tests.rs`.
-//! Runtime stream/external-worker behavior lives under the corresponding
-//! `transport/runtime/*/tests` module. Protocol parity and removed-surface
+//! Runtime stream behavior lives under the corresponding transport tests.
+//! Protocol parity and removed-surface
 //! assertions belong in the static integration targets under
 //! `packages/agent/tests/`.
 

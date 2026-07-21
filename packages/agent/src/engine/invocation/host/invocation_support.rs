@@ -20,20 +20,6 @@ pub(super) fn release_after_primary(
     }
 }
 
-pub(super) fn queue_retryable_delivery_failure(
-    prepared: &PreparedSyncInvocation,
-    handler_result: &Result<Value>,
-) -> Option<EngineError> {
-    match handler_result {
-        Err(error @ EngineError::WorkerTransportFailure { .. })
-            if !prepared.function.effect_class.is_mutating() && prepared.idempotency.is_none() =>
-        {
-            Some(error.clone())
-        }
-        _ => None,
-    }
-}
-
 pub(super) fn lease_request_from_requirement(
     requirement: &ResourceLeaseRequirement,
     invocation: &Invocation,

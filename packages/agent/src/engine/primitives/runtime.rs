@@ -1,19 +1,18 @@
 //! Privileged primitive query runtime.
 //!
-//! Catalog, worker, storage, and generated-UI primitives need access
+//! Catalog, storage, and generated-UI primitives need access
 //! to host-owned catalog and ledger state. The response contracts live here so
 //! `EngineHost` stays a coordinator rather than a primitive response bucket.
 
 use serde_json::{Value, json};
 
-use super::{catalog, storage, ui, worker};
+use super::{catalog, storage, ui};
 use crate::engine::catalog::discovery::{ActorContext, FunctionQuery};
 use crate::engine::durability::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, UpdateResource,
 };
 use crate::engine::invocation::model::{CausalContext, Invocation};
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::WorkerId;
 use crate::engine::kernel::types::{
     FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
 };
@@ -26,9 +25,6 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition>;
     fn inspect_catalog_item(&self, invocation: &Invocation) -> Result<Value>;
     fn watch_catalog_snapshot_base(&self, invocation: &Invocation) -> Result<Value>;
-    fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition>;
-    fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool>;
-    fn unregister_worker(&mut self, id: &WorkerId, owner_actor: &str) -> Result<()>;
     fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
     fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
     fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
@@ -52,10 +48,6 @@ pub(in crate::engine) fn dispatch(
         catalog::LIST_FUNCTION => catalog_list(host, invocation),
         catalog::INSPECT_FUNCTION => host.inspect_catalog_item(invocation),
         catalog::WATCH_SNAPSHOT_FUNCTION => catalog_watch_snapshot(host, invocation),
-        worker::LIST_FUNCTION => worker_list(host, invocation),
-        worker::GET_FUNCTION => worker_get(host, invocation),
-        worker::HEALTH_FUNCTION => worker_health(host, invocation),
-        worker::DISCONNECT_FUNCTION => worker_disconnect(host, invocation),
         ui::CREATE_SURFACE_FUNCTION
         | ui::UPDATE_SURFACE_FUNCTION
         | ui::INSPECT_SURFACE_FUNCTION
@@ -128,84 +120,6 @@ fn catalog_watch_snapshot(
     }))
 }
 
-fn worker_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let actor = actor_context(&invocation.causal_context);
-    Ok(json!({
-        "workers": host.visible_workers(&actor),
-    }))
-}
-
-fn worker_get(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
-    let actor = actor_context(&invocation.causal_context);
-    let worker = host.inspect_worker(&id)?;
-    if !is_visibility_visible(
-        &worker.visibility,
-        worker.provenance.session_id.as_deref(),
-        worker.provenance.workspace_id.as_deref(),
-        &actor,
-    ) {
-        return Err(EngineError::PolicyViolation(format!(
-            "worker {id} is not visible"
-        )));
-    }
-    Ok(json!({ "worker": worker }))
-}
-
-fn worker_health(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
-    let actor = actor_context(&invocation.causal_context);
-    let worker = host.inspect_worker(&id)?;
-    let functions = host
-        .discover_functions(&FunctionQuery {
-            actor: Some(actor),
-            visibility: None,
-            namespace_prefix: None,
-            text: None,
-            effect_class: None,
-            max_risk: None,
-            health: None,
-            include_internal: true,
-        })
-        .into_iter()
-        .filter(|function| function.owner_worker == id)
-        .collect::<Vec<_>>();
-    let triggers = host
-        .visible_triggers(&actor_context(&invocation.causal_context))
-        .into_iter()
-        .filter(|trigger| trigger.owner_worker == id)
-        .collect::<Vec<_>>();
-    let health = if functions
-        .iter()
-        .any(|function| !function.health.is_routable())
-    {
-        "unhealthy"
-    } else {
-        "healthy"
-    };
-    Ok(json!({
-        "worker": worker,
-        "functions": functions,
-        "triggers": triggers,
-        "health": health,
-    }))
-}
-
-fn worker_disconnect(
-    host: &mut dyn PrimitiveRuntimeHost,
-    invocation: &Invocation,
-) -> Result<Value> {
-    let id = worker_id(required_str(&invocation.payload, "workerId")?)?;
-    if host.worker_is_volatile(&id) != Some(true) {
-        return Err(EngineError::PolicyViolation(format!(
-            "worker::disconnect can only disconnect volatile workers ({id})"
-        )));
-    }
-    let worker = host.inspect_worker(&id)?;
-    host.unregister_worker(&id, worker.owner_actor.as_str())?;
-    Ok(json!({ "disconnected": true }))
-}
-
 fn storage_stats(host: &dyn PrimitiveRuntimeHost) -> Result<Value> {
     Ok(json!({ "stats": host.storage_stats()? }))
 }
@@ -246,45 +160,6 @@ pub(in crate::engine::primitives) fn actor_context(context: &CausalContext) -> A
     }
 }
 
-fn is_visibility_visible(
-    visibility: &VisibilityScope,
-    session_id: Option<&str>,
-    workspace_id: Option<&str>,
-    actor: &ActorContext,
-) -> bool {
-    match visibility {
-        VisibilityScope::Internal => actor.actor_kind.is_admin_like(),
-        VisibilityScope::Session => {
-            actor.actor_kind.is_admin_like()
-                || matches!((actor.session_id.as_deref(), session_id), (Some(a), Some(b)) if a == b)
-        }
-        VisibilityScope::Workspace => {
-            actor.actor_kind.is_admin_like()
-                || matches!((actor.workspace_id.as_deref(), workspace_id), (Some(a), Some(b)) if a == b)
-        }
-        VisibilityScope::System => true,
-        VisibilityScope::Client => {
-            matches!(
-                actor.actor_kind,
-                crate::engine::catalog::discovery::ActorKind::Client
-            ) || actor.actor_kind.is_admin_like()
-        }
-        VisibilityScope::Worker => {
-            matches!(
-                actor.actor_kind,
-                crate::engine::catalog::discovery::ActorKind::Worker
-            ) || actor.actor_kind.is_admin_like()
-        }
-        VisibilityScope::Agent => {
-            matches!(
-                actor.actor_kind,
-                crate::engine::catalog::discovery::ActorKind::Agent
-            ) || actor.actor_kind.is_admin_like()
-        }
-        VisibilityScope::Admin => actor.actor_kind.is_admin_like(),
-    }
-}
-
 pub(in crate::engine::primitives) fn required_str<'a>(
     payload: &'a Value,
     field: &str,
@@ -322,8 +197,4 @@ fn optional_visibility(value: Option<&Value>) -> Result<Option<VisibilityScope>>
             ))),
         })
         .transpose()
-}
-
-fn worker_id(value: &str) -> Result<WorkerId> {
-    WorkerId::new(value.to_owned())
 }

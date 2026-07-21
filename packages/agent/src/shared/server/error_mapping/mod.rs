@@ -12,8 +12,8 @@ use crate::shared::server::failure::{
     ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE,
     ENGINE_NAMESPACE_DENIED, ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
     ENGINE_STALE_FUNCTION_SURFACE, ENGINE_STORED_INVOCATION_ERROR,
-    ENGINE_UNSUPPORTED_DELIVERY_MODE, ENGINE_WORKER_TRANSPORT_FAILURE, FailureCategory,
-    FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory, FailureEnvelope, FailureOrigin,
+    RUNTIME_CANCELLED,
 };
 use serde_json::Value;
 
@@ -282,15 +282,6 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             .with_details(capability_failure.details)
             .with_error_type(Some(ENGINE_DOMAIN_FAILURE.to_owned()))
         }
-        EngineError::WorkerTransportFailure { code, message } => FailureEnvelope::new(
-            code.clone(),
-            FailureCategory::Engine,
-            message.clone(),
-            true,
-            true,
-            FailureOrigin::Engine,
-        )
-        .with_error_type(Some(ENGINE_WORKER_TRANSPORT_FAILURE.to_owned())),
         EngineError::InvocationCancelled => FailureEnvelope::new(
             RUNTIME_CANCELLED,
             FailureCategory::Cancelled,

@@ -2,11 +2,10 @@
 //!
 //! The ledger is intentionally narrower than the live catalog. It persists
 //! audit records, invocation attempts, idempotency reservations/results, catalog
-//! changes, and the current durable external-worker catalog definitions needed
-//! to fail closed across process restarts without pretending disconnected
-//! sockets still have executable handlers. Session replay reads invocation rows
-//! and idempotency entries through this ledger boundary so replay does not query
-//! SQLite internals from domain code.
+//! changes. Callable definitions are rebuilt from fixed bootstrap contracts and
+//! canonical worker bundles rather than duplicated in this ledger. Session
+//! replay reads invocation rows and idempotency entries through this boundary so
+//! replay does not query SQLite internals from domain code.
 //!
 //! The SQLite implementation keeps schema and query operations in
 //! `sqlite_store`, with row decoding helpers split into `sqlite_store::rows` so
@@ -26,10 +25,9 @@ use serde::Serialize;
 
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::{FunctionId, InvocationId, WorkerId};
+use crate::engine::kernel::ids::{FunctionId, InvocationId};
 use crate::engine::kernel::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, FunctionRevision, IdempotencyScope,
-    ReplayBehavior, WorkerDefinition,
+    CatalogChange, CatalogRevision, FunctionRevision, IdempotencyScope, ReplayBehavior,
 };
 
 mod memory;
@@ -128,25 +126,6 @@ pub trait EngineLedgerStore: Send {
         revision: CatalogRevision,
         limit: usize,
     ) -> Result<Vec<CatalogChange>>;
-
-    /// Store the current definition for a durable external worker.
-    fn upsert_durable_worker_definition(&mut self, definition: &WorkerDefinition) -> Result<()>;
-
-    /// Remove a durable external worker definition and its owned functions.
-    fn remove_durable_worker_definition(&mut self, worker_id: &WorkerId) -> Result<()>;
-
-    /// List durable external worker definitions persisted for restart.
-    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>>;
-
-    /// Store the current definition for a durable external function.
-    fn upsert_durable_function_definition(&mut self, definition: &FunctionDefinition)
-    -> Result<()>;
-
-    /// Remove a durable external function definition.
-    fn remove_durable_function_definition(&mut self, function_id: &FunctionId) -> Result<()>;
-
-    /// List durable external function definitions persisted for restart.
-    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>>;
 
     /// Append an invocation record.
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()>;

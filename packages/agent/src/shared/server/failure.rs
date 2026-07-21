@@ -36,8 +36,6 @@ pub const ENGINE_POLICY_VIOLATION: &str = "ENGINE_POLICY_VIOLATION";
 pub const ENGINE_NOT_ROUTABLE: &str = "ENGINE_NOT_ROUTABLE";
 /// Engine domain capability preserved a native failure envelope.
 pub const ENGINE_DOMAIN_FAILURE: &str = "ENGINE_DOMAIN_FAILURE";
-/// Engine worker transport failed before a result arrived.
-pub const ENGINE_WORKER_TRANSPORT_FAILURE: &str = "ENGINE_WORKER_TRANSPORT_FAILURE";
 /// Engine handler returned an application failure.
 pub const ENGINE_HANDLER_FAILED: &str = "ENGINE_HANDLER_FAILED";
 

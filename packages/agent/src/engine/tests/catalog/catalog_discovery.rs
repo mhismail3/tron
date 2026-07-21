@@ -235,25 +235,21 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
 fn discovery_text_query_matches_tokens_across_canonical_id() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("worker", "worker"), true)
+        .register_worker(worker("alpha", "alpha"), true)
         .unwrap();
     catalog
-        .register_function(
-            read_function("worker::list", "worker"),
-            Some(handler()),
-            true,
-        )
+        .register_function(read_function("alpha::list", "alpha"), Some(handler()), true)
         .unwrap();
 
     let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
     let filtered = catalog.discover_functions(&FunctionQuery {
-        text: Some("worker list".to_owned()),
+        text: Some("alpha list".to_owned()),
         actor: Some(agent),
         ..FunctionQuery::default()
     });
 
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].id.as_str(), "worker::list");
+    assert_eq!(filtered[0].id.as_str(), "alpha::list");
 }
 
 #[test]

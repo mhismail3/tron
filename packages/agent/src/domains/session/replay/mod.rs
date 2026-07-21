@@ -633,9 +633,6 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
             "message": message,
             "details": details
         }),
-        EngineError::WorkerTransportFailure { code, message } => {
-            json!({"kind": "worker_transport_failure", "code": code, "message": message})
-        }
         EngineError::InvocationCancelled => json!({"kind": "invocation_cancelled"}),
         EngineError::HandlerFailed(message) => {
             json!({"kind": "handler_failed", "message": message})

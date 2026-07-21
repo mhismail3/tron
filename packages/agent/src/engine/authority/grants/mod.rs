@@ -53,7 +53,7 @@ pub use model::{
     BOOTSTRAP_GRANT_IDS, ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant, EngineGrantEvent,
     EngineGrantLifecycle, ListGrants,
 };
-pub(crate) use policy_hash::{bootstrap_grant_policy_hash, grant_policy_hash};
+pub(crate) use policy_hash::grant_policy_hash;
 
 use authorization::authorize_with_grant;
 use derivation::{ensure_child_narrows_parent, ensure_parent_can_derive, validate_derive_request};

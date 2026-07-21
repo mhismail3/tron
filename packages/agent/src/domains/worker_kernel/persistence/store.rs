@@ -1926,7 +1926,7 @@ impl WorkerStore {
         }
         Ok(WebhookCredential {
             trigger_id: trigger_id.to_owned(),
-            path: format!("/engine/workers/webhooks/{worker_id}/{trigger_id}"),
+            path: format!("/engine/webhooks/workers/{worker_id}/{trigger_id}"),
             token,
         })
     }
@@ -2316,7 +2316,7 @@ fn replace_active_triggers(
             token_hash = Some(hash_secret(&token));
             new_webhooks.push(WebhookCredential {
                 trigger_id: trigger.id().to_owned(),
-                path: format!("/engine/workers/webhooks/{worker_id}/{}", trigger.id()),
+                path: format!("/engine/webhooks/workers/{worker_id}/{}", trigger.id()),
                 token,
             });
         }

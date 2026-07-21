@@ -120,7 +120,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "open_connection",
             "checkpoint",
             "SqliteEngineLedgerStore::open",
-            "hydrate_durable_catalog_from_ledger",
+            "hydrate_catalog_revision_from_ledger",
             "PrimitiveStores::sqlite",
             "bootstrap_meta_capabilities",
         ],
@@ -278,23 +278,16 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
     for required in [
         "EngineRuntimeServices",
         "shutdown.register_task(tokio::spawn(service.run()))",
-        "shutdown.register_task(tokio::spawn(heartbeat.run()))",
     ] {
         assert!(
             runtime.contains(required),
             "Engine runtime service ownership missing `{required}`"
         );
     }
-    for (path, owner) in [
-        (
-            "packages/agent/src/transport/runtime/queue_drainer.rs",
-            "queue drainer",
-        ),
-        (
-            "packages/agent/src/transport/runtime/worker_heartbeat.rs",
-            "worker heartbeat",
-        ),
-    ] {
+    for (path, owner) in [(
+        "packages/agent/src/transport/runtime/queue_drainer.rs",
+        "queue drainer",
+    )] {
         let source = read_repo_file(path);
         assert!(
             source.contains("CancellationToken") && source.contains("cancel.cancelled()"),

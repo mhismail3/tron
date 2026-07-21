@@ -52,6 +52,38 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
 }
 
 #[test]
+fn sqlite_engine_ledger_removes_superseded_external_catalog_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tron.sqlite");
+    {
+        let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+        store
+            .connection()
+            .execute_batch(
+                "CREATE TABLE engine_catalog_workers (worker_id TEXT PRIMARY KEY);\
+                 CREATE TABLE engine_catalog_functions (function_id TEXT PRIMARY KEY);",
+            )
+            .unwrap();
+    }
+
+    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    for removed in ["engine_catalog_workers", "engine_catalog_functions"] {
+        let present = store
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [removed],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        assert!(
+            !present,
+            "superseded catalog table must be dropped: {removed}"
+        );
+    }
+}
+
+#[test]
 fn ledger_boundaries_redact_manually_constructed_results_and_idempotency_outcomes() {
     let token = "trwh_0123456789abcdef0123456789abcdef";
     let invocation = Invocation::new_sync(

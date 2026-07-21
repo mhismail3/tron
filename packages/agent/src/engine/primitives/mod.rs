@@ -46,7 +46,6 @@ mod stores;
 pub(crate) mod stream;
 pub(crate) mod trigger;
 pub(crate) mod ui;
-pub(crate) mod worker;
 mod workers;
 
 pub(in crate::engine) use crate::engine::authority::grants::EngineGrantStoreBackend;
@@ -62,7 +61,6 @@ pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
 pub(crate) const TRIGGER_WORKER_ID: &str = "trigger";
 pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
-pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
 pub(crate) const UI_WORKER_ID: &str = "ui";
 
@@ -217,17 +215,6 @@ pub(super) fn worker_id(value: &str) -> Result<WorkerId> {
 pub(super) fn boolean_response_schema(field: &str) -> Value {
     let mut properties = serde_json::Map::new();
     properties.insert(field.to_owned(), json!({"type": "boolean"}));
-    json!({
-        "type": "object",
-        "required": [field],
-        "additionalProperties": false,
-        "properties": properties
-    })
-}
-
-pub(super) fn nullable_response_schema(field: &str) -> Value {
-    let mut properties = serde_json::Map::new();
-    properties.insert(field.to_owned(), json!({}));
     json!({
         "type": "object",
         "required": [field],

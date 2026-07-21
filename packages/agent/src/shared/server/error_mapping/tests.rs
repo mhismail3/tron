@@ -175,14 +175,6 @@ fn every_engine_error_variant_has_stable_failure_mapping() {
             FailureCategory::NotFound,
         ),
         (
-            EngineError::WorkerTransportFailure {
-                code: "WORKER_DISCONNECTED".to_owned(),
-                message: "worker disconnected".to_owned(),
-            },
-            "WORKER_DISCONNECTED",
-            FailureCategory::Engine,
-        ),
-        (
             EngineError::InvocationCancelled,
             RUNTIME_CANCELLED,
             FailureCategory::Cancelled,
