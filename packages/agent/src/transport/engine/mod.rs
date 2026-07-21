@@ -7,10 +7,8 @@
 //! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 //!
-//! Public transports do not accept caller-provided authority scopes or runtime
-//! metadata. Authority scopes are derived from registered transport contracts
-//! and canonical targets; runtime metadata is reserved for trusted engine and
-//! agent-owned execution paths.
+//! Public transports do not accept caller-provided runtime metadata; it remains
+//! reserved for trusted engine and agent-owned execution paths.
 
 pub mod contracts;
 pub mod socket;
@@ -63,7 +61,7 @@ pub struct EngineTransportRequest {
     pub function_id: FunctionId,
     /// Payload delivered to the engine function.
     pub payload: Value,
-    /// Causal authority and trace metadata for the engine invocation.
+    /// Causal actor and trace metadata for the engine invocation.
     pub causal_context: crate::engine::CausalContext,
 }
 
@@ -77,28 +75,8 @@ pub fn build_engine_transport_request(
         return Ok(None);
     };
     reject_noncanonical_target(spec.operation_key.as_str(), &input.params_payload)?;
-    let domain_authority_scope = spec
-        .authority_scope
-        .ok_or_else(|| CapabilityError::Internal {
-            message: format!(
-                "engine transport method {} is missing an authority scope",
-                spec.operation_key.as_str()
-            ),
-        })?;
-    let mut causal_context = transport_causal_context_for_method(
-        spec.operation_key.as_str(),
-        domain_authority_scope,
-        &input.context,
-    )?;
-    if spec.operation_key.as_str() == "promote" {
-        push_scope_once(&mut causal_context, "engine.promote.workspace".to_owned());
-        push_scope_once(&mut causal_context, "engine.promote.system".to_owned());
-    }
-    if spec.operation_key.as_str() == "invoke" {
-        for scope in target_authority_scopes_for_engine_invoke(&input.params_payload) {
-            push_scope_once(&mut causal_context, scope);
-        }
-    }
+    let mut causal_context =
+        transport_causal_context_for_method(spec.operation_key.as_str(), &input.context)?;
     if spec.effect_class.is_mutating() {
         match spec.idempotency_mode {
             TransportIdempotencyMode::ExplicitRequired => {
@@ -155,7 +133,6 @@ pub async fn dispatch_engine_transport_request(
 
 fn transport_causal_context_for_method(
     method: &str,
-    scope: &str,
     context: &EngineTransportContext,
 ) -> Result<CausalContext, CapabilityError> {
     let (actor_kind, actor_id) = transport_actor_for_method(method);
@@ -168,11 +145,8 @@ fn transport_causal_context_for_method(
     let mut causal_context = CausalContext::new(
         catalog::actor_id(actor_id).map_err(engine_error_to_capability_error)?,
         actor_kind,
-        catalog::grant_id(catalog::SYSTEM_AUTHORITY_GRANT)
-            .map_err(engine_error_to_capability_error)?,
         trace_id,
-    )
-    .with_scope(scope);
+    );
     if let Some(session_id) = context
         .session_id
         .clone()
@@ -228,33 +202,6 @@ fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), Capab
         });
     }
     Ok(())
-}
-
-fn target_authority_scopes_for_engine_invoke(payload: &Value) -> Vec<String> {
-    let Some(function_id) = extract_string(payload, "functionId") else {
-        return Vec::new();
-    };
-    let Some((namespace, _operation)) = function_id.split_once("::") else {
-        return Vec::new();
-    };
-    match namespace {
-        "engine" => vec![
-            "engine.read".to_owned(),
-            "engine.promote.workspace".to_owned(),
-            "engine.promote.system".to_owned(),
-        ],
-        other => vec![format!("{other}.read"), format!("{other}.write")],
-    }
-}
-
-fn push_scope_once(causal_context: &mut CausalContext, scope: String) {
-    if !causal_context
-        .authority_scopes
-        .iter()
-        .any(|item| item == &scope)
-    {
-        causal_context.authority_scopes.push(scope);
-    }
 }
 
 fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
@@ -342,25 +289,11 @@ mod tests {
     }
 
     #[test]
-    fn public_engine_invoke_never_mints_internal_invoke_scope() {
+    fn public_engine_invoke_keeps_authenticated_client_identity_and_no_runtime_metadata() {
         let envelope = build_invoke("agent::prompt_apply");
-        let forbidden_scope = ["engine", "internal", "invoke"].join(".");
 
-        assert!(
-            !envelope
-                .causal_context
-                .authority_scopes
-                .iter()
-                .any(|scope| scope == &forbidden_scope)
-        );
         assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
-        assert_eq!(
-            envelope
-                .causal_context
-                .authority_grant_id
-                .as_ref()
-                .map(|id| id.as_str()),
-            Some(catalog::SYSTEM_AUTHORITY_GRANT)
-        );
+        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
+        assert!(envelope.causal_context.runtime_metadata.is_empty());
     }
 }

@@ -34,7 +34,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     let tailscaleIp: String?
     let compactionPreserveRecentCount: Int
     let compactionTriggerTokenThreshold: Double
-    let transcriptionEnabled: Bool
 
     init(
         defaultModel: String,
@@ -42,7 +41,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         tailscaleIp: String?,
         compactionPreserveRecentCount: Int,
         compactionTriggerTokenThreshold: Double,
-        transcriptionEnabled: Bool,
         autonomousWorkers: Bool = false
     ) {
         self.defaultModel = defaultModel
@@ -50,7 +48,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         self.tailscaleIp = tailscaleIp
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
-        self.transcriptionEnabled = transcriptionEnabled
         self.autonomousWorkers = autonomousWorkers
     }
 
@@ -61,7 +58,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             tailscaleIp: settings.tailscaleIp,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
             compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
-            transcriptionEnabled: settings.transcriptionEnabled,
             autonomousWorkers: settings.autonomousWorkers
         )
     }
@@ -75,7 +71,6 @@ enum SettingsMutation {
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)
     case compactionPreserveRecentCount(Int)
-    case transcriptionEnabled(Bool)
 }
 
 /// Black-box settings contract for server-authoritative settings.
@@ -281,18 +276,6 @@ protocol MessageRepository: AnyObject {
     ) async throws -> MessageDeleteResult
 }
 
-// MARK: - Transcription Repository
-
-@MainActor
-protocol TranscriptionRepository: AnyObject {
-    func transcribeAudio(
-        data: Data,
-        mimeType: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> TranscribeAudioResult
-    func listModels() async throws -> TranscriptionModelsResult
-}
-
 // MARK: - Workspace Browser Repository
 
 @MainActor
@@ -370,6 +353,5 @@ struct ChatSessionServices {
     let agent: any AgentRepository
     let models: any ModelRepository
     let messages: any MessageRepository
-    let transcription: any TranscriptionRepository
     let workerKernel: any WorkerKernelRepository
 }

@@ -15,10 +15,9 @@
 //! credentials cannot enter SQLite, payload blobs, replay exports, or later
 //! idempotent replays. Both ledger implementations apply that policy at their
 //! storage boundary even when a caller manually constructs a record.
-//! Authority grant ids are nullable observations: authenticated non-local calls
-//! retain their real id, while trusted-local calls persist SQL `NULL`. Startup
-//! transactionally rebuilds the historical `TEXT NOT NULL` shape before any
-//! such row is written and preserves all prior invocation rows.
+//! The worker-first retirement migration removes historical authority, lease,
+//! compensation, and produced-resource columns in one transaction while
+//! preserving the causal and outcome fields owned by this ledger.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -40,6 +39,93 @@ pub use outcome::{StoredEngineError, StoredInvocationOutcome};
 pub use sqlite_store::SqliteEngineLedgerStore;
 
 use sqlite_codec::ledger_failure;
+
+/// Rebuild the invocation ledger without columns owned by retired execution
+/// planes. The caller owns the surrounding worker-first retirement transaction.
+pub(crate) fn retire_legacy_invocation_columns(
+    transaction: &rusqlite::Transaction<'_>,
+) -> std::result::Result<bool, String> {
+    let retired_columns = [
+        "authority_grant_id",
+        "authority_scopes_json",
+        "resource_lease_ids_json",
+        "compensation_status",
+        "produced_resource_refs_json",
+    ];
+    let mut statement = transaction
+        .prepare("PRAGMA table_info(engine_invocations)")
+        .map_err(|error| format!("inspect invocation columns: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("query invocation columns: {error}"))?
+        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
+        .map_err(|error| format!("decode invocation columns: {error}"))?;
+    drop(statement);
+    if columns.is_empty()
+        || retired_columns
+            .iter()
+            .all(|column| !columns.contains(*column))
+    {
+        return Ok(false);
+    }
+    let retained = [
+        "invocation_id",
+        "function_id",
+        "worker_id",
+        "function_revision",
+        "catalog_revision",
+        "actor_id",
+        "actor_kind_json",
+        "trace_id",
+        "parent_invocation_id",
+        "trigger_id",
+        "session_id",
+        "workspace_id",
+        "delivery_mode_json",
+        "idempotency_scope_kind",
+        "idempotency_scope_value",
+        "idempotency_key",
+        "replayed_from",
+        "succeeded",
+        "result_json",
+        "error_json",
+        "timestamp",
+    ];
+    for column in retained {
+        if !columns.contains(column) {
+            return Err(format!(
+                "cannot retire invocation observations: retained column {column} is missing"
+            ));
+        }
+    }
+    let column_list = retained.join(",");
+    transaction
+        .execute_batch(
+            "DROP TABLE IF EXISTS engine_invocations__worker_first_retirement;
+             ALTER TABLE engine_invocations RENAME TO engine_invocations__worker_first_retirement;
+             DROP INDEX IF EXISTS idx_engine_invocations_trace;",
+        )
+        .map_err(|error| format!("stage invocation ledger rebuild: {error}"))?;
+    transaction
+        .execute_batch(sqlite_codec::INVOCATION_TABLE_SCHEMA)
+        .map_err(|error| format!("create worker-first invocation ledger: {error}"))?;
+    transaction
+        .execute(
+            &format!(
+                "INSERT INTO engine_invocations ({column_list}) \
+                 SELECT {column_list} FROM engine_invocations__worker_first_retirement"
+            ),
+            [],
+        )
+        .map_err(|error| format!("copy retained invocation rows: {error}"))?;
+    transaction
+        .execute_batch(
+            "DROP TABLE engine_invocations__worker_first_retirement;
+             CREATE INDEX idx_engine_invocations_trace ON engine_invocations(trace_id);",
+        )
+        .map_err(|error| format!("finish invocation ledger rebuild: {error}"))?;
+    Ok(true)
+}
 
 /// Fully scoped idempotency key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]

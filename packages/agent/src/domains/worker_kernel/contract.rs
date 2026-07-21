@@ -534,9 +534,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             ENGINE_SURFACE_SNAPSHOT_FUNCTION,
             "engine",
             EffectClass::PureRead,
-            RiskLevel::Low,
-            None,
-        )
+            RiskLevel::Low)
         .domain_worker(WORKER)
         .request_schema(json!({
             "type":"object",
@@ -584,9 +582,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "worker_kernel::inbox_attach",
             WORKER,
             EffectClass::IdempotentWrite,
-            RiskLevel::Low,
-            None,
-        )
+            RiskLevel::Low)
         .visibility(VisibilityScope::Internal)
         .request_schema(json!({"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":32},"relevanceQuery":{"type":"string"}}}))
         .response_schema(open_response())
@@ -600,9 +596,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             "worker_kernel::webhook_invoke",
             WORKER,
             EffectClass::ExternalSideEffect,
-            RiskLevel::High,
-            None,
-        )
+            RiskLevel::High)
         .visibility(VisibilityScope::Internal)
         .request_schema(json!({"type":"object","additionalProperties":false,"required":["workerId","triggerId","token","input","idempotencyKey"],"properties":{"workerId":{"type":"string"},"triggerId":{"type":"string"},"token":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"}}}))
         .response_schema(open_response())
@@ -621,7 +615,7 @@ fn spec(
     request: Value,
     description: &'static str,
 ) -> crate::engine::Result<CapabilitySpec> {
-    let mut contract = CapabilityContract::new(function, WORKER, effect, risk, None)
+    let mut contract = CapabilityContract::new(function, WORKER, effect, risk)
         .request_schema(request)
         .response_schema(response_schema(function))
         .description(description)

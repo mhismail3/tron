@@ -188,7 +188,7 @@ mod tests {
         assert!(json.get("version").is_some());
         assert!(json.get("api").is_some());
         assert_eq!(json["autonomousWorkers"], false);
-        assert_eq!(json["server"]["transcription"]["enabled"], false);
+        assert!(json["server"].get("transcription").is_none());
 
         assert!(json.get("models").is_none());
         assert!(json.get("logging").is_none());

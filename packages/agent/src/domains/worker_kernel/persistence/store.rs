@@ -13,7 +13,6 @@ use super::super::types::{
     UpsertOutcome, WebhookCredential, WorkerBundle, WorkerCommand, WorkerRunner, WorkerState,
     WorkerSummary, WorkerTrigger,
 };
-use super::snapshot::ensure_pre_worker_snapshot;
 
 #[derive(Clone)]
 pub struct WorkerStore {
@@ -47,9 +46,7 @@ impl Drop for RemoveDirectoryOnDrop {
 }
 
 impl WorkerStore {
-    pub fn open(home: PathBuf, source_profile: &str) -> Result<Self, String> {
-        ensure_pre_worker_snapshot(&home, source_profile)
-            .map_err(|error| format!("create pre-worker state snapshot: {error}"))?;
+    pub fn open(home: PathBuf) -> Result<Self, String> {
         let root = home.join("workspace").join("workers");
         let database = home
             .join("internal")
@@ -256,7 +253,6 @@ impl WorkerStore {
             )
             .map_err(|error| format!("initialize worker database: {error}"))?;
         super::migration::rebuild_indexes(&self.root, &self.database)?;
-        super::migration::import_legacy_candidates(&self.home, &self.root)?;
         self.recover_interrupted()
     }
 
@@ -2619,51 +2615,6 @@ mod tests {
             prepared.bundle.tool_name.as_deref(),
             Some("worker_last30days_research")
         );
-    }
-
-    #[test]
-    fn first_schema_open_snapshots_legacy_profile_and_restores_it() {
-        let temp = tempfile::tempdir().unwrap();
-        let profile = temp.path().join("profiles/user/profile.toml");
-        fs::create_dir_all(profile.parent().unwrap()).unwrap();
-        fs::write(&profile, "[settings]\nautonomousWorkers = false\n").unwrap();
-        let legacy_database = temp.path().join("internal/database/tron.sqlite");
-        fs::create_dir_all(legacy_database.parent().unwrap()).unwrap();
-        let connection = Connection::open(&legacy_database).unwrap();
-        connection
-            .execute("CREATE TABLE legacy(value TEXT NOT NULL)", [])
-            .unwrap();
-        connection
-            .execute("INSERT INTO legacy VALUES('before-worker-schema')", [])
-            .unwrap();
-        drop(connection);
-        let worker_database = temp.path().join("internal/database/workers.sqlite");
-        assert!(!worker_database.exists());
-
-        let store = WorkerStore::open(temp.path().to_path_buf(), "user").unwrap();
-        assert!(worker_database.is_file());
-        let snapshots = super::super::snapshot::list_snapshots(temp.path()).unwrap();
-        assert_eq!(snapshots.len(), 1);
-        super::super::snapshot::verify_snapshot(&snapshots[0]).unwrap();
-        fs::write(&profile, "[settings]\nautonomousWorkers = true\n").unwrap();
-        drop(store);
-
-        let recovery =
-            super::super::snapshot::restore_snapshot(&snapshots[0], temp.path()).unwrap();
-        assert!(recovery.join("internal/database/workers.sqlite").is_file());
-        assert_eq!(
-            fs::read_to_string(&profile).unwrap(),
-            "[settings]\nautonomousWorkers = false\n"
-        );
-        let restored = Connection::open(&legacy_database).unwrap();
-        assert_eq!(
-            restored
-                .query_row("SELECT value FROM legacy", [], |row| row
-                    .get::<_, String>(0))
-                .unwrap(),
-            "before-worker-schema"
-        );
-        assert!(!worker_database.exists());
     }
 
     #[test]

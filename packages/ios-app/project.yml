@@ -5,7 +5,7 @@ options:
     iOS: "26.0"
   xcodeVersion: "2640"
   developmentLanguage: en
-  generateEmptyDirectories: true
+  generateEmptyDirectories: false
   createIntermediateGroups: true
 
 configFiles:
@@ -74,7 +74,7 @@ targets:
     platform: iOS
     sources:
       - path: ShareExtension
-      - path: Sources/Support/Share/SharedContent.swift
+      - path: Sources/Support/SharedContent.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension

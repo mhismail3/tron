@@ -232,7 +232,7 @@ Missing build products, helpers, links, or failed packaging are hard failures.
 1. Add a case to `WizardStep` enum in `Sources/Support/Onboarding/OnboardingModels.swift`.
 2. Create a new view file under `Sources/Wizard/Steps/`.
 3. Add a case to the `switch state.step` dispatcher in `WizardView.swift`.
-4. Add tests to `Tests/Wizard/Flow/`, `Tests/Wizard/Steps/`, or `Tests/Wizard/Components/` based on the behavior being pinned; at minimum, verify the step ordering, rendering, and back/next behavior.
+4. Add tests to `Tests/Wizard/` and keep production steps under the multi-file `Sources/Wizard/Steps/` owner; at minimum, verify step ordering, rendering, and back/next behavior.
 5. Keep the shared 480×440 canvas unless the new page genuinely cannot fit; a canvas-size change belongs in `WizardLayout` and `WizardVisualLayoutTests`, not per-step metadata.
 6. Update `packages/mac-app/docs/architecture.md` with the step's role.
 

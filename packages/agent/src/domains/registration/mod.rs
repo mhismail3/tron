@@ -33,8 +33,7 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, auth, blob, context_control, device, filesystem, logs, memory, message, model, session,
-    settings, system, transcription, worker_kernel,
+    agent, auth, blob, filesystem, logs, message, model, session, settings, system, worker_kernel,
 };
 
 #[must_use = "activate after transport-trigger registration"]
@@ -131,14 +130,10 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainCompo
     let mut modules = vec![
         system::worker_module(&deps)?,
         worker_kernel_registration.module,
-        device::worker_module(&deps)?,
-        context_control::worker_module(&deps)?,
-        memory::worker_module(&deps)?,
         filesystem::worker_module(&deps)?,
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
         settings::worker_module(&deps)?,
-        transcription::worker_module(&deps)?,
         auth::worker_module(&deps)?,
         agent::worker_module(&deps)?,
         logs::worker_module(&deps)?,
@@ -231,10 +226,7 @@ fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()
                 module.worker.id.as_str()
             )));
         }
-        if matches!(
-            *topic,
-            "catalog.changes" | "queue.lifecycle" | "resource.leases" | "compensation.records"
-        ) {
+        if matches!(*topic, "catalog.changes" | "queue.lifecycle") {
             return Err(EngineError::PolicyViolation(format!(
                 "domain worker {} cannot claim engine-owned stream topic {topic}",
                 module.worker.id.as_str()
@@ -289,9 +281,9 @@ mod tests {
     use std::time::Duration;
 
     use crate::engine::{
-        ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass,
-        FunctionDefinition, FunctionId, FunctionQuery, InProcessFunctionHandler, Invocation,
-        TraceId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+        ActorContext, ActorId, ActorKind, CausalContext, EffectClass, FunctionDefinition,
+        FunctionId, FunctionQuery, InProcessFunctionHandler, Invocation, TraceId, VisibilityScope,
+        WorkerDefinition, WorkerId, WorkerKind,
     };
 
     #[derive(Debug)]
@@ -315,7 +307,6 @@ mod tests {
             WorkerId::new("test").expect("worker id"),
             WorkerKind::InProcess,
             crate::engine::ActorId::new("system").expect("actor id"),
-            AuthorityGrantId::new("engine-transport").expect("grant id"),
         )
         .with_namespace_claim("test");
         let mut definition = FunctionDefinition::new(
@@ -343,8 +334,8 @@ mod tests {
     }
 
     #[test]
-    fn stream_topic_validation_rejects_engine_owned_topics() {
-        let module = test_module(&["resource.leases"], vec!["resource.leases"]);
+    fn stream_topic_validation_rejects_active_engine_owned_topics() {
+        let module = test_module(&["catalog.changes"], vec!["catalog.changes"]);
         let Err(error) = validate_domain_stream_topics(&module) else {
             panic!("engine topic must fail");
         };
@@ -427,16 +418,6 @@ mod tests {
             "filesystem::create_dir",
             "filesystem::get_home",
             "filesystem::list_dir",
-            "memory::configure_policy",
-            "memory::edit",
-            "memory::inspect",
-            "memory::list",
-            "memory::migrate_export",
-            "memory::migrate_import",
-            "memory::record_prompt_trace",
-            "memory::retain",
-            "memory::status",
-            "memory::tombstone",
         ] {
             assert!(
                 function_ids
@@ -471,7 +452,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trusted_local_kernel_invocation_creates_no_grant() {
+    async fn trusted_local_kernel_invocation_records_actor_and_trace_without_grant_plane() {
         let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
         let invocation = Invocation::new_sync(
             FunctionId::new("worker_kernel::list").expect("function id"),
@@ -483,10 +464,8 @@ mod tests {
             )
             .with_session_id("worker-first-test"),
         );
-        assert!(
-            invocation.causal_context.authority_grant_id.is_none(),
-            "trusted-local context must carry no grant observation"
-        );
+        let invocation_id = invocation.id.clone();
+        let actor_id = invocation.causal_context.actor_id.clone();
 
         let result = ctx.engine_host.invoke(invocation).await;
 
@@ -499,10 +478,12 @@ mod tests {
             .expect("replay snapshot")
             .invocations;
         assert!(
-            records.iter().any(|record| {
-                record.invocation_id == result.invocation_id && record.authority_grant_id.is_none()
-            }),
-            "trusted-local invocation must persist without a grant"
+            records
+                .iter()
+                .any(|record| record.invocation_id == invocation_id
+                    && record.actor_id == actor_id
+                    && record.invocation_id == result.invocation_id),
+            "trusted-local invocation must persist actor and invocation identity"
         );
     }
 

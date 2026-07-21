@@ -61,16 +61,6 @@ extension ChatView {
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            // Live stream button — visible only when a Display stream is active.
-            if viewModel.displayStreamState.isStreamActive {
-                Button {
-                    viewModel.displayStreamState.showStreamSheet = true
-                } label: {
-                    Image(systemName: "play.rectangle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
             Button {
                 NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue)
             } label: {

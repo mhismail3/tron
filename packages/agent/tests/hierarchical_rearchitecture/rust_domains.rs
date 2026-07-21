@@ -34,7 +34,7 @@ fn rust_session_domain_uses_lifecycle_query_reconstruction_owners() {
 #[test]
 fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
     let required = [
-        "packages/agent/src/domains/session/event_store/envelope/mod.rs",
+        "packages/agent/src/domains/session/event_store/envelope.rs",
         "packages/agent/src/domains/session/event_store/reconstruction/mod.rs",
         "packages/agent/src/domains/session/event_store/store/event_store/mod.rs",
         "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
@@ -314,12 +314,11 @@ fn rust_settings_domain_keeps_worker_root_thin() {
 #[test]
 fn rust_engine_tests_are_mirrored_by_subsystem() {
     let required = [
-        "packages/agent/src/engine/tests/authority/mod.rs",
         "packages/agent/src/engine/tests/catalog/mod.rs",
         "packages/agent/src/engine/tests/durability/mod.rs",
         "packages/agent/src/engine/tests/invocation/mod.rs",
         "packages/agent/src/engine/tests/kernel/mod.rs",
-        "packages/agent/src/engine/tests/fixtures/mod.rs",
+        "packages/agent/src/engine/tests/fixtures.rs",
     ];
     let banned = [
         "packages/agent/src/engine/tests/catalog_discovery.rs",

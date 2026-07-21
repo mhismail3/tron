@@ -97,8 +97,6 @@ async fn boot_server_with_config_and_autonomy(
         session_manager,
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
-        transcription_runtime: tron::domains::transcription::SharedTranscriptionEngine::new(),
-        apns_runtime: tron::platform::apns::ApnsRuntime::disabled(),
         settings_path,
         profile_runtime: Arc::new(ProfileRuntime::load(&home).unwrap()),
         responder_factory: None,

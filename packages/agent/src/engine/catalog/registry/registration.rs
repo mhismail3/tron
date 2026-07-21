@@ -40,7 +40,6 @@ impl LiveCatalog {
         volatile: bool,
     ) -> Result<WorkerRevision> {
         validate_worker_namespace_claims(&definition)?;
-        self.validate_worker_grant(&definition)?;
         let kind = if let Some(existing) = self.workers.get(&definition.id) {
             if existing.definition.owner_actor != definition.owner_actor {
                 return Err(EngineError::OwnerMismatch {
@@ -148,7 +147,6 @@ impl LiveCatalog {
                 function_id: definition.id.to_string(),
             });
         }
-        self.validate_function_worker_grant(&definition, owner)?;
         policy::validate_function_registration(&definition)?;
 
         let kind = if let Some(existing) = self.functions.get(&definition.id) {

@@ -54,10 +54,6 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"targetVisibility":{"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","idempotencyKey"],"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility"],"type":"object"}))
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
-        .compensation(crate::engine::CompensationContract::new(
-            crate::engine::CompensationKind::InverseCommandAvailable,
-            "domain-specific tests preserve current rollback, no-op, or replay behavior",
-        ))
         .build()?,
     ];
     for spec in &specs {
@@ -73,12 +69,6 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
         if spec.request_schema.is_none() || spec.response_schema.is_none() {
             return Err(EngineError::PolicyViolation(format!(
                 "public engine transport method {} must declare strict request/response schemas",
-                spec.operation_key.as_str()
-            )));
-        }
-        if spec.effect_class.is_mutating() && spec.authority_scope.is_none() {
-            return Err(EngineError::PolicyViolation(format!(
-                "mutating public engine transport method {} must require an authority scope",
                 spec.operation_key.as_str()
             )));
         }
@@ -103,18 +93,10 @@ fn public_spec(
     effect: EffectClass,
     risk: RiskLevel,
 ) -> CapabilityContract {
-    CapabilityContract::new(method, "engine", effect, risk, Some(authority_for(effect)))
+    CapabilityContract::new(method, "engine", effect, risk)
         .function_id(function_id)
         .domain_worker("engine")
         .domain_module("transport::engine::socket")
-}
-
-fn authority_for(effect: EffectClass) -> &'static str {
-    if effect.is_mutating() {
-        "engine.promote.workspace"
-    } else {
-        "engine.read"
-    }
 }
 
 #[cfg(test)]

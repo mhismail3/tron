@@ -1,12 +1,10 @@
 //! Host-dispatched primitive runtime implementation.
 //!
-//! Primitive functions need a narrow view of catalog, resources, streams,
-//! queues, grants, and storage. This file owns the
+//! Primitive functions need a narrow view of catalog and storage. This file owns the
 //! `PrimitiveRuntimeHost` implementation so the host root can focus on lock
 //! choreography and invocation flow.
 
 use super::*;
-use crate::engine::durability::resources;
 
 impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
     fn discover_functions(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
@@ -23,39 +21,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
 
     fn watch_catalog_snapshot_base(&self, invocation: &Invocation) -> Result<Value> {
         self.meta_watch(invocation)
-    }
-
-    fn inspect_resource(
-        &self,
-        resource_id: &str,
-    ) -> Result<Option<resources::EngineResourceInspection>> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .inspect(resource_id)
-    }
-
-    fn create_resource(
-        &mut self,
-        request: resources::CreateResource,
-    ) -> Result<resources::EngineResource> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .create(request)
-    }
-
-    fn update_resource(
-        &mut self,
-        request: resources::UpdateResource,
-    ) -> Result<resources::EngineResourceVersion> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .update(request)
     }
 
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport> {

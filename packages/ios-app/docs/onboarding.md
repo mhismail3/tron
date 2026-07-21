@@ -267,12 +267,11 @@ at a bounded cadence until the server returns, the app backgrounds, or
 authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
 The Engine settings sheet starts directly with Servers, followed by the
-server-owned Session Defaults, Context, and Transcription sections; it has no
-top summary hero or separate presentation projection. Engine owns the retained
-quick-session defaults that exist as actionable iOS controls: model and
-workspace. The Local Transcription toggle remains an Engine policy even though
-the concise main Settings row does not enumerate it. Session briefing remains
-session-scoped through the prompt composer's context ring and briefing surfaces.
+server-owned Session Defaults, Context, and Autonomous Workers sections; it has
+no top summary hero or separate presentation projection. Engine owns the
+retained quick-session defaults that exist as actionable iOS controls: model
+and workspace. Fixed local transcription and microphone capture are absent;
+speech workflows must return as workers developed through real use.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a

@@ -19,7 +19,6 @@ final class SettingsState {
 
     // MARK: - Engine Policy
 
-    var transcriptionEnabled: Bool = false
     var autonomousWorkers: Bool = false
 
     @ObservationIgnored
@@ -103,7 +102,6 @@ final class SettingsState {
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        transcriptionEnabled = settings.transcriptionEnabled
         autonomousWorkers = settings.autonomousWorkers
     }
 }

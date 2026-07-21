@@ -204,7 +204,6 @@ mod tests {
             "dummy",
             EffectClass::PureRead,
             RiskLevel::Low,
-            Some("dummy.read"),
         )
         .build()
         .expect("valid test capability")

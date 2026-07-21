@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, HashSet};
 use serde_json::Value;
 
 use crate::engine::{
-    ActorId, ActorKind, CausalContext, ENGINE_INTERNAL_INVOKE_SCOPE, EngineHostHandle,
-    FunctionDefinition, FunctionId, Invocation, InvocationId, TraceId,
+    ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionDefinition, FunctionId,
+    Invocation, InvocationId, TraceId,
 };
 use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
@@ -74,15 +74,14 @@ pub(crate) async fn take_worker_inbox_context(
     }
     // INVARIANT: inbox attachment is an engine-owned projection step, not a
     // model tool call. Attribute the observation to the session while using an
-    // internal runtime actor so the hidden operation never depends on an agent
-    // grant or fails its own visibility boundary.
+    // internal runtime actor so the hidden operation satisfies its visibility
+    // boundary without pretending to be a model tool call.
     let mut context = CausalContext::trusted_local(
         ActorId::new("system:agent-runtime").ok()?,
         ActorKind::System,
         trace_id.cloned().unwrap_or_else(TraceId::generate),
     )
     .with_session_id(session_id.to_owned())
-    .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
     .with_idempotency_key(format!("worker-inbox-attach:{session_id}:{turn}"));
     if let Some(parent) = parent_invocation_id {
         context = context.with_parent_invocation(parent.clone());
@@ -126,7 +125,7 @@ pub struct PrimitiveExecutionTarget {
     pub function: FunctionDefinition,
     pub stops_turn: bool,
     pub execution_mode: ExecutionMode,
-    /// Trusted-local calls bypass per-invocation capability grants.
+    /// Whether this target came from the accepted trusted-local tool surface.
     pub trusted_local: bool,
 }
 
@@ -247,8 +246,7 @@ mod tests {
 
     use super::*;
     use crate::engine::{
-        ActorId, AuthorityGrantId, EffectClass, FunctionDefinition, WorkerDefinition, WorkerId,
-        WorkerKind,
+        ActorId, EffectClass, FunctionDefinition, WorkerDefinition, WorkerId, WorkerKind,
     };
 
     struct InboxAttachHandler;
@@ -270,7 +268,6 @@ mod tests {
             WorkerId::new(id).expect("worker id"),
             WorkerKind::System,
             ActorId::new("system").expect("actor id"),
-            AuthorityGrantId::new("engine-transport").expect("grant id"),
         )
         .with_namespace_claim(namespace)
     }
@@ -336,7 +333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_owned_inbox_attachment_crosses_internal_visibility_without_an_agent_grant() {
+    async fn engine_owned_inbox_attachment_crosses_internal_visibility_for_trusted_runtime() {
         let host = EngineHostHandle::new_in_memory().expect("host");
         host.register_worker_for_setup(worker("worker_kernel", "worker_kernel"), false)
             .expect("worker kernel");

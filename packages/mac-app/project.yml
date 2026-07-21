@@ -4,7 +4,7 @@ options:
   deploymentTarget:
     macOS: "15.0"
   developmentLanguage: en
-  generateEmptyDirectories: true
+  generateEmptyDirectories: false
   createIntermediateGroups: true
 
 configFiles:

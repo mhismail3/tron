@@ -11,7 +11,7 @@
 //! | [`foundation`] | Constants, IDs, paths, profile specs, retry/text helpers, and shared errors |
 //! | [`protocol`] | Public DTOs for content, events, messages, memory, and model capability data |
 //! | [`server`] | Transport-neutral runtime context, validation, params, and capability errors |
-//! | [`storage`] | SQLite storage helpers used by engine, session, logs, and runtime surfaces |
+//! | [`storage`] | SQLite storage helpers used by engine, session, and logs |
 //! | [`observability`] | Tracing/log persistence transport and test capture helpers |
 //!
 //! ## Entry Points

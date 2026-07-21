@@ -6,8 +6,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sqlite_codec::{
-    INVOCATION_COLUMNS, INVOCATION_INDEX_SCHEMA, INVOCATION_TABLE_SCHEMA,
-    LEGACY_TRUSTED_LOCAL_AUTHORITY_OBSERVATION, RawCatalogChangeRow, RawIdempotencyRow,
+    INVOCATION_INDEX_SCHEMA, INVOCATION_TABLE_SCHEMA, RawCatalogChangeRow, RawIdempotencyRow,
     SQLITE_SCHEMA, ensure_column, ledger_failure, optional_stored_error_json,
     optional_stored_json_string, raw_catalog_change, raw_idempotency_entry,
     resolve_optional_stored_json_string, sqlite_err, to_json_string,
@@ -70,42 +69,8 @@ impl SqliteEngineLedgerStore {
         self.conn
             .execute_batch(INVOCATION_INDEX_SCHEMA)
             .map_err(|err| sqlite_err("initialize_invocation_index", err))?;
-        ensure_column(
-            &self.conn,
-            "engine_invocations",
-            "resource_lease_ids_json",
-            "TEXT NOT NULL DEFAULT '[]'",
-        )?;
-        ensure_column(
-            &self.conn,
-            "engine_invocations",
-            "compensation_status",
-            "TEXT",
-        )?;
-        ensure_column(
-            &self.conn,
-            "engine_invocations",
-            "produced_resource_refs_json",
-            "TEXT NOT NULL DEFAULT '[]'",
-        )?;
         ensure_column(&self.conn, "engine_invocations", "session_id", "TEXT")?;
         ensure_column(&self.conn, "engine_invocations", "workspace_id", "TEXT")?;
-        crate::shared::storage::ensure_nullable_text_observation(
-            &self.conn,
-            "engine_invocations",
-            "authority_grant_id",
-            INVOCATION_TABLE_SCHEMA,
-            INVOCATION_INDEX_SCHEMA,
-            INVOCATION_COLUMNS,
-        )
-        .map_err(|err| ledger_failure("ledger.migrate_nullable_authority", err.to_string()))?;
-        self.conn
-            .execute(
-                "UPDATE engine_invocations SET authority_grant_id = NULL \
-                 WHERE authority_grant_id = ?1",
-                [LEGACY_TRUSTED_LOCAL_AUTHORITY_OBSERVATION],
-            )
-            .map_err(|err| sqlite_err("ledger.clear_legacy_local_authority", err))?;
         Ok(())
     }
 
@@ -312,15 +277,13 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .execute(
                 "INSERT INTO engine_invocations
                    (invocation_id, function_id, worker_id, function_revision,
-                    catalog_revision, actor_id, actor_kind_json, authority_grant_id,
-                    authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
+                    catalog_revision, actor_id, actor_kind_json, trace_id,
+                    parent_invocation_id, trigger_id,
                     session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
-                    idempotency_scope_value, resource_lease_ids_json, compensation_status,
-                    produced_resource_refs_json, idempotency_key, replayed_from, succeeded,
+                    idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                     result_json, error_json, timestamp)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
-                         ?24, ?25, ?26)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                 params![
                     record.invocation_id.as_str(),
                     record.function_id.as_str(),
@@ -329,14 +292,6 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     record.catalog_revision.0,
                     record.actor_id.as_str(),
                     to_json_string("append_invocation.actor_kind", &record.actor_kind)?,
-                    record
-                        .authority_grant_id
-                        .as_ref()
-                        .map(crate::engine::AuthorityGrantId::as_str),
-                    to_json_string(
-                        "append_invocation.authority_scopes",
-                        &record.authority_scopes
-                    )?,
                     record.trace_id.as_str(),
                     record
                         .parent_invocation_id
@@ -354,15 +309,6 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         .idempotency_scope
                         .as_ref()
                         .map(|scope| scope.value.as_str()),
-                    to_json_string(
-                        "append_invocation.resource_lease_ids",
-                        &record.resource_lease_ids
-                    )?,
-                    record.compensation_status.as_deref(),
-                    to_json_string(
-                        "append_invocation.produced_resource_refs",
-                        &record.produced_resource_refs
-                    )?,
                     record.idempotency_key.as_deref(),
                     record.replayed_from.as_ref().map(InvocationId::as_str),
                     i64::from(record.succeeded),
@@ -397,11 +343,10 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .conn
             .prepare(
                 "SELECT invocation_id, function_id, worker_id, function_revision,
-                        catalog_revision, actor_id, actor_kind_json, authority_grant_id,
-                        authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
+                        catalog_revision, actor_id, actor_kind_json, trace_id,
+                        parent_invocation_id, trigger_id,
                         session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
-                        idempotency_scope_value, resource_lease_ids_json, compensation_status,
-                        produced_resource_refs_json, idempotency_key, replayed_from, succeeded,
+                        idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                         result_json, error_json, timestamp
                  FROM engine_invocations
                  ORDER BY rowid ASC",
@@ -425,11 +370,10 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .conn
             .prepare(
                 "SELECT invocation_id, function_id, worker_id, function_revision,
-                        catalog_revision, actor_id, actor_kind_json, authority_grant_id,
-                        authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
+                        catalog_revision, actor_id, actor_kind_json, trace_id,
+                        parent_invocation_id, trigger_id,
                         session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
-                        idempotency_scope_value, resource_lease_ids_json, compensation_status,
-                        produced_resource_refs_json, idempotency_key, replayed_from, succeeded,
+                        idempotency_scope_value, idempotency_key, replayed_from, succeeded,
                         result_json, error_json, timestamp
                  FROM engine_invocations
                  WHERE session_id = ?1
@@ -618,90 +562,5 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             ));
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::{
-        ActorId, ActorKind, CatalogRevision, CausalContext, FunctionId, FunctionRevision,
-        Invocation, InvocationResult, TraceId,
-    };
-    use serde_json::json;
-
-    #[test]
-    fn old_invocation_schema_migrates_and_trusted_local_rows_store_sql_null() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("tron.sqlite");
-        let legacy_schema = INVOCATION_TABLE_SCHEMA.replace(
-            "authority_grant_id       TEXT,",
-            "authority_grant_id       TEXT NOT NULL,",
-        );
-        assert_ne!(legacy_schema, INVOCATION_TABLE_SCHEMA);
-        Connection::open(&path)
-            .unwrap()
-            .execute_batch(&format!(
-                "{legacy_schema}
-                 INSERT INTO engine_invocations (
-                   invocation_id, function_id, worker_id, function_revision,
-                   catalog_revision, actor_id, actor_kind_json, authority_grant_id,
-                   authority_scopes_json, trace_id, delivery_mode_json, succeeded, timestamp
-                 ) VALUES (
-                   'legacy-local', 'worker_kernel::list', 'worker_kernel', 1,
-                   1, 'agent:legacy-local', '\"Agent\"',
-                   '{LEGACY_TRUSTED_LOCAL_AUTHORITY_OBSERVATION}', '[]',
-                   'legacy-local-trace', '\"Sync\"', 1, '2026-07-20T00:00:00Z'
-                 );"
-            ))
-            .unwrap();
-
-        let mut store = SqliteEngineLedgerStore::open(&path).unwrap();
-        let invocation = Invocation::new_sync(
-            FunctionId::new("worker_kernel::list").unwrap(),
-            json!({}),
-            CausalContext::trusted_local(
-                ActorId::new("agent:nullable-ledger-test").unwrap(),
-                ActorKind::Agent,
-                TraceId::new("nullable-ledger-test").unwrap(),
-            )
-            .with_session_id("nullable-ledger-test"),
-        );
-        let result = InvocationResult::success(
-            &invocation,
-            WorkerId::new("worker_kernel").unwrap(),
-            FunctionRevision(1),
-            CatalogRevision(1),
-            json!({"workers": []}),
-        );
-        let record = InvocationRecord::from_result(&invocation, &result, None);
-        store.append_invocation(&record).unwrap();
-
-        let stored_grant: Option<String> = store
-            .connection()
-            .query_row(
-                "SELECT authority_grant_id FROM engine_invocations WHERE invocation_id = ?1",
-                [invocation.id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(stored_grant, None);
-        let records = store.list_invocations().unwrap();
-        assert_eq!(records.len(), 2);
-        assert!(
-            records
-                .iter()
-                .all(|record| record.authority_grant_id.is_none())
-        );
-        let not_null: i64 = store
-            .connection()
-            .query_row(
-                "SELECT \"notnull\" FROM pragma_table_info('engine_invocations') \
-                 WHERE name = 'authority_grant_id'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(not_null, 0);
     }
 }

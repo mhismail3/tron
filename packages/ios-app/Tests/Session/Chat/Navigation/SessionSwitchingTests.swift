@@ -108,7 +108,6 @@ final class SessionSwitchingTests: XCTestCase {
             agent: engineClient.agent,
             models: DefaultModelRepository(modelClient: engineClient.model),
             messages: DefaultMessageRepository(messageClient: engineClient.message),
-            transcription: DefaultTranscriptionRepository(client: engineClient.transcription),
             workerKernel: DefaultWorkerKernelRepository(client: engineClient.workerKernel)
         )
 

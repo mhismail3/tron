@@ -2,8 +2,8 @@
 //!
 //! The loop owns provider execution after startup has accepted a prompt:
 //! reconstruct session state, compose soul/state/history context, call the
-//! provider with one `execute` capability, persist resulting events, and repeat
-//! until the assistant reaches a terminal response.
+//! provider with the resolved direct typed surface, persist resulting events,
+//! and repeat until the assistant reaches a terminal response.
 //!
 //! Runtime observability is intentionally first-class here. The loop emits
 //! structured `agent_event` logs for run/turn boundaries, provider requests,

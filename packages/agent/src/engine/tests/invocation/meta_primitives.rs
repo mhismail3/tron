@@ -34,7 +34,7 @@ async fn storage_primitives_report_and_checkpoint_unified_sqlite_file() {
         .invoke(Invocation::new_sync(
             fid("storage::stats"),
             json!({}),
-            causal().with_scope("storage.read"),
+            causal(),
         ))
         .await;
     assert_eq!(stats.error, None);
@@ -48,7 +48,6 @@ async fn storage_primitives_report_and_checkpoint_unified_sqlite_file() {
             fid("storage::checkpoint"),
             json!({}),
             causal()
-                .with_scope("storage.write")
                 .with_session_id("session-a")
                 .with_idempotency_key("storage-checkpoint-test"),
         ))
@@ -61,7 +60,7 @@ async fn storage_primitives_report_and_checkpoint_unified_sqlite_file() {
 }
 
 #[tokio::test]
-async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
+async fn engine_meta_discover_and_inspect_are_live_and_visibility_checked() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()
         .register_worker(worker("w1", "alpha"), true)
@@ -136,21 +135,14 @@ async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
 #[tokio::test]
 async fn primitive_catalog_read_function_reports_bootstrapped_engine_catalog() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
-    let system_context = |trace_id: &str, scope: &str| {
-        CausalContext::new(
-            actor("system"),
-            ActorKind::System,
-            grant("system-grant"),
-            trace(trace_id),
-        )
-        .with_scope(scope)
-    };
+    let system_context =
+        |trace_id: &str| CausalContext::new(actor("system"), ActorKind::System, trace(trace_id));
 
     let catalog = handle
         .invoke(host_invocation(
             "catalog::list",
             json!({"includeInternal": true}),
-            system_context("primitive-trace", "catalog.read"),
+            system_context("primitive-trace"),
         ))
         .await;
     assert_eq!(catalog.error, None);
@@ -169,10 +161,8 @@ async fn catalog_read_primitives_are_visible_to_engine_client() {
     let client_context = CausalContext::new(
         actor("engine-client"),
         ActorKind::Client,
-        grant("engine-transport"),
         trace("catalog-client-read"),
-    )
-    .with_scope("catalog.read");
+    );
 
     let list = handle
         .invoke(host_invocation(
@@ -217,60 +207,6 @@ async fn catalog_read_primitives_are_visible_to_engine_client() {
             .unwrap()
             .iter()
             .any(|function| function["id"] == "catalog::watch_snapshot")
-    );
-}
-
-#[tokio::test]
-async fn resource_read_primitives_are_visible_to_engine_client_without_write_access() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-    let client_context = || {
-        CausalContext::new(
-            actor("engine-client"),
-            ActorKind::Client,
-            grant("engine-transport"),
-            trace("resource-client-read"),
-        )
-        .with_scope("resource.read")
-        .with_scope("resource.write")
-        .with_session_id("session-a")
-    };
-
-    let listed = handle
-        .invoke(host_invocation(
-            "engine::invoke",
-            json!({"functionId": "resource::list", "payload": {"kind": "ui_surface", "limit": 25}}),
-            client_context(),
-        ))
-        .await;
-    assert_eq!(listed.error, None, "engine::invoke wraps child outcomes");
-    let child = &listed.value.as_ref().unwrap()["child"];
-    assert_eq!(child["error"], serde_json::Value::Null);
-    assert!(
-        child["value"]["resources"].is_array(),
-        "engine-client resource::list should return the resource array"
-    );
-
-    let create = handle
-        .invoke(host_invocation(
-            "engine::invoke",
-            json!({
-                "functionId": "resource::create",
-                "payload": {
-                    "kind": "ui_surface",
-                    "scope": "session",
-                    "payload": {"title": "client mutation must not run"}
-                },
-                "idempotencyKey": "client-resource-create"
-            }),
-            client_context(),
-        ))
-        .await;
-    assert_eq!(create.error, None, "engine::invoke wraps child outcomes");
-    assert!(
-        create.value.unwrap()["child"]["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("not visible")),
-        "engine-client must not reach resource writes through engine::invoke"
     );
 }
 
@@ -496,11 +432,8 @@ async fn public_engine_invoke_cannot_reach_hidden_visibility_targets() {
         CausalContext::new(
             actor("engine-client"),
             ActorKind::Client,
-            grant("engine-transport"),
             trace("public-engine-invoke-hidden"),
         )
-        .with_scope("alpha.read")
-        .with_scope("alpha.write")
     };
 
     for target in ["alpha::internal", "alpha::admin", "alpha::worker_only"] {
@@ -527,7 +460,7 @@ async fn public_engine_invoke_cannot_reach_hidden_visibility_targets() {
 }
 
 #[tokio::test]
-async fn engine_internal_invoke_scope_does_not_make_public_context_trusted() {
+async fn actor_kind_controls_internal_visibility_without_caller_supplied_scope() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()
         .register_worker(worker("w1", "alpha"), true)
@@ -549,22 +482,20 @@ async fn engine_internal_invoke_scope_does_not_make_public_context_trusted() {
         )
         .unwrap();
 
-    let public_raw_scope = host
+    let public_client = host
         .invoke(host_invocation(
             "engine::invoke",
             json!({"functionId": "alpha::internal", "payload": {}}),
             CausalContext::new(
                 actor("engine-client"),
                 ActorKind::Client,
-                grant("engine-transport"),
                 trace("public-engine-invoke-raw-internal"),
-            )
-            .with_scope(crate::engine::ENGINE_INTERNAL_INVOKE_SCOPE),
+            ),
         ))
         .await;
-    assert_eq!(public_raw_scope.error, None);
+    assert_eq!(public_client.error, None);
     assert!(
-        public_raw_scope.value.unwrap()["child"]["error"]["message"]
+        public_client.value.unwrap()["child"]["error"]["message"]
             .as_str()
             .is_some_and(|message| message.contains("not visible"))
     );
@@ -577,10 +508,8 @@ async fn engine_internal_invoke_scope_does_not_make_public_context_trusted() {
             CausalContext::new(
                 actor("system"),
                 ActorKind::System,
-                grant("engine-system"),
                 trace("trusted-engine-invoke-internal"),
-            )
-            .with_scope(crate::engine::ENGINE_INTERNAL_INVOKE_SCOPE),
+            ),
         ))
         .await;
     assert_eq!(trusted_runtime.error, None);

@@ -45,11 +45,12 @@ fn sqlite_table_names(source: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn project_reference_database_table_names() -> BTreeSet<String> {
+fn project_reference_table_names(section_heading: &str) -> BTreeSet<String> {
     let reference = read_repo_file("packages/agent/docs/project-reference.md");
+    let marker = format!("### {section_heading}\n");
     let table_section = reference
-        .split_once("### Tables\n")
-        .expect("project reference must document the database tables")
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("project reference must document {section_heading}"))
         .1;
     let mut names = BTreeSet::new();
     let mut rows_started = false;
@@ -231,10 +232,6 @@ fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
         "packages/agent/src/engine/durability/ledger/sqlite_codec.rs",
         "packages/agent/src/engine/durability/streams/sqlite_store.rs",
         "packages/agent/src/engine/durability/state.rs",
-        "packages/agent/src/engine/durability/resources/store/sqlite_codec.rs",
-        "packages/agent/src/engine/authority/grants/mod.rs",
-        "packages/agent/src/engine/authority/leases.rs",
-        "packages/agent/src/engine/authority/compensation.rs",
     ];
     let source_tables = schema_sources
         .into_iter()
@@ -249,9 +246,22 @@ fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
         .collect();
 
     assert_eq!(
-        project_reference_database_table_names(),
+        project_reference_table_names("Tables"),
         source_tables,
-        "project-reference database catalog must match active SQLite schema owners"
+        "project-reference primary database catalog must match active SQLite schema owners"
+    );
+}
+
+#[test]
+fn project_reference_worker_table_catalog_matches_worker_store() {
+    let source_tables = sqlite_table_names(&read_repo_file(
+        "packages/agent/src/domains/worker_kernel/persistence/store.rs",
+    ));
+    assert!(!source_tables.is_empty(), "worker store declares no tables");
+    assert_eq!(
+        project_reference_table_names("Worker database"),
+        source_tables,
+        "project-reference worker database catalog must match its isolated store"
     );
 }
 

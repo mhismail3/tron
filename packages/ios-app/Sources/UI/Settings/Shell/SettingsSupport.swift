@@ -138,7 +138,6 @@ enum MainSettingsFooterLayout {
 enum EngineSettingsSection: String, CaseIterable, Sendable {
     case defaults = "Session Defaults"
     case context = "Context"
-    case transcription = "Transcription"
 }
 
 enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {

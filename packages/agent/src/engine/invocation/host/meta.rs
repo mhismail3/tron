@@ -9,7 +9,6 @@ use super::*;
 
 pub(super) const ENGINE_WORKER_ID: &str = "engine";
 pub(super) const ENGINE_OWNER_ACTOR: &str = "system";
-pub(super) const ENGINE_AUTHORITY_GRANT: &str = "engine-system";
 
 pub(super) const DISCOVER_FUNCTION: &str = "engine::discover";
 pub(super) const INSPECT_FUNCTION: &str = "engine::inspect";
@@ -68,7 +67,6 @@ pub(super) fn engine_worker() -> WorkerDefinition {
         worker_id(ENGINE_WORKER_ID).expect("valid engine worker id"),
         WorkerKind::System,
         actor_id(ENGINE_OWNER_ACTOR).expect("valid engine owner actor"),
-        grant_id(ENGINE_AUTHORITY_GRANT).expect("valid engine authority grant"),
     )
     .with_namespace_claim(ENGINE_WORKER_ID)
 }
@@ -106,7 +104,6 @@ pub(super) fn meta_function_definitions() -> Result<Vec<FunctionDefinition>> {
             EffectClass::IdempotentWrite,
         )
         .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-        .with_required_authority(AuthorityRequirement::scope("engine.promote"))
         .with_risk(RiskLevel::Medium)
         .with_request_schema(promote_schema()),
     ];
@@ -133,7 +130,6 @@ pub(super) fn same_meta_function_contract(
         && existing.effect_class == expected.effect_class
         && existing.risk_level == expected.risk_level
         && existing.idempotency == expected.idempotency
-        && existing.required_authority == expected.required_authority
         && existing.allowed_delivery_modes == expected.allowed_delivery_modes
         && existing.health == expected.health
         && existing.provenance == expected.provenance
@@ -225,7 +221,6 @@ pub(super) fn actor_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
         actor_kind: context.actor_kind.clone(),
-        authority_scopes: context.authority_scopes.clone(),
         session_id: context.session_id.clone(),
         workspace_id: context.workspace_id.clone(),
     }
@@ -607,10 +602,6 @@ pub(super) fn function_id(value: &str) -> Result<FunctionId> {
 
 pub(super) fn actor_id(value: &str) -> Result<ActorId> {
     ActorId::new(value)
-}
-
-pub(super) fn grant_id(value: &str) -> Result<AuthorityGrantId> {
-    AuthorityGrantId::new(value)
 }
 
 pub(super) fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {

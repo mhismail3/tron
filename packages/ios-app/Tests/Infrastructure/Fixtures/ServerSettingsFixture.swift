@@ -20,10 +20,7 @@ enum ServerSettingsFixture {
         {
             "autonomousWorkers": false,
             "server": {
-                "defaultModel": "claude-sonnet-4-6",
-                "transcription": {
-                    "enabled": false
-                }
+                "defaultModel": "claude-sonnet-4-6"
             },
             "context": {
                 "compactor": {

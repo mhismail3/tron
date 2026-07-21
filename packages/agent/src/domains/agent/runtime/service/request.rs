@@ -9,6 +9,6 @@ pub struct PromptRequest {
     pub reasoning_level: Option<String>,
     pub attachments: Option<Vec<Value>>,
     /// Engine causality moved from the accepted invocation into the provider
-    /// turn, completion resources, and runtime stream records.
+    /// turn, completion events, and runtime stream records.
     pub engine_causality: Option<PromptEngineCausality>,
 }

@@ -8,7 +8,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `host` | Catalog-backed invocation host, dispatch policy, recording, queue/stream/resource integration. |
+//! | `host` | Catalog-backed invocation host, dispatch policy, recording, state, and stream integration. |
 //! | `model` | Invocation, causal context, result, and durable invocation record DTOs. |
 //!
 //! ## Entry Points
@@ -22,10 +22,8 @@
 //!
 //! - Invocation IDs and causal context are created before dispatch and copied
 //!   into the durable record.
-//! - Trusted-local contexts carry no authority-grant id. Grant-backed remote
-//!   boundaries carry `Some(id)`; rejected unbacked observations and accepted
-//!   trusted-local calls carry `None`, with only the latter receiving the
-//!   explicit trusted-local runtime marker.
+//! - Trusted-local contexts carry an explicit runtime marker plus actor and
+//!   trace evidence. Public transport cannot supply that marker.
 //! - Durable records preserve session/workspace/trace/idempotency references so
 //!   replay manifests can explain why an invocation occurred.
 //! - Model-originated direct calls carry the advertised function revision and,

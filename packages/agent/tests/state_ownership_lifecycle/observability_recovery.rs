@@ -125,7 +125,7 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
         ],
     );
 
-    let logs_domain = read_repo_file("packages/agent/src/domains/logs/mod.rs");
+    let logs_domain = read_repo_file("packages/agent/src/domains/logs.rs");
     for required in [
         "CapabilityContract::new(",
         "\"logs::ingest\"",
@@ -142,7 +142,7 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "logs domain observability lifecycle missing `{required}`"
         );
     }
-    let log_ops = read_repo_file("packages/agent/src/domains/logs/mod.rs");
+    let log_ops = read_repo_file("packages/agent/src/domains/logs.rs");
     for required in [
         "if params.limit > MAX_RECENT_LIMIT",
         "LogSessionFilter::OnlySession",

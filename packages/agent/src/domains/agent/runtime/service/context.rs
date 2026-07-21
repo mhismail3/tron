@@ -83,7 +83,6 @@ async fn invoke_state_list(
         crate::engine::ActorKind::System,
         crate::engine::TraceId::new("agent-state-context").ok()?,
     )
-    .with_scope("state.read")
     .with_idempotency_key("agent-state-context");
     if let Some(session_id) = session_id {
         causal = causal.with_session_id(session_id);
@@ -123,10 +122,8 @@ mod tests {
         crate::engine::CausalContext::new(
             crate::engine::ActorId::new("system:test").unwrap(),
             crate::engine::ActorKind::System,
-            crate::engine::AuthorityGrantId::new("engine-system").unwrap(),
             crate::engine::TraceId::new("agent-state-context-test").unwrap(),
         )
-        .with_scope("state.write")
         .with_idempotency_key("agent-state-context-test")
         .with_session_id(session_id)
     }

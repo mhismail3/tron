@@ -316,8 +316,13 @@ impl TronAgent {
         self.persister = persister;
     }
 
-    pub(crate) fn set_context_control(&mut self, deps: crate::domains::context_control::Deps) {
-        self.compaction.set_context_control(deps);
+    pub(crate) fn set_compaction_session_manager(
+        &mut self,
+        session_manager: Arc<
+            crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager,
+        >,
+    ) {
+        self.compaction.set_session_manager(session_manager);
     }
 
     pub fn set_sequence_counter(&mut self, counter: Arc<AtomicI64>) {

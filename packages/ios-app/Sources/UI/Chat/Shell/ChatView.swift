@@ -78,13 +78,6 @@ struct ChatView: View {
             viewModel: viewModel,
             sessionId: sessionId
         )
-        .sheet(isPresented: $viewModel.displayStreamState.showStreamSheet) {
-            StreamSheetView(
-                viewModel: viewModel,
-                onClose: { viewModel.displayStreamState.showStreamSheet = false },
-                onStop: { viewModel.stopDisplayStream() }
-            )
-        }
         // iOS 26 menu actions route through NotificationCenter before state mutation.
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
             guard let raw = notification.object as? String,
@@ -141,7 +134,6 @@ struct ChatView: View {
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             viewModel.clearLocalNotifications()
-            viewModel.cancelRecording()
             viewModel.stopLiveEventStream()
             // Do not reset `initialLoadComplete` here. SwiftUI can send
             // `onDisappear` for transient app/sheet/navigation transitions

@@ -17,7 +17,6 @@ struct ProductionAppRoot: View {
 
     @State private var initializer = AppInitializer()
     @State private var connectionBannerKind: ConnectionToastPolicy.Kind?
-    @State private var isRegisteringPush = false
 
     // Onboarding state — owned per-launch; survives across the sheet
     // because @State preserves its initial value for the lifetime of
@@ -61,19 +60,9 @@ struct ProductionAppRoot: View {
             .task {
                 await initializeApp()
             }
-            .onChange(of: container.pushNotificationService.deviceToken, initial: true) { _, token in
-                guard let token else { return }
-                Task { await registerDeviceToken(token) }
-            }
             .onChange(of: container.engineClient.connectionState) { oldState, newState in
                 handleConnectionBannerTransition(to: newState)
                 container.clientLogIngestionService.handleConnectionChange(from: oldState, to: newState)
-                if newState.isConnected && !oldState.isConnected && onboardingComplete {
-                    Task { await registerPushIfAuthorized() }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .navigateToSession)) { notification in
-                container.deepLinkRouter.handle(notificationPayload: notification.userInfo ?? [:])
             }
             .onOpenURL { url in
                 // Handle URL scheme deep links
@@ -119,10 +108,6 @@ struct ProductionAppRoot: View {
                 if newPhase == .active && oldPhase != .active {
                     Task {
                         await recoverForegroundConnection()
-                        if container.engineClient.connectionState.isConnected && onboardingComplete {
-                            await registerPushIfAuthorized()
-                        }
-
                         // Handle reconnection based on current connection state.
                         // Session-list refresh is requested unconditionally — the central
                         // SessionRefreshService coalesces and defers to reconnect if offline.
@@ -256,35 +241,6 @@ struct ProductionAppRoot: View {
     private func initializeApp() async {
         await initializer.initialize {
             try await container.initialize()
-        }
-        if container.engineClient.connectionState.isConnected && onboardingComplete {
-            await registerPushIfAuthorized()
-        }
-    }
-
-    private func registerPushIfAuthorized() async {
-        guard !isRegisteringPush else { return }
-        isRegisteringPush = true
-        defer { isRegisteringPush = false }
-        await container.pushNotificationService.registerAfterPairing()
-        if let token = container.pushNotificationService.deviceToken {
-            await registerDeviceToken(token)
-        }
-    }
-
-    private func registerDeviceToken(_ token: String) async {
-        guard container.engineClient.connectionState.isConnected else { return }
-        do {
-            let result = try await container.engineClient.system.registerDeviceToken(token)
-            TronLogger.shared.info(
-                "Device registration completed: status=\(result.status) transport=\(result.liveApnsEnabled)",
-                category: .notification
-            )
-        } catch {
-            TronLogger.shared.error(
-                "Device registration failed: \(error.localizedDescription)",
-                category: .notification
-            )
         }
     }
 

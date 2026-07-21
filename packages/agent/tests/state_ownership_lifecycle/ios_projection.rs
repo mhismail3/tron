@@ -375,8 +375,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "InputHistoryStore must require its defaults owner, not reach for UserDefaults.standard"
     );
 
-    let shared_content =
-        read_repo_file("packages/ios-app/Sources/Support/Share/SharedContent.swift");
+    let shared_content = read_repo_file("packages/ios-app/Sources/Support/SharedContent.swift");
     for required in [
         "App Group UserDefaults",
         "static let suiteName",

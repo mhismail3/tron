@@ -4,14 +4,13 @@
 //! request DTO, dependency bundle, run plan, spawning, stream event publication,
 //! lightweight session title generation, and the major run-turn phases. The
 //! service also owns the outer structured logging lifecycle for accepted prompt
-//! runs so logs, session events, trace records, and agent-result resources share
-//! common run/session/trace identifiers. `PromptRequest` is the single
+//! runs so logs, session events, and trace records share common
+//! run/session/trace identifiers. `PromptRequest` is the single
 //! plan-level owner of accepted invocation causality; execution moves that value
 //! into its turn and completion path. Completion emits the runtime-owned
 //! durable session-update projection after the turn's synchronous persistence
 //! calls have committed; it does not rebuild that wire event, retain
-//! session-cache ownership, or duplicate final assistant state into an
-//! `agent_result` resource.
+//! session-cache ownership, or duplicate final assistant state.
 //! Before durable history is reconstructed, prompt admission atomically closes
 //! any terminal prior turn's unmatched capability starts and broadcasts those
 //! row-backed repairs to live clients. A repair failure rejects the prompt

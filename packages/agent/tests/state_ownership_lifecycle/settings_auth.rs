@@ -251,7 +251,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         "OAuth pending-flow TTL must remain explicit"
     );
 
-    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding/mod.rs");
+    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding.rs");
     assert_contains_in_order(
         "bearer-token auth storage lifecycle",
         &onboarding,
@@ -430,7 +430,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
 #[test]
 fn server_auth_and_settings_writes_stay_owner_private() {
     let allowed = [
-        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
+        "packages/agent/src/app/lifecycle/onboarding.rs",
         "packages/agent/src/app/health/mod.rs",
         "packages/agent/src/domains/auth/credentials/",
         "packages/agent/src/domains/settings/profile/",

@@ -172,8 +172,8 @@ fn context_clear_drops_results_without_a_remaining_invocation() {
                 "content": [{
                     "type": "capability_invocation",
                     "id": "call_clear",
-                    "name": "execute",
-                    "arguments": {"operation": "context_control_clear"}
+                    "name": "session_clear",
+                    "arguments": {"reason": "test"}
                 }]
             }),
         ),
@@ -181,7 +181,7 @@ fn context_clear_drops_results_without_a_remaining_invocation() {
             EventType::CapabilityInvocationStarted,
             serde_json::json!({
                 "invocationId": "call_clear",
-                "arguments": {"operation": "context_control_clear"}
+                "arguments": {"reason": "test"}
             }),
         ),
         ev(
@@ -239,8 +239,8 @@ fn compact_boundary_drops_results_without_a_remaining_invocation() {
                 "content": [{
                     "type": "capability_invocation",
                     "id": "call_compact",
-                    "name": "execute",
-                    "arguments": {"operation": "context_control_compact"}
+                    "name": "session_compact",
+                    "arguments": {"reason": "manual"}
                 }]
             }),
         ),
@@ -248,7 +248,7 @@ fn compact_boundary_drops_results_without_a_remaining_invocation() {
             EventType::CapabilityInvocationStarted,
             serde_json::json!({
                 "invocationId": "call_compact",
-                "arguments": {"operation": "context_control_compact"}
+                "arguments": {"reason": "manual"}
             }),
         ),
         ev(

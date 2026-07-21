@@ -10,13 +10,8 @@ use serde::{Deserialize, Serialize};
 /// guards against drift; adding a field here means adding it at every
 /// emit site in the same commit.
 ///
-/// Runtime compactions commit through context-control action and preflight
-/// snapshot resources. The action/snapshot refs remain optional at the wire
-/// type so historical/imported boundaries can still decode, but new runtime
-/// compactions durably prepare the referenced action version before appending
-/// the boundary. Action finalization is replay-repairable, so a committed
-/// boundary never points at a missing action resource and remains turn-stopping
-/// even if secondary audit publication is interrupted.
+/// Runtime compactions commit directly as durable session boundaries. There is
+/// no parallel context-control resource plane to authorize, prepare, or repair.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompactBoundaryPayload {
@@ -48,20 +43,9 @@ pub struct CompactBoundaryPayload {
     /// Number of messages preserved after compaction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preserved_messages: Option<i64>,
-    /// Context-control action resource backing this boundary, when available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_control_action_resource_id: Option<String>,
-    /// Prepared action version that already existed when this boundary
-    /// committed. Historical boundaries may omit it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_control_action_version_id: Option<String>,
-    /// Context-control preflight snapshot resource backing this boundary, when
-    /// available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_control_snapshot_resource_id: Option<String>,
-    /// Internal capability invocation that caused this boundary, retained as
-    /// durable audit correlation. Reconstruction derives provider-valid result
-    /// pairing from the surviving assistant invocation blocks instead.
+    /// Internal invocation that caused this boundary, retained as durable
+    /// audit correlation. Reconstruction derives provider-valid result pairing
+    /// from the surviving assistant invocation blocks instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boundary_invocation_id: Option<String>,
 }
@@ -164,24 +148,14 @@ mod tests {
     }
 
     #[test]
-    fn compact_boundary_accepts_context_control_audit_refs() {
+    fn compact_boundary_accepts_direct_invocation_audit_ref() {
         let ok = serde_json::json!({
             "originalTokens": 100,
             "compactedTokens": 10,
             "reason": "threshold_exceeded",
-            "contextControlActionResourceId": "context_control_action:test",
-            "contextControlSnapshotResourceId": "context_control_snapshot:test",
             "boundaryInvocationId": "invocation:test",
         });
         let parsed: CompactBoundaryPayload = serde_json::from_value(ok).unwrap();
-        assert_eq!(
-            parsed.context_control_action_resource_id.as_deref(),
-            Some("context_control_action:test")
-        );
-        assert_eq!(
-            parsed.context_control_snapshot_resource_id.as_deref(),
-            Some("context_control_snapshot:test")
-        );
         assert_eq!(
             parsed.boundary_invocation_id.as_deref(),
             Some("invocation:test")

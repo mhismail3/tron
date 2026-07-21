@@ -13,9 +13,7 @@ pub use catalog::{
 };
 pub use function::FunctionDefinition;
 pub use function::{
-    AuthorityRequirement, CompensationContract, CompensationKind, DeliveryMode,
-    DurableOutputContract, EffectClass, IdempotencyContract, IdempotencyKeySource,
-    IdempotencyScope, LedgerKind, ReplayBehavior, ResourceLeaseFailureBehavior,
-    ResourceLeaseRequirement, RiskLevel,
+    DeliveryMode, EffectClass, IdempotencyContract, IdempotencyKeySource, IdempotencyScope,
+    LedgerKind, ReplayBehavior, RiskLevel,
 };
 pub use worker::{WorkerDefinition, WorkerKind, WorkerLifecycleState};

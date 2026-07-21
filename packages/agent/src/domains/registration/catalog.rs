@@ -7,14 +7,12 @@
 
 pub(crate) use super::contract::function_definition_for_capability;
 use crate::engine::{
-    ActorId, AuthorityGrantId, DurableOutputContract, EffectClass, FunctionId, IdempotencyContract,
-    ResourceLeaseRequirement, Result as EngineResult, RiskLevel, VisibilityScope, WorkerId,
+    ActorId, EffectClass, FunctionId, IdempotencyContract, Result as EngineResult, RiskLevel,
+    VisibilityScope, WorkerId,
 };
 
 /// System actor used for server-owned capability registration.
 pub(crate) const SYSTEM_OWNER_ACTOR: &str = "system";
-/// Authority grant carried by first-party engine transport and domain workers.
-pub(crate) const SYSTEM_AUTHORITY_GRANT: &str = "engine-transport";
 
 /// Idempotency source for a public engine transport method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,8 +49,6 @@ pub struct CapabilitySpec {
     pub risk_level: RiskLevel,
     /// Engine visibility.
     pub visibility: VisibilityScope,
-    /// Optional authority scope required to invoke.
-    pub authority_scope: Option<&'static str>,
     /// Public transport idempotency mode when this function is exposed through
     /// an engine protocol message.
     pub idempotency_mode: TransportIdempotencyMode,
@@ -64,19 +60,13 @@ pub struct CapabilitySpec {
     pub response_schema: Option<serde_json::Value>,
     /// Idempotency contract owned by the domain contract for mutating functions.
     pub idempotency: Option<IdempotencyContract>,
-    /// Engine-owned resource lease contract required before handler execution.
-    pub resource_lease: Option<ResourceLeaseRequirement>,
-    /// Durable compensation/audit contract.
-    pub compensation: Option<crate::engine::CompensationContract>,
-    /// Durable output contract enforced after handler execution.
-    pub output_contract: DurableOutputContract,
     /// Stream topics emitted by this capability.
     pub stream_topics: Vec<&'static str>,
     /// Discovery description supplied by the owning domain.
     pub description: Option<&'static str>,
     /// Discovery/search tags supplied by the owning domain.
     pub tags: Vec<&'static str>,
-    /// Generated UI presentation hints supplied by the owning domain.
+    /// Generic trace/result presentation hints supplied by the owning domain.
     pub presentation_hints: Option<serde_json::Value>,
 }
 
@@ -86,8 +76,4 @@ pub(crate) fn worker_id(value: &str) -> EngineResult<WorkerId> {
 
 pub(crate) fn actor_id(value: &str) -> EngineResult<ActorId> {
     ActorId::new(value)
-}
-
-pub(crate) fn grant_id(value: &str) -> EngineResult<AuthorityGrantId> {
-    AuthorityGrantId::new(value)
 }

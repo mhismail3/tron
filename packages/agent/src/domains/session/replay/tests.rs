@@ -11,7 +11,7 @@ use crate::domains::session::event_store::{
     AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
 };
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
+    ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionId, Invocation,
     PublishStreamEvent, TraceId, VisibilityScope,
 };
 
@@ -175,10 +175,8 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
             CausalContext::new(
                 actor_id("actor-replay"),
                 ActorKind::System,
-                grant_id("grant"),
                 trace_id("state-trace"),
             )
-            .with_scope("state.write")
             .with_session_id(session_id.clone())
             .with_workspace_id(workspace_id.clone())
             .with_idempotency_key("state-set-replay"),
@@ -194,7 +192,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
             CausalContext::new(
                 actor_id("actor-replay"),
                 ActorKind::System,
-                grant_id("grant"),
                 trace_id("missing-trace"),
             )
             .with_session_id(session_id.clone())
@@ -290,10 +287,6 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
 
 fn actor_id(value: &str) -> ActorId {
     ActorId::new(value).unwrap()
-}
-
-fn grant_id(value: &str) -> AuthorityGrantId {
-    AuthorityGrantId::new(value).unwrap()
 }
 
 fn trace_id(value: &str) -> TraceId {

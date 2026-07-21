@@ -130,34 +130,21 @@ extension SourceGuardTests {
     }
 
 
-    @Test("APNs registration stays inside the trusted lifecycle plane")
-    func testAPNsRegistrationStaysInsideTrustedLifecyclePlane() throws {
+    @Test("primitive client has no fixed APNs registration plane")
+    func testPrimitiveClientHasNoFixedAPNsRegistrationPlane() throws {
         let iosRoot = iosAppRoot()
-        let ownedPaths = [
-            "Sources/App/Lifecycle/AppDelegate.swift",
-            "Sources/App/Lifecycle/AppRuntimeMode.swift",
-            "Sources/App/Lifecycle/ProductionAppRoot.swift",
-            "Sources/App/Lifecycle/TronMobileApp.swift",
-            "Sources/Engine/Transport/Clients/SystemClient.swift",
+        let retiredPaths = [
             "Sources/Support/Foundation/Notifications/APNsEnvironment.swift",
             "Sources/Support/Foundation/Notifications/PushNotificationService.swift",
+            "Tests/Support/Foundation/Notifications/APNsEnvironmentTests.swift",
+            "docs/apns.md",
         ]
-        for relativePath in ownedPaths {
+        for relativePath in retiredPaths {
             #expect(
-                FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
-                "\(relativePath) is required by the trusted APNs lifecycle plane"
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) must remain retired until notification delivery is rebuilt as a worker"
             )
         }
-        let betaEntitlement = try String(
-            contentsOf: iosRoot.appendingPathComponent("TronMobileBeta.entitlements"),
-            encoding: .utf8
-        )
-        let productionEntitlement = try String(
-            contentsOf: iosRoot.appendingPathComponent("TronMobileProd.entitlements"),
-            encoding: .utf8
-        )
-        #expect(betaEntitlement.contains("<string>development</string>"))
-        #expect(productionEntitlement.contains("<string>production</string>"))
 
         let systemClient = try String(
             contentsOf: iosRoot.appendingPathComponent(
@@ -165,18 +152,15 @@ extension SourceGuardTests {
             ),
             encoding: .utf8
         )
-        #expect(systemClient.contains("device::register"))
-        #expect(systemClient.contains("UUID().uuidString"))
-        #expect(systemClient.contains("ios:device-register:v4:"))
-        #expect(!systemClient.contains("identifierForVendor"))
-        #expect(!systemClient.contains("UserDefaults.standard.set(token"))
+        #expect(!systemClient.contains("device::register"))
+        #expect(!systemClient.contains("apnsToken"))
 
         let appDelegate = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/AppDelegate.swift"),
             encoding: .utf8
         )
-        #expect(appDelegate.contains("didRegisterForRemoteNotificationsWithDeviceToken"))
-        #expect(!appDelegate.contains("APNs token: "))
+        #expect(!appDelegate.contains("didRegisterForRemoteNotificationsWithDeviceToken"))
+        #expect(!appDelegate.contains("UNUserNotificationCenterDelegate"))
 
         let appLifecycle = try String(
             contentsOf: iosRoot.appendingPathComponent(
@@ -184,17 +168,8 @@ extension SourceGuardTests {
             ),
             encoding: .utf8
         )
-        #expect(appLifecycle.contains("container.pushNotificationService.deviceToken"))
-        #expect(appLifecycle.contains("await registerPushIfAuthorized()"))
-
-        let pushService = try String(
-            contentsOf: iosRoot.appendingPathComponent(
-                "Sources/Support/Foundation/Notifications/PushNotificationService.swift"
-            ),
-            encoding: .utf8
-        )
-        #expect(pushService.contains("Notification authorization status:"))
-        #expect(pushService.contains("notifications are disabled in iOS Settings"))
+        #expect(!appLifecycle.contains("pushNotificationService"))
+        #expect(!appLifecycle.contains("registerPushIfAuthorized"))
     }
 
 
@@ -295,7 +270,7 @@ extension SourceGuardTests {
             "Sources/Session/Timeline/Activity/ActivityLine.swift",
             "Sources/Session/Timeline/Activity/CapabilityActivityPresentation.swift",
             "Sources/Session/Timeline/Activity/ServerActivityLine.swift",
-            "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Agent.swift",
             "Sources/Engine/Protocol/Capability/EngineProtocolTypes+Capability.swift",
             "Sources/Session/Timeline/Messages",
             "Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift",

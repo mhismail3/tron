@@ -2,70 +2,36 @@ use super::support::*;
 
 #[test]
 fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
-    let compensation = read_repo_file("packages/agent/src/engine/authority/compensation.rs");
+    let stores = read_repo_file("packages/agent/src/engine/primitives/stores.rs");
     assert_contains_in_order(
-        "compensation audit-only lifecycle",
-        &compensation,
+        "primitive store sqlite bundle",
+        &stores,
         &[
-            "Compensation is intentionally recorded before Tron attempts any automated",
-            "pub enum EngineCompensationStatus",
-            "Recorded",
-            "Self::Recorded => \"recorded\"",
-            "status: EngineCompensationStatus::Recorded",
-            "\"engine_compensation\"",
-            "\"audit\"",
+            "fn sqlite(path: &std::path::Path) -> Result<Self>",
+            "SqliteEngineStreamStore::open(path)?",
+            "SqliteEngineStateStore::open(path)?",
         ],
     );
-    assert!(
-        !compensation.contains("Succeeded") && !compensation.contains("RolledBack"),
-        "compensation must remain explicit audit-only state until a rollback owner is implemented"
-    );
-
-    let invocation_support =
-        read_repo_file("packages/agent/src/engine/invocation/host/invocation_support.rs");
-    for required in [
-        "acquire_resource_lease_for_invocation",
-        "release_resource_lease_sync",
-        "record_compensation_for_result_sync",
-        "\"resource_lease.acquired\"",
-        "\"resource_lease.released\"",
-        "\"compensation.recorded\"",
+    for forbidden in [
+        "GrantStore",
+        "ResourceLeaseStore",
+        "CompensationStore",
+        "ResourceStore",
     ] {
         assert!(
-            invocation_support.contains(required),
-            "engine host contract bookkeeping missing `{required}`"
+            !stores.contains(forbidden),
+            "retired substrate store leaked into the primitive bundle: {forbidden}"
         );
     }
-
-    let meta_invocation =
-        read_repo_file("packages/agent/src/engine/invocation/host/meta_invocation.rs");
-    assert_contains_in_order(
-        "host-dispatched primitive contract finalization",
-        &meta_invocation,
-        &[
-            "let compensation_contract = function.compensation.clone();",
-            "let lease_result = self.acquire_resource_lease_for_invocation",
-            "release_after_primary(self.release_resource_lease_sync",
-            "finish_meta_invocation_with_contracts",
-            "complete_invocation_idempotency",
-            "record_compensation_for_result_sync",
-            "record_invocation_result_with_contracts",
-        ],
-    );
 
     let ledger = read_repo_file("packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs");
     for required in [
         "append_catalog_change",
         "append_invocation",
-        "resource_lease_ids_json",
-        "compensation_status",
-        "produced_resource_refs_json",
         "reserve_idempotency",
         "IdempotencyStatus::InProgress",
         "complete_idempotency",
         "IdempotencyStatus::Completed",
-        "\"engine_invocation\"",
-        "\"engine_idempotency\"",
         "list_invocations_by_session",
         "list_idempotency_by_session",
     ] {
@@ -74,26 +40,16 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
             "engine ledger lifecycle missing `{required}`"
         );
     }
-
-    let resources = read_repo_file("packages/agent/src/engine/durability/resources/store/mod.rs");
-    for required in [
-        "register_type",
-        "resource.created",
-        "append_version_inner",
-        "EngineResourceVersionState::Available",
-        "store_json_value",
-        "\"engine_resource_version\"",
-        "update_resource_pointer",
-        "resource.version.created",
-        "resource.linked",
-        "expected_current_version_id",
-        "version conflict",
-        "inspect",
-        "list",
+    for retired_column in [
+        "authority_grant_id",
+        "authority_scopes_json",
+        "resource_lease_ids_json",
+        "compensation_status",
+        "produced_resource_refs_json",
     ] {
         assert!(
-            resources.contains(required),
-            "engine resource store lifecycle missing `{required}`"
+            !ledger.contains(retired_column),
+            "active ledger still owns retired column `{retired_column}`"
         );
     }
 
@@ -103,7 +59,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
         "compare_and_set",
         "state revision conflict",
         "DELETE FROM engine_state_entries",
-        "\"engine_state_entry\"",
         "list(",
     ] {
         assert!(
@@ -130,36 +85,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
             assert!(source.contains(required), "{path} missing `{required}`");
         }
     }
-    let sqlite_stream =
-        read_repo_file("packages/agent/src/engine/durability/streams/sqlite_store.rs");
-    for required in [
-        "engine_stream_events",
-        "engine_stream_subscriptions",
-        "active = 0",
-        "SET cursor = CASE",
-        "\"engine_stream_event\"",
-    ] {
-        assert!(
-            sqlite_stream.contains(required),
-            "SQLite stream lifecycle missing `{required}`"
-        );
-    }
-
-    let stores = read_repo_file("packages/agent/src/engine/primitives/stores.rs");
-    assert_contains_in_order(
-        "primitive store sqlite bundle",
-        &stores,
-        &[
-            "fn sqlite(path: &std::path::Path) -> Result<Self>",
-            "SqliteEngineStreamStore::open(path)?",
-            "SqliteEngineStateStore::open(path)?",
-            "SqliteEngineResourceLeaseStore::open(path)?",
-            "SqliteEngineResourceStore::open(path)?",
-            "SqliteEngineGrantStore::open(path)?",
-            "SqliteEngineCompensationStore::open(path)?",
-            "stores.install_builtin_resource_types()?",
-        ],
-    );
 
     let storage_schema = read_repo_file("packages/agent/src/shared/storage/schema.rs");
     for required in [
@@ -188,34 +113,6 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
         assert!(
             payloads.contains(required),
             "shared payload-ref lifecycle missing `{required}`"
-        );
-    }
-    let maintenance = read_repo_file("packages/agent/src/shared/storage/maintenance.rs");
-    for required in [
-        "checkpoint_database",
-        "export_snapshot",
-        "retention_run",
-        "DELETE FROM storage_payload_refs",
-        "storage_checkpoints",
-        "storage_exports",
-        "storage_retention_runs",
-    ] {
-        assert!(
-            maintenance.contains(required),
-            "shared storage maintenance lifecycle missing `{required}`"
-        );
-    }
-    let stats = read_repo_file("packages/agent/src/shared/storage/stats.rs");
-    for required in [
-        "payload_owner_stats",
-        "expired_pending_payload_refs",
-        "storage_payload_refs",
-        "unowned_blob_count",
-        "PayloadOwnerStorageStats",
-    ] {
-        assert!(
-            stats.contains(required),
-            "storage stats missing `{required}`"
         );
     }
 }

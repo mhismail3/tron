@@ -15,7 +15,7 @@ import Testing
 ///      hostname vs IP, default port).
 ///   2. `pingRequestData(protocolVersion:clientVersion:)` JSON encoding
 ///      (matches what `system::ping` consumes in
-///      `packages/agent/src/domains/system/mod.rs`).
+    ///      `packages/agent/src/domains/system.rs`).
 ///   3. `classify(envelope:)` outcome mapping for the four shapes:
 ///      success / unauthorized / incompatible / unreachable.
 ///

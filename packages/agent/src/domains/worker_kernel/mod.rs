@@ -3,13 +3,9 @@
 //! This domain is the executable self-extension path. A complete bundle is
 //! staged, dependency-locked, smoke-tested, atomically versioned, activated,
 //! and projected as a direct typed model tool by one `worker_upsert` call.
-//! Callers may omit a dependency's expected checksum; acquisition computes and
-//! seals it into the staged manifest and lock before the version is hashed.
-//! A bounded staged `sourceDirectory` imports a UTF-8 tree directly; inline
-//! files override it, while symlinks and special files fail before preparation.
-//! Filesystem bundles are canonical; absent optional fields are omitted so an
-//! inspected manifest remains valid `worker_upsert` input. SQLite holds only
-//! rebuildable indexes and durable operational/audit ledgers.
+//! Acquisition seals dependency checksums before hashing; bounded UTF-8 source
+//! imports reject symlinks and special files. Filesystem bundles are canonical,
+//! while SQLite owns rebuildable indexes and durable operational evidence.
 //!
 //! ## Submodules
 //!
@@ -24,7 +20,21 @@
 //! | `runtime` | Runners, concurrency, dispatch, dynamic tools, and supervision |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
-//! # Invariants
+//!
+//! ## Entry Points
+//!
+//! [`registration`] composes fixed operations and the durable runtime.
+//! [`resolve_tool_surface`] builds each provider turn's exact tool set. State
+//! retirement and offline restore are re-exported from `persistence` for
+//! bootstrap and CLI callers.
+//!
+//! ## Dependency Direction
+//!
+//! Agent turns and authenticated transport call this domain; the generic engine
+//! and client presentation layers never depend on worker implementation types.
+//!
+//! ## Invariants
+//!
 //! Worker activation is atomic with respect to the canonical active pointer:
 //! failed dependency, smoke-test, or health-check work never changes the active
 //! version. Successful pre-activation evidence is sealed into the immutable
@@ -98,12 +108,10 @@
 //! Lifecycle events and audit retain reliability evidence while redacting
 //! credential fields and recognizable secrets. One-time webhook credentials
 //! exist raw only in the active provider turn that requested them.
-//! A webhook request body is the worker's ordinary typed input. Object-valued
-//! trigger configuration supplies defaults, request keys override defaults,
-//! and no engine-specific wrapper field is injected.
-//! Unseen inbox attachment is invoked by the engine's internal runtime identity
-//! with session/trace provenance. It therefore crosses internal visibility as
-//! an engine projection and never requires or fabricates an agent grant.
+//! Webhook bodies are ordinary typed input: trigger configuration supplies
+//! defaults, request keys override them, and no engine wrapper is injected.
+//! Unseen inbox attachment uses an internal runtime identity with session/trace
+//! provenance; it never requires or fabricates an agent grant.
 //! An agent-runner drop guard aborts its child on timeout, stop, disable, or
 //! shutdown. Causal depth survives the child hop, and pre-admission event
 //! subscription preserves even an immediate provider failure's terminal error.
@@ -112,6 +120,11 @@
 //! Core proposal approval rejects negated or ambiguous messages. A failed
 //! approved cherry-pick is aborted and verified back at its original commit
 //! before the proposal remains in the tested state.
+//!
+//! ## Test Ownership
+//!
+//! Unit tests live beside each concern; cross-domain replay, migration,
+//! provider-tool, transport, and client proofs live under `packages/agent/tests`.
 
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -133,22 +146,13 @@ mod surface;
 mod tests;
 mod types;
 
+pub(crate) use persistence::{
+    list_state_snapshots, prepare_profile_state_retirement, restore_state_snapshot,
+};
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]
 pub(crate) use surface::SurfaceToolSnapshot;
 pub(crate) use surface::{EngineSurfaceSnapshot, promote_worker_for_session, resolve_tool_surface};
-
-pub(crate) fn list_state_snapshots() -> Result<Vec<std::path::PathBuf>, String> {
-    persistence::list_snapshots(&crate::shared::foundation::paths::tron_home())
-        .map_err(|error| error.to_string())
-}
-
-pub(crate) fn restore_state_snapshot(
-    snapshot: &std::path::Path,
-) -> Result<std::path::PathBuf, String> {
-    persistence::restore_snapshot(snapshot, &crate::shared::foundation::paths::tron_home())
-        .map_err(|error| error.to_string())
-}
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["worker.lifecycle", "worker.invocations"];
 
@@ -162,12 +166,8 @@ pub(crate) fn registration(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Registration> {
     let autonomous = deps.profile_runtime.current().settings.autonomous_workers;
-    let current_profile = deps.profile_runtime.current();
-    let store = persistence::WorkerStore::open(
-        deps.profile_runtime.home().to_path_buf(),
-        current_profile.profile_name(),
-    )
-    .map_err(crate::engine::EngineError::HandlerFailed)?;
+    let store = persistence::WorkerStore::open(deps.profile_runtime.home().to_path_buf())
+        .map_err(crate::engine::EngineError::HandlerFailed)?;
     let runtime = WorkerRuntime::new(
         store,
         deps.engine_host.clone(),

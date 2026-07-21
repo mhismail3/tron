@@ -61,8 +61,6 @@
 //!   `profiles/user/profile.toml`.
 //! - `settings.get` preserves the complete profile contract; mobile parity is
 //!   enforced only for fields explicitly admitted by the iOS settings DTO.
-//! - Local transcription remains a server-owned Engine policy at
-//!   `server.transcription.enabled` and is mirrored by the iOS Engine page.
 //! - Diagnostics verbosity, diagnostic retention, and database budgets are
 //!   engine-managed policy, not mutable profile settings.
 //! - Malformed settings and unknown nested settings keys fail fast instead of

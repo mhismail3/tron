@@ -41,10 +41,9 @@ impl EngineHost {
     }
 
     fn from_catalog_and_primitives(
-        mut catalog: LiveCatalog,
+        catalog: LiveCatalog,
         primitives: PrimitiveStores,
     ) -> Result<Self> {
-        catalog.set_grant_store(primitives.grants.clone());
         let mut host = Self {
             catalog,
             primitives,
@@ -159,10 +158,6 @@ fn same_primitive_function_contract(
         && existing.effect_class == expected.effect_class
         && existing.risk_level == expected.risk_level
         && existing.idempotency == expected.idempotency
-        && existing.resource_lease == expected.resource_lease
-        && existing.compensation == expected.compensation
-        && existing.output_contract == expected.output_contract
-        && existing.required_authority == expected.required_authority
         && existing.allowed_delivery_modes == expected.allowed_delivery_modes
         && existing.health == expected.health
         && existing.provenance == expected.provenance

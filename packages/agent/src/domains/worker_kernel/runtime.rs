@@ -1066,7 +1066,6 @@ impl WorkerRuntime {
             ActorKind::Worker,
             TraceId::new(invocation.trace_id.clone()).unwrap_or_else(|_| TraceId::generate()),
         )
-        .with_scope("agent.write")
         .with_session_id(session_id.clone())
         .with_idempotency_key(format!(
             "worker-agent:{}",

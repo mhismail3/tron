@@ -24,8 +24,7 @@ async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
             json!({"x": 1}),
             causal()
                 .with_session_id("session-a")
-                .with_workspace_id("workspace-a")
-                .with_scope("alpha.write"),
+                .with_workspace_id("workspace-a"),
         ))
         .await;
 
@@ -41,20 +40,16 @@ async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
 async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload_handling() {
     let mut host = EngineHost::new().unwrap();
 
-    for (function_id, scope) in [
-        ("ui::submit_action", "ui.write"),
-        ("engine::promote", "engine.promote.workspace"),
-        ("resource::create", "resource.write"),
+    for function_id in [
+        "storage::checkpoint",
+        "storage::export_snapshot",
+        "storage::retention_run",
     ] {
+        let context = CausalContext::new(actor("system"), ActorKind::System, trace("trace"))
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a");
         let result = host
-            .invoke(host_invocation(
-                function_id,
-                json!({}),
-                causal()
-                    .with_session_id("session-a")
-                    .with_workspace_id("workspace-a")
-                    .with_scope(scope),
-            ))
+            .invoke(host_invocation(function_id, json!({}), context))
             .await;
 
         assert!(
@@ -79,17 +74,21 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
 
     let missing = functions
         .iter()
-        .filter(|function| hmh_f1_surface(function.id.as_str()))
+        .filter(|function| function.id.as_str().starts_with("storage::"))
         .filter(|function| function.effect_class.requires_idempotency())
         .filter(|function| function.idempotency.is_none())
         .map(|function| function.id.as_str().to_owned())
         .collect::<Vec<_>>();
     assert!(
         missing.is_empty(),
-        "mutating ui/promotion/resource surfaces missing idempotency: {missing:?}"
+        "mutating storage surfaces missing idempotency: {missing:?}"
     );
 
-    for required in ["ui::submit_action", "engine::promote", "resource::create"] {
+    for required in [
+        "storage::checkpoint",
+        "storage::export_snapshot",
+        "storage::retention_run",
+    ] {
         let definition = functions
             .iter()
             .find(|function| function.id.as_str() == required)
@@ -103,17 +102,4 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
             "{required} must require an idempotency contract"
         );
     }
-}
-
-fn hmh_f1_surface(function_id: &str) -> bool {
-    function_id == "engine::promote"
-        || function_id.starts_with("ui::")
-        || function_id.starts_with("resource::")
-        || function_id.starts_with("artifact::")
-        || function_id.starts_with("goal::")
-        || function_id.starts_with("claim::")
-        || function_id.starts_with("evidence::")
-        || function_id.starts_with("decision::")
-        || function_id.starts_with("materialized_file::")
-        || function_id.starts_with("patch::")
 }

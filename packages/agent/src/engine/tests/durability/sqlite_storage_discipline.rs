@@ -2,7 +2,6 @@ use super::*;
 
 use rusqlite::{Connection, params};
 
-use crate::engine::durability::resources::SqliteEngineResourceStore;
 use crate::engine::durability::state::SqliteEngineStateStore;
 
 fn assert_storage_generation(path: &std::path::Path) {
@@ -46,13 +45,6 @@ fn state_error(path: std::path::PathBuf) -> EngineError {
     }
 }
 
-fn resource_error(path: std::path::PathBuf) -> EngineError {
-    match SqliteEngineResourceStore::open(&path) {
-        Ok(_) => panic!("resource constructor accepted drifted shared storage schema"),
-        Err(error) => error,
-    }
-}
-
 #[test]
 fn sqlite_durability_constructors_create_shared_storage_metadata_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -74,12 +66,6 @@ fn sqlite_durability_constructors_create_shared_storage_metadata_first() {
         let _store = SqliteEngineStateStore::open(&state_path).unwrap();
     }
     assert_storage_generation(&state_path);
-
-    let resource_path = dir.path().join("resource.sqlite");
-    {
-        let _store = SqliteEngineResourceStore::open(&resource_path).unwrap();
-    }
-    assert_storage_generation(&resource_path);
 }
 
 #[test]
@@ -94,7 +80,4 @@ fn sqlite_durability_constructors_refuse_shared_storage_schema_drift() {
 
     let state = state_error(drifted_storage_path(&dir, "state-drift.sqlite"));
     assert!(state.to_string().contains("storage schema drift"));
-
-    let resource = resource_error(drifted_storage_path(&dir, "resource-drift.sqlite"));
-    assert!(resource.to_string().contains("storage schema drift"));
 }

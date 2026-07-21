@@ -7,7 +7,7 @@ extension SourceGuardTests {
     func testPromptTransportHasOneAttachmentPlane() throws {
         let iosRoot = iosAppRoot()
         let checkedFiles = [
-            "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Agent.swift",
             "Sources/Engine/Transport/Clients/AgentClient.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
             "Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",

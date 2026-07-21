@@ -222,11 +222,6 @@ extension ChatViewModel {
         // Clear thinking accumulation (streaming finalization handled by coordinator)
         thinkingState.clearCurrentStreaming()
 
-        // End any active display stream.
-        if displayStreamState.isStreamActive {
-            endDisplayStream()
-        }
-
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
 
@@ -305,8 +300,7 @@ extension ChatViewModel {
         // Add context cleared notification pill to chat
         let clearedMessage = ChatMessage.contextCleared(
             tokensBefore: pluginResult.tokensBefore,
-            tokensAfter: pluginResult.tokensAfter,
-            contextControlActionResourceId: pluginResult.contextControlActionResourceId
+            tokensAfter: pluginResult.tokensAfter
         )
         appendToMessages(clearedMessage)
     }

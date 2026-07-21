@@ -9,12 +9,9 @@ use serde_json::json;
 
 use crate::domains::registration::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::domains::registration::contract::CapabilityContract;
-use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
-};
+use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
 
-use super::{READ_SCOPE, WORKER, WRITE_SCOPE};
+use super::WORKER;
 
 pub(super) const GET_HOME_FUNCTION: &str = "filesystem::get_home";
 pub(super) const LIST_DIR_FUNCTION: &str = "filesystem::list_dir";
@@ -27,7 +24,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             WORKER,
             EffectClass::PureRead,
             RiskLevel::Low,
-            Some(READ_SCOPE),
         )
         .request_schema(json!({
             "type": "object",
@@ -64,7 +60,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             WORKER,
             EffectClass::PureRead,
             RiskLevel::Low,
-            Some(READ_SCOPE),
         )
         .request_schema(json!({
             "type": "object",
@@ -109,7 +104,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             WORKER,
             EffectClass::IdempotentWrite,
             RiskLevel::Medium,
-            Some(WRITE_SCOPE),
         )
         .request_schema(json!({
             "type": "object",
@@ -133,15 +127,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         }))
         .idempotency(IdempotencyContract::caller_system_engine_ledger())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
-        .resource_lease(ResourceLeaseRequirement::exclusive_template(
-            WORKER,
-            "filesystem:workspace_browser",
-            60_000,
-        ))
-        .compensation(CompensationContract::new(
-            CompensationKind::ManualOnly,
-            "workspace folder creation is idempotent; removal remains an explicit user action",
-        ))
         .build()?,
     ])
 }

@@ -526,4 +526,5 @@ fn compact_log_data(conn: &Connection, entry: &PendingEntry) -> Option<String> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[path = "transport_tests.rs"]
 mod tests;

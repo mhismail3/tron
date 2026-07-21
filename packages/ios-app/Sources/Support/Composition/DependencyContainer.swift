@@ -49,10 +49,6 @@ final class DependencyContainer {
     /// deduplication; this service only batches the local in-memory buffer.
     private(set) var clientLogIngestionService: ClientLogIngestionService
 
-    /// Owns only the local APNs authorization/token exchange. Server-side
-    /// device registration and delivery remain engine-owned.
-    private(set) var pushNotificationService: PushNotificationService
-
     /// iOS-local paired server list and active selection.
     @ObservationIgnored
     let pairedServerStore: PairedServerStore
@@ -131,17 +127,11 @@ final class DependencyContainer {
     /// Message mutation repository.
     private(set) var messageRepository: any MessageRepository
 
-    /// Local transcription repository.
-    private(set) var transcriptionRepository: any TranscriptionRepository
-
     /// Server-backed workspace browser repository.
     private(set) var workspaceBrowserRepository: any WorkspaceBrowserRepository
 
     /// Profile-global worker repository for the worker console.
     private(set) var workerKernelRepository: any WorkerKernelRepository
-
-    /// Session context-control repository for Session Briefing.
-    private(set) var contextControlRepository: any ContextControlRepository
 
     var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {
         Self.makeDiagnosticsEngineEndpoint(client: engineClient)
@@ -215,8 +205,6 @@ final class DependencyContainer {
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
         deepLinkRouter = DeepLinkRouter()
-        pushNotificationService = PushNotificationService()
-
         // Build initial server URL from the iOS-local active pairing. With no
         // pair, use a non-routable placeholder so app launch never silently
         // falls back to localhost.
@@ -273,10 +261,8 @@ final class DependencyContainer {
         settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
-        transcriptionRepository = DefaultTranscriptionRepository(client: client.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: client.workspaceBrowser)
         workerKernelRepository = DefaultWorkerKernelRepository(client: client.workerKernel)
-        contextControlRepository = client.contextControl
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -494,10 +480,8 @@ final class DependencyContainer {
         settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
-        transcriptionRepository = DefaultTranscriptionRepository(client: newClient.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: newClient.workspaceBrowser)
         workerKernelRepository = DefaultWorkerKernelRepository(client: newClient.workerKernel)
-        contextControlRepository = newClient.contextControl
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)

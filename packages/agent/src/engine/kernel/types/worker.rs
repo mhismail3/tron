@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{Provenance, VisibilityScope, WorkerRevision};
-use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, WorkerId};
+use crate::engine::kernel::ids::{ActorId, WorkerId};
 
 /// Runtime kind of a registered worker.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,8 +58,6 @@ pub struct WorkerDefinition {
     pub lifecycle: WorkerLifecycleState,
     /// Actor that owns the worker.
     pub owner_actor: ActorId,
-    /// Authority grant used by the worker.
-    pub authority_grant: AuthorityGrantId,
     /// Claimed namespaces.
     pub namespace_claims: Vec<String>,
     /// Visibility.
@@ -71,12 +69,7 @@ pub struct WorkerDefinition {
 impl WorkerDefinition {
     /// Create a worker definition.
     #[must_use]
-    pub fn new(
-        id: WorkerId,
-        kind: WorkerKind,
-        owner_actor: ActorId,
-        authority_grant: AuthorityGrantId,
-    ) -> Self {
+    pub fn new(id: WorkerId, kind: WorkerKind, owner_actor: ActorId) -> Self {
         let provenance = Provenance::new(owner_actor.clone(), "worker");
         Self {
             id,
@@ -84,7 +77,6 @@ impl WorkerDefinition {
             kind,
             lifecycle: WorkerLifecycleState::Ready,
             owner_actor,
-            authority_grant,
             namespace_claims: Vec::new(),
             visibility: VisibilityScope::Internal,
             provenance,

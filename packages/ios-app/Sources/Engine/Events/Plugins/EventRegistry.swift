@@ -156,9 +156,6 @@ final class EventRegistry: @unchecked Sendable {
         register(AuthUpdatedPlugin.self)
         register(StreamRecoveryRequiredPlugin.self)
 
-        // Display streaming events
-        register(DisplayFramePlugin.self)
-
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 

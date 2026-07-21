@@ -1,7 +1,7 @@
 //! Privileged synchronous invocation and delegated child execution.
 //!
 //! Reserved synchronous engine functions and host-dispatched primitives share one
-//! validation, idempotency, budget, lease, ledger, and compensation envelope;
+//! validation, idempotency, budget, and ledger envelope;
 //! only their dispatch functions differ.
 
 use super::*;
@@ -45,30 +45,8 @@ impl EngineHost {
                     .record_invocation_result(&invocation, result, scope);
             }
         };
-        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
-            return self.finish_meta_invocation(invocation, function, Err(err), idempotency);
-        }
-
-        let compensation_contract = function.compensation.clone();
-        let lease_result = self.acquire_resource_lease_for_invocation(&function, &invocation);
-        let mut lease_ids = Vec::new();
-        let value = match lease_result {
-            Ok(Some(lease)) => {
-                lease_ids.push(lease.lease_id.clone());
-                let result = dispatch(self, &invocation);
-                release_after_primary(self.release_resource_lease_sync(&lease.lease_id), result)
-            }
-            Ok(None) => dispatch(self, &invocation),
-            Err(error) => Err(error),
-        };
-        self.finish_meta_invocation_with_contracts(
-            invocation,
-            function,
-            value,
-            idempotency,
-            lease_ids,
-            compensation_contract,
-        )
+        let value = dispatch(self, &invocation);
+        self.finish_meta_invocation(invocation, function, value, idempotency)
     }
 
     fn dispatch_meta(&mut self, invocation: &Invocation) -> Result<Value> {
@@ -93,9 +71,6 @@ impl EngineHost {
             Err(err) => return self.meta_error(&invocation, err),
         };
 
-        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
-            return self.finish_meta_invocation(invocation, function, Err(err), None);
-        }
         let value = match self.meta_invoke_child(&invocation).await {
             Ok(value) => Ok(value),
             Err(err) => Err(err),
@@ -124,11 +99,6 @@ impl EngineHost {
                 ));
             }
         };
-        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
-            return PreparedDelegatedInvocationDecision::Finished(Box::new(
-                self.finish_meta_invocation(invocation, function, Err(err), None),
-            ));
-        }
         let child = if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),
@@ -155,41 +125,10 @@ impl EngineHost {
 
         invocation.causal_context.catalog_revision = self.catalog.revision();
         policy::validate_invocation(&function, invocation)?;
-        if !invocation.causal_context.is_trusted_local() {
-            self.primitives
-                .grants
-                .lock()
-                .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-                .authorize_invocation(&function, invocation)?;
-        }
         if let Some(schema) = &function.request_schema {
             schema::validate_payload(&function.id, "request", schema, &invocation.payload)?;
         }
         Ok(function)
-    }
-
-    fn consume_invocation_budget_sync(
-        &mut self,
-        function: &FunctionDefinition,
-        invocation: &Invocation,
-    ) -> Result<()> {
-        if invocation.causal_context.is_trusted_local() {
-            return Ok(());
-        }
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .consume_invocation_budget(ConsumeGrantInvocationBudget {
-                grant_id: invocation
-                    .causal_context
-                    .require_authority_grant_id("consume meta-invocation budget")?
-                    .clone(),
-                invocation_id: invocation.id.clone(),
-                function_id: function.id.clone(),
-                trace_id: invocation.causal_context.trace_id.clone(),
-            })
-            .map(|_| ())
     }
 
     pub(super) fn finish_meta_invocation(
@@ -198,25 +137,6 @@ impl EngineHost {
         function: FunctionDefinition,
         value: Result<Value>,
         idempotency: Option<IdempotencyReservation>,
-    ) -> InvocationResult {
-        self.finish_meta_invocation_with_contracts(
-            invocation,
-            function,
-            value,
-            idempotency,
-            Vec::new(),
-            None,
-        )
-    }
-
-    fn finish_meta_invocation_with_contracts(
-        &mut self,
-        invocation: Invocation,
-        function: FunctionDefinition,
-        value: Result<Value>,
-        idempotency: Option<IdempotencyReservation>,
-        resource_lease_ids: Vec<String>,
-        compensation_contract: Option<CompensationContract>,
     ) -> InvocationResult {
         let mut result = match value {
             Ok(value) => InvocationResult::success(
@@ -247,26 +167,8 @@ impl EngineHost {
                 result = completion_error;
             }
         }
-        let compensation_status = compensation_contract
-            .as_ref()
-            .map(|_| "recorded".to_owned());
-        let compensation = self.record_compensation_for_result_sync(
-            &invocation,
-            compensation_contract,
-            &result,
-            resource_lease_ids.clone(),
-        );
-        let compensation_status = compensation
-            .as_ref()
-            .map(|record| record.status.as_str().to_owned())
-            .or(compensation_status);
-        self.catalog.record_invocation_result_with_contracts(
-            &invocation,
-            result,
-            idempotency_scope,
-            resource_lease_ids,
-            compensation_status,
-        )
+        self.catalog
+            .record_invocation_result(&invocation, result, idempotency_scope)
     }
 
     fn meta_error(&mut self, invocation: &Invocation, err: EngineError) -> InvocationResult {

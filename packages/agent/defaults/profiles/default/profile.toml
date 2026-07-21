@@ -47,9 +47,6 @@ maxTurns = 250
 heartbeatIntervalMs = 30000
 defaultModel = "claude-sonnet-4-6"
 
-[settings.server.transcription]
-enabled = false
-
 [settings.tmux]
 commandTimeoutMs = 30000
 pollingIntervalMs = 500

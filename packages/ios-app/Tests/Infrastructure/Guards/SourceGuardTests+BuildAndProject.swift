@@ -6,8 +6,11 @@ extension SourceGuardTests {
     @Test("icon generator owns only active generated image outputs")
     func testIconGeneratorOwnsOnlyActiveGeneratedImageOutputs() throws {
         let iosRoot = iosAppRoot()
+        let repositoryRoot = iosRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let generator = try String(
-            contentsOf: iosRoot.appendingPathComponent("scripts/generate-icons.mjs"),
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/generate-ios-icons.mjs"),
             encoding: .utf8
         )
         let generatedAssets = [
@@ -57,7 +60,6 @@ extension SourceGuardTests {
                 "The adaptive presentation helper must own one soft edge for every app-owned sheet root",
         ]
         let expectedWebViewOwners = Set([
-            "Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift",
             "Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift",
         ])
         let edgeAssignments = [

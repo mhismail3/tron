@@ -3,8 +3,8 @@ use super::support::*;
 #[test]
 fn rust_progressive_docs_declare_dependency_and_test_ownership() {
     let required_docs = [
-        "packages/agent/src/engine/authority/mod.rs",
         "packages/agent/src/engine/durability/mod.rs",
+        "packages/agent/src/domains/worker_kernel/mod.rs",
         "packages/agent/src/domains/session/event_store/mod.rs",
     ];
 

@@ -11,10 +11,10 @@
 //! ## Prompt Execution Flow
 //!
 //! 1. `/engine` builds an `EngineTransportRequest` for `agent::prompt`.
-//! 2. The authenticated transport validates schema, idempotency, leases, and
-//!    catalog revision before this domain handler runs. Transport authority
-//!    authenticates the remote caller; it is not re-derived for trusted-local
-//!    model tool calls.
+//! 2. The authenticated transport validates schema, idempotency, visibility,
+//!    and catalog revision before this domain handler runs. Transport auth
+//!    authenticates the remote caller; local model tools carry runtime-owned
+//!    causal provenance.
 //! 3. `agent::prompt` derives the run id, records the accepted prompt, invokes
 //!    hidden `agent::prompt_apply` synchronously through an engine-owned
 //!    internal causal context, and returns an affirmative acknowledgement plus
@@ -35,7 +35,7 @@
 //!    runtime, loop, turn, provider stream, capability, and primitive execute
 //!    phases. Those logs carry durable IDs and lifecycle metadata for agent and
 //!    operator inspection, while prompt text, streamed text, and tool arguments
-//!    stay in the authorized event/trace/resource surfaces instead of logs.
+//!    stay in the event/trace owners instead of logs.
 //!
 //! ## Submodules
 //!

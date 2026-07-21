@@ -50,8 +50,6 @@ extension ChatViewModel: ConnectionContext {
     ///   would destroy their work.
     /// - `draftStore` (persisted drafts): same reason, and these are
     ///   disk-backed anyway.
-    /// - `displayStreamState`: driven by server events; the server
-    ///   re-emits on reconnect.
     /// - Coordinator-local caches: derived from persisted events, so
     ///   reconstruction refreshes them implicitly.
     ///

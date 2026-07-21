@@ -84,8 +84,7 @@ final class CompactionCoordinator {
             reason: pluginResult.reason,
             summary: pluginResult.summary,
             preservedTurns: pluginResult.preservedTurns,
-            summarizedTurns: pluginResult.summarizedTurns,
-            contextControlActionResourceId: pluginResult.contextControlActionResourceId
+            summarizedTurns: pluginResult.summarizedTurns
         )
         replaceInProgressMessage(compactionMessage, context)
     }

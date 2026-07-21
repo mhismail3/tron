@@ -8,9 +8,7 @@ use super::{IdempotencyEntry, IdempotencyKey, StoredEngineError, StoredInvocatio
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
-};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use crate::engine::kernel::types::{
     CatalogChange, CatalogChangeClass, CatalogRevision, CatalogSubjectKind, DeliveryMode,
     FunctionRevision, IdempotencyScope, VisibilityScope,
@@ -70,7 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
 
 "#;
 
-/// Canonical invocation table SQL reused by the nullable-authority migration.
+/// Canonical invocation table SQL.
 pub(super) const INVOCATION_TABLE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS engine_invocations (
   invocation_id            TEXT PRIMARY KEY,
@@ -80,8 +78,6 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   catalog_revision         INTEGER NOT NULL,
   actor_id                 TEXT NOT NULL,
   actor_kind_json          TEXT NOT NULL,
-  authority_grant_id       TEXT,
-  authority_scopes_json    TEXT NOT NULL,
   trace_id                 TEXT NOT NULL,
   parent_invocation_id     TEXT,
   trigger_id               TEXT,
@@ -90,9 +86,6 @@ CREATE TABLE IF NOT EXISTS engine_invocations (
   delivery_mode_json       TEXT NOT NULL,
   idempotency_scope_kind   TEXT,
   idempotency_scope_value  TEXT,
-  resource_lease_ids_json  TEXT NOT NULL DEFAULT '[]',
-  compensation_status      TEXT,
-  produced_resource_refs_json TEXT NOT NULL DEFAULT '[]',
   idempotency_key          TEXT,
   replayed_from            TEXT,
   succeeded                INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
@@ -106,39 +99,6 @@ pub(super) const INVOCATION_INDEX_SCHEMA: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_engine_invocations_trace
   ON engine_invocations(trace_id);
 "#;
-
-pub(super) const INVOCATION_COLUMNS: &[&str] = &[
-    "invocation_id",
-    "function_id",
-    "worker_id",
-    "function_revision",
-    "catalog_revision",
-    "actor_id",
-    "actor_kind_json",
-    "authority_grant_id",
-    "authority_scopes_json",
-    "trace_id",
-    "parent_invocation_id",
-    "trigger_id",
-    "session_id",
-    "workspace_id",
-    "delivery_mode_json",
-    "idempotency_scope_kind",
-    "idempotency_scope_value",
-    "resource_lease_ids_json",
-    "compensation_status",
-    "produced_resource_refs_json",
-    "idempotency_key",
-    "replayed_from",
-    "succeeded",
-    "result_json",
-    "error_json",
-    "timestamp",
-];
-
-/// Historical placeholder written before trusted-local authority became an
-/// explicit nullable observation. Startup converts it to SQL `NULL` once.
-pub(super) const LEGACY_TRUSTED_LOCAL_AUTHORITY_OBSERVATION: &str = "trusted-local-observation";
 
 pub(super) struct RawCatalogChangeRow {
     pub(super) id: String,
@@ -163,8 +123,6 @@ pub(super) struct RawInvocationRow {
     pub(super) catalog_revision: u64,
     pub(super) actor_id: String,
     pub(super) actor_kind_json: String,
-    pub(super) authority_grant_id: Option<String>,
-    pub(super) authority_scopes_json: String,
     pub(super) trace_id: String,
     pub(super) parent_invocation_id: Option<String>,
     pub(super) trigger_id: Option<String>,
@@ -173,9 +131,6 @@ pub(super) struct RawInvocationRow {
     pub(super) delivery_mode_json: String,
     pub(super) idempotency_scope_kind: Option<String>,
     pub(super) idempotency_scope_value: Option<String>,
-    pub(super) resource_lease_ids_json: String,
-    pub(super) compensation_status: Option<String>,
-    pub(super) produced_resource_refs_json: String,
     pub(super) idempotency_key: Option<String>,
     pub(super) replayed_from: Option<String>,
     pub(super) succeeded: i64,
@@ -235,14 +190,6 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
         catalog_revision: CatalogRevision(row.catalog_revision),
         actor_id: ActorId::new(row.actor_id)?,
         actor_kind: from_json_string::<ActorKind>("invocation.actor_kind", &row.actor_kind_json)?,
-        authority_grant_id: row
-            .authority_grant_id
-            .map(AuthorityGrantId::new)
-            .transpose()?,
-        authority_scopes: from_json_string(
-            "invocation.authority_scopes",
-            &row.authority_scopes_json,
-        )?,
         trace_id: TraceId::new(row.trace_id)?,
         parent_invocation_id: row
             .parent_invocation_id
@@ -260,15 +207,6 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
             (Some(kind), Some(value)) => Some(IdempotencyScope::new(kind, value)),
             _ => None,
         },
-        resource_lease_ids: from_json_string(
-            "invocation.resource_lease_ids",
-            &row.resource_lease_ids_json,
-        )?,
-        compensation_status: row.compensation_status,
-        produced_resource_refs: from_json_string(
-            "invocation.produced_resource_refs",
-            &row.produced_resource_refs_json,
-        )?,
         replayed_from: row.replayed_from.map(InvocationId::new).transpose()?,
         succeeded: row.succeeded == 1,
         result_value: optional_from_json_string("invocation.result", &row.result_json)?,

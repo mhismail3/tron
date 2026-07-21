@@ -15,7 +15,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertFalse(state.isLoaded)
         XCTAssertNil(state.loadError)
-        XCTAssertFalse(state.transcriptionEnabled)
     }
 
     // MARK: - Display Helpers
@@ -33,19 +32,6 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         state.quickSessionWorkspace = "/tmp/workspace"
         XCTAssertEqual(state.displayQuickSessionWorkspace, "/tmp/workspace")
-    }
-
-    func testApplyServerSettingsLoadsTranscriptionChoice() throws {
-        let state = SettingsState()
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
-        {
-          "server": { "transcription": { "enabled": true } }
-        }
-        """))
-
-        state.applyServerSettings(ServerSettingsSnapshot(settings))
-
-        XCTAssertTrue(state.transcriptionEnabled)
     }
 
     // MARK: - Server Switching

@@ -44,7 +44,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertNotNil(landscapeContent.range(of: "serversSection"))
         XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
         XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "transcriptionSection"))
+        XCTAssertNotNil(landscapeContent.range(of: "autonomousWorkersSection"))
         XCTAssertNil(landscapeContent.range(of: "evidencePolicySection"))
         XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(
@@ -181,8 +181,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(engine.contains("label: \"Model\""))
         XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.transcriptionEnabled(enabled))"))
-        XCTAssertTrue(engine.contains("EngineSettingsSection.transcription.rawValue"))
+        XCTAssertTrue(engine.contains("updateServerSetting(.autonomousWorkers(enabled))"))
         XCTAssertTrue(settingsMain.contains("MainSettingsGridDestination.order"))
         XCTAssertFalse(settingsMain.contains("Server-Owned"))
         XCTAssertFalse(settingsMain.contains("This iPhone"))

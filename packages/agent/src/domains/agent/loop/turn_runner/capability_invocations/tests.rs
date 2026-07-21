@@ -8,9 +8,8 @@ use crate::domains::session::event_store::sqlite::connection::{self, ConnectionC
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 use crate::engine::{
-    ActorId, AuthorityGrantId, AuthorityRequirement, EffectClass, EngineHostHandle,
-    FunctionDefinition, FunctionId, Invocation, RiskLevel, VisibilityScope, WorkerDefinition,
-    WorkerId, WorkerKind,
+    ActorId, EffectClass, EngineHostHandle, FunctionDefinition, FunctionId, Invocation, RiskLevel,
+    VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::events::{AssistantMessage, TronEvent};
@@ -207,7 +206,6 @@ async fn phase_engine_surface_with_mode(
                 WorkerId::new("capability").expect("worker id"),
                 WorkerKind::InProcess,
                 ActorId::new("capability-owner").expect("actor id"),
-                AuthorityGrantId::new("capability-grant").expect("grant id"),
             )
             .with_namespace_claim("capability"),
             false,
@@ -223,8 +221,7 @@ async fn phase_engine_surface_with_mode(
         VisibilityScope::System,
         EffectClass::PureRead,
     )
-    .with_risk(RiskLevel::Low)
-    .with_required_authority(AuthorityRequirement::scope("capability.execute"));
+    .with_risk(RiskLevel::Low);
     engine_host
         .register_function(
             function.clone(),

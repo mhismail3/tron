@@ -30,10 +30,9 @@ The source-owned kernel retains only:
   management;
 - authenticated `/engine` transport and loopback token-authenticated worker
   webhook ingress;
-- private iOS device-token custody;
 - isolated core-change proposal creation and explicitly approved application;
-- product settings, auth, context, memory, logging, blobs, and transcription
-  needed by current clients.
+- product settings, auth, session compaction, logging, and blobs needed by
+  current clients.
 
 The authenticated `filesystem` product domain contains only the three iOS
 workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Its old
@@ -45,7 +44,9 @@ Higher-level behavior belongs in a worker bundle. The fixed tree no longer
 contains module proposal/validation/install/dependency/lifecycle/runtime
 planes, capability binding and shadow routing, procedural candidates,
 metadata-only schedules, the old worker lifecycle, fixed media/notification
-delivery planes, or the `capability::execute` wrapper.
+delivery planes, fixed transcription, or the `capability::execute` wrapper.
+Speech-to-text may return only as a worker authored and validated through real
+use; it is not a fixed domain, settings policy, sidecar, or client feature.
 
 The engine still uses generic words such as “capability invocation” in provider
 tool-call events and client rendering. Those names describe the model protocol;
@@ -445,15 +446,18 @@ The invocation executor records actor, session, workspace, model/provider call,
 trace, parent invocation, working directory, turn, and deterministic
 idempotency metadata. None of those observations is a permission grant.
 
-The causal model represents that distinction directly: local contexts and their
-invocation, queue, lease, and compensation records carry no grant id and persist
-SQL `NULL`. Catalog discovery actor context contains no grant field at all.
-Grant-backed authenticated boundaries retain `Some(real_id)` and fail closed if
-that id is absent; rejected work can carry an unbacked observation without
-receiving the trusted-local marker. Startup transactionally converts the prior
-`TEXT NOT NULL` observation columns while preserving rows, so there is no
-active `trusted-local` placeholder or compatibility grant. The same one-time
-conversion clears historical placeholder values to SQL `NULL`.
+The causal model represents that distinction directly: it carries actor,
+session/workspace, trace, parent, trigger, delivery, idempotency, and trusted
+runtime metadata, but no grant id or permission scope. Catalog discovery actor
+context likewise contains no grant field. Public transport cannot inject the
+trusted-local marker or other runtime metadata.
+
+Before the current schema opens a live profile, the worker-first retirement
+migration creates a verified snapshot, imports only complete executable legacy
+bundles as inactive candidates, reports incomplete proposals, and then removes
+the old grant/resource/lease/compensation tables and invocation columns in one
+transaction. It does not retain a synthetic grant, compatibility adapter, or
+nullable permission observation.
 
 There are no local operation claims, resource selectors, synthetic profile
 grants, or agent-kind rejections. Executable workers can change local files and
@@ -557,8 +561,9 @@ rebuild reports are written beside canonical worker state.
 ## Storage
 
 The primary `tron.sqlite` remains the source for sessions, messages, provider
-audits, generic resources, streams, and approval-message evidence. The worker
-kernel does not move these shared engine records into its disposable index.
+audits, streams, scoped engine state, and approval-message evidence. Worker
+bundles remain filesystem-canonical; the worker database owns their derived
+indexes and durable operational history.
 
 ### Tables
 
@@ -566,17 +571,8 @@ kernel does not move these shared engine records into its disposable index.
 |---|---|
 | `blobs` | content-addressed durable payloads |
 | `engine_catalog_changes` | catalog change stream |
-| `engine_compensation_records` | engine compensation evidence; nullable non-local grant observation |
-| `engine_grant_events` | retained non-local authority audit history |
-| `engine_grants` | retained non-local authority grants |
 | `engine_idempotency_entries` | engine invocation idempotency ledger |
-| `engine_invocations` | generic engine invocation history; local rows carry SQL `NULL` grant observation |
-| `engine_resource_events` | generic resource event history |
-| `engine_resource_leases` | generic resource leases; grant id is optional provenance |
-| `engine_resource_links` | generic resource relationships |
-| `engine_resource_type_definitions` | registered generic resource schemas |
-| `engine_resource_versions` | immutable generic resource versions |
-| `engine_resources` | generic resource heads |
+| `engine_invocations` | generic engine invocation history |
 | `engine_state_entries` | engine-owned state values |
 | `engine_stream_events` | durable engine stream records |
 | `engine_stream_subscriptions` | durable stream cursors |
@@ -594,8 +590,10 @@ kernel does not move these shared engine records into its disposable index.
 
 ### Worker database
 
-The rebuildable worker database is
-`~/.tron/internal/database/workers.sqlite` with:
+The worker database is `~/.tron/internal/database/workers.sqlite`. Bundle,
+version, route, and trigger indexes rebuild from canonical worker files;
+invocation, attempt, trace, inbox, health, audit, and stop-all rows are durable
+operational evidence:
 
 | Table | Ownership |
 |---|---|
@@ -613,9 +611,9 @@ The rebuildable worker database is
 | `worker_health` | versioned activation/lifecycle/execution health history |
 | `worker_runtime_settings` | durable profile stop-all state |
 
-Raw device tokens remain outside generic resources in a private `0600` file
-under `~/.tron/internal/devices/`. The fixed kernel performs no notification
-inbox or APNs delivery; that behavior belongs in a worker.
+The fixed kernel has no device-token registration, notification inbox, or APNs
+delivery plane. A future notification workflow must be authored and exercised
+as a worker rather than restored as a fixed domain.
 
 ## Events and Transport
 
@@ -683,9 +681,9 @@ Conversational creation remains the authoring interface; the client does not
 contain a bundle editor. The Mac package is a server supervisor/pairing shell,
 so iOS is the only current operational engine client requiring the console.
 
-The Session Briefing sheet opened from the composer context ring remains the
-server-backed surface for model selection, context composition, compaction,
-clear actions, memory references, and durable context-action evidence.
+Compaction and clear events are direct durable session boundaries. The client
+renders those events without a parallel context-control resource client or
+Session Briefing sheet.
 
 Settings exposes the Logs sheet in every iOS build configuration from its toolbar.
 While connected, Tron automatically ingests deduplicated client logs into the
@@ -781,13 +779,28 @@ prove that accepted worker workflows remain uninterrupted.
 
 ## Source Owners
 
+Source hierarchy is an ownership mechanism, not a placeholder mechanism.
+Repository-owned configuration, automation, default-profile, source, test, and
+package-documentation trees contain no empty directories and no leaf directory
+that exists only to wrap one file. The only narrow exceptions are layouts with
+a concrete external or canonical contract: Codex environment and skill
+packages, benchmark baselines, profile bundles, the canonical agent reference
+directory, the iOS documentation asset directory, Apple color sets, the bundled
+font directory, and generated helper-app `MacOS` payload directories. The
+hierarchy guard walks these repository-owned trees so deleted planes cannot
+leave empty shells and speculative single-file folders cannot accumulate again.
+It also requires every Rust source or test file to have an adjacent module
+owner, preventing a deleted registration edge from leaving compilationally
+invisible source behind. Generated build trees are deliberately outside this
+source-ownership contract and may be recreated by their toolchains.
+
 - Worker kernel: `packages/agent/src/domains/worker_kernel/`
 - Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface.rs`
 - Provider schema adaptation: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
 - Trusted-local execution: `packages/agent/src/domains/agent/loop/capability_invocation_executor/`
 - Profile settings: `packages/agent/src/domains/settings/profile/types/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
-- iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/Catalog/` and `WorkerKernel/`
+- iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift` and `EngineProtocolTypes+WorkerKernel.swift`
 - iOS Engine Dashboard: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`
 
 Nearest `mod.rs` documentation and focused tests are the implementation-level

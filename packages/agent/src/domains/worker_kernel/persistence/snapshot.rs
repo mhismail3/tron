@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
-const SNAPSHOT_FORMAT: &str = "tron.worker_state_snapshot.v1";
+const SNAPSHOT_FORMAT_V1: &str = "tron.worker_state_snapshot.v1";
+const SNAPSHOT_FORMAT: &str = "tron.worker_state_snapshot.v2";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +16,8 @@ struct SnapshotManifest {
     schema_version: u32,
     source_home: String,
     source_profile: String,
+    #[serde(default)]
+    source_inventory_sha256: String,
     created_at: String,
     files: Vec<SnapshotFile>,
     restore: Vec<String>,
@@ -37,16 +40,22 @@ fn default_snapshot_file_kind() -> String {
 pub(super) fn ensure_pre_worker_snapshot(
     home: &Path,
     source_profile: &str,
+    source_inventory_sha256: &str,
 ) -> io::Result<Option<PathBuf>> {
     let snapshots = home.join("internal").join("snapshots");
     fs::create_dir_all(&snapshots)?;
-    let marker = snapshots.join("worker-first-v1.complete.json");
-    if marker.exists() {
+    let marker = snapshots.join("worker-first-v2.complete.json");
+    if let Ok(bytes) = fs::read(&marker)
+        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        && value["sourceInventorySha256"] == source_inventory_sha256
+        && let Some(snapshot) = value["snapshot"].as_str()
+    {
+        verify_snapshot(Path::new(snapshot))?;
         return Ok(None);
     }
 
     let created_at = chrono::Utc::now();
-    let name = format!("worker-first-v1-{}", created_at.format("%Y%m%dT%H%M%SZ"));
+    let name = format!("worker-first-v2-{}", created_at.format("%Y%m%dT%H%M%SZ"));
     let staging = snapshots.join(format!(".{name}.staging"));
     let destination = snapshots.join(&name);
     fs::create_dir_all(&staging)?;
@@ -63,9 +72,10 @@ pub(super) fn ensure_pre_worker_snapshot(
 
     let manifest = SnapshotManifest {
         format: SNAPSHOT_FORMAT.to_owned(),
-        schema_version: 1,
+        schema_version: 2,
         source_home: home.display().to_string(),
         source_profile: source_profile.to_owned(),
+        source_inventory_sha256: source_inventory_sha256.to_owned(),
         created_at: created_at.to_rfc3339(),
         files,
         restore: vec![
@@ -86,6 +96,7 @@ pub(super) fn ensure_pre_worker_snapshot(
             "format": SNAPSHOT_FORMAT,
             "snapshot": destination.display().to_string(),
             "createdAt": created_at.to_rfc3339(),
+            "sourceInventorySha256": source_inventory_sha256,
         }))
         .map_err(io::Error::other)?,
     )?;
@@ -110,7 +121,10 @@ pub(super) fn verify_snapshot(snapshot: &Path) -> io::Result<()> {
     let manifest: SnapshotManifest =
         serde_json::from_slice(&fs::read(snapshot.join("manifest.json"))?)
             .map_err(io::Error::other)?;
-    if manifest.format != SNAPSHOT_FORMAT || manifest.schema_version != 1 {
+    if !matches!(
+        (manifest.format.as_str(), manifest.schema_version),
+        (SNAPSHOT_FORMAT_V1, 1) | (SNAPSHOT_FORMAT, 2)
+    ) {
         return Err(io::Error::other("unsupported worker state snapshot format"));
     }
     for file in &manifest.files {
@@ -346,14 +360,15 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink("state", home.join("workspace/workers/old/current-state"))
             .unwrap();
-        let snapshot = ensure_pre_worker_snapshot(home, "test-profile")
+        let snapshot = ensure_pre_worker_snapshot(home, "test-profile", "database-sha")
             .unwrap()
             .unwrap();
         verify_snapshot(&snapshot).unwrap();
         let manifest: SnapshotManifest =
             serde_json::from_slice(&fs::read(snapshot.join("manifest.json")).unwrap()).unwrap();
         assert_eq!(manifest.format, SNAPSHOT_FORMAT);
-        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.schema_version, 2);
+        assert_eq!(manifest.source_inventory_sha256, "database-sha");
         assert_eq!(manifest.source_profile, "test-profile");
         assert_eq!(manifest.source_home, home.display().to_string());
         assert!(!manifest.files.is_empty());
@@ -397,7 +412,7 @@ mod tests {
         let home = source.path();
         fs::create_dir_all(home.join("profiles/user")).unwrap();
         fs::write(home.join("profiles/user/profile.toml"), "[settings]\n").unwrap();
-        let snapshot = ensure_pre_worker_snapshot(home, "checksum-profile")
+        let snapshot = ensure_pre_worker_snapshot(home, "checksum-profile", "database-sha")
             .unwrap()
             .unwrap();
         fs::write(snapshot.join("profiles/user/profile.toml"), "corrupt").unwrap();

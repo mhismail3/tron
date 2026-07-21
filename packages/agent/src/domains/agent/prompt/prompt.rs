@@ -1,9 +1,7 @@
 //! Agent workflow operations.
 use std::sync::Arc;
 
-use super::{
-    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest, errors,
-};
+use super::{AgentCommandService, PromptEngineCausality, PromptRequest, errors};
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
 use crate::domains::model::responder::ModelResponderFactory;
@@ -299,20 +297,7 @@ fn trusted_agent_internal_child_context(
     let mut context = invocation.causal_context.clone();
     context.actor_id = crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id");
     context.actor_kind = crate::engine::ActorKind::System;
-    if !context.is_trusted_local() {
-        context.authority_grant_id =
-            Some(crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id"));
-    }
     context.parent_invocation_id = Some(invocation.id.clone());
-    if !context
-        .authority_scopes
-        .iter()
-        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
-    {
-        context
-            .authority_scopes
-            .push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
-    }
     context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
     context.delivery_mode = crate::engine::DeliveryMode::Sync;
     context
@@ -334,7 +319,7 @@ pub(crate) async fn publish_prompt_stream(
 mod tests {
     use super::*;
     use crate::domains::registration::worker::DomainRegistrationContext;
-    use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+    use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, TraceId};
     use crate::shared::server::test_support::make_test_context;
 
     #[tokio::test]
@@ -365,10 +350,8 @@ mod tests {
             CausalContext::new(
                 ActorId::new("engine-client").expect("actor id"),
                 ActorKind::Client,
-                AuthorityGrantId::new("engine-transport").expect("grant id"),
                 TraceId::new("prompt-parent").expect("trace id"),
             )
-            .with_scope("agent.write")
             .with_session_id("session-a")
             .with_workspace_id("workspace-a"),
         );
@@ -377,19 +360,9 @@ mod tests {
 
         assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
         assert_eq!(child.actor_kind, ActorKind::System);
-        assert_eq!(
-            child.authority_grant_id.as_ref().map(|id| id.as_str()),
-            Some("engine-system")
-        );
         assert_eq!(child.parent_invocation_id, Some(parent.id));
         assert_eq!(child.session_id.as_deref(), Some("session-a"));
         assert_eq!(child.workspace_id.as_deref(), Some("workspace-a"));
-        assert!(
-            child
-                .authority_scopes
-                .iter()
-                .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
-        );
         assert!(
             child
                 .idempotency_key

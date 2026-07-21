@@ -27,7 +27,6 @@ pub(super) fn registrations(
                 STATE_WORKER_ID,
                 "read scoped engine state",
                 EffectClass::PureRead,
-                "state.read",
             )
             .with_request_schema(state_key_schema())
             .with_response_schema(state_entry_response_schema(true)),
@@ -39,7 +38,6 @@ pub(super) fn registrations(
                 STATE_WORKER_ID,
                 "write scoped engine state",
                 EffectClass::IdempotentWrite,
-                "state.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_request_schema(state_set_schema())
@@ -52,7 +50,6 @@ pub(super) fn registrations(
                 STATE_WORKER_ID,
                 "delete scoped engine state",
                 EffectClass::IdempotentWrite,
-                "state.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_request_schema(state_key_schema())
@@ -65,7 +62,6 @@ pub(super) fn registrations(
                 STATE_WORKER_ID,
                 "conditionally update scoped engine state",
                 EffectClass::IdempotentWrite,
-                "state.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_request_schema(state_compare_and_set_schema())
@@ -78,7 +74,6 @@ pub(super) fn registrations(
                 STATE_WORKER_ID,
                 "list scoped engine state",
                 EffectClass::PureRead,
-                "state.read",
             )
             .with_request_schema(state_list_schema())
             .with_response_schema(json!({

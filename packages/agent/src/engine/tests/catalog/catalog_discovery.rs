@@ -24,13 +24,8 @@ fn worker_registration_updates_revision_and_owner_conflicts_are_rejected() {
     assert_eq!(rev.0, 2);
     assert_eq!(catalog.revision().0, 2);
 
-    let conflicting = WorkerDefinition::new(
-        wid("w1"),
-        WorkerKind::InProcess,
-        actor("other"),
-        grant("grant"),
-    )
-    .with_namespace_claim("alpha");
+    let conflicting = WorkerDefinition::new(wid("w1"), WorkerKind::InProcess, actor("other"))
+        .with_namespace_claim("alpha");
     assert!(matches!(
         catalog.register_worker(conflicting, true),
         Err(EngineError::OwnerMismatch { kind: "worker", .. })
@@ -112,43 +107,6 @@ fn mutating_function_requires_idempotency() {
 
     catalog
         .register_function(write_function("alpha::write", "w1"), Some(handler()), true)
-        .unwrap();
-}
-
-#[test]
-fn high_risk_agent_visible_function_requires_compensation_metadata() {
-    let mut catalog = LiveCatalog::new();
-    catalog
-        .register_worker(worker("w1", "alpha"), true)
-        .unwrap();
-    let irreversible = FunctionDefinition::new(
-        fid("alpha::delete_forever"),
-        wid("w1"),
-        "irreversible",
-        VisibilityScope::Agent,
-        EffectClass::IrreversibleSideEffect,
-    )
-    .with_idempotency(IdempotencyContract::caller_session());
-    assert!(matches!(
-        catalog.register_function(irreversible, Some(handler()), true),
-        Err(EngineError::PolicyViolation(message)) if message.contains("compensation")
-    ));
-
-    let compensated = FunctionDefinition::new(
-        fid("alpha::delete_forever"),
-        wid("w1"),
-        "irreversible",
-        VisibilityScope::Agent,
-        EffectClass::IrreversibleSideEffect,
-    )
-    .with_idempotency(IdempotencyContract::caller_session())
-    .with_required_authority(AuthorityRequirement::scope("delete"))
-    .with_compensation(CompensationContract::new(
-        CompensationKind::ManualOnly,
-        "test irreversible operation requires manual recovery notes",
-    ));
-    catalog
-        .register_function(compensated, Some(handler()), true)
         .unwrap();
 }
 
@@ -459,13 +417,8 @@ fn unregister_function_removes_the_function_and_advances_revision() {
 #[test]
 fn engine_host_bootstrap_repairs_stale_system_meta_contracts() {
     let mut catalog = LiveCatalog::new();
-    let engine_worker = WorkerDefinition::new(
-        wid("engine"),
-        WorkerKind::System,
-        actor("system"),
-        grant("engine-system"),
-    )
-    .with_namespace_claim("engine");
+    let engine_worker = WorkerDefinition::new(wid("engine"), WorkerKind::System, actor("system"))
+        .with_namespace_claim("engine");
     catalog.register_worker(engine_worker, false).unwrap();
     catalog
         .register_function(

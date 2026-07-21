@@ -6,14 +6,14 @@
 //! single-file artifacts when the operator needs one. The `modular-engine-v4`
 //! generation is a clean break for the collapsed substrate: startup accepts only
 //! the canonical active DB path and moves a non-current `tron.sqlite` generation
-//! aside before creating the grant, resource, ledger, stream, state, queue,
-//! lease, compensation, storage, and session-harness tables from the current
+//! aside before creating the ledger, stream, state, storage, and
+//! session-harness tables from the current
 //! schema only. Generation inspection errors fail closed, archived DB/WAL/SHM
 //! files carry an `archive-manifest.json`, and shared storage schema setup runs
 //! behind a savepoint with drift and payload-reference integrity checks.
-//! Source-owned tables may also use the narrow nullable-observation rebuild
-//! helper to preserve rows while removing historical `NOT NULL` authority-id
-//! ceremony; the helper is transactional and idempotent.
+//! A one-time worker-first retirement imports complete legacy proposals as
+//! inactive worker candidates, reports incomplete records, and transactionally
+//! removes the superseded authority/resource schema after a verified snapshot.
 //! Startup and manual cleanup share one managed diagnostic horizon and active
 //! database budget. Those bounds prune only low-signal diagnostic data and
 //! unowned blobs; they are not chat, session, or memory retention policy.
@@ -38,11 +38,10 @@ mod tests;
 pub use archive::{archive_non_current_active_database, prepare_active_database};
 pub use maintenance::{checkpoint_database, export_snapshot};
 pub use payloads::{
-    decode_blob_content, encode_blob_content, register_existing_blob_owner,
-    resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
-    store_json_value, store_owned_payload_ref,
+    PayloadRefCleanup, decode_blob_content, encode_blob_content, register_existing_blob_owner,
+    resolve_stored_json_string, resolve_stored_json_value, retire_payload_refs_by_owner_kind,
+    store_content_blob, store_json_bytes, store_json_value, store_owned_payload_ref,
 };
-pub(crate) use schema::ensure_nullable_text_observation;
 pub use schema::{apply_runtime_pragmas, ensure_storage_schema};
 pub use stats::storage_stats;
 

@@ -5,7 +5,6 @@
 
 mod fixtures;
 
-mod authority;
 mod catalog;
 mod durability;
 mod invocation;

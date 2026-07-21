@@ -35,28 +35,26 @@ packages/mac-app/
 ├── Sources/
 │   ├── Info.plist                  # Bundle metadata (starts regular; switches to accessory after onboarding)
 │   ├── App/
+│   │   ├── EnvironmentSetup.swift # Sendable DI struct (live + test values)
 │   │   ├── Lifecycle/              # @main entry, AppDelegate, startup maintenance, runtime variant
-│   │   ├── CommandMode/            # Internal start/uninstall command-mode entry points
-│   │   └── Composition/            # Sendable DI struct (live + test values)
+│   │   └── CommandMode/            # Internal start/uninstall command-mode entry points
 │   ├── MenuBar/
+│   │   ├── MenuBarController.swift # NSStatusItem and window lifecycle
 │   │   ├── Actions/                # Typed menu commands, action handler, and feedback issue action
-│   │   ├── Controller/             # NSStatusItem and window lifecycle
 │   │   └── Presentation/           # Pure typed-descriptor builder, logs reader, logs window
 │   ├── Resources/                  # tracked icons, fonts, and helper/LaunchAgent metadata
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
 │   │   └── Library/                # helper Info.plists + LaunchAgent plists; binaries are staged and ignored
 │   ├── Server/
+│   │   ├── BearerTokenReader.swift # auth.json bearer-token reader
 │   │   ├── LaunchAgent/            # protocol + SMAppService-backed LiveLaunchAgentManager
 │   │   ├── Health/                 # one-shot ping, health waiting, status polling
 │   │   ├── Paths/                  # TronPaths plus profile settings TOML cache
-│   │   ├── PairingToken/           # auth.json bearer-token reader
 │   │   └── ProcessControl/         # dev stopper, process probe, wrapper lock, uninstall
 │   ├── Support/
-│   │   ├── Diagnostics/
-│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask bearer/API/OAuth fields, drop chat content
-│   │   ├── Feedback/
-│   │   │   └── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
+│   │   ├── DiagnosticsRedactor.swift # strip paths, mask bearer/API/OAuth fields, drop chat content
+│   │   ├── FeedbackComposer.swift    # pure GitHub issue composer with redacted log context
 │   │   ├── Foundation/
 │   │   │   ├── Subprocess.swift
 │   │   │   └── VersionDisplay.swift

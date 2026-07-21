@@ -29,8 +29,6 @@ mod handlers;
 mod service;
 
 pub(crate) const WORKER: &str = "filesystem";
-pub(crate) const READ_SCOPE: &str = "filesystem.read";
-pub(crate) const WRITE_SCOPE: &str = "filesystem.write";
 const STREAM_TOPICS: &[&str] = &[];
 
 #[derive(Clone)]

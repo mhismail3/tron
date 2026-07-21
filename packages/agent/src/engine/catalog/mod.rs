@@ -9,8 +9,7 @@
 //! projections.
 //!
 //! Discovery actor context is provenance plus visibility scope, not an
-//! authorization token. It deliberately contains no authority-grant id;
-//! grant-backed invocation authorization remains an execution-boundary concern.
+//! authorization token or permission object.
 
 pub mod discovery;
 pub mod registry;

@@ -1,16 +1,13 @@
 //! Privileged primitive query runtime.
 //!
-//! Catalog, storage, and generated-UI primitives need access
+//! Catalog and storage primitives need access
 //! to host-owned catalog and ledger state. The response contracts live here so
 //! `EngineHost` stays a coordinator rather than a primitive response bucket.
 
 use serde_json::{Value, json};
 
-use super::{catalog, storage, ui};
+use super::{catalog, storage};
 use crate::engine::catalog::discovery::{ActorContext, FunctionQuery};
-use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, UpdateResource,
-};
 use crate::engine::invocation::model::{CausalContext, Invocation};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::types::{FunctionDefinition, VisibilityScope, WorkerDefinition};
@@ -21,9 +18,6 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition>;
     fn inspect_catalog_item(&self, invocation: &Invocation) -> Result<Value>;
     fn watch_catalog_snapshot_base(&self, invocation: &Invocation) -> Result<Value>;
-    fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
-    fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
-    fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport>;
     fn storage_checkpoint(&self) -> Result<crate::shared::storage::StorageCheckpointReport>;
     fn storage_export_snapshot(
@@ -44,13 +38,6 @@ pub(in crate::engine) fn dispatch(
         catalog::LIST_FUNCTION => catalog_list(host, invocation),
         catalog::INSPECT_FUNCTION => host.inspect_catalog_item(invocation),
         catalog::WATCH_SNAPSHOT_FUNCTION => catalog_watch_snapshot(host, invocation),
-        ui::CREATE_SURFACE_FUNCTION
-        | ui::UPDATE_SURFACE_FUNCTION
-        | ui::INSPECT_SURFACE_FUNCTION
-        | ui::VALIDATE_SURFACE_FUNCTION
-        | ui::EXPIRE_SURFACE_FUNCTION
-        | ui::DISCARD_SURFACE_FUNCTION
-        | ui::SUBMIT_ACTION_FUNCTION => ui::dispatch(host, invocation),
         storage::STATS_FUNCTION => storage_stats(host),
         storage::CHECKPOINT_FUNCTION => storage_checkpoint(host),
         storage::EXPORT_SNAPSHOT_FUNCTION => storage_export_snapshot(host, invocation),
@@ -146,7 +133,6 @@ pub(in crate::engine::primitives) fn actor_context(context: &CausalContext) -> A
     ActorContext {
         actor_id: context.actor_id.clone(),
         actor_kind: context.actor_kind.clone(),
-        authority_scopes: context.authority_scopes.clone(),
         session_id: context.session_id.clone(),
         workspace_id: context.workspace_id.clone(),
     }

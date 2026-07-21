@@ -12,21 +12,9 @@ pub struct ContextClearedPayload {
     pub tokens_after: i64,
     /// Reason for clearing.
     pub reason: String,
-    /// Context-control action resource backing this clear boundary, when
-    /// available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_control_action_resource_id: Option<String>,
-    /// Prepared action version that already existed when this boundary
-    /// committed. Historical boundaries may omit it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_control_action_version_id: Option<String>,
-    /// Context-control preflight snapshot resource backing this clear boundary,
-    /// when available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_control_snapshot_resource_id: Option<String>,
-    /// Internal capability invocation that caused this boundary, retained as
-    /// durable audit correlation. Reconstruction derives provider-valid result
-    /// pairing from the surviving assistant invocation blocks instead.
+    /// Internal invocation that caused this boundary, retained as durable
+    /// audit correlation. Reconstruction derives provider-valid result pairing
+    /// from the surviving assistant invocation blocks instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boundary_invocation_id: Option<String>,
 }

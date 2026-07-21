@@ -27,7 +27,6 @@ pub(super) fn registrations(
                 STREAM_WORKER_ID,
                 "subscribe to a live stream; omit afterCursor to start at the topic tail",
                 EffectClass::IdempotentWrite,
-                "stream.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_request_schema(stream_subscribe_schema())
@@ -40,7 +39,6 @@ pub(super) fn registrations(
                 STREAM_WORKER_ID,
                 "poll a stream subscription",
                 EffectClass::PureRead,
-                "stream.read",
             )
             .with_request_schema(stream_poll_schema())
             .with_response_schema(stream_poll_response_schema()),
@@ -52,7 +50,6 @@ pub(super) fn registrations(
                 STREAM_WORKER_ID,
                 "unsubscribe from a stream",
                 EffectClass::IdempotentWrite,
-                "stream.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_request_schema(stream_unsubscribe_schema())
@@ -67,7 +64,6 @@ pub(super) fn registrations(
                 VisibilityScope::Internal,
                 EffectClass::AppendOnlyEvent,
             )
-            .with_required_authority(crate::engine::AuthorityRequirement::scope("stream.write"))
             .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
             .with_request_schema(stream_publish_schema())
             .with_response_schema(json!({

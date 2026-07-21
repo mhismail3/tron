@@ -18,7 +18,7 @@ fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
         );
     }
 
-    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding/mod.rs");
+    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding.rs");
     for required in [
         "const TOKEN_BYTE_LEN: usize = 32",
         "general_purpose::URL_SAFE_NO_PAD.encode(bytes)",
@@ -102,7 +102,7 @@ fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
 
     for path in [
         "packages/ios-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
-        "packages/mac-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
+        "packages/mac-app/Sources/Support/DiagnosticsRedactor.swift",
     ] {
         let source = read_repo_file(path);
         for required in [
@@ -143,7 +143,7 @@ fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
         "iOS source guards must pin token custody and redaction boundaries"
     );
     let mac_source_guard =
-        read_repo_file("packages/mac-app/Tests/Infrastructure/Guards/MacSourceGuardTests.swift");
+        read_repo_file("packages/mac-app/Tests/Infrastructure/MacSourceGuardTests.swift");
     assert!(
         mac_source_guard.contains("diagnosticsRedactorKeepsAuthFieldParity"),
         "Mac source guards must pin diagnostics redaction parity"

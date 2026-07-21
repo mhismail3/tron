@@ -11,13 +11,25 @@ mod store;
 
 pub(super) use store::WorkerStore;
 
-pub(super) fn list_snapshots(home: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
-    snapshot::list_snapshots(home)
+pub(crate) fn prepare_profile_state_retirement(
+    home: &std::path::Path,
+    source_profile: &str,
+    database: &std::path::Path,
+) -> Result<(), String> {
+    migration::prepare_worker_first_retirement(home, source_profile, database)
 }
 
-pub(super) fn restore_snapshot(
+pub(crate) fn list_state_snapshots() -> Result<Vec<std::path::PathBuf>, String> {
+    snapshot::list_snapshots(&crate::shared::foundation::paths::tron_home())
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn restore_state_snapshot(
     snapshot_path: &std::path::Path,
-    home: &std::path::Path,
-) -> std::io::Result<std::path::PathBuf> {
-    snapshot::restore_snapshot(snapshot_path, home)
+) -> Result<std::path::PathBuf, String> {
+    snapshot::restore_snapshot(
+        snapshot_path,
+        &crate::shared::foundation::paths::tron_home(),
+    )
+    .map_err(|error| error.to_string())
 }

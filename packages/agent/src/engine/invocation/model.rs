@@ -10,9 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
-};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
 use crate::engine::kernel::types::{
     CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyScope,
 };
@@ -52,9 +50,9 @@ pub const RUNTIME_METADATA_TRIGGER_DEPTH: &str = "engine.triggerDepth";
 pub const RUNTIME_METADATA_TRIGGER_PATH: &str = "engine.triggerPath";
 /// Runtime-owned marker for an accepted local agent or worker invocation.
 ///
-/// This is deliberately not an authority grant. The host uses it to bypass the
-/// legacy grant lookup and budget path while retaining actor and causal
-/// observations during the worker-first POC.
+/// This is deliberately not an authority grant. It records that the accepted
+/// caller came from the local agent/worker runtime while retaining actor and
+/// causal observations.
 pub const RUNTIME_METADATA_TRUSTED_LOCAL: &str = "engine.trustedLocal";
 
 /// Causal context carried by every invocation.
@@ -64,12 +62,6 @@ pub struct CausalContext {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id for grant-backed boundaries. Trusted-local
-    /// invocations deliberately carry no grant.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authority_grant_id: Option<AuthorityGrantId>,
-    /// Granted authority scopes.
-    pub authority_scopes: Vec<String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation.
@@ -95,26 +87,10 @@ pub struct CausalContext {
 impl CausalContext {
     /// Create a causal context.
     #[must_use]
-    pub fn new(
-        actor_id: ActorId,
-        actor_kind: ActorKind,
-        authority_grant_id: AuthorityGrantId,
-        trace_id: TraceId,
-    ) -> Self {
-        Self::new_with_authority(actor_id, actor_kind, Some(authority_grant_id), trace_id)
-    }
-
-    fn new_with_authority(
-        actor_id: ActorId,
-        actor_kind: ActorKind,
-        authority_grant_id: Option<AuthorityGrantId>,
-        trace_id: TraceId,
-    ) -> Self {
+    pub fn new(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
         Self {
             actor_id,
             actor_kind,
-            authority_grant_id,
-            authority_scopes: Vec::new(),
             trace_id,
             parent_invocation_id: None,
             session_id: None,
@@ -127,16 +103,13 @@ impl CausalContext {
         }
     }
 
-    /// Create an observational context with no authority grant and no trusted
-    /// execution marker. Rejected work can therefore retain honest causal
-    /// evidence without gaining a local-authority bypass.
+    /// Create an observational context with no trusted execution marker.
     #[must_use]
     pub fn observed(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
-        Self::new_with_authority(actor_id, actor_kind, None, trace_id)
+        Self::new(actor_id, actor_kind, trace_id)
     }
 
-    /// Create a trusted-local causal context that is not backed by an authority
-    /// grant.
+    /// Create a trusted-local causal context.
     #[must_use]
     pub fn trusted_local(actor_id: ActorId, actor_kind: ActorKind, trace_id: TraceId) -> Self {
         Self::observed(actor_id, actor_kind, trace_id)
@@ -150,26 +123,6 @@ impl CausalContext {
         self.runtime_metadata
             .get(RUNTIME_METADATA_TRUSTED_LOCAL)
             .is_some_and(|value| value == "true")
-    }
-
-    /// Return the grant required by a grant-backed boundary.
-    ///
-    /// Trusted-local calls must never be converted into a synthetic grant just
-    /// to satisfy a legacy field. Callers that truly require a grant fail
-    /// closed through this accessor instead.
-    pub fn require_authority_grant_id(&self, operation: &str) -> Result<&AuthorityGrantId> {
-        self.authority_grant_id.as_ref().ok_or_else(|| {
-            EngineError::PolicyViolation(format!(
-                "{operation} requires a grant-backed causal context"
-            ))
-        })
-    }
-
-    /// Add an authority scope.
-    #[must_use]
-    pub fn with_scope(mut self, scope: impl Into<String>) -> Self {
-        self.authority_scopes.push(scope.into());
-        self
     }
 
     /// Set the session id.
@@ -205,12 +158,6 @@ impl CausalContext {
     pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
         self.idempotency_key = Some(key.into());
         self
-    }
-
-    /// Whether this context has a scope.
-    #[must_use]
-    pub fn has_scope(&self, scope: &str) -> bool {
-        self.authority_scopes.iter().any(|s| s == scope)
     }
 
     /// Attach engine-internal runtime metadata.
@@ -396,11 +343,6 @@ pub struct InvocationRecord {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Authority grant id when a grant-backed boundary authorized the call.
-    /// Trusted-local invocations persist `None`/SQL `NULL`.
-    pub authority_grant_id: Option<AuthorityGrantId>,
-    /// Granted authority scopes.
-    pub authority_scopes: Vec<String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation.
@@ -417,12 +359,6 @@ pub struct InvocationRecord {
     pub idempotency_key: Option<String>,
     /// Concrete idempotency scope.
     pub idempotency_scope: Option<IdempotencyScope>,
-    /// Resource leases acquired by the engine for this invocation.
-    pub resource_lease_ids: Vec<String>,
-    /// Durable compensation record status for this invocation.
-    pub compensation_status: Option<String>,
-    /// Resource references produced by the capability result.
-    pub produced_resource_refs: Vec<Value>,
     /// Replayed invocation, when this was an idempotency replay/no-op.
     pub replayed_from: Option<InvocationId>,
     /// Whether the result was successful.
@@ -462,8 +398,6 @@ impl InvocationRecord {
             catalog_revision: result.catalog_revision,
             actor_id: invocation.causal_context.actor_id.clone(),
             actor_kind: invocation.causal_context.actor_kind.clone(),
-            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
-            authority_scopes: invocation.causal_context.authority_scopes.clone(),
             trace_id: invocation.causal_context.trace_id.clone(),
             parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
             trigger_id: invocation.causal_context.trigger_id.clone(),
@@ -472,9 +406,6 @@ impl InvocationRecord {
             delivery_mode: invocation.delivery_mode,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
             idempotency_scope,
-            resource_lease_ids: Vec::new(),
-            compensation_status: None,
-            produced_resource_refs: produced_resource_refs_from_result(&result.value),
             replayed_from: result.replayed_from.clone(),
             succeeded: result.error.is_none(),
             result_value: result
@@ -498,34 +429,8 @@ impl InvocationRecord {
             .result_value
             .as_ref()
             .map(crate::shared::foundation::redaction::redact_sensitive_json);
-        record.produced_resource_refs = record
-            .produced_resource_refs
-            .iter()
-            .map(crate::shared::foundation::redaction::redact_sensitive_json)
-            .collect();
         record
     }
-
-    /// Attach host-enforced contract bookkeeping.
-    #[must_use]
-    pub fn with_contracts(
-        mut self,
-        resource_lease_ids: Vec<String>,
-        compensation_status: Option<String>,
-    ) -> Self {
-        self.resource_lease_ids = resource_lease_ids;
-        self.compensation_status = compensation_status;
-        self
-    }
-}
-
-fn produced_resource_refs_from_result(value: &Option<Value>) -> Vec<Value> {
-    value
-        .as_ref()
-        .and_then(|value| value.get("resourceRefs"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -533,7 +438,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trusted_local_context_has_no_synthetic_authority_id() {
+    fn trusted_local_context_round_trips_runtime_marker() {
         let context = CausalContext::trusted_local(
             ActorId::new("agent:trusted-local-test").unwrap(),
             ActorKind::Agent,
@@ -541,11 +446,8 @@ mod tests {
         );
 
         assert!(context.is_trusted_local());
-        assert_eq!(context.authority_grant_id, None);
         let encoded = serde_json::to_value(&context).unwrap();
-        assert!(encoded.get("authority_grant_id").is_none());
         let decoded: CausalContext = serde_json::from_value(encoded).unwrap();
-        assert_eq!(decoded.authority_grant_id, None);
         assert!(decoded.is_trusted_local());
     }
 
@@ -555,7 +457,6 @@ mod tests {
         let causal_context = CausalContext::new(
             ActorId::new("actor-fixed").unwrap(),
             ActorKind::Agent,
-            AuthorityGrantId::new("grant-fixed").unwrap(),
             trace_id,
         )
         .with_session_id("sess-fixed")
@@ -592,7 +493,6 @@ mod tests {
             CausalContext::new(
                 ActorId::new("agent-secret").unwrap(),
                 ActorKind::Agent,
-                AuthorityGrantId::new("grant-secret").unwrap(),
                 TraceId::new("trace-secret").unwrap(),
             ),
         );

@@ -27,18 +27,6 @@ final class ChatViewModel {
     var hasMoreMessages = false
     /// Whether currently loading more messages
     var isLoadingMoreMessages = false
-    /// Composer microphone recording state.
-    var isRecording = false
-    /// Smoothed microphone energy for the recording affordance (0...1).
-    var recordingAudioLevel: Double = 0
-    /// Composer audio is being sent to local transcription.
-    var isTranscribing = false
-
-    // MARK: - Display Stream State
-
-    /// Display stream state (active stream, frames, sheet, stop tracking)
-    var displayStreamState = DisplayStreamState()
-
     // MARK: - Input State (delegated to InputBarState)
 
     /// Text input - delegated to inputBarState
@@ -176,15 +164,6 @@ final class ChatViewModel {
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
-    /// Coordinates local composer mic recording and transcription.
-    let transcriptionCoordinator = ChatTranscriptionCoordinator()
-    /// Cancellable composer voice task covering readiness, stop, file load, and transcription upload.
-    @ObservationIgnored
-    var transcriptionTask: Task<Void, Never>?
-    @ObservationIgnored
-    var transcriptionTaskGeneration: UInt64 = 0
-    /// Composer-scoped microphone recorder.
-    let micRecorder = ComposerMicRecorder()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     /// Message identities for capability invocations in the live current turn.
@@ -269,11 +248,6 @@ final class ChatViewModel {
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
         setupBindings()
         setupEventProcessingCallbacks()
-        micRecorder.onFinish = { [weak self] url, success in
-            Task { @MainActor [weak self] in
-                await self?.handleRecordingFinished(url: url, success: success)
-            }
-        }
     }
 
     @ObservationIgnored
@@ -282,7 +256,6 @@ final class ChatViewModel {
     private func setupBindings() {
         let connection = services.connection
         let inputBarState = inputBarState
-        let micRecorder = micRecorder
 
         observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
             guard let self else { return }
@@ -297,7 +270,6 @@ final class ChatViewModel {
                 isCompacting = false
                 compactionInProgressMessageId = nil
                 runningCapabilityInvocationCount = 0
-                clearDisplayStreamState()
                 prunedLiveMessages.removeAll()
             }
         })
@@ -306,13 +278,6 @@ final class ChatViewModel {
             self?.startSelectedImageProcessing(images)
         })
 
-        observationTasks.append(Self.observeLoop({ micRecorder.isRecording }) { [weak self] recording in
-            self?.isRecording = recording
-        })
-
-        observationTasks.append(Self.observeLoop({ micRecorder.audioLevel }) { [weak self] level in
-            self?.recordingAudioLevel = level
-        })
     }
 
     func startLiveEventStream() {
@@ -359,8 +324,6 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             selectedImageTask?.cancel()
-            transcriptionTask?.cancel()
-            micRecorder.cancelRecording()
         }
     }
 

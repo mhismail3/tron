@@ -29,8 +29,6 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) orchestrator: Arc<Orchestrator>,
     pub(crate) session_manager: Arc<SessionManager>,
     pub(crate) event_store: Arc<EventStore>,
-    pub(crate) transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-    pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
     pub(crate) responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     pub(crate) profile_runtime: Arc<ProfileRuntime>,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
@@ -54,8 +52,6 @@ impl DomainRegistrationContext {
             orchestrator: Arc::clone(&ctx.orchestrator),
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
-            transcription_runtime: ctx.transcription_runtime.clone(),
-            apns_runtime: ctx.apns_runtime.clone(),
             responder_factory: ctx.responder_factory.clone(),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
@@ -92,7 +88,6 @@ pub(crate) fn domain_worker_module(
         catalog::worker_id(namespace)?,
         WorkerKind::InProcess,
         catalog::actor_id(catalog::SYSTEM_OWNER_ACTOR)?,
-        catalog::grant_id(catalog::SYSTEM_AUTHORITY_GRANT)?,
     )
     .with_namespace_claim(namespace);
     Ok(DomainWorkerModule {

@@ -130,17 +130,6 @@ impl LiveCatalog {
                         reason: "duplicate key is configured to reject".to_owned(),
                     },
                 ),
-                ReplayBehavior::Compensate => InvocationResult::error(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    EngineError::IdempotencyConflict {
-                        function_id: function.id.to_string(),
-                        key: existing.key.key.clone(),
-                        reason: "compensation replay is not executable in phase 1".to_owned(),
-                    },
-                ),
             },
         }
     }
@@ -302,14 +291,7 @@ fn idempotency_scope_value(
         )),
         VisibilityScope::Internal => Ok(IdempotencyScope::new(
             "internal",
-            invocation
-                .causal_context
-                .authority_grant_id
-                .as_ref()
-                .map_or_else(
-                    || format!("trusted-local:{}", invocation.causal_context.actor_id),
-                    ToString::to_string,
-                ),
+            invocation.causal_context.actor_id.to_string(),
         )),
     }
 }

@@ -6,7 +6,7 @@ The iOS app handles engine events through two paths:
 
 ```
 Live:   Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
-Stored: EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage array
+Stored: EventDatabase -> Session/Timeline/UnifiedEventTransformer -> ChatMessage array
 ```
 
 The live path updates the mounted session UI. The stored path reconstructs
@@ -89,7 +89,6 @@ Current retained plugin groups:
 | Capability invocation | `Sources/Engine/Events/Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
 | Lifecycle | `Sources/Engine/Events/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
 | Session | `Sources/Engine/Events/Plugins/Session/` | Connection and session list/update/archive/delete state. |
-| Display | `Sources/Engine/Events/Plugins/Display/` | Generic display frames for runtime surfaces. |
 | Server | `Sources/Engine/Events/Plugins/Server/` | Server/auth/restart status messages. |
 
 Deleted workflow-specific plugin roots, including prompt queue and hook
@@ -206,7 +205,7 @@ context-window value; the coordinator does not pass a duplicate token snapshot.
 
 ## Stored Reconstruction
 
-`Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` reconstructs
+`Session/Timeline/UnifiedEventTransformer.swift` reconstructs
 messages from `SessionEvent` rows. Engine reconstruction helpers own persisted
 event decoding support; the transformer is Session-owned because it projects
 durable events into chat timeline state. Its transient reconstruction result

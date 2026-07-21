@@ -1,9 +1,8 @@
 //! In-memory live catalog registry.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 
-use crate::engine::authority::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore};
 use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, InMemoryEngineLedgerStore,
 };
@@ -14,12 +13,10 @@ use crate::engine::kernel::types::{
     CatalogChange, CatalogRevision, FunctionDefinition, WorkerDefinition,
 };
 
-mod authorization;
 mod catalog_changes;
 mod cleanup;
 mod idempotency;
 mod invocation;
-mod output_contract;
 mod registration;
 mod search;
 
@@ -46,7 +43,6 @@ pub struct LiveCatalog {
     workers: BTreeMap<WorkerId, WorkerEntry>,
     functions: BTreeMap<FunctionId, FunctionEntry>,
     ledger: Box<dyn EngineLedgerStore>,
-    grants: Arc<StdMutex<EngineGrantStoreBackend>>,
 }
 
 impl LiveCatalog {
@@ -64,18 +60,7 @@ impl LiveCatalog {
             workers: BTreeMap::new(),
             functions: BTreeMap::new(),
             ledger,
-            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
-                InMemoryEngineGrantStore::new(),
-            ))),
         }
-    }
-
-    /// Use a caller-supplied grant store for invocation authorization.
-    pub(in crate::engine) fn set_grant_store(
-        &mut self,
-        grants: Arc<StdMutex<EngineGrantStoreBackend>>,
-    ) {
-        self.grants = grants;
     }
 
     /// Current catalog revision.

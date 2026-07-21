@@ -18,7 +18,6 @@ extension SourceGuardTests {
                     "Sources/Engine/Transport/Clients/SystemClient.swift",
                     "Sources/Engine/Transport/Clients/MessageClient.swift",
                     "Sources/Engine/Transport/Clients/LogsClient.swift",
-                    "Sources/Engine/Transport/Clients/TranscriptionClient.swift",
                     "Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift",
                 ]
             ),
@@ -89,22 +88,13 @@ extension SourceGuardTests {
                 maximumFileCount: 49,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: [
-                    "Coordinators",
                     "Messaging",
                     "Navigation",
                     "State",
                     "ViewModel",
-                ]
-            ),
-            HierarchyBudget(
-                relativePath: "Tests/Session/Chat/Coordinators",
-                minimumFileCount: 1,
-                maximumFileCount: 2,
-                maximumLineCount: hardLineLimit,
-                allowedImmediateSubdirectories: [],
+                ],
                 requiredFiles: [
-                    "Tests/Session/Chat/Coordinators/MessagingCoordinatorTests.swift",
-                    "Tests/Session/Chat/Coordinators/ChatTranscriptionCoordinatorTests.swift",
+                    "Tests/Session/Chat/MessagingCoordinatorTests.swift",
                 ]
             ),
             HierarchyBudget(

@@ -142,15 +142,10 @@ final class EngineClient: EngineTransport {
 
     /// Session context visibility and context-boundary client.
     @ObservationIgnored
-    lazy var contextControl: ContextControlClient = ContextControlClient(transport: self)
 
     /// Server-backed workspace browser for human workspace selection.
     @ObservationIgnored
     lazy var workspaceBrowser: WorkspaceBrowserClient = WorkspaceBrowserClient(transport: self)
-
-    /// Local speech-to-text operations.
-    @ObservationIgnored
-    lazy var transcription: TranscriptionClient = TranscriptionClient(transport: self)
 
     // MARK: - Unified Event Stream
     //

@@ -11,7 +11,7 @@ async fn stream_primitive_subscribe_poll_and_unsubscribe_are_scoped() {
                 "topic": "events.session",
                 "sessionId": "session-a"
             }),
-            mutating_causal("stream-subscribe").with_scope("stream.write"),
+            mutating_causal("stream-subscribe"),
         ))
         .await;
     assert_eq!(subscribe.error, None);
@@ -48,9 +48,7 @@ async fn stream_primitive_subscribe_poll_and_unsubscribe_are_scoped() {
         .invoke(host_invocation(
             "stream::poll",
             json!({"subscriptionId": "sub-a", "limit": 10}),
-            causal()
-                .with_scope("stream.read")
-                .with_session_id("session-a"),
+            causal().with_session_id("session-a"),
         ))
         .await;
     assert_eq!(poll.error, None);
@@ -75,7 +73,7 @@ async fn stream_primitive_subscribe_poll_and_unsubscribe_are_scoped() {
         .invoke(host_invocation(
             "stream::unsubscribe",
             json!({"subscriptionId": "sub-a"}),
-            mutating_causal("stream-unsubscribe").with_scope("stream.write"),
+            mutating_causal("stream-unsubscribe"),
         ))
         .await;
     assert_eq!(unsubscribe.error, None);
@@ -107,7 +105,7 @@ async fn stream_primitive_subscribe_without_after_cursor_starts_at_topic_tail() 
                 "topic": "events.session",
                 "sessionId": "session-a"
             }),
-            mutating_causal("stream-subscribe-tail").with_scope("stream.write"),
+            mutating_causal("stream-subscribe-tail"),
         ))
         .await;
     assert_eq!(subscribe.error, None);
@@ -131,9 +129,7 @@ async fn stream_primitive_subscribe_without_after_cursor_starts_at_topic_tail() 
         .invoke(host_invocation(
             "stream::poll",
             json!({"subscriptionId": "sub-tail", "limit": 10}),
-            causal()
-                .with_scope("stream.read")
-                .with_session_id("session-a"),
+            causal().with_session_id("session-a"),
         ))
         .await;
     assert_eq!(poll.error, None);

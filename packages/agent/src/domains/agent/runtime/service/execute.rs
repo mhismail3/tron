@@ -208,15 +208,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         .filter(|id| !id.is_empty());
     let agent_state_context =
         load_agent_state_context(&engine_host, &session_id, resolved_workspace_id.as_deref()).await;
-    let memory_prompt_context = crate::domains::memory::service::load_prompt_memory_context(
-        &engine_host,
-        &session_id,
-        resolved_workspace_id.as_deref(),
-        engine_causality
-            .as_ref()
-            .map(|causality| causality.context.trace_id.clone()),
-    )
-    .await;
+    let memory_prompt_context = None;
     trace!(
         component = "agent.runtime",
         agent_event = "agent_state_context_loaded",
@@ -225,15 +217,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         workspace_id = resolved_workspace_id.as_deref().unwrap_or("none"),
         has_agent_state_context = agent_state_context.is_some(),
         "agent state context loaded"
-    );
-    trace!(
-        component = "agent.runtime",
-        agent_event = "memory_prompt_context_loaded",
-        session_id = %session_id,
-        run_id = %run_id,
-        workspace_id = resolved_workspace_id.as_deref().unwrap_or("none"),
-        has_memory_prompt_context = memory_prompt_context.is_some(),
-        "memory prompt context loaded"
     );
 
     let messages = state.messages.clone();
@@ -303,11 +286,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
 
     agent.set_abort_token(cancel_token);
     agent.set_persister(Some(persister.clone()));
-    agent.set_context_control(crate::domains::context_control::Deps {
-        engine_host: engine_host.clone(),
-        event_store: event_store.clone(),
-        session_manager: session_manager.clone(),
-    });
+    agent.set_compaction_session_manager(session_manager.clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
     spawn_session_title_generation(
         title_responder_factory,
@@ -453,4 +432,5 @@ fn resolve_turn_offset(
 }
 
 #[cfg(test)]
+#[path = "execute_tests.rs"]
 mod tests;

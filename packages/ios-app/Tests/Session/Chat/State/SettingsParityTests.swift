@@ -31,8 +31,6 @@ final class SettingsParityTests: XCTestCase {
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
-        // Engine transcription policy
-        "transcriptionEnabled",
         "autonomousWorkers",
     ]
 
@@ -60,7 +58,7 @@ final class SettingsParityTests: XCTestCase {
     }
 
     func testEveryDecodedSettingsFieldProjectsIntoSnapshot() throws {
-        let json = #"{"autonomousWorkers":true,"server":{"defaultWorkspace":"/parity-workspace","tailscaleIp":"100.64.0.7","transcription":{"enabled":true}},"context":{"compactor":{"preserveRecentCount":7,"triggerTokenThreshold":0.55}}}"#
+        let json = #"{"autonomousWorkers":true,"server":{"defaultWorkspace":"/parity-workspace","tailscaleIp":"100.64.0.7"},"context":{"compactor":{"preserveRecentCount":7,"triggerTokenThreshold":0.55}}}"#
         let settings = try JSONDecoder().decode(
             ServerSettings.self,
             from: try ServerSettingsFixture.data(json)
@@ -68,7 +66,7 @@ final class SettingsParityTests: XCTestCase {
 
         XCTAssertEqual(
             Set(Mirror(reflecting: settings).children.compactMap(\.label)),
-            Set(["autonomousWorkers", "defaultModel", "defaultWorkspace", "tailscaleIp", "compaction", "transcriptionEnabled"])
+            Set(["autonomousWorkers", "defaultModel", "defaultWorkspace", "tailscaleIp", "compaction"])
         )
         XCTAssertEqual(
             Set(Mirror(reflecting: settings.compaction).children.compactMap(\.label)),
@@ -82,7 +80,6 @@ final class SettingsParityTests: XCTestCase {
             tailscaleIp: "100.64.0.7",
             compactionPreserveRecentCount: 7,
             compactionTriggerTokenThreshold: 0.55,
-            transcriptionEnabled: true,
             autonomousWorkers: true
         ))
     }

@@ -13,12 +13,8 @@ extension ChatView {
                         agentPhase: viewModel.agentPhase,
                         isCompacting: viewModel.isCompacting,
                         isConnected: services.connection.connectionState.isConnected,
-                        isRecording: viewModel.isRecording,
-                        recordingAudioLevel: viewModel.recordingAudioLevel,
-                        isTranscribing: viewModel.isTranscribing,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         placeholderShowsProgress: !initialLoadComplete,
-                        contextPercentage: viewModel.contextState.contextPercentage,
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
                         readOnly: !(interactionPolicy?.isConnected ?? false),
@@ -44,11 +40,7 @@ extension ChatView {
                         onAttachmentError: { title, message in
                             viewModel.appendLocalError(dedupKey: "attachment.error.\(title)", title: title, message: message)
                         },
-                        onMicTap: viewModel.toggleRecording,
-                        onHistoryNavigate: { newText in viewModel.inputText = newText },
-                        onContextTap: {
-                            sheetCoordinator.showContextControl()
-                        }
+                        onHistoryNavigate: { newText in viewModel.inputText = newText }
                     )
                 )
                 .id(sessionId)
@@ -71,8 +63,6 @@ extension ChatView {
                 preservedTurns: preservedTurns,
                 summarizedTurns: summarizedTurns
             )
-        case .contextControlAction(let resourceId):
-            sheetCoordinator.showContextControl(actionResourceId: resourceId)
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
         case .capabilityInvocationGroup(let data):

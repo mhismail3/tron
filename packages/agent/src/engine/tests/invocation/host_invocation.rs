@@ -104,7 +104,6 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].function_id.as_str(), "alpha::read");
     assert_eq!(records[0].actor_id, actor("agent"));
-    assert_eq!(records[0].authority_grant_id, Some(grant("grant")));
     assert_eq!(records[0].trace_id, trace("trace"));
     assert_eq!(records[0].parent_invocation_id, Some(parent));
     assert_eq!(records[0].trigger_id, Some(trigger));
@@ -120,63 +119,6 @@ async fn invocation_ledger_records_success_error_and_full_causality() {
             ..
         })
     ));
-}
-
-#[tokio::test]
-async fn trusted_local_mutation_records_lease_and_compensation_without_grant() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker_for_setup(worker("w1", "alpha"), true)
-        .unwrap();
-    handle
-        .register_function_for_setup(
-            write_function("alpha::local_write", "w1")
-                .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
-                    "file",
-                    "file:{path}",
-                    30_000,
-                ))
-                .with_compensation(CompensationContract::new(
-                    CompensationKind::ManualOnly,
-                    "prior content remains recoverable",
-                )),
-            Some(handler()),
-            true,
-        )
-        .unwrap();
-    let invocation = Invocation::new_sync(
-        fid("alpha::local_write"),
-        json!({"path": "notes/example.txt"}),
-        CausalContext::trusted_local(
-            actor("agent"),
-            ActorKind::Agent,
-            trace("trusted-local-write"),
-        )
-        .with_session_id("trusted-local-write")
-        .with_idempotency_key("trusted-local-write"),
-    );
-
-    let result = handle.invoke(invocation).await;
-
-    assert_eq!(result.error, None);
-    let snapshot = handle.replay_snapshot("trusted-local-write").await.unwrap();
-    let record = snapshot
-        .invocations
-        .iter()
-        .find(|record| record.invocation_id == result.invocation_id)
-        .expect("trusted-local invocation record");
-    assert_eq!(record.authority_grant_id, None);
-    assert_eq!(record.resource_lease_ids.len(), 1);
-    let lease = handle
-        .get_resource_lease(&record.resource_lease_ids[0])
-        .await
-        .unwrap()
-        .expect("trusted-local resource lease");
-    assert_eq!(lease.authority_grant_id, None);
-    let compensation = handle.list_compensation_records().await.unwrap();
-    assert_eq!(compensation.len(), 1);
-    assert_eq!(compensation[0].authority_grant_id, None);
 }
 
 #[tokio::test]
@@ -448,34 +390,21 @@ async fn invocation_returns_structured_errors() {
 }
 
 #[tokio::test]
-async fn invocation_enforces_authority_health_and_idempotency_key() {
+async fn invocation_enforces_health_and_idempotency_key() {
     let mut catalog = LiveCatalog::new();
     catalog
         .register_worker(worker("w1", "alpha"), true)
         .unwrap();
-    let function = write_function("alpha::write", "w1")
-        .with_required_authority(AuthorityRequirement::scope("write"));
+    let function = write_function("alpha::write", "w1");
     catalog
         .register_function(function, Some(handler()), true)
         .unwrap();
-
-    let no_scope = catalog
-        .invoke_sync(Invocation::new_sync(
-            fid("alpha::write"),
-            json!({}),
-            causal(),
-        ))
-        .await;
-    assert!(matches!(
-        no_scope.error,
-        Some(EngineError::PolicyViolation(message)) if message.contains("idempotency key")
-    ));
 
     let no_key = catalog
         .invoke_sync(Invocation::new_sync(
             fid("alpha::write"),
             json!({}),
-            causal().with_scope("write"),
+            causal(),
         ))
         .await;
     assert!(matches!(
@@ -487,16 +416,14 @@ async fn invocation_enforces_authority_health_and_idempotency_key() {
         .invoke_sync(Invocation::new_sync(
             fid("alpha::write"),
             json!({}),
-            mutating_causal("write-1").with_scope("write"),
+            mutating_causal("write-1"),
         ))
         .await;
     assert!(ok.error.is_none());
 
     catalog
         .register_function(
-            write_function("alpha::write", "w1")
-                .with_required_authority(AuthorityRequirement::scope("write"))
-                .with_health(FunctionHealth::Unhealthy),
+            write_function("alpha::write", "w1").with_health(FunctionHealth::Unhealthy),
             Some(handler()),
             true,
         )
@@ -505,7 +432,7 @@ async fn invocation_enforces_authority_health_and_idempotency_key() {
         .invoke_sync(Invocation::new_sync(
             fid("alpha::write"),
             json!({}),
-            mutating_causal("write-2").with_scope("write"),
+            mutating_causal("write-2"),
         ))
         .await;
     assert!(matches!(
@@ -774,7 +701,7 @@ async fn engine_host_handle_records_panics_and_replays_panic_errors() {
 }
 
 #[tokio::test]
-async fn regular_cancellation_releases_lease_records_compensation_and_replays_typed_error() {
+async fn regular_cancellation_records_and_replays_typed_error() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("w1", "alpha"), true)
@@ -783,16 +710,7 @@ async fn regular_cancellation_releases_lease_records_compensation_and_replays_ty
     handle
         .register_function_for_setup(
             write_function("alpha::cancellable", "w1")
-                .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
-                .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
-                    "session",
-                    "session:{sessionId}:cancellable",
-                    30_000,
-                ))
-                .with_compensation(CompensationContract::new(
-                    CompensationKind::ManualOnly,
-                    "cancelled writes retain recovery evidence",
-                )),
+                .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
             Some(Arc::new(BlockingHandler {
                 started: Arc::clone(&started),
                 release: Arc::new(Notify::new()),
@@ -834,27 +752,6 @@ async fn regular_cancellation_releases_lease_records_compensation_and_replays_ty
     };
     assert!(!first_record.succeeded);
     assert_eq!(first_record.error, Some(EngineError::InvocationCancelled));
-    assert_eq!(first_record.resource_lease_ids.len(), 1);
-    let lease_id = &first_record.resource_lease_ids[0];
-    let lease = handle
-        .get_resource_lease(lease_id)
-        .await
-        .unwrap()
-        .expect("cancelled invocation lease");
-    assert_eq!(lease.status, EngineResourceLeaseStatus::Released);
-
-    let compensation = handle.list_compensation_records().await.unwrap();
-    assert_eq!(compensation.len(), 1);
-    assert_eq!(compensation[0].invocation_id, first.invocation_id);
-    assert_eq!(compensation[0].resource_lease_ids, vec![lease_id.clone()]);
-    assert!(!compensation[0].succeeded);
-    assert_eq!(
-        compensation[0]
-            .error
-            .as_ref()
-            .map(|error| error.kind.as_str()),
-        Some("invocation_cancelled")
-    );
 
     let replay = tokio::time::timeout(
         std::time::Duration::from_millis(100),
@@ -868,7 +765,6 @@ async fn regular_cancellation_releases_lease_records_compensation_and_replays_ty
     .expect("idempotent replay must not re-enter the blocking handler");
     assert_eq!(replay.replayed_from, Some(first.invocation_id));
     assert_eq!(replay.error, Some(EngineError::InvocationCancelled));
-    assert_eq!(handle.list_compensation_records().await.unwrap().len(), 1);
 }
 
 #[tokio::test]

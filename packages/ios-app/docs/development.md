@@ -46,7 +46,7 @@ PNGs and the 100px README preview under `docs/assets/`:
 ```bash
 cd packages/ios-app
 bun install --frozen-lockfile
-bun scripts/generate-icons.mjs
+bun ../../scripts/generate-ios-icons.mjs
 ```
 
 The app renders the vector asset directly; no raster logo image set is bundled.
@@ -313,23 +313,19 @@ xcodebuild test -scheme Tron \
 
 ```
 
-For the interactive prompt-composer glass, background-free proportional
-Session Briefing context ring, and voice-lifecycle slot/action ownership, run
-the focused presentation/source contracts and visual render:
+For the interactive prompt-composer glass and voice-lifecycle action ownership,
+run the focused presentation/source contracts and visual render:
 
 ```bash
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -only-testing:TronMobileTests/ContextBriefingButtonTests \
+  -only-testing:TronMobileTests/ComposerVoiceStateTests \
   -only-testing:TronMobileTests/InputBarKeyboardTraversalTests
 
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
   -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests
 
-xcodebuild test -scheme 'Tron UI Validation' \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -only-testing:TronMobileUITests/SessionBriefingUITests/testComposerGlassKeepsAttachmentMenuAndSessionBriefingInteractive
 ```
 
 For the workspace selector's shared shortcut/action capsule geometry, run its
@@ -393,7 +389,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/EventTypeRegistryTests \
   -only-testing:TronMobileTests/ErrorEventProjectionTests \
   -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
-  -only-testing:TronMobileTests/GeneratedUIRendererTests
+  -only-testing:TronMobileTests/WorkerConsoleVisualContractTests
 ```
 
 ### Simulator Deep-Link Smoke Test
@@ -663,10 +659,10 @@ and move straight to group assignment.
 
 ### Adding Runtime Presentation
 
-1. Emit operation, trace ids, and runtime-owned presentation hints from the server or generated runtime data.
-2. Reuse the generic capability chip, detail sheet, result renderer, and `GeneratedRuntimeSurfaceView`.
-3. Add a reusable renderer under `UI/Capabilities/` or `UI/RuntimeSurfaces/` only when primitive trace/result rendering is not expressive enough.
-4. Add focused tests for the primitive payload/result shape and the generic sheet route.
+1. Emit operation, trace ids, and runtime-owned presentation hints from the server.
+2. Reuse the generic capability chip, detail sheet, and result renderer.
+3. Add a reusable renderer under `UI/Capabilities/` only when primitive trace/result rendering is not expressive enough.
+4. Add focused tests for the primitive payload/result shape and its generic sheet route. Do not recreate the retired resource-backed generated-UI plane.
 
 ### Updating Event Handling
 

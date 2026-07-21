@@ -42,8 +42,9 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
         &[
             "resolve_production_db_path",
             "ensure_parent_dir",
-            "prepare_active_database",
             "acquire_database_lock",
+            "prepare_profile_state_retirement",
+            "prepare_active_database",
             "new_file",
             "check_integrity",
             "run_migrations",
@@ -55,7 +56,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
         "bootstrap must recover crash journals before accepting traffic"
     );
 
-    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding/mod.rs");
+    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding.rs");
     assert_contains_in_order(
         "bearer-token materialization sequence",
         &onboarding,

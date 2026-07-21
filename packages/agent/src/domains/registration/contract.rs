@@ -1,12 +1,12 @@
 //! Generic capability-contract builders.
 //!
 //! Domain contracts are the primitive manifest for retained in-process workers:
-//! they declare the canonical function id, schema, authority, risk/effect, and
+//! they declare the canonical function id, schema, risk/effect, and
 //! capability metadata that the registry projects into contracts and
 //! implementations.
 //!
 //! Domain `contract.rs` files own their function inventory, schemas, risk,
-//! authority, idempotency, lease, compensation, and stream metadata. This
+//! idempotency, and stream metadata. This
 //! module contains only method-agnostic construction helpers used to turn those
 //! local records into engine definitions.
 
@@ -14,8 +14,7 @@ use serde_json::{Map, Value, json};
 
 use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
-    AuthorityRequirement, CompensationContract, DurableOutputContract, EffectClass,
-    FunctionDefinition, FunctionId, IdempotencyContract, Provenance, ResourceLeaseRequirement,
+    EffectClass, FunctionDefinition, FunctionId, IdempotencyContract, Provenance,
     Result as EngineResult, RiskLevel, VisibilityScope, WorkerId,
 };
 
@@ -35,8 +34,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) risk_level: RiskLevel,
     /// Catalog visibility.
     pub(crate) visibility: VisibilityScope,
-    /// Required domain authority scope.
-    pub(crate) authority_scope: Option<&'static str>,
     /// Transport-level idempotency mode for engine client protocol bindings.
     pub(crate) idempotency_mode: TransportIdempotencyMode,
     /// Domain module provenance.
@@ -47,12 +44,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) response_schema: Option<Value>,
     /// Mutating idempotency contract.
     pub(crate) idempotency: Option<IdempotencyContract>,
-    /// Engine resource lease requirement.
-    pub(crate) resource_lease: Option<ResourceLeaseRequirement>,
-    /// Durable compensation contract.
-    pub(crate) compensation: Option<CompensationContract>,
-    /// Durable output contract enforced after handler execution.
-    pub(crate) output_contract: DurableOutputContract,
     /// Stream topics emitted by the function.
     pub(crate) stream_topics: Vec<&'static str>,
     /// Human-readable discovery description.
@@ -72,7 +63,6 @@ impl CapabilityContract {
         owner_worker: &'static str,
         effect_class: EffectClass,
         risk_level: RiskLevel,
-        authority_scope: Option<&'static str>,
     ) -> Self {
         let operation_key = method
             .rsplit_once("::")
@@ -87,15 +77,11 @@ impl CapabilityContract {
             effect_class,
             risk_level,
             visibility: VisibilityScope::System,
-            authority_scope,
             idempotency_mode: TransportIdempotencyMode::NotRequired,
             domain_module: owner_worker,
             request_schema: None,
             response_schema: None,
             idempotency: None,
-            resource_lease: None,
-            compensation: None,
-            output_contract: DurableOutputContract::None,
             stream_topics: Vec::new(),
             description: None,
             tags: Vec::new(),
@@ -157,33 +143,9 @@ impl CapabilityContract {
         self
     }
 
-    /// Attach native client presentation hints.
-    pub(crate) fn presentation_hints(mut self, hints: Value) -> Self {
-        self.presentation_hints = Some(hints);
-        self
-    }
-
     /// Attach mutating idempotency metadata.
     pub(crate) fn idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
-        self
-    }
-
-    /// Attach resource lease metadata.
-    pub(crate) fn resource_lease(mut self, requirement: ResourceLeaseRequirement) -> Self {
-        self.resource_lease = Some(requirement);
-        self
-    }
-
-    /// Attach compensation metadata.
-    pub(crate) fn compensation(mut self, contract: CompensationContract) -> Self {
-        self.compensation = Some(contract);
-        self
-    }
-
-    /// Attach a durable output contract.
-    pub(crate) fn output_contract(mut self, contract: DurableOutputContract) -> Self {
-        self.output_contract = contract;
         self
     }
 
@@ -203,15 +165,11 @@ impl CapabilityContract {
             effect_class: self.effect_class,
             risk_level: self.risk_level,
             visibility: self.visibility,
-            authority_scope: self.authority_scope,
             idempotency_mode: self.idempotency_mode,
             domain_module: self.domain_module,
             request_schema: self.request_schema,
             response_schema: self.response_schema,
             idempotency: self.idempotency,
-            resource_lease: self.resource_lease,
-            compensation: self.compensation,
-            output_contract: self.output_contract,
             stream_topics: self.stream_topics,
             description: self.description,
             tags: self.tags,
@@ -234,19 +192,9 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     .with_risk(spec.risk_level)
     .with_tags(spec.tags.iter().map(|tag| (*tag).to_owned()).collect())
     .with_provenance(Provenance::system());
-    if let Some(scope) = spec.authority_scope {
-        definition = definition.with_required_authority(AuthorityRequirement::scope(scope));
-    }
     if let Some(contract) = &spec.idempotency {
         definition = definition.with_idempotency(contract.clone());
     }
-    if let Some(requirement) = &spec.resource_lease {
-        definition = definition.with_resource_lease(requirement.clone());
-    }
-    if let Some(contract) = &spec.compensation {
-        definition = definition.with_compensation(contract.clone());
-    }
-    definition = definition.with_output_contract(spec.output_contract.clone());
     if let Some(schema) = &spec.request_schema {
         definition = definition.with_request_schema(schema.clone());
     }
@@ -274,10 +222,8 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
             "workerKind": "in_process",
             "deliveryModes": definition.allowed_delivery_modes.iter().map(|mode| mode.as_str()).collect::<Vec<_>>()
         },
-        "domainAuthorityScope": spec.authority_scope,
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "domainModule": spec.domain_module,
-        "outputContract": spec.output_contract,
         "streamTopics": spec.stream_topics,
         "stopsTurn": false,
         "presentationHints": presentation_hints,

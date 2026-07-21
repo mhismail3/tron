@@ -22,7 +22,7 @@ extension SourceGuardTests {
         for rootName in removedViewRoots {
             #expect(
                 !FileManager.default.fileExists(atPath: uiRoot.appendingPathComponent(rootName).path),
-                "\(rootName) is a fixed product UI root; primitive iOS must render only the chat shell and generic runtime surfaces"
+                "\(rootName) is a fixed product UI root; primitive iOS must render only the chat shell, Engine Dashboard, and settings"
             )
         }
 
@@ -31,7 +31,7 @@ extension SourceGuardTests {
             "UI/Chat/Shell/ChatView.swift",
             "UI/Chat/Composer/InputBar.swift",
             "UI/Settings/Shell/SettingsView.swift",
-            "UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "UI/WorkerConsole/EngineDashboardViews.swift",
         ]
         for relativePath in requiredShellFiles {
             #expect(
@@ -89,7 +89,7 @@ extension SourceGuardTests {
     func testIOSSourcesUseHRAFeatureOwnedHierarchy() throws {
         let iosRoot = iosAppRoot()
         let bannedBuckets = [
-            "Sources/UI/Views": "HRA-11 replaces the broad view bucket with UI/Chat, UI/Settings, UI/Onboarding, UI/RuntimeSurfaces, UI/Capabilities, UI/Components, UI/System, and UI/Theme owners.",
+            "Sources/UI/Views": "HRA-11 replaces the broad view bucket with UI/Chat, UI/WorkerConsole, UI/Settings, UI/Onboarding, UI/Capabilities, UI/Components, UI/System, and UI/Theme owners.",
             "Sources/Engine/Network": "HRA-9 replaces the network bucket with Engine/Transport/WebSocket, Clients, Retry, and DeepLinks owners.",
             "Sources/Engine/Database": "HRA-9 reconciles database code under Engine/Persistence/SQLite and Repositories.",
             "Sources/Engine/EventStore": "HRA-9 reconciles event-store sync under Engine/Persistence/Sync and Repositories.",
@@ -98,6 +98,9 @@ extension SourceGuardTests {
             "Sources/Support/Concurrency": "HRA-12 moves concurrency primitives under Support/Foundation/Concurrency.",
             "Sources/Support/DependencyInjection": "HRA-12 moves dependency assembly under Support/Composition.",
             "Sources/Support/Diagnostics/Services": "HRA-12 flattens diagnostics services under Support/Diagnostics.",
+            "Sources/Support/Feedback": "single-file feedback ownership is represented by Support/FeedbackComposer.swift.",
+            "Sources/Support/Share": "single-file share ownership is represented by Support/SharedContent.swift.",
+            "Sources/UI/RuntimeSurfaces": "the resource-backed generated-UI and display-stream planes were retired with their server actuator.",
             "Sources/Support/Utilities": "HRA-12 splits utilities into scoped Support/Foundation concerns.",
             "Sources/Support/Extensions": "HRA-12 splits extensions into scoped Support/Foundation/SwiftUI or parsing/formatting concerns.",
             "Sources/Support/Infrastructure": "HRA-12 moves infrastructure services to diagnostics or foundation owners.",
@@ -116,14 +119,11 @@ extension SourceGuardTests {
             "Sources/UI/Chat",
             "Sources/UI/Settings",
             "Sources/UI/Onboarding",
-            "Sources/UI/RuntimeSurfaces",
             "Sources/Support/Composition",
             "Sources/Support/Foundation",
             "Sources/Support/Diagnostics",
             "Sources/Support/Pairing",
             "Sources/Support/Storage",
-            "Sources/Support/Feedback",
-            "Sources/Support/Share",
         ]
 
         let presentBanned = bannedBuckets.keys
@@ -146,10 +146,7 @@ extension SourceGuardTests {
             "Sources/Engine/Transport/WebSocket",
             "Sources/Engine/Transport/Clients",
             "Sources/Engine/Transport/Retry",
-            "Sources/Engine/Transport/DeepLinks",
             "Sources/Engine/Protocol/Core",
-            "Sources/Engine/Protocol/Agent",
-            "Sources/Engine/Protocol/Session",
             "Sources/Engine/Events/Live",
             "Sources/Engine/Events/Payloads",
             "Sources/Engine/Events/Plugins",
@@ -169,6 +166,27 @@ extension SourceGuardTests {
             "Sources/Engine/Events/Core",
             "Sources/Engine/Events/Types",
             "Sources/Engine/Events/Reconstruction/Handlers",
+            "Sources/Engine/Transport/DeepLinks",
+            "Sources/Engine/Transport/WebSocket/Protocols",
+            "Sources/Engine/Persistence/SQLite/Schema",
+        ]
+        let requiredFlatFiles = [
+            "Sources/Engine/ModelFilteringService.swift",
+            "Sources/Engine/Persistence/SQLite/DatabaseSchema.swift",
+            "Sources/Engine/Transport/DeepLinkRouter.swift",
+            "Sources/Engine/Transport/WebSocket/EngineTransport.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Auth.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Events.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Filesystem.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Interaction.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Model.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Reconstruct.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Session.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Settings.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+System.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+WorkerKernel.swift",
         ]
         let connectionFiles = [
             "Sources/Engine/Transport/WebSocket/EngineConnection.swift",
@@ -185,10 +203,12 @@ extension SourceGuardTests {
             .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
         let missingConnectionFiles = connectionFiles
             .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+        let missingFlatFiles = requiredFlatFiles
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
 
         #expect(
-            missingRequired.isEmpty && presentBanned.isEmpty && missingConnectionFiles.isEmpty,
-            "HRA-9 Engine hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingConnectionFiles)"
+            missingRequired.isEmpty && presentBanned.isEmpty && missingConnectionFiles.isEmpty && missingFlatFiles.isEmpty,
+            "HRA-9 Engine hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingConnectionFiles); missing single-file owners: \(missingFlatFiles)"
         )
     }
 
@@ -225,11 +245,8 @@ extension SourceGuardTests {
             "Sources/Session/Chat/Messaging",
             "Sources/Session/Chat/Navigation",
             "Sources/Session/Chat/State",
-            "Sources/Session/Parsing",
             "Sources/Session/Timeline/Activity",
             "Sources/Session/Timeline/Messages",
-            "Sources/Session/Timeline/Reconstruction",
-            "Sources/Session/Timeline/Tokens",
         ]
         let bannedRoots = [
             "Sources/Session/Activity",
@@ -238,10 +255,16 @@ extension SourceGuardTests {
             "Sources/Session/Reconstruction",
             "Sources/Session/Tokens",
             "Sources/Session/ViewModels",
+            "Sources/Session/Parsing",
+            "Sources/Session/Timeline/Reconstruction",
+            "Sources/Session/Timeline/Tokens",
         ]
         let splitDisplayModelFiles = [
             "Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel.swift",
             "Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel+PresentationHelpers.swift",
+            "Sources/Session/CapabilityArgumentParser.swift",
+            "Sources/Session/Timeline/UnifiedEventTransformer.swift",
+            "Sources/Session/Timeline/TokenRecord.swift",
         ]
 
         let missingRequired = requiredRoots
@@ -271,18 +294,13 @@ extension SourceGuardTests {
         let requiredRoots = [
             "Sources/UI/Capabilities",
             "Sources/UI/Capabilities/Shared",
-            "Sources/UI/Capabilities/Thinking",
             "Sources/UI/Chat/Composer",
             "Sources/UI/Chat/Messages",
-            "Sources/UI/Chat/Messages/Indicators",
             "Sources/UI/Chat/Sheets",
             "Sources/UI/Chat/Shell",
             "Sources/UI/Components",
             "Sources/UI/Onboarding/Flow",
-            "Sources/UI/Onboarding/Pairing",
             "Sources/UI/Onboarding/Steps",
-            "Sources/UI/RuntimeSurfaces",
-            "Sources/UI/RuntimeSurfaces/Display",
             "Sources/UI/Settings/ModelPicker",
             "Sources/UI/Settings/Pages",
             "Sources/UI/Settings/Pages/ModelProviders",
@@ -293,12 +311,16 @@ extension SourceGuardTests {
         ]
         let bannedRoots = [
             "Sources/UI/Views",
+            "Sources/UI/Capabilities/Thinking",
+            "Sources/UI/Chat/Messages/Indicators",
+            "Sources/UI/Onboarding/Pairing",
         ]
         let splitUIFiles = [
-            "Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
-            "Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift",
             "Sources/UI/Settings/Shell/SettingsView.swift",
             "Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift",
+            "Sources/UI/Capabilities/ThinkingDetailSheet.swift",
+            "Sources/UI/Chat/Messages/NeuralSparkIndicator.swift",
+            "Sources/UI/Onboarding/QRCodeScannerSheet.swift",
         ]
 
         let missingRequired = requiredRoots
@@ -329,17 +351,13 @@ extension SourceGuardTests {
             "Sources/App/Lifecycle",
             "Sources/Support/Composition",
             "Sources/Support/Diagnostics",
-            "Sources/Support/Feedback",
             "Sources/Support/Foundation",
             "Sources/Support/Foundation/Concurrency",
             "Sources/Support/Foundation/Formatting",
-            "Sources/Support/Foundation/Media",
             "Sources/Support/Foundation/Parsing",
             "Sources/Support/Foundation/SwiftUI",
-            "Sources/Support/Foundation/Validation",
             "Sources/Support/Pairing",
             "Sources/Support/Pairing/Onboarding",
-            "Sources/Support/Share",
             "Sources/Support/Storage",
         ]
         let bannedRoots = [
@@ -352,6 +370,10 @@ extension SourceGuardTests {
             "Sources/Support/Settings",
             "Sources/Support/Storage/Services",
             "Sources/Support/Utilities",
+            "Sources/Support/Feedback",
+            "Sources/Support/Foundation/Media",
+            "Sources/Support/Foundation/Validation",
+            "Sources/Support/Share",
         ]
         let requiredFiles = [
             "Sources/App/Lifecycle/AppDelegate.swift",
@@ -378,7 +400,7 @@ extension SourceGuardTests {
             "Sources/Support/Foundation/Formatting/TaskFormatting.swift",
             "Sources/Support/Foundation/Formatting/TokenFormatter.swift",
             "Sources/Support/Foundation/Formatting/VersionDisplay.swift",
-            "Sources/Support/Foundation/Media/ImageProcessor.swift",
+            "Sources/Support/Foundation/ImageProcessor.swift",
             "Sources/Support/Foundation/Parsing/ContentLineParser.swift",
             "Sources/Support/Foundation/Parsing/DateParser.swift",
             "Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift",
@@ -386,9 +408,10 @@ extension SourceGuardTests {
             "Sources/Support/Foundation/SwiftUI/ToastCenter.swift",
             "Sources/Support/Foundation/SwiftUI/View+Accessibility.swift",
             "Sources/Support/Foundation/SwiftUI/View+Extensions.swift",
-            "Sources/Support/Foundation/Validation/FolderNameValidator.swift",
+            "Sources/Support/Foundation/FolderNameValidator.swift",
             "Sources/Support/Pairing/PairedServerStore.swift",
-            "Sources/Support/Share/SharedContent.swift",
+            "Sources/Support/FeedbackComposer.swift",
+            "Sources/Support/SharedContent.swift",
             "Sources/Support/Storage/DraftStore.swift",
             "Sources/Support/Storage/InputHistoryStore.swift",
             "Sources/Support/Storage/KeychainItem.swift",
@@ -442,6 +465,14 @@ extension SourceGuardTests {
             "Tests/Utilities",
             "Tests/ViewModels",
             "Tests/Views",
+            "Tests/Engine/Models",
+            "Tests/Engine/Transport/DeepLinks",
+            "Tests/Session/Parsing",
+            "Tests/Support/Feedback",
+            "Tests/Support/Foundation/Concurrency",
+            "Tests/Support/Foundation/Validation",
+            "Tests/UI/RuntimeSurfaces",
+            "Tests/UI/WorkerConsole",
         ]
         let requiredFiles = [
             "Tests/Infrastructure/AppLifecycle/AppDelegateTests.swift",
@@ -449,6 +480,13 @@ extension SourceGuardTests {
             "Tests/Infrastructure/Fixtures/HostedTestLifecycle.swift",
             "Tests/Infrastructure/Fixtures/IsolatedTestState.swift",
             "Tests/Infrastructure/Fixtures/IsolatedTestStateTests.swift",
+            "Tests/Engine/ModelFilteringServiceTests.swift",
+            "Tests/Engine/Transport/DeepLinkRouterTests.swift",
+            "Tests/Session/CapabilityArgumentParserTests.swift",
+            "Tests/Support/FeedbackComposerTests.swift",
+            "Tests/Support/Foundation/AsyncSemaphoreTests.swift",
+            "Tests/Support/Foundation/FolderCreationTests.swift",
+            "Tests/UI/WorkerConsoleVisualContractTests.swift",
         ]
 
         let missingRequired = requiredRoots
@@ -476,8 +514,8 @@ extension SourceGuardTests {
         #expect(project.contains("- path: Sources\n        createIntermediateGroups: true"))
         #expect(project.contains("- path: Tests\n        createIntermediateGroups: true"))
         #expect(project.contains("- path: ShareExtension"))
-        #expect(project.contains("- path: Sources/Support/Share/SharedContent.swift"))
-        #expect(project.contains("generateEmptyDirectories: true"))
+        #expect(project.contains("- path: Sources/Support/SharedContent.swift"))
+        #expect(project.contains("generateEmptyDirectories: false"))
         #expect(project.contains("createIntermediateGroups: true"))
     }
 }

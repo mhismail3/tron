@@ -3,11 +3,7 @@ use super::*;
 #[tokio::test]
 async fn state_primitive_revisions_cas_list_and_delete_are_idempotent() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
-    let context = |key: &str| {
-        mutating_causal(key)
-            .with_scope("state.write")
-            .with_session_id("session-a")
-    };
+    let context = |key: &str| mutating_causal(key).with_session_id("session-a");
     let set = handle
         .invoke(host_invocation(
             "state::set",
@@ -76,9 +72,7 @@ async fn state_primitive_revisions_cas_list_and_delete_are_idempotent() {
         .invoke(host_invocation(
             "state::list",
             json!({"scope": "session", "namespace": "agent", "keyPrefix": "dr"}),
-            causal()
-                .with_scope("state.read")
-                .with_session_id("session-a"),
+            causal().with_session_id("session-a"),
         ))
         .await;
     assert_eq!(listed.error, None);

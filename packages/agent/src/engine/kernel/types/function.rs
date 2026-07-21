@@ -20,7 +20,7 @@ pub enum EffectClass {
     IdempotentWrite,
     /// Appends immutable ledger/event data.
     AppendOnlyEvent,
-    /// Side effect with compensation.
+    /// Side effect whose caller may safely retry after an explicit failure.
     ReversibleSideEffect,
     /// External system/device effect.
     ExternalSideEffect,
@@ -123,8 +123,6 @@ pub enum ReplayBehavior {
     NoOp,
     /// Reject duplicate.
     Reject,
-    /// Run compensation.
-    Compensate,
 }
 
 impl ReplayBehavior {
@@ -135,7 +133,6 @@ impl ReplayBehavior {
             Self::ReturnPrevious => "return_previous",
             Self::NoOp => "no_op",
             Self::Reject => "reject",
-            Self::Compensate => "compensate",
         }
     }
 }
@@ -221,190 +218,6 @@ impl IdempotencyScope {
     }
 }
 
-/// Fail-closed behavior when a declared resource lease cannot be acquired.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ResourceLeaseFailureBehavior {
-    /// Reject the invocation before handler execution.
-    FailClosed,
-}
-
-/// Engine-owned resource lease contract for a mutating function.
-///
-/// The first implementation resolves `resource_id_template` from invocation
-/// payload fields plus canonical causal-context fields such as `sessionId` and
-/// `workspaceId`. Keeping this metadata on the function definition makes
-/// resource ownership visible through discovery and enforceable by the host
-/// before any domain handler runs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResourceLeaseRequirement {
-    /// Resolver identifier. `payload_template` is the built-in v1 resolver.
-    pub resolver_id: String,
-    /// Domain resource kind, such as `session`, `trace`, or `artifact`.
-    pub resource_kind: String,
-    /// Template used by the resolver to derive a canonical resource id.
-    pub resource_id_template: String,
-    /// Lease TTL in milliseconds.
-    pub ttl_ms: i64,
-    /// Whether this lease is exclusive. Only exclusive leases exist in v1.
-    pub exclusive: bool,
-    /// Stream topic for lease lifecycle records.
-    pub stream_topic: String,
-    /// Behavior when resolution/acquisition fails.
-    pub failure_behavior: ResourceLeaseFailureBehavior,
-}
-
-impl ResourceLeaseRequirement {
-    /// Build an exclusive payload-template lease requirement.
-    #[must_use]
-    pub fn exclusive_template(
-        resource_kind: impl Into<String>,
-        resource_id_template: impl Into<String>,
-        ttl_ms: i64,
-    ) -> Self {
-        Self {
-            resolver_id: "payload_template".to_owned(),
-            resource_kind: resource_kind.into(),
-            resource_id_template: resource_id_template.into(),
-            ttl_ms,
-            exclusive: true,
-            stream_topic: "resource.leases".to_owned(),
-            failure_behavior: ResourceLeaseFailureBehavior::FailClosed,
-        }
-    }
-}
-
-/// Compensation strategy for a mutating function.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum CompensationKind {
-    /// No compensation is needed.
-    None,
-    /// The domain event log preserves enough information for manual recovery.
-    EventSourced,
-    /// A documented inverse command exists.
-    InverseCommandAvailable,
-    /// Manual recovery is required.
-    ManualOnly,
-    /// The side effect is external and cannot be safely undone automatically.
-    ExternalIrreversible,
-}
-
-/// Durable compensation contract attached to high-risk functions.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompensationContract {
-    /// Compensation kind.
-    pub kind: CompensationKind,
-    /// Required operator-facing notes.
-    pub notes: String,
-}
-
-impl CompensationContract {
-    /// Create a compensation contract with notes.
-    #[must_use]
-    pub fn new(kind: CompensationKind, notes: impl Into<String>) -> Self {
-        Self {
-            kind,
-            notes: notes.into(),
-        }
-    }
-
-    /// Whether this contract has useful notes for audit/recovery.
-    #[must_use]
-    pub fn has_notes(&self) -> bool {
-        !self.notes.trim().is_empty()
-    }
-}
-
-/// Durable output contract enforced by the engine after capability execution.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum DurableOutputContract {
-    /// The capability intentionally produces no durable output.
-    None,
-    /// Successful results must include top-level resource references.
-    ResourceBacked {
-        /// Resource kinds the function may produce.
-        produced_resource_kinds: Vec<String>,
-        /// Whether a successful result must include at least one ref.
-        required_resource_refs: bool,
-    },
-    /// Contract applies only when the named engine classifier matches.
-    Conditional {
-        /// Engine-owned classifier id, for example `process_write_like`.
-        classifier: String,
-        /// Resource-backed contract used when the classifier matches.
-        resource_backed_contract: Box<DurableOutputContract>,
-    },
-}
-
-impl DurableOutputContract {
-    /// Build a resource-backed output contract requiring at least one ref.
-    #[must_use]
-    pub fn resource_backed(kinds: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self::ResourceBacked {
-            produced_resource_kinds: kinds.into_iter().map(Into::into).collect(),
-            required_resource_refs: true,
-        }
-    }
-
-    /// Whether this contract is the no-output form.
-    #[must_use]
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-
-    /// Whether the contract can be enforced by the host.
-    #[must_use]
-    pub fn is_enforceable(&self) -> bool {
-        match self {
-            Self::None => true,
-            Self::ResourceBacked {
-                produced_resource_kinds,
-                ..
-            } => !produced_resource_kinds.is_empty(),
-            Self::Conditional {
-                classifier,
-                resource_backed_contract,
-            } => {
-                !classifier.trim().is_empty()
-                    && matches!(resource_backed_contract.as_ref(), Self::ResourceBacked { produced_resource_kinds, .. } if !produced_resource_kinds.is_empty())
-            }
-        }
-    }
-}
-
-impl Default for DurableOutputContract {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-/// Authority needed to discover or invoke a capability.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthorityRequirement {
-    /// Required authority scopes.
-    pub scopes: Vec<String>,
-}
-
-impl AuthorityRequirement {
-    /// No additional authority.
-    #[must_use]
-    pub fn none() -> Self {
-        Self::default()
-    }
-
-    /// Require one scope.
-    #[must_use]
-    pub fn scope(scope: impl Into<String>) -> Self {
-        Self {
-            scopes: vec![scope.into()],
-        }
-    }
-}
-
 /// Function catalog definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FunctionDefinition {
@@ -432,14 +245,6 @@ pub struct FunctionDefinition {
     pub risk_level: RiskLevel,
     /// Idempotency contract.
     pub idempotency: Option<IdempotencyContract>,
-    /// Engine-enforced resource lease requirement.
-    pub resource_lease: Option<ResourceLeaseRequirement>,
-    /// Durable compensation/audit contract.
-    pub compensation: Option<CompensationContract>,
-    /// Durable output contract enforced by the host after handler execution.
-    pub output_contract: DurableOutputContract,
-    /// Required authority.
-    pub required_authority: AuthorityRequirement,
     /// Allowed delivery modes.
     pub allowed_delivery_modes: Vec<DeliveryMode>,
     /// Health.
@@ -473,10 +278,6 @@ impl FunctionDefinition {
             effect_class,
             risk_level: RiskLevel::Low,
             idempotency: None,
-            resource_lease: None,
-            compensation: None,
-            output_contract: DurableOutputContract::None,
-            required_authority: AuthorityRequirement::none(),
             allowed_delivery_modes: vec![DeliveryMode::Sync],
             health: FunctionHealth::Healthy,
             provenance: Provenance::system(),
@@ -488,34 +289,6 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
-        self
-    }
-
-    /// Attach an engine-enforced resource lease requirement.
-    #[must_use]
-    pub fn with_resource_lease(mut self, requirement: ResourceLeaseRequirement) -> Self {
-        self.resource_lease = Some(requirement);
-        self
-    }
-
-    /// Attach a durable compensation contract.
-    #[must_use]
-    pub fn with_compensation(mut self, contract: CompensationContract) -> Self {
-        self.compensation = Some(contract);
-        self
-    }
-
-    /// Attach a durable output contract.
-    #[must_use]
-    pub fn with_output_contract(mut self, contract: DurableOutputContract) -> Self {
-        self.output_contract = contract;
-        self
-    }
-
-    /// Attach a required authority.
-    #[must_use]
-    pub fn with_required_authority(mut self, requirement: AuthorityRequirement) -> Self {
-        self.required_authority = requirement;
         self
     }
 

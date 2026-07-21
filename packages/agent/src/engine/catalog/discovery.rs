@@ -12,8 +12,6 @@ pub struct ActorContext {
     pub actor_id: ActorId,
     /// Actor kind.
     pub actor_kind: ActorKind,
-    /// Granted authority scopes.
-    pub authority_scopes: Vec<String>,
     /// Optional session id.
     pub session_id: Option<String>,
     /// Optional workspace id.
@@ -27,17 +25,9 @@ impl ActorContext {
         Self {
             actor_id,
             actor_kind,
-            authority_scopes: Vec::new(),
             session_id: None,
             workspace_id: None,
         }
-    }
-
-    /// Add an authority scope.
-    #[must_use]
-    pub fn with_scope(mut self, scope: impl Into<String>) -> Self {
-        self.authority_scopes.push(scope.into());
-        self
     }
 
     /// Set the actor session id.
@@ -52,12 +42,6 @@ impl ActorContext {
     pub fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
         self.workspace_id = Some(workspace_id.into());
         self
-    }
-
-    /// Whether this actor has a scope.
-    #[must_use]
-    pub fn has_scope(&self, scope: &str) -> bool {
-        self.authority_scopes.iter().any(|s| s == scope)
     }
 }
 

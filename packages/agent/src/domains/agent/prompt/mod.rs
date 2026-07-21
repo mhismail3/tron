@@ -5,7 +5,6 @@
 //! functions.
 
 use crate::domains::agent::runtime::service::{PromptEngineCausality, PromptRequest};
-use crate::engine::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::shared::server::errors;
 
 mod commands;

@@ -33,14 +33,14 @@ fn rust_source_root_has_only_allowed_entry_files() {
 #[test]
 fn rust_app_transport_shared_roots_are_owned() {
     let required = [
-        "packages/agent/src/app/cli/mod.rs",
+        "packages/agent/src/app/cli.rs",
         "packages/agent/src/app/bootstrap/mod.rs",
         "packages/agent/src/app/bootstrap/config.rs",
         "packages/agent/src/app/bootstrap/server.rs",
         "packages/agent/src/app/health/mod.rs",
         "packages/agent/src/app/health/metrics.rs",
         "packages/agent/src/app/lifecycle/mod.rs",
-        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
+        "packages/agent/src/app/lifecycle/onboarding.rs",
         "packages/agent/src/app/lifecycle/shutdown.rs",
         "packages/agent/src/transport/http/auth.rs",
         "packages/agent/src/transport/engine/contracts.rs",
@@ -123,13 +123,10 @@ fn rust_engine_root_has_no_unowned_flat_modules() {
 #[test]
 fn rust_engine_subsystem_roots_are_owned() {
     let required_files = [
-        "packages/agent/src/engine/authority/mod.rs",
-        "packages/agent/src/engine/authority/grants/mod.rs",
         "packages/agent/src/engine/catalog/mod.rs",
         "packages/agent/src/engine/catalog/registry/mod.rs",
         "packages/agent/src/engine/durability/mod.rs",
         "packages/agent/src/engine/durability/ledger/mod.rs",
-        "packages/agent/src/engine/durability/resources/store/mod.rs",
         "packages/agent/src/engine/invocation/mod.rs",
         "packages/agent/src/engine/invocation/host/mod.rs",
         "packages/agent/src/engine/kernel/mod.rs",
@@ -137,11 +134,12 @@ fn rust_engine_subsystem_roots_are_owned() {
         "packages/agent/src/engine/kernel/types/catalog.rs",
         "packages/agent/src/engine/kernel/types/function.rs",
         "packages/agent/src/engine/kernel/types/worker.rs",
-        "packages/agent/src/engine/primitives/resource/mod.rs",
-        "packages/agent/src/engine/primitives/ui/mod.rs",
+        "packages/agent/src/engine/primitives/mod.rs",
+        "packages/agent/src/engine/primitives/workers.rs",
     ];
     let banned_paths = [
         "packages/agent/src/engine/capabilities.rs",
+        "packages/agent/src/engine/authority",
         "packages/agent/src/engine/compensation.rs",
         "packages/agent/src/engine/discovery.rs",
         "packages/agent/src/engine/errors.rs",
@@ -162,6 +160,7 @@ fn rust_engine_subsystem_roots_are_owned() {
         "packages/agent/src/engine/registry",
         "packages/agent/src/engine/registry.rs",
         "packages/agent/src/engine/resources",
+        "packages/agent/src/engine/durability/resources",
         "packages/agent/src/engine/schema.rs",
         "packages/agent/src/engine/state.rs",
         "packages/agent/src/engine/streams.rs",

@@ -123,21 +123,6 @@ pub(crate) fn init_database(
 )> {
     let db_path = resolve_production_db_path(db_path_override)?;
     ensure_parent_dir(&db_path)?;
-    let archive_report =
-        crate::shared::storage::prepare_active_database(&db_path).with_context(|| {
-            format!(
-                "Failed to prepare unified database files for {}",
-                db_path.display()
-            )
-        })?;
-    if archive_report.moved_any() {
-        tracing::info!(
-            archive_dir = ?archive_report.archive_dir,
-            files = archive_report.files.len(),
-            "archived non-current database files before unified storage startup"
-        );
-    }
-
     // INVARIANT: A single process owns the event-store DB. Take the
     // OS-level flock before opening the connection pool so a stray
     // `tron dev` alongside the launchd service aborts at startup
@@ -160,6 +145,37 @@ pub(crate) fn init_database(
             }
         },
     )?;
+
+    let tron_home = crate::shared::foundation::paths::tron_home();
+    let canonical_database = tron_home
+        .join("internal")
+        .join("database")
+        .join(crate::shared::storage::UNIFIED_DB_FILENAME);
+    if db_path == canonical_database && db_path.is_file() {
+        let source_profile = crate::shared::foundation::profile::active_profile_name_at(&tron_home)
+            .unwrap_or_else(|| "unknown".to_owned());
+        crate::domains::worker_kernel::prepare_profile_state_retirement(
+            &tron_home,
+            &source_profile,
+            &db_path,
+        )
+        .map_err(anyhow::Error::msg)
+        .context("Failed to snapshot and retire legacy worker state")?;
+    }
+    let archive_report =
+        crate::shared::storage::prepare_active_database(&db_path).with_context(|| {
+            format!(
+                "Failed to prepare unified database files for {}",
+                db_path.display()
+            )
+        })?;
+    if archive_report.moved_any() {
+        tracing::info!(
+            archive_dir = ?archive_report.archive_dir,
+            files = archive_report.files.len(),
+            "archived non-current database files before unified storage startup"
+        );
+    }
 
     let db_str = db_path.to_string_lossy();
     let pool =
@@ -220,7 +236,6 @@ struct ServiceState {
     event_store: Arc<EventStore>,
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
-    transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
     responder_factory: Arc<dyn ModelResponderFactory>,
 }
 
@@ -246,52 +261,12 @@ async fn init_services(
     let (responder_factory, shared_http_client) = init_model_responder_factory(settings).await;
     let _ = shared_http_client;
 
-    let transcription_runtime = crate::domains::transcription::SharedTranscriptionEngine::new();
-
     Ok(ServiceState {
         event_store,
         session_manager,
         orchestrator,
-        transcription_runtime,
         responder_factory,
     })
-}
-
-fn register_transcription_sidecar(
-    enabled: bool,
-    server: &TronServer,
-    transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-) {
-    if !enabled {
-        transcription_runtime.mark_disabled();
-        tracing::info!("transcription sidecar disabled");
-        return;
-    }
-
-    transcription_runtime.mark_loading("Local transcription model is loading.");
-    let shutdown = server.shutdown().token();
-    let task = tokio::spawn(async move {
-        tokio::select! {
-            engine = crate::domains::transcription::MlxEngine::new() => {
-                match engine {
-                    Ok(engine) => {
-                        let engine: Arc<dyn crate::domains::transcription::TranscriptionEngine> = engine;
-                        if transcription_runtime.mark_ready(engine) {
-                            tracing::info!("transcription sidecar ready (parakeet-mlx)");
-                        }
-                    }
-                    Err(error) => {
-                        transcription_runtime.mark_failed(error.to_string());
-                        tracing::warn!(error = %error, "transcription sidecar setup failed");
-                    }
-                }
-            }
-            () = shutdown.cancelled() => {
-                tracing::debug!("transcription sidecar startup cancelled");
-            }
-        }
-    });
-    server.shutdown().register_task(task);
 }
 
 /// Create model responder factory and check startup auth availability.
@@ -331,10 +306,6 @@ fn build_server_runtime_context(
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
         engine_host,
-        transcription_runtime: services.transcription_runtime.clone(),
-        apns_runtime: crate::platform::apns::ApnsRuntime::production(
-            &crate::shared::foundation::paths::internal_dir(),
-        ),
         settings_path,
         profile_runtime,
         responder_factory: Some(services.responder_factory),
@@ -479,12 +450,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     .await
     .context("Failed to register server domain workers")?;
     register_blocking_supervisor_shutdown(server.shutdown());
-    register_transcription_sidecar(
-        settings.server.transcription.enabled,
-        &server,
-        server.runtime_context().transcription_runtime.clone(),
-    );
-
     // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(
         orchestrator_for_stream_events.subscribe(),

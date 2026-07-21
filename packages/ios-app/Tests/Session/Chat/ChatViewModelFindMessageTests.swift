@@ -396,7 +396,6 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             agent: AgentClient(transport: transport),
             models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
             messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
-            transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
             workerKernel: DefaultWorkerKernelRepository(client: WorkerKernelClient(transport: transport))
         )
         return (ChatViewModel(services: services, sessionId: "test-session"), sessions)

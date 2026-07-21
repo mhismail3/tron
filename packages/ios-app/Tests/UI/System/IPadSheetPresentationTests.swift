@@ -103,12 +103,8 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".immersiveCameraSheetPresentation"
             ),
             (
-                ["Sources", "UI", "Onboarding", "Pairing", "QRCodeScannerSheet.swift"],
+                ["Sources", "UI", "Onboarding", "QRCodeScannerSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
-            (
-                ["Sources", "UI", "RuntimeSurfaces", "Display", "StreamSheetView.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
                 ["Sources", "UI", "System", "CompactionDetailSheet.swift"],

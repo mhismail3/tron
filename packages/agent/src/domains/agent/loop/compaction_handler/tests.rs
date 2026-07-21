@@ -122,7 +122,7 @@ async fn skipped_event_reports_no_durable_reduction() {
 }
 
 #[tokio::test]
-async fn execute_uses_injected_summarizer_but_requires_context_control_proof() {
+async fn execute_uses_injected_summarizer_and_commits_direct_boundary() {
     let calls = Arc::new(AtomicUsize::new(0));
     let handler = CompactionHandler::with_summarizer(
         CompactionTriggerConfig::default(),

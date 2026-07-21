@@ -14,10 +14,8 @@
 //! | `agent`, `model` | Model turns and provider protocol |
 //! | `session`, `message`, `logs` | Durable conversation and event truth |
 //! | `auth`, `settings`, `system` | Authenticated product configuration |
-//! | `blob`, `transcription` | Client attachment infrastructure |
-//! | `device` | Authenticated private device-token custody |
+//! | `blob` | Client attachment infrastructure |
 //! | `filesystem` | Native workspace browsing used by clients |
-//! | `memory`, `context_control` | Prompt/session state custody |
 //! | `worker_kernel` | Worker bundles, runners, dispatch, inbox, and core proposals |
 //! | `registration` | Composition validation for this fixed set |
 //!
@@ -32,11 +30,8 @@
 pub mod agent;
 pub mod auth;
 pub mod blob;
-pub mod context_control;
-pub mod device;
 pub mod filesystem;
 pub mod logs;
-pub mod memory;
 pub mod message;
 pub mod model;
 pub mod registration;
@@ -44,5 +39,4 @@ pub mod registration;
 pub mod session;
 pub mod settings;
 pub mod system;
-pub mod transcription;
 pub mod worker_kernel;

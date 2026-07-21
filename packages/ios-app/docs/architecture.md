@@ -26,9 +26,9 @@ The app has two primary operational surfaces:
   published workers, and durable profile activity; operate worker lifecycle.
 
 The former Agent Cockpit, module activity, capability-binding, package
-lifecycle, and legacy worker-lifecycle UI planes are deleted. Conversational
-creation is the worker authoring interface; iOS does not contain a bundle
-editor or invent worker state.
+lifecycle, legacy worker-lifecycle, generated-UI resource, and display-stream
+planes are deleted. Conversational creation is the worker authoring interface;
+iOS does not contain a bundle editor or invent worker state.
 
 ## State Ownership
 
@@ -88,7 +88,8 @@ Sources/
 ```
 
 `Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the authoritative
-logo. `scripts/generate-icons.mjs` derives app icons and the README preview.
+logo. The repository-owned `scripts/generate-ios-icons.mjs` derives app icons
+and the README preview.
 
 ## Composition
 
@@ -143,7 +144,7 @@ worker metadata from the client. The server supplies internal causal context.
 
 ### DTOs
 
-`Engine/Protocol/WorkerKernel/EngineProtocolTypes+WorkerKernel.swift` owns:
+`Engine/Protocol/EngineProtocolTypes+WorkerKernel.swift` owns:
 
 - `WorkerSummaryDTO` for identity, tool name, runner, health, active version,
   enabled/retired status, trigger count, and update time;
@@ -160,7 +161,7 @@ The bundle remains `[String: AnyCodable]` because its JSON schemas, runner, and
 routing metadata are intentionally extensible. Stable operational fields are
 strongly typed.
 
-`Engine/Protocol/Catalog/EngineProtocolTypes+Catalog.swift` additionally owns
+`Engine/Protocol/EngineProtocolTypes+Catalog.swift` additionally owns
 `EngineIntrospectionSnapshotDTO`, `EngineCoreComponentDTO`,
 `AgentToolSurfaceDTO`, `EngineSurfaceToolDTO`, and `AvailableWorkerToolDTO`.
 These are the authoritative client projection for compiled composition, fixed
@@ -285,7 +286,7 @@ chips; “capability” in those UI type names means a provider tool call, not t
 removed authorization framework. Direct typed command vectors render as a
 readable command while the technical detail retains their exact JSON evidence.
 
-## Composer, Attachments, and Voice
+## Composer and Attachments
 
 The composer owns:
 
@@ -293,31 +294,24 @@ The composer owns:
 - camera, photo, and file pickers;
 - prepared attachment ids and encoded-size preflight against
   `hello.maxMessageSize`;
-- local microphone capture and bounded energy visualization;
-- cancellation-aware transcription;
-- the trailing voice/send/transcribing/stop action;
-- the proportional context-ring entry to Session Briefing.
+- the trailing send/stop action.
 
-`ComposerMicRecorder` owns the fixed five-minute automatic stop. Permission and
-audio samples remain in the capture engine; view state receives only normalized
-energy. Recording and transcription own the trailing action until both states
-end, even when a draft exists.
+The primitive client has no fixed microphone capture or transcription stack.
+If speech input proves useful, Tron must author, activate, and exercise it as a
+worker instead of adding another permanent product subsystem.
 
 Attachment conversion commits before submission. Pending photo-picker objects
 remain with the conversion owner and are not treated as sendable attachments.
 The final encoded frame size is checked before socket send so an oversized
 prompt cannot disconnect the client or erase retryable content.
 
-## Context and Memory Presentation
+## Context Lifecycle Presentation
 
-Session Briefing is server-backed. It exposes model switching, bounded context
-composition, compaction/clear actions, read-only memory refs, and durable
-context-action evidence. iOS does not implement hidden prompt memory,
-memory-retain editing, skills, source control, or prompt libraries.
-
-The context ring is proportional to the server-projected bounded percentage.
-It yields its composer slot during audio recording/transcription and returns
-after those owners reach terminal state.
+Compaction and clear are direct server-owned session boundaries. Live events
+and reconstruction project the same typed token counts, reason, summary, and
+turn counts into timeline pills. Tapping a completed compaction opens only its
+event detail; iOS has no parallel context-control repository, resource audit
+sheet, hidden prompt memory editor, or Session Briefing surface.
 
 ## Settings Parity
 
@@ -345,18 +339,13 @@ reloads the new server's value.
 No server-only provider retry, runtime, tmux, or TUI field may drift into only
 one Swift layer. `SettingsParityTests` guard the admitted projection.
 
-## Device Token Custody
+## Notification Boundary
 
-One observable push service owns APNs callbacks and retries registration after
-pairing, reconnect, and foreground transitions. The client sends the token only
-through authenticated `device::register`, including install identity, bundle,
-and APNs environment so side-by-side variants do not overwrite each other.
-
-The server stores raw tokens privately and only a hash in its durable device
-resource. The worker-first fixed kernel does not provide a notification inbox,
-push policy, or APNs delivery plane. iOS must not imply that fixed delivery
-exists; a future delivery workflow must be a persistent worker with its own
-observable behavior.
+The worker-first client has no fixed APNs registration or notification-delivery
+plane. `AppDelegate` owns only application launch diagnostics, and deep links
+enter through the URL router. A future push workflow must arrive as an explicit
+worker-backed product slice with observable token custody, delivery, and client
+handling rather than a dormant fixed client façade.
 
 ## Local Persistence and Diagnostics
 
@@ -368,8 +357,8 @@ Local storage is bounded and concern-owned:
 - local logs, feedback bundles, MetricKit payloads, and hashed server-log
   correlation ids.
 
-Secrets, raw APNs tokens, worker webhook tokens, provider credentials, and
-server authority metadata must never enter local diagnostic logs. Connection
+Secrets, worker webhook tokens, provider credentials, and server runtime
+metadata must never enter local diagnostic logs. Connection
 toasts and compact in-chat error pills remain the immediate attention surfaces;
 worker execution failures belong in the server-owned Engine Dashboard inbox.
 

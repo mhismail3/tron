@@ -1,8 +1,7 @@
 //! Catalog primitive worker contracts.
 //!
-//! Read-only catalog surfaces are system-visible and gated by `catalog.read`
-//! so operator clients can project live worker/function state without
-//! owning catalog mutations.
+//! Read-only catalog surfaces are system-visible so operator clients can
+//! project live worker/function state without owning catalog mutations.
 
 use serde_json::{Value, json};
 
@@ -72,15 +71,10 @@ fn catalog_read(
     request_schema: Value,
     response_schema: Value,
 ) -> PrimitiveFunctionRegistration {
-    let mut definition = primitive_function(
-        id,
-        CATALOG_WORKER_ID,
-        description,
-        EffectClass::PureRead,
-        "catalog.read",
-    )
-    .with_request_schema(request_schema)
-    .with_response_schema(response_schema);
+    let mut definition =
+        primitive_function(id, CATALOG_WORKER_ID, description, EffectClass::PureRead)
+            .with_request_schema(request_schema)
+            .with_response_schema(response_schema);
     definition.visibility = VisibilityScope::System;
     host_dispatched_registration(definition)
 }

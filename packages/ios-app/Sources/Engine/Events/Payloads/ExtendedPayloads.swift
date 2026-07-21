@@ -24,8 +24,6 @@ struct CompactBoundaryPayload {
     let preservedTurns: Int?
     let summarizedTurns: Int?
     let preservedMessages: Int?
-    let contextControlActionResourceId: String?
-    let contextControlSnapshotResourceId: String?
 
     init?(from payload: [String: AnyCodable]) {
         // Range fields are optional (not present in auto-compaction events)
@@ -63,8 +61,6 @@ struct CompactBoundaryPayload {
         self.preservedTurns = payload.int("preservedTurns")
         self.summarizedTurns = payload.int("summarizedTurns")
         self.preservedMessages = payload.int("preservedMessages")
-        self.contextControlActionResourceId = payload.string("contextControlActionResourceId")
-        self.contextControlSnapshotResourceId = payload.string("contextControlSnapshotResourceId")
     }
 }
 
@@ -73,8 +69,6 @@ struct CompactBoundaryPayload {
 struct ContextClearedPayload {
     let tokensBefore: Int
     let tokensAfter: Int
-    let contextControlActionResourceId: String?
-    let contextControlSnapshotResourceId: String?
 
     init?(from payload: [String: AnyCodable]) {
         guard let tokensBefore = payload.int("tokensBefore"),
@@ -83,7 +77,5 @@ struct ContextClearedPayload {
         }
         self.tokensBefore = tokensBefore
         self.tokensAfter = tokensAfter
-        self.contextControlActionResourceId = payload.string("contextControlActionResourceId")
-        self.contextControlSnapshotResourceId = payload.string("contextControlSnapshotResourceId")
     }
 }

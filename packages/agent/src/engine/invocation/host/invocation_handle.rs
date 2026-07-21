@@ -33,9 +33,8 @@ impl EngineHostHandle {
     /// This path deliberately excludes the privileged `engine::invoke` meta
     /// route, engine-owned/host-dispatched primitives, queued work, and trigger
     /// dispatch. Those targets retain their ordinary routing without this
-    /// cancellation contract. Cancellation is observed after any resource
-    /// lease is acquired so the normal release, durable outcome, idempotency,
-    /// and compensation lifecycle still completes.
+    /// cancellation contract. The durable outcome and idempotency lifecycle
+    /// still complete after cancellation is observed.
     pub(crate) async fn invoke_regular_cancellable(
         &self,
         invocation: Invocation,
@@ -77,44 +76,12 @@ impl EngineHostHandle {
         prepared: PreparedSyncInvocation,
         cancellation: Option<&CancellationToken>,
     ) -> InvocationResult {
-        let compensation_contract = prepared.function.compensation.clone();
-        let compensation_invocation = prepared.invocation.clone();
-        let lease_result = self.acquire_prepared_resource_lease(&prepared).await;
-        let mut lease_ids = Vec::new();
-        let handler_result = match lease_result {
-            Ok(Some(lease)) => {
-                lease_ids.push(lease.lease_id.clone());
-                let result = self.invoke_prepared_handler(&prepared, cancellation).await;
-                release_after_primary(self.release_resource_lease(&lease.lease_id).await, result)
-            }
-            Ok(None) => self.invoke_prepared_handler(&prepared, cancellation).await,
-            Err(error) => Err(error),
-        };
-        let compensation_status = prepared
-            .function
-            .compensation
-            .as_ref()
-            .map(|_| "recorded".to_owned());
-        let result = self
-            .inner
+        let handler_result = self.invoke_prepared_handler(&prepared, cancellation).await;
+        self.inner
             .lock()
             .await
             .catalog
-            .finish_prepared_sync_invocation_with_contracts(
-                prepared,
-                handler_result,
-                lease_ids.clone(),
-                compensation_status.clone(),
-            );
-        let _ = self
-            .record_compensation_for_result(
-                &compensation_invocation,
-                compensation_contract,
-                &result,
-                lease_ids,
-            )
-            .await;
-        result
+            .finish_prepared_sync_invocation(prepared, handler_result)
     }
 
     async fn invoke_prepared_handler(
@@ -145,59 +112,6 @@ impl EngineHostHandle {
                     panic_payload_message(payload)
                 )))
             })
-    }
-
-    async fn acquire_prepared_resource_lease(
-        &self,
-        prepared: &PreparedSyncInvocation,
-    ) -> Result<Option<EngineResourceLease>> {
-        let Some(requirement) = &prepared.function.resource_lease else {
-            return Ok(None);
-        };
-        let request = lease_request_from_requirement(requirement, &prepared.invocation)?;
-        self.acquire_resource_lease(request).await.map(Some)
-    }
-
-    async fn record_compensation_for_result(
-        &self,
-        invocation: &Invocation,
-        contract: Option<CompensationContract>,
-        result: &InvocationResult,
-        resource_lease_ids: Vec<String>,
-    ) -> Option<EngineCompensationRecord> {
-        let Some(contract) = contract else {
-            return None;
-        };
-        let record = compensation_record(invocation, result, contract, resource_lease_ids);
-        let store = self.inner.lock().await.primitives.compensation.clone();
-        let stored = store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))
-            .and_then(|mut store| store.record(record));
-        match stored {
-            Ok(record) => {
-                let _ = self
-                    .publish_stream_event(PublishStreamEvent {
-                        topic: "compensation.records".to_owned(),
-                        payload: json!({
-                            "type": "compensation.recorded",
-                            "compensation": record.clone(),
-                        }),
-                        visibility: VisibilityScope::System,
-                        session_id: None,
-                        workspace_id: None,
-                        producer: "compensation".to_owned(),
-                        trace_id: Some(result.trace_id.clone()),
-                        parent_invocation_id: Some(result.invocation_id.clone()),
-                    })
-                    .await;
-                Some(record)
-            }
-            Err(error) => {
-                tracing::error!(?error, "failed to record engine compensation contract");
-                None
-            }
-        }
     }
 
     /// Record a trigger dispatch attempt that failed before normal invocation

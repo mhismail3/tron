@@ -80,25 +80,8 @@ struct InputBarConfig {
 
     /// Whether the agent is currently processing (convenience).
     var isProcessing: Bool { agentPhase.isProcessing }
-    /// Whether composer audio is currently recording.
-    let isRecording: Bool
-    /// Normalized microphone energy owned by the recorder (0...1).
-    let recordingAudioLevel: Double
-    /// Whether a captured recording is being transcribed.
-    let isTranscribing: Bool
-
-    /// Session Briefing yields its composer slot throughout the authoritative
-    /// voice lifecycle so capture/transcription status stays adjacent to the
-    /// trailing action.
-    var showsContextBriefingControl: Bool {
-        !isRecording && !isTranscribing
-    }
-
-    /// Voice capture owns the trailing composer action until recording and
-    /// transcription have both finished, even when a draft already has text
-    /// or attachments.
     func canSend(hasContent: Bool) -> Bool {
-        guard agentPhase.isIdle, showsContextBriefingControl else { return false }
+        guard agentPhase.isIdle else { return false }
         return hasContent && sendBlockReason == nil
     }
 
@@ -122,7 +105,6 @@ struct InputBarConfig {
     let placeholderText: String
     /// Whether the placeholder represents a shell-owned loading state.
     let placeholderShowsProgress: Bool
-    let contextPercentage: Int
 
     // MARK: - Model / Attachments
     let currentModelInfo: ModelInfo?
@@ -151,12 +133,8 @@ struct InputBarConfig {
         agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
         isConnected: Bool = true,
-        isRecording: Bool = false,
-        recordingAudioLevel: Double = 0,
-        isTranscribing: Bool = false,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
-        contextPercentage: Int = 0,
         currentModelInfo: ModelInfo? = nil,
         inputHistory: InputHistoryStore? = nil,
         readOnly: Bool = false,
@@ -165,12 +143,8 @@ struct InputBarConfig {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
         self.isConnected = isConnected
-        self.isRecording = isRecording
-        self.recordingAudioLevel = min(max(recordingAudioLevel, 0), 1)
-        self.isTranscribing = isTranscribing
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress
-        self.contextPercentage = contextPercentage
         self.currentModelInfo = currentModelInfo
         self.inputHistory = inputHistory
         self.readOnly = readOnly
@@ -188,13 +162,8 @@ struct InputBarActions {
     let onAddAttachment: (Attachment) -> Void
     let onRemoveAttachment: (Attachment) -> Void
     let onAttachmentError: (String, String) -> Void
-    let onMicTap: () -> Void
-
     // MARK: - History
     let onHistoryNavigate: ((String) -> Void)?
-
-    // MARK: - Context
-    let onContextTap: (() -> Void)?
 
     init(
         onSend: @escaping () -> Void = {},
@@ -202,17 +171,13 @@ struct InputBarActions {
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
         onAttachmentError: @escaping (String, String) -> Void = { _, _ in },
-        onMicTap: @escaping () -> Void = {},
-        onHistoryNavigate: ((String) -> Void)? = nil,
-        onContextTap: (() -> Void)? = nil
+        onHistoryNavigate: ((String) -> Void)? = nil
     ) {
         self.onSend = onSend
         self.onAbort = onAbort
         self.onAddAttachment = onAddAttachment
         self.onRemoveAttachment = onRemoveAttachment
         self.onAttachmentError = onAttachmentError
-        self.onMicTap = onMicTap
         self.onHistoryNavigate = onHistoryNavigate
-        self.onContextTap = onContextTap
     }
 }

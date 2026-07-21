@@ -2,8 +2,8 @@
 //!
 //! Storage functions expose the unified `tron.sqlite` runtime as canonical
 //! engine capabilities. They do not bypass the engine ledger: checkpoint,
-//! export, stats, and retention requests are normal invocations with authority,
-//! idempotency, and audit records. Retention callers may choose dry-run mode,
+//! export, stats, and retention requests are normal invocations with
+//! idempotency and audit records. Retention callers may choose dry-run mode,
 //! but the diagnostic horizon remains storage-owner policy.
 
 use serde_json::{Value, json};
@@ -27,7 +27,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 STORAGE_WORKER_ID,
                 "report unified engine storage size and table ownership",
                 EffectClass::PureRead,
-                "storage.read",
             )
             .with_request_schema(empty_schema())
             .with_response_schema(json!({
@@ -43,7 +42,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 STORAGE_WORKER_ID,
                 "checkpoint unified storage WAL into the main SQLite file",
                 EffectClass::IdempotentWrite,
-                "storage.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_risk(RiskLevel::Medium)
@@ -61,7 +59,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 STORAGE_WORKER_ID,
                 "export unified storage into a portable single-file SQLite snapshot",
                 EffectClass::IdempotentWrite,
-                "storage.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_risk(RiskLevel::Medium)
@@ -79,7 +76,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 STORAGE_WORKER_ID,
                 "run unified storage retention and blob cleanup",
                 EffectClass::IdempotentWrite,
-                "storage.write",
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
             .with_risk(RiskLevel::Medium)

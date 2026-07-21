@@ -10,6 +10,85 @@ use super::{
     ZSTD_COMPRESSION_THRESHOLD_BYTES, ensure_storage_schema, hex_sha256, payload_preview,
 };
 
+/// Result of removing payload ownership owned by retired engine planes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PayloadRefCleanup {
+    /// Ownership rows removed.
+    pub refs_removed: usize,
+    /// Exclusive blobs removed after their final owner disappeared.
+    pub blobs_removed: usize,
+    /// Shared blobs retained with an exact remaining-owner count.
+    pub blobs_reconciled: usize,
+}
+
+/// Remove payload refs for the exact owner kinds and reconcile only blobs those
+/// refs touched. Shared blobs survive with an exact count; exclusive blobs are
+/// deleted. The caller owns the surrounding transaction.
+pub fn retire_payload_refs_by_owner_kind(
+    transaction: &rusqlite::Transaction<'_>,
+    owner_kinds: &[&str],
+) -> Result<PayloadRefCleanup> {
+    if owner_kinds.is_empty() {
+        return Ok(PayloadRefCleanup::default());
+    }
+    let placeholders = (0..owner_kinds.len())
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let values = owner_kinds
+        .iter()
+        .map(|kind| rusqlite::types::Value::Text((*kind).to_owned()))
+        .collect::<Vec<_>>();
+    let blob_ids = {
+        let mut statement = transaction
+            .prepare(&format!(
+                "SELECT DISTINCT payload_blob_id FROM storage_payload_refs \
+                 WHERE owner_kind IN ({placeholders}) AND payload_blob_id IS NOT NULL"
+            ))
+            .context("failed to prepare retired payload blob scan")?;
+        statement
+            .query_map(rusqlite::params_from_iter(values.clone()), |row| {
+                row.get::<_, String>(0)
+            })
+            .context("failed to query retired payload blobs")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to decode retired payload blobs")?
+    };
+    let refs_removed = transaction
+        .execute(
+            &format!("DELETE FROM storage_payload_refs WHERE owner_kind IN ({placeholders})"),
+            rusqlite::params_from_iter(values),
+        )
+        .context("failed to remove retired payload refs")?;
+    let mut cleanup = PayloadRefCleanup {
+        refs_removed,
+        ..PayloadRefCleanup::default()
+    };
+    for blob_id in blob_ids {
+        let remaining: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM storage_payload_refs WHERE payload_blob_id = ?1",
+                [&blob_id],
+                |row| row.get(0),
+            )
+            .with_context(|| format!("failed to count remaining owners for blob {blob_id}"))?;
+        if remaining == 0 {
+            cleanup.blobs_removed += transaction
+                .execute("DELETE FROM blobs WHERE id = ?1", [&blob_id])
+                .with_context(|| format!("failed to remove unowned blob {blob_id}"))?;
+        } else {
+            transaction
+                .execute(
+                    "UPDATE blobs SET ref_count = ?2 WHERE id = ?1",
+                    params![blob_id, remaining],
+                )
+                .with_context(|| format!("failed to reconcile shared blob {blob_id}"))?;
+            cleanup.blobs_reconciled += 1;
+        }
+    }
+    Ok(cleanup)
+}
+
 /// Store bytes in the shared content-addressed blob table.
 pub fn store_content_blob(conn: &Connection, content: &[u8], mime_type: &str) -> Result<String> {
     let hash = hex_sha256(content);

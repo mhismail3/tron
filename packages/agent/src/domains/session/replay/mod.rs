@@ -360,8 +360,6 @@ struct ReplayInvocationRecord {
     catalog_revision: u64,
     actor_id: String,
     actor_kind: Value,
-    authority_grant_id: Option<String>,
-    authority_scopes: Vec<String>,
     trace_id: String,
     parent_invocation_id: Option<String>,
     trigger_id: Option<String>,
@@ -370,9 +368,6 @@ struct ReplayInvocationRecord {
     delivery_mode: Value,
     idempotency_key: Option<String>,
     idempotency_scope: Option<ReplayIdempotencyScope>,
-    resource_lease_ids: Vec<String>,
-    compensation_status: Option<String>,
-    produced_resource_refs: Vec<Value>,
     replayed_from: Option<String>,
     succeeded: bool,
     result_value: Option<Value>,
@@ -393,8 +388,6 @@ impl ReplayInvocationRecord {
             catalog_revision: record.catalog_revision.0,
             actor_id: record.actor_id.to_string(),
             actor_kind: serde_json::to_value(&record.actor_kind).unwrap_or(Value::Null),
-            authority_grant_id: record.authority_grant_id.as_ref().map(ToString::to_string),
-            authority_scopes: record.authority_scopes.clone(),
             trace_id: record.trace_id.to_string(),
             parent_invocation_id: record
                 .parent_invocation_id
@@ -409,9 +402,6 @@ impl ReplayInvocationRecord {
                 .idempotency_scope
                 .as_ref()
                 .map(ReplayIdempotencyScope::from_scope),
-            resource_lease_ids: record.resource_lease_ids.clone(),
-            compensation_status: record.compensation_status.clone(),
-            produced_resource_refs: record.produced_resource_refs.clone(),
             replayed_from: record.replayed_from.as_ref().map(ToString::to_string),
             succeeded: record.succeeded,
             result_value: record.result_value.clone(),
@@ -469,7 +459,6 @@ fn replay_behavior_name(behavior: &ReplayBehavior) -> &'static str {
         ReplayBehavior::ReturnPrevious => "return_previous",
         ReplayBehavior::NoOp => "no_op",
         ReplayBehavior::Reject => "reject",
-        ReplayBehavior::Compensate => "compensate",
     }
 }
 

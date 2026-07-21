@@ -14,7 +14,6 @@
 //! lifecycle envelope shared by reserved synchronous engine functions and
 //! host-dispatched primitives; the router below selects only their dispatch family.
 
-use std::any::Any;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,9 +23,6 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::authority::compensation::{EngineCompensationRecord, compensation_record};
-use crate::engine::authority::grants::{ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant};
-use crate::engine::authority::leases::{AcquireResourceLease, EngineResourceLease};
 use crate::engine::catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 use crate::engine::catalog::registry::{
     InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
@@ -37,10 +33,6 @@ use crate::engine::durability::ledger::EngineLedgerStore;
 use crate::engine::durability::ledger::{
     IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
-use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
-    EngineResourceVersion, LinkResources, ListResources, UpdateResource,
-};
 use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
@@ -48,13 +40,11 @@ use crate::engine::invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationResult,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, WorkerId};
+use crate::engine::kernel::ids::{ActorId, FunctionId, InvocationId, WorkerId};
 use crate::engine::kernel::types::{
-    AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    CompensationContract, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionRevision, IdempotencyContract, Provenance, ResourceLeaseFailureBehavior,
-    ResourceLeaseRequirement, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
-    WorkerRevision,
+    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, DeliveryMode,
+    EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
+    Provenance, RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind, WorkerRevision,
 };
 use crate::engine::kernel::{policy, schema};
 use crate::engine::primitives;

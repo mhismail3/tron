@@ -90,7 +90,7 @@ final class NewSessionFlowTests: XCTestCase {
             "Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift",
             "Sources/UI/Chat/Shell/ContentView.swift",
             "Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift",
-            "Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift",
+            "Sources/Engine/Protocol/EngineProtocolTypes+Filesystem.swift",
         ].map { relativePath in
             try String(
                 contentsOf: iosAppRoot().appendingPathComponent(relativePath),

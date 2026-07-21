@@ -1,27 +1,12 @@
 //! Primitive store backends.
 //!
-//! Registered resource types are durable substrate owned by the fixed kernel.
+//! The fixed kernel retains only scoped state and streams; worker bundles and
+//! operational ledgers own adaptation state.
 
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::Value;
 
-use crate::engine::authority::compensation::{
-    EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
-};
-use crate::engine::authority::grants::{
-    EngineGrantStoreBackend, InMemoryEngineGrantStore, SqliteEngineGrantStore,
-};
-use crate::engine::authority::leases::{
-    AcquireResourceLease, EngineResourceLease, InMemoryEngineResourceLeaseStore,
-    SqliteEngineResourceLeaseStore,
-};
-use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
-    EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
-    RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
-    builtin_resource_type_definitions,
-};
 use crate::engine::durability::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };
@@ -29,7 +14,7 @@ use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, InMemoryEngineStreamStore, PublishStreamEvent,
     SqliteEngineStreamStore, StreamActorScope, StreamCursor,
 };
-use crate::engine::kernel::errors::{EngineError, Result};
+use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::types::VisibilityScope;
 
 pub(in crate::engine) enum StreamStoreBackend {
@@ -218,217 +203,33 @@ impl StateStoreBackend {
     }
 }
 
-pub(in crate::engine) enum ResourceLeaseStoreBackend {
-    InMemory(InMemoryEngineResourceLeaseStore),
-    Sqlite(SqliteEngineResourceLeaseStore),
-}
-
-impl ResourceLeaseStoreBackend {
-    pub(in crate::engine) fn acquire(
-        &mut self,
-        request: AcquireResourceLease,
-    ) -> Result<EngineResourceLease> {
-        match self {
-            Self::InMemory(store) => store.acquire(request),
-            Self::Sqlite(store) => store.acquire(request),
-        }
-    }
-
-    pub(in crate::engine) fn release(
-        &mut self,
-        lease_id: &str,
-    ) -> Result<Option<EngineResourceLease>> {
-        match self {
-            Self::InMemory(store) => store.release(lease_id),
-            Self::Sqlite(store) => store.release(lease_id),
-        }
-    }
-
-    pub(in crate::engine) fn get(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
-        match self {
-            Self::InMemory(store) => store.get(lease_id),
-            Self::Sqlite(store) => store.get(lease_id),
-        }
-    }
-}
-
-pub(in crate::engine) enum CompensationStoreBackend {
-    InMemory(InMemoryEngineCompensationStore),
-    Sqlite(SqliteEngineCompensationStore),
-}
-
-impl CompensationStoreBackend {
-    pub(in crate::engine) fn record(
-        &mut self,
-        record: EngineCompensationRecord,
-    ) -> Result<EngineCompensationRecord> {
-        match self {
-            Self::InMemory(store) => store.record(record),
-            Self::Sqlite(store) => store.record(record),
-        }
-    }
-
-    pub(in crate::engine) fn get(
-        &self,
-        compensation_id: &str,
-    ) -> Result<Option<EngineCompensationRecord>> {
-        match self {
-            Self::InMemory(store) => store.get(compensation_id),
-            Self::Sqlite(store) => store.get(compensation_id),
-        }
-    }
-
-    pub(in crate::engine) fn list(&self) -> Result<Vec<EngineCompensationRecord>> {
-        match self {
-            Self::InMemory(store) => store.list(),
-            Self::Sqlite(store) => store.list(),
-        }
-    }
-}
-
-pub(in crate::engine) enum ResourceStoreBackend {
-    InMemory(InMemoryEngineResourceStore),
-    Sqlite(SqliteEngineResourceStore),
-}
-
-impl ResourceStoreBackend {
-    pub(in crate::engine) fn register_type(
-        &mut self,
-        request: RegisterResourceType,
-    ) -> Result<EngineResourceTypeDefinition> {
-        match self {
-            Self::InMemory(store) => store.register_type(request),
-            Self::Sqlite(store) => store.register_type(request),
-        }
-    }
-
-    pub(in crate::engine) fn create(&mut self, request: CreateResource) -> Result<EngineResource> {
-        match self {
-            Self::InMemory(store) => store.create(request),
-            Self::Sqlite(store) => store.create(request),
-        }
-    }
-
-    pub(in crate::engine) fn update(
-        &mut self,
-        request: UpdateResource,
-    ) -> Result<EngineResourceVersion> {
-        match self {
-            Self::InMemory(store) => store.update(request),
-            Self::Sqlite(store) => store.update(request),
-        }
-    }
-
-    pub(in crate::engine) fn link(
-        &mut self,
-        request: LinkResources,
-    ) -> Result<crate::engine::durability::resources::EngineResourceLink> {
-        match self {
-            Self::InMemory(store) => store.link(request),
-            Self::Sqlite(store) => store.link(request),
-        }
-    }
-
-    pub(in crate::engine) fn inspect(
-        &self,
-        resource_id: &str,
-    ) -> Result<Option<EngineResourceInspection>> {
-        match self {
-            Self::InMemory(store) => store.inspect(resource_id),
-            Self::Sqlite(store) => store.inspect(resource_id),
-        }
-    }
-
-    pub(in crate::engine) fn list(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
-        match self {
-            Self::InMemory(store) => store.list(filter),
-            Self::Sqlite(store) => store.list(filter),
-        }
-    }
-
-    pub(in crate::engine) fn list_internal_scan(
-        &self,
-        filter: ListResources,
-    ) -> Result<Vec<EngineResource>> {
-        match self {
-            Self::InMemory(store) => store.list_internal_scan(filter),
-            Self::Sqlite(store) => store.list_internal_scan(filter),
-        }
-    }
-}
-
 /// Engine primitive store bundle.
 #[derive(Clone)]
 pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) streams: Arc<StdMutex<StreamStoreBackend>>,
     pub(in crate::engine) state: Arc<StdMutex<StateStoreBackend>>,
-    pub(in crate::engine) leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
-    pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
-    pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
-    pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
 }
 
 impl PrimitiveStores {
     pub(in crate::engine) fn in_memory() -> Self {
-        let stores = Self {
+        Self {
             streams: Arc::new(StdMutex::new(StreamStoreBackend::InMemory(
                 InMemoryEngineStreamStore::new(),
             ))),
             state: Arc::new(StdMutex::new(StateStoreBackend::InMemory(
                 InMemoryEngineStateStore::new(),
             ))),
-            leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::InMemory(
-                InMemoryEngineResourceLeaseStore::new(),
-            ))),
-            resources: Arc::new(StdMutex::new(ResourceStoreBackend::InMemory(
-                InMemoryEngineResourceStore::new(),
-            ))),
-            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
-                InMemoryEngineGrantStore::new(),
-            ))),
-            compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
-                InMemoryEngineCompensationStore::new(),
-            ))),
-        };
-        stores
-            .install_builtin_resource_types()
-            .expect("built-in resource type definitions are valid");
-        stores
+        }
     }
 
     pub(in crate::engine) fn sqlite(path: &std::path::Path) -> Result<Self> {
-        let stores = Self {
+        Ok(Self {
             streams: Arc::new(StdMutex::new(StreamStoreBackend::Sqlite(
                 SqliteEngineStreamStore::open(path)?,
             ))),
             state: Arc::new(StdMutex::new(StateStoreBackend::Sqlite(
                 SqliteEngineStateStore::open(path)?,
             ))),
-            leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::Sqlite(
-                SqliteEngineResourceLeaseStore::open(path)?,
-            ))),
-            resources: Arc::new(StdMutex::new(ResourceStoreBackend::Sqlite(
-                SqliteEngineResourceStore::open(path)?,
-            ))),
-            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::Sqlite(
-                SqliteEngineGrantStore::open(path)?,
-            ))),
-            compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
-                SqliteEngineCompensationStore::open(path)?,
-            ))),
-        };
-        stores.install_builtin_resource_types()?;
-        Ok(stores)
-    }
-
-    fn install_builtin_resource_types(&self) -> Result<()> {
-        let mut resources = self
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?;
-        for definition in builtin_resource_type_definitions() {
-            resources.register_type(definition)?;
-        }
-        Ok(())
+        })
     }
 }

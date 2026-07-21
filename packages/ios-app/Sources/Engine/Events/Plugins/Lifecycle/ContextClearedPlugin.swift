@@ -16,8 +16,6 @@ enum ContextClearedPlugin: DispatchableEventPlugin {
         struct DataPayload: Decodable, Sendable {
             let tokensBefore: Int
             let tokensAfter: Int
-            let contextControlActionResourceId: String?
-            let contextControlSnapshotResourceId: String?
         }
     }
 
@@ -26,21 +24,12 @@ enum ContextClearedPlugin: DispatchableEventPlugin {
     struct Result: EventResult {
         let tokensBefore: Int
         let tokensAfter: Int
-        let contextControlActionResourceId: String?
-        let contextControlSnapshotResourceId: String?
 
         var tokensFreed: Int { tokensBefore - tokensAfter }
 
-        init(
-            tokensBefore: Int,
-            tokensAfter: Int,
-            contextControlActionResourceId: String? = nil,
-            contextControlSnapshotResourceId: String? = nil
-        ) {
+        init(tokensBefore: Int, tokensAfter: Int) {
             self.tokensBefore = tokensBefore
             self.tokensAfter = tokensAfter
-            self.contextControlActionResourceId = contextControlActionResourceId
-            self.contextControlSnapshotResourceId = contextControlSnapshotResourceId
         }
     }
 
@@ -49,9 +38,7 @@ enum ContextClearedPlugin: DispatchableEventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
             tokensBefore: event.data.tokensBefore,
-            tokensAfter: event.data.tokensAfter,
-            contextControlActionResourceId: event.data.contextControlActionResourceId,
-            contextControlSnapshotResourceId: event.data.contextControlSnapshotResourceId
+            tokensAfter: event.data.tokensAfter
         )
     }
 

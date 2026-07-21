@@ -40,10 +40,6 @@ import Foundation
     func handleStreamRecoveryRequired(_ result: StreamRecoveryRequiredPlugin.Result)
 }
 
-@MainActor protocol DisplayStreamEventHandler: AnyObject {
-    func handleDisplayFrame(_ result: DisplayFramePlugin.Result)
-}
-
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -57,5 +53,4 @@ import Foundation
     StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler,
     ServerEventHandler,
-    DisplayStreamEventHandler,
     EventDispatchLogger {}

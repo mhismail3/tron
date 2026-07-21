@@ -24,12 +24,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-capability-chip.png", AnyView(Self.capabilityChipView), CGSize(width: 430, height: 180)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
-            ("chat-composer-context-ring.png", AnyView(ComposerContextRingFixture()), CGSize(width: 430, height: 180)),
-            (
-                "chat-composer-recording-waveform.png",
-                AnyView(ComposerContextRingFixture(isRecording: true)),
-                CGSize(width: 430, height: 180)
-            ),
+            ("chat-composer-idle.png", AnyView(ComposerFixture()), CGSize(width: 430, height: 180)),
         ]
 
         for (name, view, size) in samples {
@@ -136,9 +131,8 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         )
     }
 
-    private struct ComposerContextRingFixture: View {
+    private struct ComposerFixture: View {
         @State private var state = InputBarState()
-        var isRecording = false
 
         var body: some View {
             VStack {
@@ -146,13 +140,10 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                 InputBar(
                     state: state,
                     config: InputBarConfig(
-                        isRecording: isRecording,
-                        recordingAudioLevel: 0.68,
-                        contextPercentage: 68,
                         currentModelInfo: nil,
                         readOnly: false
                     ),
-                    actions: InputBarActions(onContextTap: {})
+                    actions: InputBarActions()
                 )
             }
             .padding(.bottom, 20)

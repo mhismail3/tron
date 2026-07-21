@@ -39,7 +39,6 @@ struct EngineSettingsOwnershipTests {
         #expect(EngineSettingsSection.allCases == [
             .defaults,
             .context,
-            .transcription,
         ])
     }
 

@@ -131,7 +131,6 @@ extension SourceGuardTests {
         let attachmentMenuRange = try #require(source.range(of: "ComposerAttachmentButton("))
 
         #expect(source.contains("ComposerAttachmentButton("))
-        #expect(source.contains("ContextBriefingButton("))
         #expect(source.contains("ComposerTrailingButton("))
         #expect(source.contains("inputField"))
         #expect(source.components(separatedBy: ".glassEffect(").count - 1 == 1)

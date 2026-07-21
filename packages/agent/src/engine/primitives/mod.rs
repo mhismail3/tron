@@ -7,16 +7,9 @@
 //! local `runtime` module. Backend store ownership lives in `stores`, while
 //! worker and function registration assembly lives in `workers`; this root keeps
 //! shared primitive constants and payload/schema helpers only.
-//! `grant::*` is the engine-owned authority surface; `resource::*` plus the
-//! artifact/goal/claim/evidence/decision wrappers form the durable output
-//! substrate. Materialized-file wrappers keep file bytes tied to resource
-//! versions, record damaged truth through the resource store, and block
-//! operational reads or rewrites after discard while leaving inspection
-//! available. `trigger::*` dispatches registered triggers back through the
-//! same trigger runtime used by transports and schedules, so queued trigger
-//! delivery is not a harness-only path. `ui::*` stores runtime UI surface
-//! resources, validates the bounded schema, and records generic action
-//! submissions without server-authored target routing.
+//! Durable worker state belongs to the worker kernel or the scoped state/stream
+//! stores; the deleted generic resource and authority graphs are not a second
+//! adaptation substrate.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
@@ -30,35 +23,23 @@ use crate::engine::durability::state::EngineStateScope;
 use crate::engine::invocation::model::{InProcessFunctionHandler, Invocation};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
-use crate::engine::kernel::types::{
-    AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionDefinition,
-    RiskLevel, VisibilityScope,
-};
+use crate::engine::kernel::types::{EffectClass, FunctionDefinition, RiskLevel, VisibilityScope};
 
 pub(crate) mod catalog;
-pub(crate) mod grant;
-pub(crate) mod resource;
 pub(in crate::engine) mod runtime;
 pub(crate) mod state;
 pub(crate) mod storage;
 mod stores;
 pub(crate) mod stream;
-pub(crate) mod ui;
 mod workers;
 
-pub(in crate::engine) use crate::engine::authority::grants::EngineGrantStoreBackend;
-pub(in crate::engine) use stores::{
-    PrimitiveStores, ResourceStoreBackend, StateStoreBackend, StreamStoreBackend,
-};
+pub(in crate::engine) use stores::{PrimitiveStores, StateStoreBackend, StreamStoreBackend};
 pub(in crate::engine) use workers::{primitive_function_definitions, primitive_workers};
 
 pub(crate) const STREAM_WORKER_ID: &str = "stream";
 pub(crate) const STATE_WORKER_ID: &str = "state";
-pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
-pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
-pub(crate) const UI_WORKER_ID: &str = "ui";
 
 /// One primitive function registration.
 pub(crate) struct PrimitiveFunctionRegistration {
@@ -73,7 +54,6 @@ pub(super) fn primitive_function(
     worker: &str,
     description: &str,
     effect: EffectClass,
-    authority_scope: &str,
 ) -> FunctionDefinition {
     FunctionDefinition::new(
         function_id(id).expect("valid static primitive function id"),
@@ -82,7 +62,6 @@ pub(super) fn primitive_function(
         VisibilityScope::Agent,
         effect,
     )
-    .with_required_authority(AuthorityRequirement::scope(authority_scope))
     .with_risk(if effect.is_mutating() {
         RiskLevel::Medium
     } else {
@@ -217,11 +196,4 @@ pub(super) fn boolean_response_schema(field: &str) -> Value {
         "additionalProperties": false,
         "properties": properties
     })
-}
-
-pub(super) fn primitive_compensation(
-    kind: CompensationKind,
-    notes: &'static str,
-) -> CompensationContract {
-    CompensationContract::new(kind, notes)
 }
