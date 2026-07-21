@@ -70,7 +70,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::filesystem_write",
         EffectClass::IdempotentWrite,
         RiskLevel::High,
-        json!({"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"},"createParents":{"type":"boolean"},"expectedSha256":{"type":"string","description":"Optional compare-and-swap precondition. Use sha256:<hex>, raw hex, or absent when creating a new file."}}}),
+        json!({"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"},"createParents":{"type":"boolean"},"expectedSha256":expected_sha256_schema(true)}}),
         "Atomically publish a complete local text file. Supply expectedSha256 after reading when overwriting concurrent work would be unsafe.",
     )?);
     specs.push(spec(
@@ -83,7 +83,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
             "required":["path","replacements"],
             "properties":{
                 "path":{"type":"string"},
-                "expectedSha256":{"type":"string","description":"Optional compare-and-swap precondition from filesystem_read or a prior mutation."},
+                "expectedSha256":expected_sha256_schema(false),
                 "replacements":{
                     "type":"array","minItems":1,"maxItems":128,
                     "items":{
@@ -466,6 +466,21 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .build()?,
     );
     Ok(specs)
+}
+
+fn expected_sha256_schema(allow_absent: bool) -> Value {
+    let (pattern, description) = if allow_absent {
+        (
+            "^(?:absent|(?:sha256:)?[0-9A-Fa-f]{64})$",
+            "Optional compare-and-swap precondition. Omit for an unconditional write, use the exact string `absent` to require a new file, or supply sha256:<hex> / raw 64-digit hex after reading an existing file.",
+        )
+    } else {
+        (
+            "^(?:sha256:)?[0-9A-Fa-f]{64}$",
+            "Optional compare-and-swap precondition from filesystem_read or a prior mutation. Omit it instead of sending an empty string.",
+        )
+    };
+    json!({"type":"string","pattern":pattern,"description":description})
 }
 
 fn spec(

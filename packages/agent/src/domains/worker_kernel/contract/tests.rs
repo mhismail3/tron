@@ -273,6 +273,67 @@ fn direct_text_search_contract_exposes_shutdown_safe_ceilings() {
 }
 
 #[test]
+fn mutation_checksum_contract_rejects_empty_or_inapplicable_preconditions() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let schema_for = |function_id: &str| {
+        definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .and_then(|definition| definition.request_schema.clone())
+            .unwrap_or_else(|| panic!("request schema for {function_id}"))
+    };
+    let write_schema = schema_for("worker_kernel::filesystem_write");
+    let edit_schema = schema_for("worker_kernel::filesystem_edit");
+    let write_id = crate::engine::FunctionId::new("worker_kernel::filesystem_write").unwrap();
+    let edit_id = crate::engine::FunctionId::new("worker_kernel::filesystem_edit").unwrap();
+    let hash = "a".repeat(64);
+
+    for payload in [
+        json!({"path":"new.txt","content":"value","expectedSha256":"absent"}),
+        json!({"path":"old.txt","content":"value","expectedSha256":hash}),
+    ] {
+        crate::engine::validate_engine_schema_payload(
+            &write_id,
+            "request",
+            &write_schema,
+            &payload,
+        )
+        .expect("write checksum form is valid");
+    }
+    crate::engine::validate_engine_schema_payload(
+        &edit_id,
+        "request",
+        &edit_schema,
+        &json!({
+            "path":"old.txt",
+            "expectedSha256":format!("sha256:{}", "b".repeat(64)),
+            "replacements":[{"oldText":"before","newText":"after"}]
+        }),
+    )
+    .expect("edit hash form is valid");
+
+    for (function_id, schema, payload) in [
+        (
+            &write_id,
+            &write_schema,
+            json!({"path":"new.txt","content":"value","expectedSha256":""}),
+        ),
+        (
+            &edit_id,
+            &edit_schema,
+            json!({
+                "path":"old.txt",
+                "expectedSha256":"absent",
+                "replacements":[{"oldText":"before","newText":"after"}]
+            }),
+        ),
+    ] {
+        crate::engine::validate_engine_schema_payload(function_id, "request", schema, &payload)
+            .expect_err("invalid checksum precondition must fail at the tool boundary");
+    }
+}
+
+#[test]
 fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     for descriptor in core_primitives() {

@@ -135,6 +135,8 @@
 //! Executable child I/O is concurrent and bounded. Unix process groups make
 //! cancellation kill descendants; trusted-local `PATH` restores conventional
 //! host tools hidden by service launchers. Details belong to `process`.
+//! Mutation schemas reject empty or inapplicable checksum preconditions before
+//! execution so provider contracts match compare-and-swap runtime behavior.
 //! Command, smoke-test, and health-check working directories are always the
 //! bundle's `files/` directory. A dependency named `N` is acquired beneath
 //! `../dependencies/N`; its optional install command runs within that directory

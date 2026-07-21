@@ -466,7 +466,10 @@ never accumulates an unbounded directory; writes stage, sync, recheck the
 observed prior state immediately before publication, rename within the target
 directory, and sync that directory. `filesystem_edit` rejects stale or
 ambiguous replacements before touching the target, so agents can edit a small
-region without echoing an entire file through tool JSON.
+region without echoing an entire file through tool JSON. Mutation contracts
+reject empty checksum strings before execution: callers omit the optional
+field for an unconditional write, use the exact `absent` sentinel only when a
+new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 
 ### Worker operations
 

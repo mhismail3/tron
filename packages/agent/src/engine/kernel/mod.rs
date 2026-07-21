@@ -11,7 +11,8 @@
 //! INVARIANT: schema keywords admitted by canonical function contracts are
 //! executable validation rules here, never documentation-only annotations.
 //! This includes schema-valued `additionalProperties`, which keeps dynamic
-//! string maps and similar extensible objects typed at runtime.
+//! string maps and similar extensible objects typed at runtime, plus string
+//! `pattern` constraints that reject malformed provider arguments pre-dispatch.
 
 pub mod errors;
 pub mod ids;

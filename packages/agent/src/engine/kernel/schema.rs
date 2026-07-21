@@ -1,5 +1,6 @@
 //! Minimal enforced JSON Schema subset for engine contracts.
 
+use regex::Regex;
 use serde_json::Value;
 
 use super::errors::{EngineError, Result};
@@ -215,6 +216,23 @@ fn validate_schema_node(
         }
     }
 
+    if let Some(pattern) = object.get("pattern") {
+        let Some(pattern) = pattern.as_str() else {
+            return Err(invalid_schema(
+                function_id,
+                direction,
+                format!("{path}.pattern must be a string"),
+            ));
+        };
+        Regex::new(pattern).map_err(|error| {
+            invalid_schema(
+                function_id,
+                direction,
+                format!("{path}.pattern is not a valid regular expression: {error}"),
+            )
+        })?;
+    }
+
     if let Some(enum_values) = object.get("enum") {
         if !enum_values.is_array() {
             return Err(invalid_schema(
@@ -401,6 +419,21 @@ fn validate_payload_node(
             direction,
             path,
             format!("string shorter than minLength {min_length}"),
+        ));
+    }
+
+    if let (Some(pattern), Some(text)) = (
+        object.get("pattern").and_then(Value::as_str),
+        payload.as_str(),
+    ) && !Regex::new(pattern)
+        .expect("schema pattern was validated")
+        .is_match(text)
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            "string does not match pattern".to_owned(),
         ));
     }
 
@@ -674,6 +707,29 @@ mod tests {
             err.to_string()
                 .contains("minLength must be a non-negative integer")
         );
+    }
+
+    #[test]
+    fn string_pattern_is_definition_validated_and_enforced() {
+        let schema = json!({"type":"string","pattern":"^(?:sha256:)?[0-9a-f]{64}$"});
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        )
+        .unwrap();
+        let mismatch = validate_payload(&function_id(), "request", &schema, &json!(""))
+            .expect_err("empty string must not match checksum pattern");
+        assert!(mismatch.to_string().contains("does not match pattern"));
+
+        for invalid in [
+            json!({"type":"string","pattern":17}),
+            json!({"type":"string","pattern":"["}),
+        ] {
+            validate_schema_definition(&function_id(), "request", &invalid)
+                .expect_err("invalid pattern definition must be rejected");
+        }
     }
 
     #[test]
