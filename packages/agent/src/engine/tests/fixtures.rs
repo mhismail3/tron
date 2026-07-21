@@ -27,9 +27,8 @@ pub(in crate::engine::tests) use crate::engine::kernel::ids::{
     ActorId, FunctionId, InvocationId, TraceId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
-    CatalogRevision, DedupeScope, EffectClass, FunctionDefinition, FunctionRevision,
-    FunctionVisibility, IdempotencyContract, IdempotencyScope, ReplayBehavior, RiskLevel,
-    StreamVisibility,
+    CatalogRevision, EffectClass, FunctionDefinition, FunctionRevision, FunctionVisibility,
+    IdempotencyContract, IdempotencyScope, RiskLevel, StreamVisibility,
 };
 pub(in crate::engine::tests) use crate::engine::{
     EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,
@@ -70,20 +69,6 @@ pub(in crate::engine::tests) fn write_function(id: &str, owner: &str) -> Functio
         EffectClass::IdempotentWrite,
     )
     .with_idempotency(IdempotencyContract::session())
-}
-
-pub(in crate::engine::tests) fn reject_idempotency() -> IdempotencyContract {
-    IdempotencyContract {
-        dedupe_scope: DedupeScope::Session,
-        replay_behavior: ReplayBehavior::Reject,
-    }
-}
-
-pub(in crate::engine::tests) fn noop_idempotency() -> IdempotencyContract {
-    IdempotencyContract {
-        dedupe_scope: DedupeScope::Session,
-        replay_behavior: ReplayBehavior::NoOp,
-    }
 }
 
 #[derive(Clone)]
@@ -340,7 +325,6 @@ pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLed
         key: key.clone(),
         payload_fingerprint: "fingerprint-a".to_owned(),
         function_revision: FunctionRevision(1),
-        replay_behavior: ReplayBehavior::ReturnPrevious,
         invocation_id: InvocationId::new("reservation-one").unwrap(),
     };
     let first = store.reserve_idempotency(reservation.clone()).unwrap();

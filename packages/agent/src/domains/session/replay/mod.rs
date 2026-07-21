@@ -18,7 +18,7 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::{EventRow, EventStore, ListEventsOptions, SessionRow};
 use crate::engine::{
     EngineError, EngineHostHandle, EngineReplaySnapshot, EngineStreamEvent, IdempotencyEntry,
-    IdempotencyScope, IdempotencyStatus, InvocationRecord, ReplayBehavior, StoredInvocationOutcome,
+    IdempotencyScope, IdempotencyStatus, InvocationRecord, StoredInvocationOutcome,
 };
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_failure;
@@ -305,7 +305,6 @@ struct ReplayIdempotencyEntry {
     payload_fingerprint: String,
     request_hash: String,
     function_revision: u64,
-    replay_behavior: String,
     status: String,
     first_invocation_id: String,
     latest_invocation_id: String,
@@ -324,7 +323,6 @@ impl ReplayIdempotencyEntry {
             payload_fingerprint: entry.payload_fingerprint.clone(),
             request_hash: entry.payload_fingerprint.clone(),
             function_revision: entry.function_revision.0,
-            replay_behavior: replay_behavior_name(&entry.replay_behavior).to_owned(),
             status: idempotency_status_name(entry.status).to_owned(),
             first_invocation_id: entry.first_invocation_id.to_string(),
             latest_invocation_id: entry.latest_invocation_id.to_string(),
@@ -432,15 +430,6 @@ fn idempotency_status_name(status: IdempotencyStatus) -> &'static str {
     match status {
         IdempotencyStatus::InProgress => "in_progress",
         IdempotencyStatus::Completed => "completed",
-        IdempotencyStatus::Unknown => "unknown",
-    }
-}
-
-fn replay_behavior_name(behavior: &ReplayBehavior) -> &'static str {
-    match behavior {
-        ReplayBehavior::ReturnPrevious => "return_previous",
-        ReplayBehavior::NoOp => "no_op",
-        ReplayBehavior::Reject => "reject",
     }
 }
 

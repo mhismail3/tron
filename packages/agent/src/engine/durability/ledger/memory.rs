@@ -102,7 +102,6 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             key: reservation.key,
             payload_fingerprint: reservation.payload_fingerprint,
             function_revision: reservation.function_revision,
-            replay_behavior: reservation.replay_behavior,
             status: IdempotencyStatus::InProgress,
             first_invocation_id: reservation.invocation_id.clone(),
             latest_invocation_id: reservation.invocation_id,

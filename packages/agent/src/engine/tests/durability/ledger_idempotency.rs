@@ -31,7 +31,6 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
         },
         payload_fingerprint: "fingerprint-a".to_owned(),
         function_revision: FunctionRevision(1),
-        replay_behavior: ReplayBehavior::ReturnPrevious,
         invocation_id: super::ids::InvocationId::new("reservation-two").unwrap(),
     };
     let existing = store
@@ -136,7 +135,6 @@ fn ledger_boundaries_redact_manually_constructed_results_and_idempotency_outcome
         key: key.clone(),
         payload_fingerprint: "secret-fingerprint".to_owned(),
         function_revision: FunctionRevision(1),
-        replay_behavior: ReplayBehavior::ReturnPrevious,
         invocation_id: invocation.id.clone(),
     };
 
@@ -339,67 +337,6 @@ async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() 
     assert_eq!(records[0].idempotency_key.as_deref(), Some("same-key"));
     assert_eq!(records[1].replayed_from, Some(first.invocation_id));
     assert!(!records[2].succeeded);
-}
-
-#[tokio::test]
-async fn idempotency_reject_and_noop_policies_are_enforced() {
-    let mut catalog = LiveCatalog::new();
-    let calls = Arc::new(AtomicUsize::new(0));
-    catalog
-        .register_function(
-            write_function("alpha::reject", "w1").with_idempotency(reject_idempotency()),
-            Arc::new(CountingHandler {
-                calls: calls.clone(),
-            }),
-        )
-        .unwrap();
-    catalog
-        .register_function(
-            write_function("alpha::noop", "w1").with_idempotency(noop_idempotency()),
-            Arc::new(CountingHandler {
-                calls: calls.clone(),
-            }),
-        )
-        .unwrap();
-
-    let first_reject = catalog
-        .invoke_sync(Invocation::new_sync(
-            fid("alpha::reject"),
-            json!({"x": 1}),
-            mutating_causal("reject-key"),
-        ))
-        .await;
-    assert!(first_reject.error.is_none());
-    let duplicate_reject = catalog
-        .invoke_sync(Invocation::new_sync(
-            fid("alpha::reject"),
-            json!({"x": 1}),
-            mutating_causal("reject-key"),
-        ))
-        .await;
-    assert!(matches!(
-        duplicate_reject.error,
-        Some(EngineError::IdempotencyConflict { .. })
-    ));
-
-    let first_noop = catalog
-        .invoke_sync(Invocation::new_sync(
-            fid("alpha::noop"),
-            json!({"x": 1}),
-            mutating_causal("noop-key"),
-        ))
-        .await;
-    assert!(first_noop.error.is_none());
-    let duplicate_noop = catalog
-        .invoke_sync(Invocation::new_sync(
-            fid("alpha::noop"),
-            json!({"x": 1}),
-            mutating_causal("noop-key"),
-        ))
-        .await;
-    assert_eq!(duplicate_noop.value, Some(Value::Null));
-    assert_eq!(duplicate_noop.replayed_from, Some(first_noop.invocation_id));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

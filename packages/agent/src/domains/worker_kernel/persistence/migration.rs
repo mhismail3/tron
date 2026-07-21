@@ -58,7 +58,6 @@ struct ImportReport {
     unconvertible_records: Vec<Value>,
     invocation_ledger_rebuilt: bool,
     catalog_changes_retired: usize,
-    idempotency_rows_rewritten: usize,
     payload_refs_removed: usize,
     payload_blobs_removed: usize,
     payload_blobs_reconciled: usize,
@@ -501,7 +500,6 @@ fn prepare_worker_first_retirement_with_fault(
         unconvertible_records,
         invocation_ledger_rebuilt: false,
         catalog_changes_retired: 0,
-        idempotency_rows_rewritten: 0,
         payload_refs_removed: 0,
         payload_blobs_removed: 0,
         payload_blobs_reconciled: 0,
@@ -512,13 +510,7 @@ fn prepare_worker_first_retirement_with_fault(
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| format!("begin worker-first retirement transaction: {error}"))?;
-    report.idempotency_rows_rewritten = transaction
-        .execute(
-            "UPDATE engine_idempotency_entries SET replay_behavior_json='\"Reject\"' \
-             WHERE replay_behavior_json IN ('\"Compensate\"','\"compensate\"')",
-            [],
-        )
-        .unwrap_or(0);
+    crate::engine::durability::ledger::retire_legacy_idempotency_replay_column(&transaction)?;
     report.invocation_ledger_rebuilt =
         crate::engine::retire_legacy_invocation_columns(&transaction)?;
     report.catalog_changes_retired = retire_legacy_catalog_changes(&transaction)?;
@@ -892,6 +884,19 @@ fn verify_retired_schema(connection: &Connection) -> Result<(), String> {
             if columns.contains(retired) {
                 return Err(format!("retired invocation column {retired} remains"));
             }
+        }
+    }
+    if table_exists(connection, "engine_idempotency_entries")? {
+        let mut statement = connection
+            .prepare("PRAGMA table_info(engine_idempotency_entries)")
+            .map_err(|error| error.to_string())?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()
+            .map_err(|error| error.to_string())?;
+        if columns.contains("replay_behavior_json") {
+            return Err("retired idempotency replay column remains".to_owned());
         }
     }
     if table_exists(connection, "engine_catalog_changes")? {

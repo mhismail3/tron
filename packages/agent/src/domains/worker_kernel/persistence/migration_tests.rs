@@ -156,6 +156,16 @@ fn table_present(connection: &Connection, table: &str) -> bool {
     table_exists(connection, table).unwrap()
 }
 
+fn column_present(connection: &Connection, table: &str, column: &str) -> bool {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .any(|value| value.unwrap() == column)
+}
+
 #[test]
 fn retirement_is_snapshot_first_transactional_idempotent_and_restore_safe() {
     let home = tempfile::tempdir().unwrap();
@@ -240,13 +250,11 @@ fn assert_migrated_state(database: &Path, root: &Path) {
         scalar_text(&connection, "SELECT value FROM engine_stream_events"),
         "retained-stream"
     );
-    assert_eq!(
-        scalar_text(
-            &connection,
-            "SELECT replay_behavior_json FROM engine_idempotency_entries"
-        ),
-        "\"Reject\""
-    );
+    assert!(!column_present(
+        &connection,
+        "engine_idempotency_entries",
+        "replay_behavior_json"
+    ));
     assert!(!table_present(&connection, "engine_stream_subscriptions"));
     drop(connection);
     let ledger =

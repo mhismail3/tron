@@ -62,6 +62,8 @@ impl SqliteEngineLedgerStore {
         self.conn
             .execute_batch(SQLITE_SCHEMA)
             .map_err(|err| sqlite_err("initialize_schema", err))?;
+        super::retire_legacy_idempotency_replay_column(&self.conn)
+            .map_err(|err| ledger_failure("ledger.replay_column_retirement", err))?;
         self.migrate_legacy_catalog_changes()?;
         self.conn
             .execute_batch(INVOCATION_TABLE_SCHEMA)
@@ -118,8 +120,8 @@ impl SqliteEngineLedgerStore {
             .conn
             .prepare(
                 "SELECT function_id, scope_kind, scope_value, idempotency_key,
-                        payload_fingerprint, function_revision, replay_behavior_json,
-                        status_json, first_invocation_id, latest_invocation_id,
+                        payload_fingerprint, function_revision, status_json,
+                        first_invocation_id, latest_invocation_id,
                         outcome_value_json, outcome_error_json, created_at, updated_at
                  FROM engine_idempotency_entries
                  WHERE function_id = ?1
@@ -144,22 +146,21 @@ impl SqliteEngineLedgerStore {
                     idempotency_key: row.get(3)?,
                     payload_fingerprint: row.get(4)?,
                     function_revision: row.get(5)?,
-                    replay_behavior_json: row.get(6)?,
-                    status_json: row.get(7)?,
-                    first_invocation_id: row.get(8)?,
-                    latest_invocation_id: row.get(9)?,
+                    status_json: row.get(6)?,
+                    first_invocation_id: row.get(7)?,
+                    latest_invocation_id: row.get(8)?,
                     outcome_value_json: resolve_optional_stored_json_string(
                         &self.conn,
-                        row.get(10)?,
+                        row.get(9)?,
                     )
                     .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
                     outcome_error_json: resolve_optional_stored_json_string(
                         &self.conn,
-                        row.get(11)?,
+                        row.get(10)?,
                     )
                     .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
-                    created_at: row.get(12)?,
-                    updated_at: row.get(13)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -338,8 +339,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .conn
             .prepare(
                 "SELECT function_id, scope_kind, scope_value, idempotency_key,
-                        payload_fingerprint, function_revision, replay_behavior_json,
-                        status_json, first_invocation_id, latest_invocation_id,
+                        payload_fingerprint, function_revision, status_json,
+                        first_invocation_id, latest_invocation_id,
                         outcome_value_json, outcome_error_json, created_at, updated_at
                  FROM engine_idempotency_entries AS entry
                  WHERE (entry.scope_kind = 'session' AND entry.scope_value = ?1)
@@ -402,10 +403,10 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .execute(
                 "INSERT INTO engine_idempotency_entries
                    (function_id, scope_kind, scope_value, idempotency_key,
-                    payload_fingerprint, function_revision, replay_behavior_json,
-                    status_json, first_invocation_id, latest_invocation_id,
+                    payload_fingerprint, function_revision, status_json,
+                    first_invocation_id, latest_invocation_id,
                     created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     reservation.key.function_id.as_str(),
                     reservation.key.scope.kind,
@@ -413,10 +414,6 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     reservation.key.key,
                     reservation.payload_fingerprint,
                     reservation.function_revision.0,
-                    to_json_string(
-                        "reserve_idempotency.replay_behavior",
-                        &reservation.replay_behavior
-                    )?,
                     to_json_string("reserve_idempotency.status", &IdempotencyStatus::InProgress)?,
                     reservation.invocation_id.as_str(),
                     reservation.invocation_id.as_str(),

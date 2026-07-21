@@ -10,9 +10,7 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::invocation::model::{Invocation, InvocationResult};
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::types::{
-    DedupeScope, FunctionDefinition, IdempotencyScope, ReplayBehavior,
-};
+use crate::engine::kernel::types::{DedupeScope, FunctionDefinition, IdempotencyScope};
 
 impl LiveCatalog {
     pub(super) fn result_for_existing_idempotency(
@@ -61,61 +59,30 @@ impl LiveCatalog {
                     reason: "previous attempt is still in progress".to_owned(),
                 },
             ),
-            IdempotencyStatus::Unknown => InvocationResult::error(
-                invocation,
-                function.owner_worker.clone(),
-                function.revision,
-                self.revision,
-                EngineError::IdempotencyConflict {
-                    function_id: function.id.to_string(),
-                    key: existing.key.key.clone(),
-                    reason: "previous attempt has unknown outcome".to_owned(),
+            IdempotencyStatus::Completed => existing.outcome.as_ref().map_or_else(
+                || {
+                    InvocationResult::error(
+                        invocation,
+                        function.owner_worker.clone(),
+                        function.revision,
+                        self.revision,
+                        EngineError::IdempotencyConflict {
+                            function_id: function.id.to_string(),
+                            key: existing.key.key.clone(),
+                            reason: "completed reservation is missing outcome".to_owned(),
+                        },
+                    )
+                },
+                |outcome| {
+                    outcome.to_replay_result(
+                        invocation,
+                        function.owner_worker.clone(),
+                        function.revision,
+                        self.revision,
+                        existing.first_invocation_id.clone(),
+                    )
                 },
             ),
-            IdempotencyStatus::Completed => match existing.replay_behavior {
-                ReplayBehavior::ReturnPrevious => existing.outcome.as_ref().map_or_else(
-                    || {
-                        InvocationResult::error(
-                            invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            EngineError::IdempotencyConflict {
-                                function_id: function.id.to_string(),
-                                key: existing.key.key.clone(),
-                                reason: "completed reservation is missing outcome".to_owned(),
-                            },
-                        )
-                    },
-                    |outcome| {
-                        outcome.to_replay_result(
-                            invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            existing.first_invocation_id.clone(),
-                        )
-                    },
-                ),
-                ReplayBehavior::NoOp => InvocationResult::noop_replay(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    existing.first_invocation_id.clone(),
-                ),
-                ReplayBehavior::Reject => InvocationResult::error(
-                    invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    EngineError::IdempotencyConflict {
-                        function_id: function.id.to_string(),
-                        key: existing.key.key.clone(),
-                        reason: "duplicate key is configured to reject".to_owned(),
-                    },
-                ),
-            },
         }
     }
 
@@ -165,7 +132,6 @@ impl LiveCatalog {
             },
             payload_fingerprint: payload_fingerprint(&invocation.payload),
             function_revision: function.revision,
-            replay_behavior: contract.replay_behavior.clone(),
             invocation_id: invocation.id.clone(),
         }))
     }

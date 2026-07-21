@@ -18,6 +18,9 @@
 //! The worker-first retirement migration removes historical authority, lease,
 //! compensation, produced-resource, and generic-trigger records in one
 //! transaction while preserving causal and outcome evidence.
+//! Duplicate handling has one contract: a matching key, payload, and function
+//! revision returns the stored result; conflicts and unfinished attempts fail.
+//! There is no configurable replay-policy plane.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -25,9 +28,7 @@ use serde::Serialize;
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::{FunctionId, InvocationId};
-use crate::engine::kernel::types::{
-    CatalogRevision, FunctionRevision, IdempotencyScope, ReplayBehavior,
-};
+use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, IdempotencyScope};
 
 mod memory;
 mod outcome;
@@ -127,6 +128,39 @@ pub(crate) fn retire_legacy_invocation_columns(
     Ok(true)
 }
 
+/// Remove the retired configurable duplicate-policy column while preserving
+/// every idempotency key, fingerprint, status, and outcome row.
+pub(crate) fn retire_legacy_idempotency_replay_column(
+    connection: &rusqlite::Connection,
+) -> std::result::Result<bool, String> {
+    let table_exists = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_idempotency_entries')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("inspect idempotency table: {error}"))?;
+    if !table_exists {
+        return Ok(false);
+    }
+    let mut statement = connection
+        .prepare("PRAGMA table_info(engine_idempotency_entries)")
+        .map_err(|error| format!("inspect idempotency columns: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("query idempotency columns: {error}"))?
+        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
+        .map_err(|error| format!("read idempotency columns: {error}"))?;
+    drop(statement);
+    if !columns.contains("replay_behavior_json") {
+        return Ok(false);
+    }
+    connection
+        .execute_batch("ALTER TABLE engine_idempotency_entries DROP COLUMN replay_behavior_json;")
+        .map_err(|error| format!("retire idempotency replay column: {error}"))?;
+    Ok(true)
+}
+
 /// Fully scoped idempotency key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
 pub struct IdempotencyKey {
@@ -145,8 +179,6 @@ pub enum IdempotencyStatus {
     InProgress,
     /// A final outcome is persisted.
     Completed,
-    /// The outcome is intentionally unknown and duplicates must not re-run.
-    Unknown,
 }
 
 /// Persisted idempotency reservation/result.
@@ -158,8 +190,6 @@ pub struct IdempotencyEntry {
     pub payload_fingerprint: String,
     /// Function revision used for the original attempt.
     pub function_revision: FunctionRevision,
-    /// Duplicate replay behavior.
-    pub replay_behavior: ReplayBehavior,
     /// Current reservation status.
     pub status: IdempotencyStatus,
     /// First invocation that reserved the key.
@@ -183,8 +213,6 @@ pub struct IdempotencyReservation {
     pub payload_fingerprint: String,
     /// Function revision.
     pub function_revision: FunctionRevision,
-    /// Duplicate replay behavior.
-    pub replay_behavior: ReplayBehavior,
     /// Invocation attempting the reservation.
     pub invocation_id: InvocationId,
 }

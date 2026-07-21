@@ -79,54 +79,27 @@ impl RiskLevel {
     }
 }
 
-/// Replay behavior for a duplicate idempotency key.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ReplayBehavior {
-    /// Return the previous result.
-    ReturnPrevious,
-    /// Accept the duplicate without changing state.
-    NoOp,
-    /// Reject duplicate.
-    Reject,
-}
-
-impl ReplayBehavior {
-    /// Static display string.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::ReturnPrevious => "return_previous",
-            Self::NoOp => "no_op",
-            Self::Reject => "reject",
-        }
-    }
-}
-
 /// Idempotency contract required for mutating agent-visible functions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdempotencyContract {
     /// Dedupe scope.
     pub dedupe_scope: DedupeScope,
-    /// Duplicate replay behavior.
-    pub replay_behavior: ReplayBehavior,
 }
 
 impl IdempotencyContract {
-    /// Session-scoped duplicate replay.
+    /// Deduplicate within one session.
     #[must_use]
     pub fn session() -> Self {
         Self {
             dedupe_scope: DedupeScope::Session,
-            replay_behavior: ReplayBehavior::ReturnPrevious,
         }
     }
 
-    /// System-scoped duplicate replay.
+    /// Deduplicate across the profile runtime.
     #[must_use]
     pub fn system() -> Self {
         Self {
             dedupe_scope: DedupeScope::System,
-            replay_behavior: ReplayBehavior::ReturnPrevious,
         }
     }
 }

@@ -561,7 +561,10 @@ types instead of the former generic visibility scope:
 
 - function admission is either public to authenticated Agent, Worker, Client,
   and System callers, or internal to the engine-owned System actor;
-- idempotency keys deduplicate within one session or across the running system;
+- idempotency keys deduplicate within one session or across the profile runtime;
+  a matching duplicate returns its durable previous result, while payload,
+  revision, in-progress, and missing-outcome conflicts fail closed. There is no
+  configurable duplicate replay policy;
 - durable stream events are either a system broadcast or addressed to one
   session, while internal consumers may intentionally read all sessions.
 

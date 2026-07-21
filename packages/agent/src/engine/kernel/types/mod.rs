@@ -1,7 +1,7 @@
 //! Engine type contracts grouped by kernel concern.
 //!
-//! `catalog` owns revision counters, function admission, stream delivery,
-//! and health; `function` owns executable definitions and their
+//! `catalog` owns revision counters, function admission, and stream delivery;
+//! `function` owns executable definitions and their
 //! two concrete idempotency extents. These are deliberately distinct types:
 //! catalog admission, duplicate suppression, and event delivery are unrelated
 //! runtime decisions and must not grow back into a generic authority scope.
@@ -21,5 +21,5 @@ pub use catalog::{CatalogRevision, FunctionRevision, FunctionVisibility, StreamV
 pub use function::FunctionDefinition;
 pub use function::{
     DedupeScope, DirectWorkerToolContract, EffectClass, IdempotencyContract, IdempotencyScope,
-    ModelToolContract, ReplayBehavior, RiskLevel,
+    ModelToolContract, RiskLevel,
 };

@@ -234,28 +234,6 @@ impl InvocationResult {
             replayed_from: None,
         }
     }
-
-    /// Build a duplicate no-op result.
-    #[must_use]
-    pub fn noop_replay(
-        invocation: &Invocation,
-        worker_id: WorkerId,
-        function_revision: FunctionRevision,
-        catalog_revision: CatalogRevision,
-        replayed_from: InvocationId,
-    ) -> Self {
-        Self {
-            invocation_id: invocation.id.clone(),
-            function_id: invocation.function_id.clone(),
-            worker_id,
-            function_revision,
-            catalog_revision,
-            trace_id: invocation.causal_context.trace_id.clone(),
-            value: Some(Value::Null),
-            error: None,
-            replayed_from: Some(replayed_from),
-        }
-    }
 }
 
 /// Durable shape of an invocation attempt in the Phase 1 in-memory ledger.

@@ -1,7 +1,7 @@
 //! Engine substrate registration and invocation checks.
 //!
 //! This layer protects primitive runtime integrity: idempotency, schemas,
-//! visibility, and routability. It does not encode product
+//! and visibility. It does not encode product
 //! prompt policy.
 //!
 //! INVARIANT: internal functions are callable only by the engine-owned System

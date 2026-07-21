@@ -60,7 +60,7 @@ pub(crate) use kernel::schema::validate_schema_definition as validate_engine_sch
 pub use kernel::types::{
     CatalogRevision, DedupeScope, DirectWorkerToolContract, EffectClass, FunctionDefinition,
     FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ModelToolContract,
-    ReplayBehavior, RiskLevel, StreamVisibility,
+    RiskLevel, StreamVisibility,
 };
 
 #[cfg(test)]
