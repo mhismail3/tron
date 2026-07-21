@@ -201,9 +201,10 @@ fn assert_migrated_state(database: &Path, root: &Path) {
     let report: Value =
         serde_json::from_slice(&fs::read(root.join(IMPORT_REPORT_FILE)).unwrap()).unwrap();
     assert_eq!(report["format"], IMPORT_FORMAT);
-    assert_eq!(report["schemaVersion"], 3);
+    assert_eq!(report["schemaVersion"], 4);
     assert_eq!(report["sourceCounts"]["resources"], 2);
     assert_eq!(report["sourceCounts"]["invocations"], 1);
+    assert_eq!(report["catalogChangesRetired"], 2);
     assert_eq!(report["importedCandidates"].as_array().unwrap().len(), 1);
     assert_eq!(report["unconvertibleRecords"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -246,6 +247,33 @@ fn assert_migrated_state(database: &Path, root: &Path) {
         ),
         "\"Reject\""
     );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM engine_catalog_changes", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        scalar_text(&connection, "SELECT kind_json FROM engine_catalog_changes"),
+        "\"FunctionRegistered\""
+    );
+    drop(connection);
+    let ledger =
+        crate::engine::durability::ledger::SqliteEngineLedgerStore::open(database).unwrap();
+    assert!(
+        crate::engine::EngineLedgerStore::list_catalog_changes(&ledger)
+            .unwrap()
+            .iter()
+            .all(|change| matches!(
+                change.subject_kind,
+                crate::engine::CatalogSubjectKind::Worker
+                    | crate::engine::CatalogSubjectKind::Function
+            ))
+    );
+    drop(ledger);
+    let connection = Connection::open(database).unwrap();
     let shared_blob_count: i64 = connection
         .query_row(
             "SELECT b.ref_count FROM blobs b JOIN storage_payload_refs r ON r.payload_blob_id=b.id
@@ -273,6 +301,11 @@ CREATE TABLE engine_resource_leases(lease_id TEXT PRIMARY KEY);
 CREATE TABLE engine_compensation_records(compensation_id TEXT PRIMARY KEY,result_json TEXT);
 CREATE TABLE engine_catalog_workers(worker_id TEXT PRIMARY KEY);
 CREATE TABLE engine_catalog_functions(function_id TEXT PRIMARY KEY);
+CREATE TABLE engine_catalog_changes(
+ id TEXT PRIMARY KEY,before_revision INTEGER NOT NULL,after_revision INTEGER NOT NULL,
+ kind_json TEXT NOT NULL,subject_id TEXT NOT NULL,subject_kind_json TEXT NOT NULL,
+ class_json TEXT NOT NULL,visibility_json TEXT NOT NULL,session_id TEXT,workspace_id TEXT,
+ owner_worker_id TEXT,timestamp TEXT NOT NULL);
 CREATE TABLE engine_queue_items(queue_id TEXT PRIMARY KEY);
 CREATE TABLE engine_invocations(
  invocation_id TEXT PRIMARY KEY,function_id TEXT NOT NULL,worker_id TEXT NOT NULL,function_revision INTEGER NOT NULL,
@@ -299,6 +332,15 @@ INSERT INTO engine_grant_events VALUES('grant-event-one');
 INSERT INTO engine_resource_leases VALUES('lease-one');
 INSERT INTO engine_catalog_workers VALUES('legacy-worker');
 INSERT INTO engine_catalog_functions VALUES('legacy::function');
+INSERT INTO engine_catalog_changes VALUES(
+ 'change-function',0,1,'"FunctionRegistered"','engine::state_get','"Function"',
+ '"Availability"','"System"',NULL,NULL,'engine','2026-01-01T00:00:00Z');
+INSERT INTO engine_catalog_changes VALUES(
+ 'change-trigger',1,2,'"TriggerRegistered"','legacy-trigger','"Trigger"',
+ '"Availability"','"Internal"',NULL,NULL,NULL,'2026-01-01T00:00:01Z');
+INSERT INTO engine_catalog_changes VALUES(
+ 'change-trigger-type',2,3,'"TriggerTypeRegistered"','legacy-trigger-type','"TriggerType"',
+ '"Availability"','"Internal"',NULL,NULL,NULL,'2026-01-01T00:00:02Z');
 INSERT INTO engine_queue_items VALUES('queue-one');
 INSERT INTO retained_sessions VALUES('session-one','retained-session');
 INSERT INTO engine_state_entries VALUES('state-one','retained-state');

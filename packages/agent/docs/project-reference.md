@@ -500,7 +500,10 @@ complete executable legacy bundles as inactive candidates, reports incomplete
 proposals, and removes the old grant/resource/lease/compensation tables and
 invocation columns in one transaction. Neither path retains a synthetic grant,
 compatibility adapter, nullable permission observation, or permissive legacy
-parser in steady-state execution.
+parser in steady-state execution. The same transaction removes catalog-change
+rows owned by the deleted generic trigger registry while retaining current
+worker/function catalog evidence; startup does not decode obsolete trigger
+variants merely to discard them later.
 
 There are no local operation claims, resource selectors, synthetic
 grants, or agent-kind rejections. Executable workers can change local files and

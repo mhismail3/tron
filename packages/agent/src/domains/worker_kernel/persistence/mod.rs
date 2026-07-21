@@ -2,8 +2,12 @@
 //!
 //! Filesystem worker bundles and active pointers are canonical. The SQLite
 //! backend owns rebuildable routing indexes plus durable operational ledgers.
-//! Database and snapshot implementation types stay private to this module;
-//! callers use [`WorkerStore`] and the narrow startup/offline snapshot
+//! Database and snapshot implementation types stay private to this module.
+//! Retirement also deletes catalog-change rows for the removed generic trigger
+//! registry; current worker/function history remains as observational evidence,
+//! and no compatibility decoder can revive the superseded trigger plane.
+//!
+//! Callers use [`WorkerStore`] and the narrow startup/offline snapshot
 //! functions re-exported here.
 //! Store concern modules and their scenario tests live under `store/`, adjacent
 //! to their single state owner without inflating one production file.

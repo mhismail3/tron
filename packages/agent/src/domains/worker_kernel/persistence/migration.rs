@@ -11,9 +11,9 @@ use super::super::types::{WorkerBundle, WorkerState, WorkerTrigger};
 use super::store::validate_bundle;
 
 const REBUILD_FORMAT: &str = "tron.worker_index_rebuild.v1";
-const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v3";
-const IMPORT_MARKER_KEY: &str = "worker_first_retirement_v3";
-const IMPORT_REPORT_FILE: &str = "legacy-import-report.v3.json";
+const IMPORT_FORMAT: &str = "tron.worker_legacy_import.v4";
+const IMPORT_MARKER_KEY: &str = "worker_first_retirement_v4";
+const IMPORT_REPORT_FILE: &str = "legacy-import-report.v4.json";
 const RETIRED_TABLES: &[&str] = &[
     "engine_resource_events",
     "engine_resource_links",
@@ -56,6 +56,7 @@ struct ImportReport {
     imported_candidates: Vec<Value>,
     unconvertible_records: Vec<Value>,
     invocation_ledger_rebuilt: bool,
+    catalog_changes_retired: usize,
     idempotency_rows_rewritten: usize,
     payload_refs_removed: usize,
     payload_blobs_removed: usize,
@@ -488,7 +489,7 @@ fn prepare_worker_first_retirement_with_fault(
         collect_legacy_candidates(&connection, &root, &imported_at)?;
     let mut report = ImportReport {
         format: IMPORT_FORMAT.to_owned(),
-        schema_version: 3,
+        schema_version: 4,
         imported_at,
         source_database: source.display().to_string(),
         source_sha256,
@@ -498,6 +499,7 @@ fn prepare_worker_first_retirement_with_fault(
         imported_candidates,
         unconvertible_records,
         invocation_ledger_rebuilt: false,
+        catalog_changes_retired: 0,
         idempotency_rows_rewritten: 0,
         payload_refs_removed: 0,
         payload_blobs_removed: 0,
@@ -518,6 +520,7 @@ fn prepare_worker_first_retirement_with_fault(
         .unwrap_or(0);
     report.invocation_ledger_rebuilt =
         crate::engine::retire_legacy_invocation_columns(&transaction)?;
+    report.catalog_changes_retired = retire_legacy_catalog_changes(&transaction)?;
     let cleanup = crate::shared::storage::retire_payload_refs_by_owner_kind(
         &transaction,
         &[
@@ -606,6 +609,20 @@ fn read_retirement_marker(connection: &Connection) -> Result<Option<ImportReport
                 .map_err(|error| format!("decode worker-first retirement marker: {error}"))
         })
         .transpose()
+}
+
+fn retire_legacy_catalog_changes(transaction: &rusqlite::Transaction<'_>) -> Result<usize, String> {
+    if !table_exists(transaction, "engine_catalog_changes")? {
+        return Ok(0);
+    }
+    transaction
+        .execute(
+            "DELETE FROM engine_catalog_changes
+             WHERE kind_json IN ('\"TriggerRegistered\"','\"TriggerTypeRegistered\"')
+                OR subject_kind_json IN ('\"Trigger\"','\"TriggerType\"')",
+            [],
+        )
+        .map_err(|error| format!("retire legacy trigger catalog history: {error}"))
 }
 
 fn collect_legacy_candidates(
@@ -869,6 +886,22 @@ fn verify_retired_schema(connection: &Connection) -> Result<(), String> {
             if columns.contains(retired) {
                 return Err(format!("retired invocation column {retired} remains"));
             }
+        }
+    }
+    if table_exists(connection, "engine_catalog_changes")? {
+        let trigger_changes: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM engine_catalog_changes
+                 WHERE kind_json IN ('\"TriggerRegistered\"','\"TriggerTypeRegistered\"')
+                    OR subject_kind_json IN ('\"Trigger\"','\"TriggerType\"')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("verify retired trigger catalog history: {error}"))?;
+        if trigger_changes != 0 {
+            return Err(format!(
+                "{trigger_changes} retired trigger catalog changes remain"
+            ));
         }
     }
     Ok(())

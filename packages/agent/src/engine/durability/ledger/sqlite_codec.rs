@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS engine_catalog_changes (
 -- The removed generic trigger catalog no longer has a decoder or runtime
 -- owner. Worker trigger evidence lives in worker-kernel operational tables.
 DELETE FROM engine_catalog_changes
-WHERE subject_kind_json IN ('\"Trigger\"', '\"TriggerType\"');
+WHERE kind_json IN ('"TriggerRegistered"', '"TriggerTypeRegistered"')
+   OR subject_kind_json IN ('"Trigger"', '"TriggerType"');
 
 CREATE TABLE IF NOT EXISTS engine_idempotency_entries (
   function_id           TEXT NOT NULL,

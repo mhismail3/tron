@@ -16,8 +16,8 @@
 //! idempotent replays. Both ledger implementations apply that policy at their
 //! storage boundary even when a caller manually constructs a record.
 //! The worker-first retirement migration removes historical authority, lease,
-//! compensation, and produced-resource columns in one transaction while
-//! preserving the causal and outcome fields owned by this ledger.
+//! compensation, produced-resource, and generic-trigger records in one
+//! transaction while preserving current catalog, causal, and outcome evidence.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
