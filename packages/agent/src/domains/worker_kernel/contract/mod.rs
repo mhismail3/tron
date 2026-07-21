@@ -1,9 +1,25 @@
+//! Fixed primitive contracts and their single canonical identity manifest.
+//!
+//! `manifest` defines stable model names, function IDs, groups, and ordering.
+//! This module builds request contracts from that inventory; `response` owns
+//! output schemas, and `bundle` owns the complete atomic worker-authoring
+//! schema. Contract tests live beside all three owners.
+
 use serde_json::{Value, json};
 
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionVisibility, IdempotencyContract, RiskLevel,
 };
+
+mod bundle;
+mod manifest;
+mod response;
+
+#[cfg(test)]
+pub(crate) use manifest::CorePrimitiveGroup;
+pub(crate) use manifest::{core_primitive_for_function, core_primitives};
+use response::{open_response, response_schema, worker_id_schema};
 
 const WORKER: &str = "worker_kernel";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
@@ -13,224 +29,6 @@ pub(super) const DEFAULT_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 5;
 pub(super) const MAX_TEXT_SEARCH_TIMEOUT_SECONDS: u64 = 60;
 pub(super) const DEFAULT_TEXT_SEARCH_WALK_ENTRIES: usize = 20_000;
 pub(super) const MAX_TEXT_SEARCH_WALK_ENTRIES: usize = 100_000;
-
-/// Stable model-facing primitive families.
-///
-/// This is deliberately narrower than the complete worker-kernel contract:
-/// internal webhook and inbox projection functions are kernel mechanics, not
-/// model vocabulary.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum CorePrimitiveGroup {
-    Host,
-    WorkerControl,
-    CoreChange,
-}
-
-impl CorePrimitiveGroup {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Host => "host",
-            Self::WorkerControl => "worker_control",
-            Self::CoreChange => "core_change",
-        }
-    }
-}
-
-/// One canonical model-facing primitive identity.
-///
-/// Contracts, handlers, provider projection, dashboard projection, and tests
-/// derive full function identity and ordering from this manifest instead of
-/// storing function-name fragments or maintaining parallel name maps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CorePrimitiveDescriptor {
-    pub(crate) function_id: &'static str,
-    pub(crate) model_name: &'static str,
-    pub(crate) group: CorePrimitiveGroup,
-    pub(crate) order: u16,
-}
-
-const CORE_PRIMITIVES: &[CorePrimitiveDescriptor] = &[
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::filesystem_read",
-        model_name: "filesystem_read",
-        group: CorePrimitiveGroup::Host,
-        order: 10,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::filesystem_list",
-        model_name: "filesystem_list",
-        group: CorePrimitiveGroup::Host,
-        order: 20,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::filesystem_search_text",
-        model_name: "filesystem_search_text",
-        group: CorePrimitiveGroup::Host,
-        order: 30,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::filesystem_write",
-        model_name: "filesystem_write",
-        group: CorePrimitiveGroup::Host,
-        order: 40,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::filesystem_edit",
-        model_name: "filesystem_edit",
-        group: CorePrimitiveGroup::Host,
-        order: 45,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::process_run",
-        model_name: "process_run",
-        group: CorePrimitiveGroup::Host,
-        order: 50,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::web_fetch",
-        model_name: "web_fetch",
-        group: CorePrimitiveGroup::Host,
-        order: 60,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::session_set_title",
-        model_name: "session_set_title",
-        group: CorePrimitiveGroup::Host,
-        order: 70,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::upsert",
-        model_name: "worker_upsert",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 100,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::discover",
-        model_name: "worker_discover",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 110,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::list",
-        model_name: "worker_list",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 120,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::inspect",
-        model_name: "worker_inspect",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 130,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::invoke",
-        model_name: "worker_invoke",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 140,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::await",
-        model_name: "worker_await",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 145,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::stop",
-        model_name: "worker_stop",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 150,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::disable",
-        model_name: "worker_disable",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 160,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::enable",
-        model_name: "worker_enable",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 170,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::rollback",
-        model_name: "worker_rollback",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 180,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::retire",
-        model_name: "worker_retire",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 190,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::purge",
-        model_name: "worker_purge",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 200,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::inbox",
-        model_name: "worker_inbox",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 210,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::runs",
-        model_name: "worker_runs",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 220,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::webhook_rotate",
-        model_name: "worker_webhook_rotate",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 230,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::stop_all",
-        model_name: "worker_stop_all",
-        group: CorePrimitiveGroup::WorkerControl,
-        order: 240,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::core_proposal_create",
-        model_name: "core_proposal_create",
-        group: CorePrimitiveGroup::CoreChange,
-        order: 300,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::core_proposal_list",
-        model_name: "core_proposal_list",
-        group: CorePrimitiveGroup::CoreChange,
-        order: 310,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::core_proposal_inspect",
-        model_name: "core_proposal_inspect",
-        group: CorePrimitiveGroup::CoreChange,
-        order: 320,
-    },
-    CorePrimitiveDescriptor {
-        function_id: "worker_kernel::core_proposal_apply",
-        model_name: "core_proposal_apply",
-        group: CorePrimitiveGroup::CoreChange,
-        order: 330,
-    },
-];
-
-pub(crate) const fn core_primitives() -> &'static [CorePrimitiveDescriptor] {
-    CORE_PRIMITIVES
-}
-
-pub(crate) fn core_primitive_for_function(
-    function_id: &str,
-) -> Option<&'static CorePrimitiveDescriptor> {
-    core_primitives()
-        .iter()
-        .find(|descriptor| descriptor.function_id == function_id)
-}
 
 pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefinition>> {
     let mut specs = Vec::new();
@@ -358,7 +156,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         json!({
             "type":"object","additionalProperties":false,"required":["bundle"],
             "properties":{
-                "bundle":super::bundle_contract::worker_bundle_schema(),
+                "bundle":bundle::worker_bundle_schema(),
                 "sourceDirectory":{"type":"string","description":"Optional local directory containing staged UTF-8 worker source. Files are imported recursively into bundle.files; explicit inline files win. Use this after authoring and testing locally so the model does not read and echo file contents back through JSON."},
                 "predecessorWorkerId":{"type":"string"}
             }
@@ -687,167 +485,5 @@ fn spec(
     contract.build()
 }
 
-fn response_schema(function: &str) -> Value {
-    match function {
-        "worker_kernel::filesystem_read" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["path","content","bytes","retainedBytes","truncated"],
-            "properties":{"path":{"type":"string"},"content":{"type":"string"},"bytes":{},"retainedBytes":{"type":"integer"},"truncated":{"type":"boolean"}}
-        }),
-        "worker_kernel::filesystem_list" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["path","entries","visitedEntries","resultLimitReached","walkLimitReached","truncated"],
-            "properties":{"path":{"type":"string"},"entries":{"type":"array"},"visitedEntries":{"type":"integer"},"resultLimitReached":{"type":"boolean"},"walkLimitReached":{"type":"boolean"},"truncated":{"type":"boolean"}}
-        }),
-        "worker_kernel::filesystem_search_text" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["query","path","matches","visitedEntries","skippedDirectories","resultLimitReached","walkLimitReached","timeLimitReached","truncated"],
-            "properties":{"query":{"type":"string"},"path":{"type":"string"},"matches":{"type":"array"},"visitedEntries":{"type":"integer"},"skippedDirectories":{"type":"integer"},"resultLimitReached":{"type":"boolean"},"walkLimitReached":{"type":"boolean"},"timeLimitReached":{"type":"boolean"},"truncated":{"type":"boolean"}}
-        }),
-        "worker_kernel::filesystem_write" => mutation_file_response_schema(false),
-        "worker_kernel::filesystem_edit" => mutation_file_response_schema(true),
-        "worker_kernel::process_run" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["command","cwd","status","success","stdout","stderr","stdoutTruncated","stderrTruncated"],
-            "properties":{"command":{"type":"array"},"cwd":{"type":"string"},"status":{},"success":{"type":"boolean"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutTruncated":{"type":"boolean"},"stderrTruncated":{"type":"boolean"}}
-        }),
-        "worker_kernel::web_fetch" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["url","status","contentType","contentLength","observedBytes","retainedBytes","truncated","content"],
-            "properties":{"url":{"type":"string"},"status":{"type":"integer"},"contentType":{},"contentLength":{},"observedBytes":{"type":"integer"},"retainedBytes":{"type":"integer"},"truncated":{"type":"boolean"},"content":{"type":"string"}}
-        }),
-        "worker_kernel::session_set_title" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["sessionId","title","updated"],
-            "properties":{"sessionId":{"type":"string"},"title":{"type":"string"},"updated":{"type":"boolean"}}
-        }),
-        "worker_kernel::core_proposal_create"
-        | "worker_kernel::core_proposal_inspect"
-        | "worker_kernel::core_proposal_apply" => core_proposal_response_schema(),
-        "worker_kernel::core_proposal_list" => json!({
-            "type":"object","additionalProperties":false,"required":["proposals"],
-            "properties":{"proposals":{"type":"array","items":core_proposal_response_schema()}}
-        }),
-        "worker_kernel::upsert" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["worker","version","created","replacedWorkerId","webhooks"],
-            "properties":{"worker":worker_summary_response_schema(),"version":{"type":"string"},"created":{"type":"boolean"},"replacedWorkerId":{},"webhooks":{"type":"array"},"sourceImport":{"type":"object"}}
-        }),
-        "worker_kernel::discover" => json!({
-            "type":"object","additionalProperties":false,"required":["query","workers"],
-            "properties":{"query":{"type":"string"},"workers":{"type":"array"}}
-        }),
-        "worker_kernel::list" => json!({
-            "type":"object","additionalProperties":false,"required":["workers","stopAll"],
-            "properties":{"workers":{"type":"array","items":worker_summary_response_schema()},"stopAll":{"type":"boolean"}}
-        }),
-        "worker_kernel::inspect" => json!({
-            "type":"object","additionalProperties":false,
-            "required":["worker","bundle","route","versions","triggers","healthHistory","audit","versionDirectory"],
-            "properties":{"worker":worker_summary_response_schema(),"bundle":{"type":"object"},"route":{},"versions":{"type":"array"},"triggers":{"type":"array"},"healthHistory":{"type":"array"},"audit":{"type":"array"},"versionDirectory":{"type":"string"}}
-        }),
-        "worker_kernel::invoke" => invocation_response_schema(),
-        "worker_kernel::await" => json!({
-            "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
-            "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
-        }),
-        "worker_kernel::stop"
-        | "worker_kernel::disable"
-        | "worker_kernel::enable"
-        | "worker_kernel::retire" => worker_summary_response_schema(),
-        "worker_kernel::rollback" => json!({
-            "type":"object","additionalProperties":false,"required":["worker","webhooks"],
-            "properties":{"worker":worker_summary_response_schema(),"webhooks":{"type":"array"}}
-        }),
-        "worker_kernel::purge" => json!({
-            "type":"object","additionalProperties":false,"required":["workerId","purged"],
-            "properties":{"workerId":{"type":"string"},"purged":{"type":"boolean"}}
-        }),
-        "worker_kernel::inbox" => json!({
-            "type":"object","additionalProperties":false,"required":["items"],
-            "properties":{"items":{"type":"array"}}
-        }),
-        "worker_kernel::runs" => json!({
-            "type":"object","additionalProperties":false,"required":["runs","attempts","traces"],
-            "properties":{"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"}}
-        }),
-        "worker_kernel::webhook_rotate" => webhook_credential_response_schema(),
-        "worker_kernel::stop_all" => json!({
-            "type":"object","additionalProperties":false,"required":["stopped"],
-            "properties":{"stopped":{"type":"boolean"}}
-        }),
-        _ => open_response(),
-    }
-}
-
-fn mutation_file_response_schema(include_replacements: bool) -> Value {
-    let mut properties = serde_json::Map::from_iter([
-        ("path".to_owned(), json!({"type":"string"})),
-        ("bytes".to_owned(), json!({"type":"integer"})),
-        ("changed".to_owned(), json!({"type":"boolean"})),
-        ("previousSha256".to_owned(), json!({})),
-        ("sha256".to_owned(), json!({"type":"string"})),
-    ]);
-    let mut required = vec!["path", "bytes", "changed", "previousSha256", "sha256"];
-    if include_replacements {
-        let _ = properties.insert("replacementsApplied".to_owned(), json!({"type":"integer"}));
-        required.push("replacementsApplied");
-    } else {
-        let _ = properties.insert("written".to_owned(), json!({"type":"boolean"}));
-        required.push("written");
-    }
-    json!({"type":"object","additionalProperties":false,"required":required,"properties":properties})
-}
-
-fn worker_summary_response_schema() -> Value {
-    json!({
-        "type":"object","additionalProperties":false,
-        "required":["workerId","name","description","toolName","runnerKind","activeVersion","enabled","retired","health","triggerCount","updatedAt"],
-        "properties":{"workerId":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"toolName":{"type":"string"},"runnerKind":{"type":"string"},"activeVersion":{"type":"string"},"enabled":{"type":"boolean"},"retired":{"type":"boolean"},"health":{"type":"string"},"triggerCount":{"type":"integer"},"updatedAt":{"type":"string"}}
-    })
-}
-
-fn invocation_response_schema() -> Value {
-    json!({
-        "type":"object","additionalProperties":false,
-        "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","attemptCount","createdAt","startedAt","completedAt"],
-        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
-    })
-}
-
-fn webhook_credential_response_schema() -> Value {
-    json!({
-        "type":"object","additionalProperties":false,"required":["triggerId","path","token"],
-        "properties":{"triggerId":{"type":"string"},"path":{"type":"string"},"token":{"type":"string"}}
-    })
-}
-
-fn core_proposal_response_schema() -> Value {
-    json!({
-        "type":"object","additionalProperties":false,
-        "required":["proposalId","title","intent","repositoryPath","worktreePath","branch","commit","testCommand","testOutput","status","createdAt","appliedAt","appliedCommit","approvalSessionId","approvalMessageId"],
-        "properties":{"proposalId":{"type":"string"},"title":{"type":"string"},"intent":{"type":"string"},"repositoryPath":{"type":"string"},"worktreePath":{"type":"string"},"branch":{"type":"string"},"commit":{"type":"string"},"testCommand":{"type":"array"},"testOutput":{"type":"string"},"status":{"type":"string"},"createdAt":{"type":"string"},"appliedAt":{},"appliedCommit":{},"approvalSessionId":{},"approvalMessageId":{}}
-    })
-}
-
-fn worker_id_schema(include_version: bool) -> Value {
-    let mut properties = serde_json::Map::new();
-    let _ = properties.insert("workerId".to_owned(), json!({"type":"string"}));
-    if include_version {
-        let _ = properties.insert("version".to_owned(), json!({"type":"string"}));
-    }
-    json!({
-        "type":"object",
-        "additionalProperties":false,
-        "required": if include_version { vec!["workerId", "version"] } else { vec!["workerId"] },
-        "properties": properties,
-    })
-}
-
-fn open_response() -> Value {
-    json!({"type":"object","additionalProperties":true})
-}
-
 #[cfg(test)]
-#[path = "contract_tests.rs"]
 mod tests;

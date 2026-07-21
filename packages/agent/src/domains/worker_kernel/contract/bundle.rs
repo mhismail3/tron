@@ -1,4 +1,4 @@
-//! Complete model-discoverable worker bundle authoring schema.
+//! Complete model-discoverable schema for atomic worker authoring.
 //!
 //! Runtime decoding remains owned by `WorkerBundle`; this projection keeps the
 //! atomic `worker_upsert` operation self-describing without a proposal,

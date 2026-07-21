@@ -11,8 +11,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `bundle_contract` | Complete model-discoverable schema for atomic worker authoring |
-//! | `contract` | Fixed direct worker-management contracts and their adjacent contract tests |
+//! | `contract` | Primitive identity plus request, response, and worker-bundle schemas |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
 //! | `persistence` | Canonical bundles, snapshot-first legacy-state retirement, index reconstruction, and durable operational ledgers |
@@ -165,7 +164,6 @@ use crate::domains::registration::composition::{
     DomainFunctionRegistration, DomainRegistrationContext,
 };
 
-mod bundle_contract;
 mod contract;
 mod core_proposals;
 mod handlers;
