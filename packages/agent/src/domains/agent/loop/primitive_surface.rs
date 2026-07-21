@@ -140,24 +140,18 @@ pub struct ResolvedPrimitiveSurface {
 pub(crate) async fn resolve_provider_primitive_surface(
     host: &EngineHostHandle,
     session_id: &str,
-    workspace_id: Option<&str>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
-    resolve_provider_primitive_surface_for_query(host, session_id, workspace_id, None).await
+    resolve_provider_primitive_surface_for_query(host, session_id, None).await
 }
 
 pub(crate) async fn resolve_provider_primitive_surface_for_query(
     host: &EngineHostHandle,
     session_id: &str,
-    workspace_id: Option<&str>,
     relevance_query: Option<&str>,
 ) -> Result<ResolvedPrimitiveSurface, String> {
-    let resolved = crate::domains::worker_kernel::resolve_tool_surface(
-        host,
-        session_id,
-        workspace_id,
-        relevance_query,
-    )
-    .await?;
+    let resolved =
+        crate::domains::worker_kernel::resolve_tool_surface(host, session_id, relevance_query)
+            .await?;
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
 
@@ -268,7 +262,7 @@ mod tests {
             function_id,
             WorkerId::new("worker_kernel").expect("worker id"),
             description,
-            crate::engine::VisibilityScope::System,
+            crate::engine::FunctionVisibility::Public,
             EffectClass::PureRead,
         )
         .with_request_schema(serde_json::json!({
@@ -298,7 +292,7 @@ mod tests {
             FunctionId::new("demo::read").expect("function id"),
             WorkerId::new("demo").expect("worker id"),
             "Should not be provider-facing",
-            crate::engine::VisibilityScope::System,
+            crate::engine::FunctionVisibility::Public,
             EffectClass::PureRead,
         );
         old_builtin_like_function.metadata =
@@ -306,7 +300,7 @@ mod tests {
         host.register_function_for_setup(old_builtin_like_function, Arc::new(InboxAttachHandler))
             .expect("nonprimitive function");
 
-        let surface = resolve_provider_primitive_surface(&host, "session-a", None)
+        let surface = resolve_provider_primitive_surface(&host, "session-a")
             .await
             .expect("surface");
         assert!(surface.capabilities.is_empty());
@@ -328,16 +322,16 @@ mod tests {
             FunctionId::new("worker_kernel::inbox_attach").expect("function id"),
             WorkerId::new("worker_kernel").expect("worker id"),
             "Attach unseen inbox results",
-            crate::engine::VisibilityScope::Internal,
+            crate::engine::FunctionVisibility::Internal,
             EffectClass::IdempotentWrite,
         )
-        .with_idempotency(crate::engine::IdempotencyContract::caller_system_engine_ledger())
+        .with_idempotency(crate::engine::IdempotencyContract::system())
         .with_request_schema(serde_json::json!({"type":"object"}))
         .with_response_schema(serde_json::json!({"type":"object"}));
         host.register_function_for_setup(attach, Arc::new(InboxAttachHandler))
             .expect("internal inbox attachment");
 
-        let surface = resolve_provider_primitive_surface(&host, "session-a", None)
+        let surface = resolve_provider_primitive_surface(&host, "session-a")
             .await
             .expect("surface");
         let primer = take_worker_inbox_context(
@@ -390,7 +384,6 @@ mod tests {
         let surface = resolve_provider_primitive_surface_for_query(
             &host,
             "autonomy-session",
-            None,
             Some("perform recent research with sources"),
         )
         .await
@@ -456,7 +449,6 @@ mod tests {
         let before = resolve_provider_primitive_surface_for_query(
             &host,
             "promotion-session",
-            None,
             Some("astronomy ephemeris"),
         )
         .await
@@ -467,7 +459,6 @@ mod tests {
         let after = resolve_provider_primitive_surface_for_query(
             &host,
             "promotion-session",
-            None,
             Some("astronomy ephemeris"),
         )
         .await
@@ -517,7 +508,6 @@ mod tests {
         let surface = resolve_provider_primitive_surface_for_query(
             &reopened,
             "durable-session",
-            None,
             Some("astronomy ephemeris"),
         )
         .await
@@ -554,7 +544,6 @@ mod tests {
         let surface = resolve_provider_primitive_surface_for_query(
             &host,
             "bounded-session",
-            None,
             Some("astronomy ephemeris"),
         )
         .await
@@ -598,7 +587,6 @@ mod tests {
         let surface = resolve_provider_primitive_surface_for_query(
             &host,
             "recreated-session",
-            None,
             Some("astronomy ephemeris"),
         )
         .await

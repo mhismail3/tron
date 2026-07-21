@@ -27,8 +27,9 @@ pub(in crate::engine::tests) use crate::engine::kernel::ids::{
     ActorId, FunctionId, InvocationId, TraceId, WorkerId,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::types::{
-    CatalogRevision, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
-    IdempotencyContract, IdempotencyScope, Provenance, ReplayBehavior, RiskLevel, VisibilityScope,
+    CatalogRevision, DedupeScope, EffectClass, FunctionDefinition, FunctionHealth,
+    FunctionRevision, FunctionVisibility, IdempotencyContract, IdempotencyScope, ReplayBehavior,
+    RiskLevel, StreamVisibility,
 };
 pub(in crate::engine::tests) use crate::engine::{
     EngineHostHandle, PublishStreamEvent, StreamActorScope, StreamCursor,
@@ -55,7 +56,7 @@ pub(in crate::engine::tests) fn read_function(id: &str, owner: &str) -> Function
         fid(id),
         wid(owner),
         "read function",
-        VisibilityScope::Agent,
+        FunctionVisibility::Public,
         EffectClass::PureRead,
     )
 }
@@ -65,22 +66,22 @@ pub(in crate::engine::tests) fn write_function(id: &str, owner: &str) -> Functio
         fid(id),
         wid(owner),
         "write function",
-        VisibilityScope::Agent,
+        FunctionVisibility::Public,
         EffectClass::IdempotentWrite,
     )
-    .with_idempotency(IdempotencyContract::caller_session())
+    .with_idempotency(IdempotencyContract::session())
 }
 
 pub(in crate::engine::tests) fn reject_idempotency() -> IdempotencyContract {
     IdempotencyContract {
-        dedupe_scope: VisibilityScope::Session,
+        dedupe_scope: DedupeScope::Session,
         replay_behavior: ReplayBehavior::Reject,
     }
 }
 
 pub(in crate::engine::tests) fn noop_idempotency() -> IdempotencyContract {
     IdempotencyContract {
-        dedupe_scope: VisibilityScope::Session,
+        dedupe_scope: DedupeScope::Session,
         replay_behavior: ReplayBehavior::NoOp,
     }
 }

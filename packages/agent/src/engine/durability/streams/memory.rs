@@ -82,12 +82,7 @@ impl InMemoryEngineStreamStore {
             .filter(|event| event.topic == topic)
             .filter(|event| event.cursor > after)
             .filter(|event| {
-                stream_scope_visible(
-                    &event.visibility,
-                    event.session_id.as_deref(),
-                    event.workspace_id.as_deref(),
-                    actor,
-                )
+                stream_scope_visible(&event.visibility, event.session_id.as_deref(), actor)
             })
             .cloned()
             .collect::<Vec<_>>();

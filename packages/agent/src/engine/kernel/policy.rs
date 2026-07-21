@@ -4,15 +4,16 @@
 //! visibility, and routability. It does not encode product
 //! prompt policy.
 //!
-//! INVARIANT: internal catalog visibility is derived from the authenticated
-//! runtime actor kind; public clients, users, and agent contexts remain denied.
+//! INVARIANT: internal functions are callable only by the engine-owned System
+//! actor. Agent, Worker, and authenticated Client actors share the public local
+//! function plane; actor identity is evidence, not a grant hierarchy.
 
 use crate::engine::catalog::discovery::{ActorContext, ActorKind};
 use crate::engine::invocation::model::{CausalContext, Invocation};
 
 use super::errors::{EngineError, Result};
 use super::schema;
-use super::types::{FunctionDefinition, VisibilityScope};
+use super::types::{FunctionDefinition, FunctionVisibility};
 
 /// Validate a function definition before registration.
 pub fn validate_function_registration(function: &FunctionDefinition) -> Result<()> {
@@ -70,47 +71,8 @@ fn validate_invocation_contract(
 #[must_use]
 pub fn is_visible_to_actor(function: &FunctionDefinition, actor: &ActorContext) -> bool {
     match function.visibility {
-        VisibilityScope::Internal => matches!(
-            actor.actor_kind,
-            ActorKind::Admin
-                | ActorKind::System
-                | ActorKind::Worker
-                | ActorKind::Queue
-                | ActorKind::Cron
-        ),
-        VisibilityScope::Session => {
-            actor.actor_kind.is_admin_like()
-                || matches!(
-                    (
-                        actor.session_id.as_deref(),
-                        function.provenance.session_id.as_deref()
-                    ),
-                    (Some(actor_session), Some(function_session))
-                        if actor_session == function_session
-                )
-        }
-        VisibilityScope::Workspace => {
-            actor.actor_kind.is_admin_like()
-                || matches!(
-                    (
-                        actor.workspace_id.as_deref(),
-                        function.provenance.workspace_id.as_deref()
-                    ),
-                    (Some(actor_workspace), Some(function_workspace))
-                        if actor_workspace == function_workspace
-                )
-        }
-        VisibilityScope::System => true,
-        VisibilityScope::Client => {
-            matches!(actor.actor_kind, ActorKind::Client) || actor.actor_kind.is_admin_like()
-        }
-        VisibilityScope::Worker => {
-            matches!(actor.actor_kind, ActorKind::Worker) || actor.actor_kind.is_admin_like()
-        }
-        VisibilityScope::Admin => actor.actor_kind.is_admin_like(),
-        VisibilityScope::Agent => {
-            matches!(actor.actor_kind, ActorKind::Agent) || actor.actor_kind.is_admin_like()
-        }
+        FunctionVisibility::Public => true,
+        FunctionVisibility::Internal => actor.actor_kind == ActorKind::System,
     }
 }
 
@@ -118,8 +80,6 @@ fn actor_from_causal_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
         actor_kind: context.actor_kind.clone(),
-        session_id: context.session_id.clone(),
-        workspace_id: context.workspace_id.clone(),
     }
 }
 
@@ -134,15 +94,14 @@ mod tests {
             FunctionId::new("alpha::hidden").expect("function id"),
             WorkerId::new("alpha").expect("worker id"),
             "hidden function",
-            VisibilityScope::Internal,
+            FunctionVisibility::Internal,
             EffectClass::PureRead,
         );
         let actor = |kind| ActorContext::new(ActorId::new("actor").expect("actor id"), kind);
 
         assert!(!is_visible_to_actor(&function, &actor(ActorKind::Client)));
-        assert!(!is_visible_to_actor(&function, &actor(ActorKind::User)));
         assert!(!is_visible_to_actor(&function, &actor(ActorKind::Agent)));
-        assert!(is_visible_to_actor(&function, &actor(ActorKind::Worker)));
+        assert!(!is_visible_to_actor(&function, &actor(ActorKind::Worker)));
         assert!(is_visible_to_actor(&function, &actor(ActorKind::System)));
     }
 }

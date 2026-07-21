@@ -21,7 +21,6 @@ pub(super) struct SubscriptionState {
     pub(super) cursor: StreamCursor,
     pub(super) filters: Option<Value>,
     pub(super) session_id: Option<String>,
-    pub(super) workspace_id: Option<String>,
 }
 
 impl EngineWsSession {
@@ -68,7 +67,6 @@ impl EngineWsSession {
                 cursor,
                 filters: message.filters,
                 session_id: context.session_id,
-                workspace_id: context.workspace_id,
             },
         );
         self.send_success(
@@ -115,10 +113,7 @@ impl EngineWsSession {
                 );
             };
             let after = StreamCursor(message.cursor.unwrap_or(subscription.cursor.0));
-            let actor = StreamActorScope::scoped(
-                subscription.session_id.clone(),
-                subscription.workspace_id.clone(),
-            );
+            let actor = StreamActorScope::scoped(subscription.session_id.clone());
             return self
                 .send_stream_page(
                     message.id,
@@ -157,7 +152,7 @@ impl EngineWsSession {
                 ),
             );
         };
-        let actor = StreamActorScope::scoped(context.session_id, context.workspace_id);
+        let actor = StreamActorScope::scoped(context.session_id);
         self.send_stream_page(
             message.id,
             &topic,
@@ -264,10 +259,7 @@ pub(super) async fn push_subscription_events(
                     .map(|(id, state)| (id.clone(), state.clone()))
                     .collect::<Vec<_>>();
                 for (subscription_id, state) in snapshot {
-                    let actor = StreamActorScope::scoped(
-                        state.session_id.clone(),
-                        state.workspace_id.clone(),
-                    );
+                    let actor = StreamActorScope::scoped(state.session_id.clone());
                     let page = match ctx
                         .engine_host
                         .poll_stream_topic(&state.topic, state.cursor, STREAM_MAX_LIMIT, &actor)

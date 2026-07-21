@@ -8,8 +8,8 @@ use crate::domains::session::event_store::sqlite::connection::{self, ConnectionC
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 use crate::engine::{
-    EffectClass, EngineHostHandle, FunctionDefinition, FunctionId, Invocation, RiskLevel,
-    VisibilityScope, WorkerId,
+    EffectClass, EngineHostHandle, FunctionDefinition, FunctionId, FunctionVisibility, Invocation,
+    RiskLevel, WorkerId,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::events::{AssistantMessage, TronEvent};
@@ -186,7 +186,7 @@ async fn phase_engine_surface_with_mode(
         function_id.clone(),
         WorkerId::new("capability").expect("worker id"),
         "Phase lifecycle test".to_owned(),
-        VisibilityScope::System,
+        FunctionVisibility::Public,
         EffectClass::PureRead,
     )
     .with_risk(RiskLevel::Low);

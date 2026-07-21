@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{FunctionHealth, FunctionRevision, Provenance, VisibilityScope};
+use super::{FunctionHealth, FunctionRevision, FunctionVisibility, Provenance};
 use crate::engine::kernel::ids::{FunctionId, WorkerId};
 
 /// Side-effect class of a function.
@@ -93,45 +93,44 @@ impl ReplayBehavior {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdempotencyContract {
     /// Dedupe scope.
-    pub dedupe_scope: VisibilityScope,
+    pub dedupe_scope: DedupeScope,
     /// Duplicate replay behavior.
     pub replay_behavior: ReplayBehavior,
 }
 
 impl IdempotencyContract {
-    /// Test-only in-memory idempotency fixture.
-    #[cfg(test)]
+    /// Session-scoped duplicate replay.
     #[must_use]
-    pub(in crate::engine) fn caller_session() -> Self {
+    pub fn session() -> Self {
         Self {
-            dedupe_scope: VisibilityScope::Session,
+            dedupe_scope: DedupeScope::Session,
             replay_behavior: ReplayBehavior::ReturnPrevious,
         }
     }
 
-    /// Caller-supplied session-scoped idempotency using the durable engine ledger.
+    /// System-scoped duplicate replay.
     #[must_use]
-    pub fn caller_session_engine_ledger() -> Self {
+    pub fn system() -> Self {
         Self {
-            dedupe_scope: VisibilityScope::Session,
-            replay_behavior: ReplayBehavior::ReturnPrevious,
-        }
-    }
-
-    /// Caller-supplied system-scoped idempotency using the durable engine ledger.
-    #[must_use]
-    pub fn caller_system_engine_ledger() -> Self {
-        Self {
-            dedupe_scope: VisibilityScope::System,
+            dedupe_scope: DedupeScope::System,
             replay_behavior: ReplayBehavior::ReturnPrevious,
         }
     }
 }
 
+/// Extent within which an idempotency key is unique.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DedupeScope {
+    /// Unique within the invocation's session.
+    Session,
+    /// Unique across the running Tron system.
+    System,
+}
+
 /// Concrete dedupe scope attached to an invocation's idempotency key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct IdempotencyScope {
-    /// Scope kind, such as `session`, `workspace`, or `system`.
+    /// Scope kind: `session` or `system`.
     pub kind: String,
     /// Concrete scope value.
     pub value: String,
@@ -163,8 +162,8 @@ pub struct FunctionDefinition {
     pub request_schema: Option<Value>,
     /// Response JSON schema.
     pub response_schema: Option<Value>,
-    /// Visibility scope.
-    pub visibility: VisibilityScope,
+    /// Function admission boundary.
+    pub visibility: FunctionVisibility,
     /// Side-effect class.
     pub effect_class: EffectClass,
     /// Risk level.
@@ -186,7 +185,7 @@ impl FunctionDefinition {
         id: FunctionId,
         owner_worker: WorkerId,
         description: impl Into<String>,
-        visibility: VisibilityScope,
+        visibility: FunctionVisibility,
         effect_class: EffectClass,
     ) -> Self {
         Self {

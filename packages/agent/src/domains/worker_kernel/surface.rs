@@ -221,16 +221,11 @@ pub(crate) struct ResolvedToolSurface {
 pub(crate) async fn resolve_tool_surface(
     host: &EngineHostHandle,
     session_id: &str,
-    workspace_id: Option<&str>,
     relevance_query: Option<&str>,
 ) -> Result<ResolvedToolSurface, String> {
     let actor_id =
         ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?;
-    let mut actor =
-        ActorContext::new(actor_id, ActorKind::Agent).with_session_id(session_id.to_owned());
-    if let Some(workspace_id) = workspace_id {
-        actor = actor.with_workspace_id(workspace_id.to_owned());
-    }
+    let actor = ActorContext::new(actor_id, ActorKind::Agent);
     let (catalog_revision, mut functions) = host.visible_functions_with_revision(&actor).await;
     functions.retain(|function| function.health == FunctionHealth::Healthy);
     functions.sort_by_key(|function| {
@@ -335,9 +330,6 @@ pub(crate) async fn resolve_tool_surface(
     let mut resolved = Vec::new();
     let mut snapshot_tools = Vec::new();
     for function in functions {
-        if function.id.namespace() == "rpc" || function.visibility.as_str() == "internal" {
-            continue;
-        }
         if !is_provider_primitive(&function) || function.request_schema.is_none() {
             continue;
         }

@@ -349,25 +349,24 @@ async fn invocation_enforces_health_and_idempotency_key() {
 }
 
 #[tokio::test]
-async fn invocation_enforces_visibility_scope() {
+async fn invocation_enforces_internal_function_boundary() {
     let mut catalog = LiveCatalog::new();
-    let session_function = FunctionDefinition::new(
-        fid("alpha::session"),
+    let internal_function = FunctionDefinition::new(
+        fid("alpha::internal"),
         wid("w1"),
-        "session function",
-        VisibilityScope::Session,
+        "internal function",
+        FunctionVisibility::Internal,
         EffectClass::PureRead,
-    )
-    .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
+    );
     catalog
-        .register_function(session_function, handler())
+        .register_function(internal_function, handler())
         .unwrap();
 
     let hidden = catalog
         .invoke_sync(Invocation::new_sync(
-            fid("alpha::session"),
+            fid("alpha::internal"),
             json!({}),
-            causal().with_session_id("session-b"),
+            causal(),
         ))
         .await;
     assert!(matches!(
@@ -377,9 +376,9 @@ async fn invocation_enforces_visibility_scope() {
 
     let visible = catalog
         .invoke_sync(Invocation::new_sync(
-            fid("alpha::session"),
+            fid("alpha::internal"),
             json!({}),
-            causal().with_session_id("session-a"),
+            CausalContext::new(actor("system"), ActorKind::System, trace("system-trace")),
         ))
         .await;
     assert!(visible.error.is_none());
@@ -503,7 +502,7 @@ async fn regular_cancellation_records_and_replays_typed_error() {
     handle
         .register_function_for_setup(
             write_function("alpha::cancellable", "w1")
-                .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+                .with_idempotency(IdempotencyContract::session()),
             Arc::new(BlockingHandler {
                 started: Arc::clone(&started),
                 release: Arc::new(Notify::new()),

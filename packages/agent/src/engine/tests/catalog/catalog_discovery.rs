@@ -43,7 +43,7 @@ fn mutating_function_requires_idempotency() {
         fid("alpha::write"),
         wid("w1"),
         "write",
-        VisibilityScope::Agent,
+        FunctionVisibility::Public,
         EffectClass::IdempotentWrite,
     );
     assert!(matches!(
@@ -55,7 +55,7 @@ fn mutating_function_requires_idempotency() {
         fid("alpha::internal_write"),
         wid("w1"),
         "internal write",
-        VisibilityScope::Internal,
+        FunctionVisibility::Internal,
         EffectClass::IdempotentWrite,
     );
     assert!(matches!(
@@ -95,7 +95,7 @@ fn visible_functions_are_sorted_and_hide_internal_functions_from_agents() {
         fid("alpha::internal"),
         wid("w1"),
         "internal",
-        VisibilityScope::Internal,
+        FunctionVisibility::Internal,
         EffectClass::PureRead,
     );
     catalog.register_function(internal, handler()).unwrap();
@@ -109,67 +109,34 @@ fn visible_functions_are_sorted_and_hide_internal_functions_from_agents() {
 }
 
 #[test]
-fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
+fn system_discovery_includes_internal_functions() {
     let mut catalog = LiveCatalog::new();
-    let session_function = FunctionDefinition::new(
-        fid("alpha::session"),
+    let public_function = FunctionDefinition::new(
+        fid("alpha::public"),
         wid("w1"),
-        "session function",
-        VisibilityScope::Session,
+        "public function",
+        FunctionVisibility::Public,
         EffectClass::PureRead,
-    )
-    .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
-    let workspace_function = FunctionDefinition::new(
-        fid("alpha::workspace"),
-        wid("w1"),
-        "workspace function",
-        VisibilityScope::Workspace,
-        EffectClass::PureRead,
-    )
-    .with_provenance(Provenance::new(actor("agent"), "test").with_workspace_id("workspace-a"));
+    );
     let internal_function = FunctionDefinition::new(
         fid("alpha::internal"),
         wid("w1"),
         "internal function",
-        VisibilityScope::Internal,
+        FunctionVisibility::Internal,
         EffectClass::PureRead,
     );
     catalog
-        .register_function(session_function, handler())
-        .unwrap();
-    catalog
-        .register_function(workspace_function, handler())
+        .register_function(public_function, handler())
         .unwrap();
     catalog
         .register_function(internal_function, handler())
         .unwrap();
 
-    let scoped_actor = ActorContext::new(actor("agent"), ActorKind::Agent)
-        .with_session_id("session-a")
-        .with_workspace_id("workspace-a");
-    let scoped = catalog.visible_functions(&scoped_actor);
+    let system = ActorContext::new(actor("system"), ActorKind::System);
+    let visible = catalog.visible_functions(&system);
     assert_eq!(
-        scoped.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
-        vec!["alpha::session", "alpha::workspace"]
-    );
-
-    let other_session = ActorContext::new(actor("agent"), ActorKind::Agent)
-        .with_session_id("session-b")
-        .with_workspace_id("workspace-a");
-    let workspace_only = catalog.visible_functions(&other_session);
-    assert_eq!(
-        workspace_only
-            .iter()
-            .map(|f| f.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["alpha::workspace"]
-    );
-
-    let admin = ActorContext::new(actor("admin"), ActorKind::Admin);
-    let admin_view = catalog.visible_functions(&admin);
-    assert_eq!(
-        admin_view.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
-        vec!["alpha::internal", "alpha::session", "alpha::workspace"]
+        visible.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+        vec!["alpha::internal", "alpha::public"]
     );
 }
 
@@ -177,26 +144,23 @@ fn discovery_enforces_scoped_visibility_and_internal_requires_admin() {
 fn inspect_is_visibility_checked() {
     let mut catalog = LiveCatalog::new();
     let function = FunctionDefinition::new(
-        fid("alpha::session"),
+        fid("alpha::internal"),
         wid("w1"),
-        "session function",
-        VisibilityScope::Session,
+        "internal function",
+        FunctionVisibility::Internal,
         EffectClass::PureRead,
-    )
-    .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
+    );
     catalog.register_function(function, handler()).unwrap();
 
-    let matching_session =
-        ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-a");
-    let other_session =
-        ActorContext::new(actor("agent"), ActorKind::Agent).with_session_id("session-b");
+    let system = ActorContext::new(actor("system"), ActorKind::System);
+    let agent = ActorContext::new(actor("agent"), ActorKind::Agent);
     assert!(
         catalog
-            .inspect_function(&fid("alpha::session"), &matching_session)
+            .inspect_function(&fid("alpha::internal"), &system)
             .is_ok()
     );
     assert!(matches!(
-        catalog.inspect_function(&fid("alpha::session"), &other_session),
+        catalog.inspect_function(&fid("alpha::internal"), &agent),
         Err(EngineError::PolicyViolation(message)) if message.contains("not visible")
     ));
 }

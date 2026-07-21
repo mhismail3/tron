@@ -492,7 +492,7 @@ async fn every_worker_console_lifecycle_mutation_emits_live_refresh_evidence() {
             "worker.lifecycle",
             StreamCursor(0),
             100,
-            &StreamActorScope::admin(),
+            &StreamActorScope::all(),
         )
         .await
         .unwrap();
@@ -864,7 +864,6 @@ async fn dynamic_tool_registration_cannot_escape_disabled_autonomy() {
         crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
             &runtime.host,
             "dynamic-registration-race",
-            None,
         )
         .await
         .unwrap();
@@ -893,7 +892,6 @@ async fn dynamic_tool_registration_cannot_escape_disabled_autonomy() {
         crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
             &runtime.host,
             "dynamic-registration-race",
-            None,
         )
         .await
         .unwrap();

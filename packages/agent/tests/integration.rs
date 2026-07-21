@@ -471,15 +471,15 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
         "worker activation event missing: {lifecycle}"
     );
 
-    let admin = ActorContext::new(
+    let system = ActorContext::new(
         ActorId::new("baseline-characterization").unwrap(),
-        ActorKind::Admin,
+        ActorKind::System,
     );
     let functions = runtime
         .server
         .runtime_context()
         .engine_host
-        .visible_functions(&admin)
+        .visible_functions(&system)
         .await;
     let model_tools = functions
         .iter()

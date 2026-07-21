@@ -52,6 +52,8 @@
 //! version; catalog preparation rejects drift and lets the next internal turn
 //! resolve a fresh surface. Session discovery promotions live in durable scoped
 //! engine state, are recency ordered and version bound, and survive restart.
+//! Worker identity, storage, ranking, and availability are profile-global;
+//! workspace is invocation context only and cannot hide or reveal tools.
 //! Both stored promotions and the final dynamic provider surface have hard
 //! bounds, so repeated discovery cannot grow an unbounded tool request or
 //! revive a retired worker id at a different version.

@@ -148,13 +148,12 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                  WHERE topic = ?1
                    AND cursor > ?2
                    AND (
-                     ?5 = 1
-                     OR visibility IN ('system', 'agent', 'client')
+                     ?4 = 1
+                     OR visibility = 'system'
                      OR (visibility = 'session' AND session_id = ?3)
-                     OR (visibility = 'workspace' AND workspace_id = ?4)
                    )
                  ORDER BY cursor ASC
-                 LIMIT ?6",
+                 LIMIT ?5",
             )
             .map_err(|err| sqlite_err("stream.poll.prepare", err.to_string()))?;
         let rows = stmt
@@ -163,8 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                     topic,
                     after.0 as i64,
                     actor.session_id.as_deref(),
-                    actor.workspace_id.as_deref(),
-                    if actor.admin { 1_i64 } else { 0_i64 },
+                    if actor.all_sessions { 1_i64 } else { 0_i64 },
                     limit.min(500) as i64 + 1
                 ],
                 |row| row_to_stream_event(&self.conn, row),
@@ -181,12 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
                 break;
             }
             next_cursor = event.cursor;
-            if stream_scope_visible(
-                &event.visibility,
-                event.session_id.as_deref(),
-                event.workspace_id.as_deref(),
-                actor,
-            ) {
+            if stream_scope_visible(&event.visibility, event.session_id.as_deref(), actor) {
                 events.push(event);
             }
         }

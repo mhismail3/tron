@@ -275,7 +275,7 @@ mod tests {
 
     use crate::engine::{
         ActorContext, ActorId, ActorKind, CausalContext, EffectClass, FunctionDefinition,
-        FunctionId, InProcessFunctionHandler, Invocation, TraceId, VisibilityScope, WorkerId,
+        FunctionId, FunctionVisibility, InProcessFunctionHandler, Invocation, TraceId, WorkerId,
     };
 
     #[derive(Debug)]
@@ -299,7 +299,7 @@ mod tests {
             FunctionId::new("test::op").expect("function id"),
             WorkerId::new("test").expect("worker id"),
             "test op",
-            VisibilityScope::System,
+            FunctionVisibility::Public,
             EffectClass::PureRead,
         );
         definition.metadata = json!({ "streamTopics": function_topics });
@@ -557,7 +557,6 @@ mod tests {
             crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
                 &ctx.engine_host,
                 "engine-surface-snapshot",
-                None,
             )
             .await
             .expect("provider surface");
@@ -745,7 +744,6 @@ mod tests {
                 let surface = crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
                     &ctx.engine_host,
                     "live-autonomy-toggle-test",
-                    None,
                 )
                 .await
                 .expect("resolve provider surface");

@@ -476,7 +476,6 @@ async fn command_runner_upserts_invokes_and_replays_idempotently() {
     let surface = runtime
         .engine_surface_snapshot(
             Some("worker-direct-session"),
-            None,
             Some("workers direct typed tool"),
         )
         .await

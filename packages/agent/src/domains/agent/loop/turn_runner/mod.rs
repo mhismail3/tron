@@ -312,7 +312,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let primitive_surface = match primitive_surface::resolve_provider_primitive_surface_for_query(
         engine_host,
         session_id,
-        workspace_id,
         relevance_query.as_deref(),
     )
     .await

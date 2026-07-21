@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::engine::{EngineError, PublishStreamEvent, VisibilityScope};
+use crate::engine::{EngineError, PublishStreamEvent, StreamVisibility};
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::events::ServerEventPayload;
 use crate::shared::server::failure::ENGINE_SCHEMA_VIOLATION;
@@ -178,7 +178,7 @@ fn stream_filters_match_neutral_server_event_scope() {
                 Some(json!({"title": "Test Session"}))
             )
         }),
-        visibility: VisibilityScope::System,
+        visibility: StreamVisibility::System,
         session_id: None,
         workspace_id: None,
         producer: "test".to_owned(),
@@ -209,7 +209,7 @@ fn recovery_marker_crosses_session_filter_but_respects_event_type_filter() {
                 Some(json!({"reason": "source_lag", "droppedEventCount": 3}))
             )
         }),
-        visibility: VisibilityScope::System,
+        visibility: StreamVisibility::System,
         session_id: None,
         workspace_id: None,
         producer: "test".to_owned(),
@@ -250,7 +250,7 @@ async fn stream_poll_returns_neutral_events() {
                     Some(json!({"ready": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("s1".to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -318,7 +318,7 @@ async fn topic_poll_reads_without_creating_subscription_state() {
                     Some(json!({"ready": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("s1".to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -361,7 +361,7 @@ async fn subscribe_without_cursor_starts_at_topic_tail() {
                     Some(json!({"old": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("s1".to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -511,7 +511,6 @@ async fn ack_response_applies_backpressure_instead_of_closing_socket() {
                 cursor: StreamCursor(0),
                 filters: None,
                 session_id: Some("s1".to_owned()),
-                workspace_id: None,
             },
         )]))),
         CancellationToken::new(),
@@ -560,7 +559,7 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
                         Some(json!({"index": index}))
                     )
                 }),
-                visibility: VisibilityScope::System,
+                visibility: StreamVisibility::System,
                 session_id: None,
                 workspace_id: None,
                 producer: "test".to_owned(),
@@ -581,7 +580,7 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
                     Some(json!({"ready": true}))
                 )
             }),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some(target_session.to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -599,7 +598,6 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
             cursor: StreamCursor(0),
             filters: Some(json!({"sessionId": target_session})),
             session_id: Some(target_session.to_owned()),
-            workspace_id: None,
         },
     )])));
     let (out_tx, mut out_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
@@ -672,7 +670,7 @@ async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
                         Some(json!({"delta": index.to_string()}))
                     )
                 }),
-                visibility: VisibilityScope::Session,
+                visibility: StreamVisibility::Session,
                 session_id: Some(target_session.to_owned()),
                 workspace_id: None,
                 producer: "test".to_owned(),
@@ -691,7 +689,6 @@ async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
             cursor: StreamCursor(0),
             filters: Some(json!({"sessionId": target_session})),
             session_id: Some(target_session.to_owned()),
-            workspace_id: None,
         },
     )])));
     let (out_tx, mut out_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);

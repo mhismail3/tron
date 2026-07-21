@@ -18,7 +18,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("model::switch", "model", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","model"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"newModel":{"type":"string"},"previousModel":{"type":"string"}},"required":["previousModel","newModel"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])

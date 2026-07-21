@@ -14,7 +14,7 @@ impl WorkerRuntime {
             .publish_stream_event(PublishStreamEvent {
                 topic: topic.to_owned(),
                 payload,
-                visibility: VisibilityScope::System,
+                visibility: StreamVisibility::System,
                 session_id: None,
                 workspace_id: None,
                 producer: "worker_kernel".to_owned(),

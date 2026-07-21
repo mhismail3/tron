@@ -90,7 +90,6 @@ async fn engine_surface_snapshot(invocation: &Invocation, deps: &Deps) -> Result
     deps.runtime
         .engine_surface_snapshot(
             invocation.causal_context.session_id.as_deref(),
-            invocation.causal_context.workspace_id.as_deref(),
             invocation
                 .payload
                 .get("relevanceQuery")

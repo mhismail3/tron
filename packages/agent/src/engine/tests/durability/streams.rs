@@ -7,7 +7,7 @@ async fn assert_topic_poll_reaches_visible_event_after_invisible_prefix(handle: 
             .publish_stream_event(PublishStreamEvent {
                 topic: "events.session".to_owned(),
                 payload: json!({"visible": false, "index": index}),
-                visibility: VisibilityScope::Session,
+                visibility: StreamVisibility::Session,
                 session_id: Some("session-hidden".to_owned()),
                 workspace_id: None,
                 producer: "test".to_owned(),
@@ -21,7 +21,7 @@ async fn assert_topic_poll_reaches_visible_event_after_invisible_prefix(handle: 
         .publish_stream_event(PublishStreamEvent {
             topic: "events.session".to_owned(),
             payload: json!({"visible": true}),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some(target_session.to_owned()),
             workspace_id: None,
             producer: "test".to_owned(),
@@ -31,7 +31,7 @@ async fn assert_topic_poll_reaches_visible_event_after_invisible_prefix(handle: 
         .await
         .unwrap();
 
-    let actor = StreamActorScope::scoped(Some(target_session.to_owned()), None);
+    let actor = StreamActorScope::scoped(Some(target_session.to_owned()));
     let mut after = StreamCursor(0);
     for _ in 0..4 {
         let page = handle

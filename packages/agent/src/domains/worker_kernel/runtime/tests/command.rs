@@ -83,7 +83,7 @@ async fn secret_values_are_injected_then_redacted_from_durable_results() {
             "worker.invocations",
             StreamCursor(0),
             100,
-            &StreamActorScope::admin(),
+            &StreamActorScope::all(),
         )
         .await
         .unwrap();

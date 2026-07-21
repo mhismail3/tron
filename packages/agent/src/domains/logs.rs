@@ -52,7 +52,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium)
         .request_schema(json!({"additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":false,"properties":{"category":{"type":"string"},"level":{"type":"string"},"message":{"type":"string"},"sessionId":{"type":"string"},"timestamp":{"type":"string"},"traceId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["timestamp","level","category","message"],"type":"object"},"maxItems":10000,"type":"array"},"sessionId":{"type":"string"},"traceId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["entries"],"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"inserted":{"type":"integer"},"success":{"type":"boolean"}},"required":["success","inserted"],"type":"object"}))
-        .idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .idempotency(IdempotencyContract::system())
         .build()?,
         CapabilityContract::new(
             "logs::recent",

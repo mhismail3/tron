@@ -13,8 +13,8 @@ use serde_json::{Map, Value, json};
 
 use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
-    EffectClass, FunctionDefinition, FunctionId, IdempotencyContract, Provenance,
-    Result as EngineResult, RiskLevel, VisibilityScope, WorkerId,
+    EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
+    Provenance, Result as EngineResult, RiskLevel, WorkerId,
 };
 
 /// Fully-owned contract record supplied by one source domain.
@@ -30,7 +30,7 @@ pub(crate) struct CapabilityContract {
     /// Risk classification.
     pub(crate) risk_level: RiskLevel,
     /// Catalog visibility.
-    pub(crate) visibility: VisibilityScope,
+    pub(crate) visibility: FunctionVisibility,
     /// Transport-level idempotency mode for engine client protocol bindings.
     pub(crate) idempotency_mode: TransportIdempotencyMode,
     /// Strict request schema.
@@ -68,7 +68,7 @@ impl CapabilityContract {
             owner_worker,
             effect_class,
             risk_level,
-            visibility: VisibilityScope::System,
+            visibility: FunctionVisibility::Public,
             idempotency_mode: TransportIdempotencyMode::NotRequired,
             request_schema: None,
             response_schema: None,
@@ -86,7 +86,7 @@ impl CapabilityContract {
     }
 
     /// Set engine visibility.
-    pub(crate) fn visibility(mut self, visibility: VisibilityScope) -> Self {
+    pub(crate) fn visibility(mut self, visibility: FunctionVisibility) -> Self {
         self.visibility = visibility;
         self
     }

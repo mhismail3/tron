@@ -45,9 +45,9 @@ use crate::domains::session::event_store::EventStore;
 use crate::domains::settings::SettingsRuntime;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
-    FunctionHealth, FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation,
-    PublishStreamEvent, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
-    WorkerId,
+    FunctionHealth, FunctionId, FunctionVisibility, IdempotencyContract, InProcessFunctionHandler,
+    Invocation, PublishStreamEvent, RiskLevel, StreamActorScope, StreamCursor, StreamVisibility,
+    TraceId, WorkerId,
 };
 
 struct ResidentProcess {
@@ -193,18 +193,12 @@ impl WorkerRuntime {
     pub(crate) async fn engine_surface_snapshot(
         &self,
         session_id: Option<&str>,
-        workspace_id: Option<&str>,
         relevance_query: Option<&str>,
     ) -> Result<Value, String> {
         let session_id = session_id.unwrap_or("engine-dashboard");
-        let surface = super::surface::resolve_tool_surface(
-            &self.host,
-            session_id,
-            workspace_id,
-            relevance_query,
-        )
-        .await?
-        .snapshot;
+        let surface = super::surface::resolve_tool_surface(&self.host, session_id, relevance_query)
+            .await?
+            .snapshot;
         let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
         Ok(json!({
             "format": 1,

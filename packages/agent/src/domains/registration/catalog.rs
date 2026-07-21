@@ -7,8 +7,8 @@
 
 pub(crate) use super::contract::function_definition_for_capability;
 use crate::engine::{
-    ActorId, EffectClass, FunctionId, IdempotencyContract, Result as EngineResult, RiskLevel,
-    VisibilityScope, WorkerId,
+    ActorId, EffectClass, FunctionId, FunctionVisibility, IdempotencyContract,
+    Result as EngineResult, RiskLevel, WorkerId,
 };
 
 /// Idempotency source for a public engine transport method.
@@ -34,7 +34,7 @@ pub struct CapabilitySpec {
     /// Risk level.
     pub risk_level: RiskLevel,
     /// Engine visibility.
-    pub visibility: VisibilityScope,
+    pub visibility: FunctionVisibility,
     /// Public transport idempotency mode when this function is exposed through
     /// an engine protocol message.
     pub idempotency_mode: TransportIdempotencyMode,

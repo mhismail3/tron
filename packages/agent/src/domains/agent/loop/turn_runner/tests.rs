@@ -3,7 +3,7 @@ use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
-use crate::engine::{EffectClass, FunctionDefinition, FunctionId, VisibilityScope, WorkerId};
+use crate::engine::{EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, WorkerId};
 use std::collections::BTreeMap;
 
 fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
@@ -13,7 +13,7 @@ fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
         function_id.clone(),
         WorkerId::new("worker-kernel").expect("worker id"),
         "list persistent workers",
-        VisibilityScope::System,
+        FunctionVisibility::Public,
         EffectClass::PureRead,
     );
     let _ = targets_by_name.insert(

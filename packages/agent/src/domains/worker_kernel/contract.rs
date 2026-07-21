@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::domains::registration::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::domains::registration::contract::CapabilityContract;
-use crate::engine::{EffectClass, IdempotencyContract, RiskLevel, VisibilityScope};
+use crate::engine::{EffectClass, FunctionVisibility, IdempotencyContract, RiskLevel};
 
 const WORKER: &str = "worker_kernel";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
@@ -581,10 +581,10 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             WORKER,
             EffectClass::IdempotentWrite,
             RiskLevel::Low)
-        .visibility(VisibilityScope::Internal)
+        .visibility(FunctionVisibility::Internal)
         .request_schema(json!({"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":32},"relevanceQuery":{"type":"string"}}}))
         .response_schema(open_response())
-        .idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .idempotency(IdempotencyContract::system())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .description("Claim notable unseen worker inbox observations for transient session context.")
         .build()?,
@@ -595,10 +595,10 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             WORKER,
             EffectClass::ExternalSideEffect,
             RiskLevel::High)
-        .visibility(VisibilityScope::Internal)
+        .visibility(FunctionVisibility::Internal)
         .request_schema(json!({"type":"object","additionalProperties":false,"required":["workerId","triggerId","token","input","idempotencyKey"],"properties":{"workerId":{"type":"string"},"triggerId":{"type":"string"},"token":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"}}}))
         .response_schema(open_response())
-        .idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .idempotency(IdempotencyContract::system())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .description("Authenticated local webhook dispatch into the persistent worker runtime.")
         .build()?,
@@ -619,7 +619,7 @@ fn spec(
         .description(description);
     if effect.requires_idempotency() {
         contract = contract
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .idempotency_mode(TransportIdempotencyMode::ExplicitRequired);
     }
     contract.build()

@@ -20,7 +20,9 @@
 //! cannot be stored, the pump stops instead of continuing with an undisclosed
 //! continuity break.
 
-use crate::engine::{EngineHostHandle, InvocationId, PublishStreamEvent, TraceId, VisibilityScope};
+use crate::engine::{
+    EngineHostHandle, InvocationId, PublishStreamEvent, StreamVisibility, TraceId,
+};
 use crate::shared::protocol::events::TronEvent;
 use crate::shared::server::events::ServerEventPayload;
 use serde_json::json;
@@ -130,7 +132,7 @@ impl EngineStreamEventPump {
                     "sourceEventType": STREAM_RECOVERY_REQUIRED_EVENT_TYPE,
                     "sourceSequence": null,
                 }),
-                visibility: VisibilityScope::System,
+                visibility: StreamVisibility::System,
                 session_id: None,
                 workspace_id: None,
                 producer: "agent-runtime".to_owned(),
@@ -157,9 +159,9 @@ impl EngineStreamEventPump {
         tracing::debug!(event_type, "projecting event to engine stream");
         let projected = tron_event_to_projected(event);
         let (visibility, session_id) = match &projected.scope {
-            StreamScope::All => (VisibilityScope::System, None),
+            StreamScope::All => (StreamVisibility::System, None),
             StreamScope::Session(session_id) => {
-                (VisibilityScope::Session, Some(session_id.clone()))
+                (StreamVisibility::Session, Some(session_id.clone()))
             }
         };
         let trace_id = event

@@ -14,12 +14,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("session::create", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workingDirectory"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .idempotency(IdempotencyContract::system())
             .build()?,
         CapabilityContract::new("session::resume", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .build()?,
         CapabilityContract::new("session::list", "session", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"cursor":{"type":"string"},"includeArchived":{"type":"boolean"},"limit":{"maximum":200,"minimum":1,"type":"integer"},"offset":{"minimum":0,"type":"integer"},"sessionId":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
@@ -39,13 +39,13 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("session::delete", "session", EffectClass::IrreversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("session::fork", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"fromEventId":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .build()?,
         CapabilityContract::new("session::get_head", "session", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
@@ -66,17 +66,17 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("session::archive", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .build()?,
         CapabilityContract::new("session::unarchive", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .build()?,
         CapabilityContract::new("session::archive_older_than", "session", EffectClass::IdempotentWrite, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"days":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["days"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .idempotency(IdempotencyContract::system())
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("session::export", "session", EffectClass::PureRead, RiskLevel::Low)

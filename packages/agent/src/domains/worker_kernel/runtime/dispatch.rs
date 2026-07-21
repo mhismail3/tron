@@ -116,7 +116,7 @@ impl WorkerRuntime {
                     &topic,
                     StreamCursor(u64::try_from(cursor).unwrap_or_default()),
                     100,
-                    &StreamActorScope::admin(),
+                    &StreamActorScope::all(),
                 )
                 .await;
             let Ok(page) = page else {

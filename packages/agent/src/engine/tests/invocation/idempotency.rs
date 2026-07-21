@@ -6,8 +6,7 @@ async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
     let calls = Arc::new(AtomicUsize::new(0));
     catalog
         .register_function(
-            write_function("alpha::write", "w1")
-                .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+            write_function("alpha::write", "w1").with_idempotency(IdempotencyContract::session()),
             Arc::new(CountingHandler {
                 calls: calls.clone(),
             }),

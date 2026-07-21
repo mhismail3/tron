@@ -260,7 +260,7 @@ fn sqlite_stream_blobs_large_payload_but_poll_returns_original_payload() {
         .publish(PublishStreamEvent {
             topic: "agent.runtime".to_owned(),
             payload: large.clone(),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("session-stream".to_owned()),
             workspace_id: Some("workspace-stream".to_owned()),
             producer: "agent".to_owned(),
@@ -282,11 +282,7 @@ fn sqlite_stream_blobs_large_payload_but_poll_returns_original_payload() {
             "agent.runtime",
             StreamCursor(0),
             10,
-            &StreamActorScope {
-                session_id: Some("session-stream".to_owned()),
-                workspace_id: Some("workspace-stream".to_owned()),
-                admin: false,
-            },
+            &StreamActorScope::scoped(Some("session-stream".to_owned())),
         )
         .unwrap();
     assert_eq!(page.events[0].payload, large);
@@ -418,7 +414,7 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
         catalog
             .register_function(
                 write_function("alpha::write", "w1")
-                    .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+                    .with_idempotency(IdempotencyContract::session()),
                 Arc::new(CountingHandler {
                     calls: calls.clone(),
                 }),
@@ -445,8 +441,7 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
     assert_eq!(persisted[0].invocation_id, first_invocation_id);
     restarted
         .register_function(
-            write_function("alpha::write", "w1")
-                .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+            write_function("alpha::write", "w1").with_idempotency(IdempotencyContract::session()),
             Arc::new(CountingHandler {
                 calls: calls.clone(),
             }),

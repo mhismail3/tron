@@ -11,8 +11,8 @@ use crate::domains::session::event_store::{
 };
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
-    FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation, PublishStreamEvent,
-    TraceId, VisibilityScope, WorkerId,
+    FunctionId, FunctionVisibility, IdempotencyContract, InProcessFunctionHandler, Invocation,
+    PublishStreamEvent, StreamVisibility, TraceId, WorkerId,
 };
 
 struct ReplayWriteHandler;
@@ -51,10 +51,10 @@ fn harness() -> ReplayHarness {
                 FunctionId::new("replay::write").expect("function id"),
                 WorkerId::new("replay").expect("owner id"),
                 "Write deterministic replay evidence",
-                VisibilityScope::System,
+                FunctionVisibility::Public,
                 EffectClass::IdempotentWrite,
             )
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+            .with_idempotency(IdempotencyContract::session()),
             Arc::new(ReplayWriteHandler),
         )
         .expect("register replay write function");
@@ -120,7 +120,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .publish_stream_event(PublishStreamEvent {
             topic: "events.session".to_owned(),
             payload: json!({"stream": 1}),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some(session_id.clone()),
             workspace_id: Some(workspace_id.clone()),
             producer: "test".to_owned(),
@@ -134,7 +134,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .publish_stream_event(PublishStreamEvent {
             topic: "events.session".to_owned(),
             payload: json!({"stream": "other-session"}),
-            visibility: VisibilityScope::Session,
+            visibility: StreamVisibility::Session,
             session_id: Some("sess_other".to_owned()),
             workspace_id: Some(workspace_id.clone()),
             producer: "test".to_owned(),

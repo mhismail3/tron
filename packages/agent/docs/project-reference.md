@@ -446,6 +446,11 @@ promotes matching workers into that session's next internal turn without a
 restart; promotions are session-scoped durable engine state and survive server
 restarts. A newly upserted worker registers immediately.
 
+Workers and the callable catalog are profile-global. Workspace remains useful
+invocation and event metadata, but it neither partitions worker availability nor
+changes the provider tool surface. The current session affects only explicit
+promotion and relevance ranking.
+
 Each model-originated invocation carries the function revision and immutable
 worker version that were advertised. Catalog preparation rejects any changed
 contract with `ENGINE_STALE_FUNCTION_SURFACE`; it never sends old provider
@@ -531,6 +536,20 @@ There are no local operation claims, resource selectors, synthetic
 grants, or agent-kind rejections. Executable workers can change local files and
 make consequential external requests without fresh confirmation. This is the
 intentional POC threat model.
+
+Three unrelated runtime boundaries use three deliberately separate closed
+types instead of the former generic visibility scope:
+
+- function admission is either public to authenticated Agent, Worker, Client,
+  and System callers, or internal to the engine-owned System actor;
+- idempotency keys deduplicate within one session or across the running system;
+- durable stream events are either a system broadcast or addressed to one
+  session, while internal consumers may intentionally read all sessions.
+
+Actor identity has only four production variants: Agent, Client, Worker, and
+System. Session and workspace are causal observations rather than actor fields.
+Unknown persisted stream scopes fail closed. This keeps admission, duplicate
+suppression, and delivery from becoming another synthetic authorization model.
 
 Attaching unseen worker inbox results is an engine-owned session projection,
 not an agent action. It runs under the internal runtime identity while retaining

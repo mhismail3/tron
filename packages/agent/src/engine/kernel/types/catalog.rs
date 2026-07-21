@@ -26,50 +26,32 @@ macro_rules! revision_type {
 revision_type!(CatalogRevision);
 revision_type!(FunctionRevision);
 
-/// Visibility scope for catalog entries.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VisibilityScope {
-    /// Engine-internal entry.
+/// Admission boundary for callable engine functions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FunctionVisibility {
+    /// Callable by authenticated clients, agents, workers, and the engine.
+    Public,
+    /// Callable only by the engine's System actor.
     Internal,
-    /// Visible to a single session.
-    Session,
-    /// Visible to a workspace.
-    Workspace,
-    /// System-wide visibility.
-    System,
-    /// Client-visible entry.
-    Client,
-    /// Worker-visible entry.
-    Worker,
-    /// Agent-visible entry.
-    Agent,
-    /// Admin-only entry.
-    Admin,
 }
 
-impl VisibilityScope {
+/// Delivery boundary for durable engine stream events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StreamVisibility {
+    /// Visible only to the named session.
+    Session,
+    /// Visible to every authenticated subscriber.
+    System,
+}
+
+impl StreamVisibility {
     /// Static display string.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Internal => "internal",
             Self::Session => "session",
-            Self::Workspace => "workspace",
             Self::System => "system",
-            Self::Client => "client",
-            Self::Worker => "worker",
-            Self::Agent => "agent",
-            Self::Admin => "admin",
         }
-    }
-
-    /// Whether this scope may be shown to an autonomous agent.
-    #[must_use]
-    pub fn is_agent_visible(&self) -> bool {
-        matches!(
-            self,
-            Self::Session | Self::Workspace | Self::System | Self::Agent
-        )
     }
 }
 

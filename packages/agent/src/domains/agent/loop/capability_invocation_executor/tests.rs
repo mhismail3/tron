@@ -12,7 +12,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
     ExecutionMode, PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::engine::{
-    EffectClass, FunctionDefinition, FunctionId, RiskLevel, VisibilityScope, WorkerId,
+    EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, RiskLevel, WorkerId,
 };
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use crate::shared::server::failure::{CAPABILITY_PRIMITIVE_NOT_FOUND, RUNTIME_CANCELLED};
@@ -108,7 +108,7 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         function_id.clone(),
         WorkerId::new("worker_kernel").unwrap(),
         "Direct typed test function",
-        VisibilityScope::System,
+        FunctionVisibility::Public,
         EffectClass::PureRead,
     )
     .with_risk(RiskLevel::Low)

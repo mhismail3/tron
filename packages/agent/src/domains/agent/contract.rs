@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{
-    EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel, VisibilityScope,
+    EffectClass, FunctionVisibility, IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["agent.runtime"];
@@ -16,19 +16,19 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
             .response_schema(agent_prompt_response_schema())
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("agent::abort", "agent", EffectClass::ReversibleSideEffect, RiskLevel::High)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("agent::abort_invocation", "agent", EffectClass::ReversibleSideEffect, RiskLevel::Medium)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"invocationId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","invocationId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .idempotency(IdempotencyContract::session())
             .build()?,
         CapabilityContract::new("agent::status", "agent", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
@@ -47,10 +47,10 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             EffectClass::ExternalSideEffect,
             RiskLevel::High,
         )
-        .visibility(VisibilityScope::Internal)
+        .visibility(FunctionVisibility::Internal)
         .request_schema(agent_prompt_apply_request_schema())
         .response_schema(agent_prompt_response_schema())
-        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency(IdempotencyContract::session())
         .stream_topics(STREAM_TOPICS.to_vec())
         .build()?,
         CapabilityContract::new(
@@ -59,10 +59,10 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             EffectClass::ExternalSideEffect,
             RiskLevel::High,
         )
-        .visibility(VisibilityScope::Internal)
+        .visibility(FunctionVisibility::Internal)
         .request_schema(agent_prompt_apply_request_schema())
         .response_schema(agent_prompt_response_schema())
-        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency(IdempotencyContract::session())
         .stream_topics(STREAM_TOPICS.to_vec())
         .build()?,
     ])

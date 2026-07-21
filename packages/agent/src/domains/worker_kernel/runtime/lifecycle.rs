@@ -361,11 +361,11 @@ impl WorkerRuntime {
             function_id,
             WorkerId::new("worker_kernel").map_err(|error| error.to_string())?,
             model_description,
-            VisibilityScope::System,
+            FunctionVisibility::Public,
             EffectClass::ExternalSideEffect,
         )
         .with_risk(RiskLevel::High)
-        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_idempotency(IdempotencyContract::session())
         .with_request_schema(active.bundle.input_schema.clone())
         .with_response_schema(active.bundle.output_schema.clone())
         .with_health(FunctionHealth::Healthy);

@@ -1,5 +1,5 @@
 use super::*;
-use crate::engine::{EngineHostHandle, StreamActorScope, StreamCursor, VisibilityScope};
+use crate::engine::{EngineHostHandle, StreamActorScope, StreamCursor, StreamVisibility};
 use crate::shared::protocol::events::{BaseEvent, TronEvent, agent_start_event};
 
 #[test]
@@ -79,7 +79,7 @@ async fn pump_publishes_runtime_events_to_engine_streams_once() {
     assert_eq!(page.events.len(), 1);
     let event = &page.events[0];
     assert_eq!(event.topic, "events.session");
-    assert_eq!(event.visibility, VisibilityScope::Session);
+    assert_eq!(event.visibility, StreamVisibility::Session);
     assert_eq!(event.session_id.as_deref(), Some("s1"));
     assert_eq!(event.payload["serverEvent"]["type"], "agent.start");
     assert_eq!(event.payload["streamScope"]["kind"], "session");
@@ -145,7 +145,7 @@ async fn lag_beyond_source_capacity_publishes_recovery_marker() {
     assert_eq!(event.payload["serverEvent"]["data"]["reason"], "source_lag");
     assert_eq!(event.payload["serverEvent"]["data"]["droppedEventCount"], 3);
     assert_eq!(event.payload["streamScope"]["kind"], "all");
-    assert_eq!(event.visibility, VisibilityScope::System);
+    assert_eq!(event.visibility, StreamVisibility::System);
 }
 
 #[tokio::test]
@@ -163,7 +163,7 @@ async fn stream_scope_prevents_cross_session_delivery() {
             "events.session",
             StreamCursor(0),
             10,
-            &StreamActorScope::scoped(Some("s1".to_owned()), None),
+            &StreamActorScope::scoped(Some("s1".to_owned())),
         )
         .await
         .unwrap();
@@ -177,7 +177,7 @@ async fn poll_until_event(
     host: &EngineHostHandle,
     session_id: Option<&str>,
 ) -> crate::engine::EngineStreamPage {
-    let actor = StreamActorScope::scoped(session_id.map(ToOwned::to_owned), None);
+    let actor = StreamActorScope::scoped(session_id.map(ToOwned::to_owned));
     for _ in 0..20 {
         let page = host
             .poll_stream_topic("events.session", StreamCursor(0), 10, &actor)

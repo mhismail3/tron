@@ -11,7 +11,7 @@ use crate::engine::durability::ledger::{
 use crate::engine::invocation::model::{Invocation, InvocationResult};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::types::{
-    FunctionDefinition, IdempotencyScope, ReplayBehavior, VisibilityScope,
+    DedupeScope, FunctionDefinition, IdempotencyScope, ReplayBehavior,
 };
 
 impl LiveCatalog {
@@ -172,11 +172,11 @@ impl LiveCatalog {
 }
 
 fn idempotency_scope_value(
-    scope: &VisibilityScope,
+    scope: &DedupeScope,
     invocation: &Invocation,
 ) -> Result<IdempotencyScope> {
     match scope {
-        VisibilityScope::Session => invocation
+        DedupeScope::Session => invocation
             .causal_context
             .session_id
             .clone()
@@ -186,37 +186,7 @@ fn idempotency_scope_value(
                     "session-scoped idempotency requires a session id".to_owned(),
                 )
             }),
-        VisibilityScope::Workspace => invocation
-            .causal_context
-            .workspace_id
-            .clone()
-            .map(|workspace| IdempotencyScope::new("workspace", workspace))
-            .ok_or_else(|| {
-                EngineError::PolicyViolation(
-                    "workspace-scoped idempotency requires a workspace id".to_owned(),
-                )
-            }),
-        VisibilityScope::System => Ok(IdempotencyScope::new("system", "system")),
-        VisibilityScope::Agent => Ok(IdempotencyScope::new(
-            "agent",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Client => Ok(IdempotencyScope::new(
-            "client",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Worker => Ok(IdempotencyScope::new(
-            "worker",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Admin => Ok(IdempotencyScope::new(
-            "admin",
-            invocation.causal_context.actor_id.to_string(),
-        )),
-        VisibilityScope::Internal => Ok(IdempotencyScope::new(
-            "internal",
-            invocation.causal_context.actor_id.to_string(),
-        )),
+        DedupeScope::System => Ok(IdempotencyScope::new("system", "system")),
     }
 }
 
