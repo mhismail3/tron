@@ -54,9 +54,9 @@ they do not imply the removed authorization or operation-catalog system.
 
 The model-facing fixed surface currently has 28 direct primitives grouped as
 eight host operations, sixteen worker-control operations, and four core-change
-operations. A single typed manifest owns their provider names, groups, and
-stable order; registration, provider projection, introspection, and exact-set
-tests do not maintain parallel name lists. Every fixed primitive rejects
+operations. A single typed manifest owns their canonical function IDs, provider
+names, groups, and stable order; registration, provider projection,
+introspection, and exact-set tests do not reconstruct partial identities. Every fixed primitive rejects
 undeclared top-level input and output fields; closed response contracts keep
 provider observations small and mechanically dependable.
 

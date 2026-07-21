@@ -412,9 +412,8 @@ pub(crate) async fn fixed_tool_inventory(
         ActorKind::System,
     );
     for descriptor in super::contract::core_primitives() {
-        let function_id =
-            crate::engine::FunctionId::new(format!("worker_kernel::{}", descriptor.operation_key))
-                .map_err(|error| error.to_string())?;
+        let function_id = crate::engine::FunctionId::new(descriptor.function_id)
+            .map_err(|error| error.to_string())?;
         let function = host
             .inspect_function(&function_id, &inspector)
             .await

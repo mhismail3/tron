@@ -192,14 +192,9 @@ pub(crate) fn registration(
         },
     )?;
     for registration in &mut functions {
-        let operation = registration
-            .definition
-            .id
-            .as_str()
-            .split_once("::")
-            .map(|(_, operation)| operation)
-            .unwrap_or_default();
-        if let Some(descriptor) = contract::core_primitive_for_operation(operation) {
+        if let Some(descriptor) =
+            contract::core_primitive_for_function(registration.definition.id.as_str())
+        {
             registration.definition.model_tool = Some(crate::engine::ModelToolContract {
                 name: descriptor.model_name.to_owned(),
                 callable: autonomous,

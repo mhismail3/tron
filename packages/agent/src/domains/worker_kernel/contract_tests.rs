@@ -227,7 +227,7 @@ fn direct_text_search_contract_exposes_shutdown_safe_ceilings() {
 fn every_fixed_model_primitive_has_a_closed_top_level_response_contract() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     for descriptor in core_primitives() {
-        let function_id = format!("worker_kernel::{}", descriptor.operation_key);
+        let function_id = descriptor.function_id;
         let definition = definitions
             .iter()
             .find(|definition| definition.id.as_str() == function_id)

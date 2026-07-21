@@ -21,7 +21,7 @@ fn core_primitive_manifest_is_unique_ordered_and_covers_each_family() {
     assert_eq!(
         descriptors
             .iter()
-            .map(|descriptor| descriptor.operation_key)
+            .map(|descriptor| descriptor.function_id)
             .collect::<BTreeSet<_>>()
             .len(),
         descriptors.len()
