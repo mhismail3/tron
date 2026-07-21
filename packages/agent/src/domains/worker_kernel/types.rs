@@ -68,17 +68,23 @@ pub struct WorkerBundle {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerEngineHook {
     ContextSummary,
+    InboxContext,
     WorkerRelevance,
 }
 
 impl WorkerEngineHook {
     pub const fn all() -> &'static [Self] {
-        &[Self::ContextSummary, Self::WorkerRelevance]
+        &[
+            Self::ContextSummary,
+            Self::InboxContext,
+            Self::WorkerRelevance,
+        ]
     }
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ContextSummary => "context_summary",
+            Self::InboxContext => "inbox_context",
             Self::WorkerRelevance => "worker_relevance",
         }
     }

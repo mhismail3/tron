@@ -140,6 +140,18 @@ promotion precedence, and disables an owner that returns invalid semantic
 output. If no healthy owner exists, or its own agent-runner turn is resolving a
 tool surface, the exact local weighted scorer provides deterministic recovery.
 
+The `inbox_context` hook receives the current task query and a bounded,
+redacted, newest-first set of unseen worker-result previews. It returns the
+observation ids to consume and the transient narrative to place in the next
+provider turn. The kernel validates that every id is unique and came from the
+supplied candidate set, atomically claims the complete selection so concurrent
+sessions cannot split it, and injects only a bounded narrative. The policy may
+consume irrelevant observations without narrating them. Without a healthy
+owner—or while the owner resolves its own agent-runner turn—the prior exact
+error/relevance selector and JSON projection remain deterministic recovery.
+Candidate reads never mark observations seen, invalid selections disable the
+hook owner, and a lost concurrent claim injects no stale narrative.
+
 ## Autonomy Modes
 
 `autonomousWorkers` is an engine setting.
@@ -601,9 +613,10 @@ make consequential external requests without fresh confirmation. This is the
 intentional POC threat model.
 
 The primary model receives one short, stable product-intent seed. Tool names,
-schemas, worker availability, lifecycle mechanics, and approval boundaries are
-projected from the live typed surface on every turn instead of being duplicated
-in a second hardcoded instruction set.
+schemas, worker availability, lifecycle mechanics, approval boundaries, and
+background-result narrative are projected from live typed surfaces or
+worker-owned hooks on every turn instead of being duplicated in a second
+hardcoded instruction set.
 
 Automatic worker projection and `worker_discover` share the active
 `worker_relevance` worker. Its input contains the evolving task query and

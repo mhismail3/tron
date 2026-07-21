@@ -526,3 +526,56 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
         1
     );
 }
+
+#[test]
+fn inbox_context_candidates_are_bounded_previews_and_claim_atomically() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let outcome = store.publish(prepared).unwrap();
+    let (run, _) = store
+        .begin_invocation(
+            &outcome.worker.worker_id,
+            &outcome.version,
+            &json!({}),
+            "context-candidate",
+            "trace-context-candidate",
+            0,
+            "manual",
+        )
+        .unwrap();
+    assert!(store.claim_running(&run.invocation_id).unwrap());
+    store
+        .complete_invocation(
+            &run.invocation_id,
+            &outcome.worker.worker_id,
+            Ok(&json!({"report":"x".repeat(8_000)})),
+        )
+        .unwrap();
+
+    let candidates = store.unseen_inbox_context_candidates(64).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert!(candidates[0]["resultPreview"].as_str().unwrap().len() <= 4_096);
+    let inbox_id = candidates[0]["inboxId"].as_str().unwrap().to_owned();
+    assert!(
+        store
+            .claim_unseen_inbox_context(&[inbox_id.clone(), "missing".to_owned()])
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(store.unseen_inbox_context_candidates(64).unwrap().len(), 1);
+    assert_eq!(
+        store
+            .claim_unseen_inbox_context(std::slice::from_ref(&inbox_id))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        store
+            .unseen_inbox_context_candidates(64)
+            .unwrap()
+            .is_empty()
+    );
+}

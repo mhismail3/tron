@@ -68,10 +68,15 @@
 //! fixed typed contract, selects the newest declaring worker when that worker
 //! is healthy and enabled, and uses the ordinary durable dispatcher. An older
 //! implementation never silently replaces a failed or disabled current owner.
-//! The Engine Dashboard exposes active hook ownership. `context_summary` and
-//! `worker_relevance` are production hooks. Each retains a narrow deterministic
-//! recovery path in the kernel so compaction and tool projection cannot depend
-//! recursively on their own policy worker.
+//! Inbox policy sees only bounded redacted previews. Its selected ids are
+//! validated against the candidate set and claimed all-or-none before its
+//! narrative enters provider context, so concurrent sessions cannot inject a
+//! narrative for observations they did not consume.
+//! The Engine Dashboard exposes active hook ownership. `context_summary`,
+//! `inbox_context`, and `worker_relevance` are production hooks. Each retains a
+//! narrow deterministic recovery path in the kernel so compaction, background
+//! context, and tool projection cannot depend recursively on their own policy
+//! worker.
 //! The authenticated `engine::surface_snapshot` read returns that same
 //! provider-neutral projection, every published worker's projection status,
 //! the complete fixed-tool inventory, and canonical engine worker summaries;

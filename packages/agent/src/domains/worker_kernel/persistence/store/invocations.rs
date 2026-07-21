@@ -2,6 +2,28 @@
 
 use super::*;
 
+const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 200;
+const MAX_INBOX_RESULT_PREVIEW_BYTES: usize = 4_096;
+
+fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    let result_json = row.get::<_, String>(4)?;
+    Ok(json!({
+        "inboxId":row.get::<_, String>(0)?,
+        "invocationId":row.get::<_, String>(1)?,
+        "workerId":row.get::<_, String>(2)?,
+        "severity":row.get::<_, String>(3)?,
+        "resultPreview":crate::shared::foundation::text::truncate_with_suffix(
+            &result_json,
+            MAX_INBOX_RESULT_PREVIEW_BYTES,
+            "...",
+        ),
+        "createdAt":row.get::<_, String>(5)?,
+        "triggerKind":row.get::<_, String>(6)?,
+        "workerName":row.get::<_, String>(7)?,
+        "workerDescription":row.get::<_, String>(8)?,
+    }))
+}
+
 impl WorkerStore {
     pub fn begin_invocation(
         &self,
@@ -421,6 +443,73 @@ impl WorkerStore {
             )
             .map_err(|error| format!("record worker system inbox result: {error}"))?;
         Ok(())
+    }
+
+    /// Return a bounded newest-first projection for worker-owned transient
+    /// context policy. Reading candidates never changes delivery state.
+    pub fn unseen_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
+                        i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
+                 FROM worker_inbox i
+                 LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
+                 JOIN workers w ON w.worker_id=i.worker_id
+                 WHERE i.seen=0
+                 ORDER BY i.created_at DESC LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map(
+                [limit.min(MAX_INBOX_CONTEXT_CANDIDATES)],
+                inbox_context_candidate,
+            )
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    /// Atomically mark still-unseen policy-selected observations and return
+    /// only rows this claimant actually won. Input order is preserved.
+    pub fn claim_unseen_inbox_context(&self, inbox_ids: &[String]) -> Result<Vec<Value>, String> {
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let mut candidates = Vec::new();
+        for inbox_id in inbox_ids {
+            let candidate = transaction
+                .query_row(
+                    "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
+                            i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
+                     FROM worker_inbox i
+                     LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
+                     JOIN workers w ON w.worker_id=i.worker_id
+                     WHERE i.inbox_id=?1 AND i.seen=0",
+                    [inbox_id],
+                    inbox_context_candidate,
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            let Some(candidate) = candidate else {
+                return Ok(Vec::new());
+            };
+            candidates.push(candidate);
+        }
+        for inbox_id in inbox_ids {
+            let updated = transaction
+                .execute(
+                    "UPDATE worker_inbox SET seen=1 WHERE inbox_id=?1 AND seen=0",
+                    [inbox_id],
+                )
+                .map_err(|error| format!("claim worker inbox context: {error}"))?;
+            if updated != 1 {
+                return Ok(Vec::new());
+            }
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(candidates)
     }
 
     /// Claim notable unseen background results for transient prompt attachment.

@@ -369,6 +369,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         turn,
         relevance_query.as_deref(),
+        run_context.origin_worker_id.as_deref(),
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
     )

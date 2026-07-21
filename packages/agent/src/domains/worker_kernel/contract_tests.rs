@@ -81,7 +81,7 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
     assert_eq!(schema["properties"]["sourceDirectory"]["type"], "string");
     assert_eq!(
         bundle["properties"]["engineHooks"]["items"]["enum"],
-        json!(["context_summary", "worker_relevance"])
+        json!(["context_summary", "inbox_context", "worker_relevance"])
     );
     assert!(
         bundle["properties"]["dependencies"]["items"]["properties"]["source"]["description"]
@@ -118,6 +118,21 @@ fn worker_relevance_is_internal_policy_not_provider_ceremony() {
         core_primitives()
             .iter()
             .all(|primitive| primitive.function_id != WORKER_RELEVANCE_FUNCTION)
+    );
+}
+
+#[test]
+fn inbox_context_is_worker_owned_policy_behind_an_internal_claim_boundary() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let attach = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::inbox_attach")
+        .expect("inbox attachment contract");
+    assert_eq!(attach.visibility, FunctionVisibility::Internal);
+    assert!(
+        core_primitives()
+            .iter()
+            .all(|primitive| primitive.function_id != "worker_kernel::inbox_attach")
     );
 }
 

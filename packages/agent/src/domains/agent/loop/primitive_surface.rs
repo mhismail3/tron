@@ -76,6 +76,7 @@ pub(crate) async fn take_worker_inbox_context(
     session_id: &str,
     turn: u32,
     relevance_query: Option<&str>,
+    origin_worker_id: Option<&str>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> Option<String> {
@@ -94,27 +95,34 @@ pub(crate) async fn take_worker_inbox_context(
     if let Some(parent) = parent_invocation_id {
         context = context.with_parent_invocation(parent.clone());
     }
+    let mut payload = serde_json::json!({
+        "limit": 8,
+        "relevanceQuery": relevance_query.unwrap_or_default(),
+    });
+    if let Some(worker_id) = origin_worker_id {
+        payload["originWorkerId"] = serde_json::json!(worker_id);
+    }
     let outcome = host
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::inbox_attach").ok()?,
-            serde_json::json!({
-                "limit": 8,
-                "relevanceQuery": relevance_query.unwrap_or_default(),
-            }),
+            payload,
             context,
         ))
         .await;
     if outcome.error.is_some() {
         return None;
     }
-    let items = outcome.value?.get("items")?.as_array()?.clone();
+    let value = outcome.value?;
+    let items = value.get("items")?.as_array()?;
     if items.is_empty() {
         return None;
     }
-    let body = serde_json::to_string_pretty(&items).ok()?;
-    Some(format!(
-        "Persistent worker inbox updates (durable, previously unseen observations):\n{body}\nUse these results when relevant. Failures are evidence for deliberate improvement, rollback, disablement, or retirement."
-    ))
+    value
+        .get("narrative")?
+        .as_str()
+        .map(str::trim)
+        .filter(|narrative| !narrative.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 #[derive(Clone, Debug)]
@@ -214,7 +222,9 @@ mod tests {
             _invocation: crate::engine::Invocation,
         ) -> crate::engine::Result<Value> {
             Ok(serde_json::json!({
-                "items": [{"workerId":"background-worker","result":{"summary":"ready"}}]
+                "handled":true,
+                "items": [{"workerId":"background-worker","resultPreview":"{\"summary\":\"ready\"}"}],
+                "narrative":"Background worker is ready."
             }))
         }
     }
@@ -331,11 +341,12 @@ mod tests {
             Some("background"),
             None,
             None,
+            None,
         )
         .await
         .expect("inbox primer");
 
-        assert!(primer.contains("background-worker"));
+        assert_eq!(primer, "Background worker is ready.");
         assert!(primer.contains("ready"));
     }
 

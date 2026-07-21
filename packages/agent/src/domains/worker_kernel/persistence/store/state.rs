@@ -217,6 +217,33 @@ fn validate_engine_hook_contract(
             vec![json!({})],
             vec![json!({}), json!({"narrative":""})],
         ),
+        WorkerEngineHook::InboxContext => (
+            json!({
+                "query":"finish the background research",
+                "items":[{
+                    "inboxId":"worker_inbox_test",
+                    "invocationId":"worker_run_test",
+                    "workerId":"recent-research",
+                    "workerName":"Recent Research",
+                    "workerDescription":"Researches recent sources",
+                    "severity":"info",
+                    "triggerKind":"schedule",
+                    "resultPreview":"{\"summary\":\"Research completed\"}",
+                    "createdAt":"2026-07-21T00:00:00Z"
+                }]
+            }),
+            json!({
+                "consumedInboxIds":["worker_inbox_test"],
+                "narrative":"The scheduled research worker completed its report."
+            }),
+            vec![json!({}), json!({"query":"missing items"})],
+            vec![
+                json!({}),
+                json!({"consumedInboxIds":[""],"narrative":"invalid id"}),
+                json!({"consumedInboxIds":"invalid","narrative":"invalid list"}),
+                json!({"consumedInboxIds":[],"narrative":7}),
+            ],
+        ),
         WorkerEngineHook::WorkerRelevance => (
             json!({
                 "query":"recent compiler research",
@@ -279,8 +306,8 @@ fn validate_engine_hook_contract(
         .is_ok()
         {
             return Err(format!(
-                "engine hook '{}' inputSchema accepts an invalid hook payload",
-                hook.as_str()
+                "engine hook '{}' inputSchema accepts invalid hook payload {invalid}",
+                hook.as_str(),
             ));
         }
     }
@@ -294,8 +321,8 @@ fn validate_engine_hook_contract(
         .is_ok()
         {
             return Err(format!(
-                "engine hook '{}' outputSchema accepts an invalid hook payload",
-                hook.as_str()
+                "engine hook '{}' outputSchema accepts invalid hook payload {invalid}",
+                hook.as_str(),
             ));
         }
     }

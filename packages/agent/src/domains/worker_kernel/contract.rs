@@ -628,13 +628,30 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         FunctionContract::new(
             "worker_kernel::inbox_attach",
             WORKER,
-            EffectClass::IdempotentWrite,
-            RiskLevel::Low)
+            EffectClass::ExternalSideEffect,
+            RiskLevel::Medium)
         .visibility(FunctionVisibility::Internal)
-        .request_schema(json!({"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":32},"relevanceQuery":{"type":"string"}}}))
-        .response_schema(open_response())
-        .idempotency(IdempotencyContract::profile())
-        .description("Claim notable unseen worker inbox observations for transient session context.")
+        .request_schema(json!({
+            "type":"object","additionalProperties":false,
+            "properties":{
+                "limit":{"type":"integer","minimum":1,"maximum":32},
+                "relevanceQuery":{"type":"string","maxLength":12000},
+                "originWorkerId":{"type":"string"}
+            }
+        }))
+        .response_schema(json!({
+            "type":"object","additionalProperties":false,
+            "required":["handled","items","narrative"],
+            "properties":{
+                "handled":{"type":"boolean"},
+                "workerId":{"type":"string"},
+                "workerVersion":{"type":"string"},
+                "narrative":{"type":"string","maxLength":12000},
+                "items":{"type":"array","maxItems":32,"items":{"type":"object"}}
+            }
+        }))
+        .idempotency(IdempotencyContract::session())
+        .description("Invoke worker-owned unseen-result context policy, atomically claim its selected observations, and retain deterministic recovery when no hook is active.")
         .build()?,
     );
     specs.push(
