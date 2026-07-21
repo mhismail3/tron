@@ -26,12 +26,6 @@ engine-global worker through one atomic operation.
 - Core source changes are prepared and tested in isolated Git worktrees. A
   later explicit user-authored message is required before application.
 
-The permissive architecture is still an experiment. Its empirical completion
-gate requires ten substantive scenarios across three days, including three
-autonomous worker adaptations and at least one proactive adaptation during an
-ordinary task. CI validates the gate but does not invent that real-world
-evidence.
-
 ## System Shape
 
 ```text

@@ -797,36 +797,14 @@ proves that `worker_upsert` cloned the exact revision and sealed its actual tree
 digest into canonical state, smoke-tests the locked dependency, activates the
 worker, and invokes it.
 
-## Empirical POC Gate
+## Observation-Driven Re-hardening
 
-Automated correctness is necessary but not sufficient. The committed
-`worker_poc_observations.json` ledger is intentionally empty. Real testing must
-demonstrate:
-
-- at least 10 substantive passed scenarios;
-- at least three distinct calendar days;
-- at least three autonomous worker creations or improvements;
-- at least one of those adaptations initiated proactively during an ordinary
-  task that did not explicitly request worker creation;
-- no unresolved failure caused by authority ceremony, a hidden actuator, a
-  proposal-only transition, or blocked activation of a valid worker.
-
-The local ledger accepts `succeeded` as the human-facing alias for `passed` and
-retains proactive-adaptation, resolution timestamp/evidence, and notes fields.
-Resolved failures must include both a timestamp and concrete resolution refs;
-these richer records remain validated rather than being discarded for CI.
-
-Validate a local evidence ledger with:
-
-```bash
-TRON_WORKER_POC_LEDGER=/absolute/path/to/observations.json \
-  cargo test --manifest-path packages/agent/Cargo.toml \
-  --test worker_poc_gate worker_poc_empirical_gate -- --ignored
-```
-
-Re-hardening begins only after this gate passes. Every new guardrail must map to
-an observed failure or concrete threat, include a regression scenario, and
-prove that accepted worker workflows remain uninterrupted.
+The permissive POC is evaluated through actual sessions and the production
+evidence they already persist: worker versions, runs, inbox results, causal
+traces, health, and audit history. Tron does not ship a second observation
+ledger or an arbitrary time/scenario gate that exists only to validate Tron.
+Future guardrails must map to an observed failure or concrete threat, include a
+regression scenario for it, and preserve accepted worker workflows.
 
 ## Source Owners
 
