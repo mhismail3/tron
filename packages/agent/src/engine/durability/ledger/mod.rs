@@ -21,6 +21,10 @@
 //! Duplicate handling has one contract: a matching key, payload, and function
 //! revision returns the stored result; conflicts and unfinished attempts fail.
 //! There is no configurable replay-policy plane.
+//! The concrete scope codec accepts only profile-global and non-empty session
+//! values. It migrates the former `system:system` spelling to
+//! `profile:profile`; every other unknown or partial persisted pair fails
+//! closed.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -161,8 +165,45 @@ pub(crate) fn retire_legacy_idempotency_replay_column(
     Ok(true)
 }
 
+/// Rename the former process-global spelling to the profile boundary that the
+/// profile-owned database has always enforced.
+pub(crate) fn migrate_profile_idempotency_scope(
+    connection: &rusqlite::Connection,
+) -> std::result::Result<(), String> {
+    for (table, kind_column, value_column) in [
+        ("engine_idempotency_entries", "scope_kind", "scope_value"),
+        (
+            "engine_invocations",
+            "idempotency_scope_kind",
+            "idempotency_scope_value",
+        ),
+    ] {
+        let present = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [table],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| format!("inspect {table}: {error}"))?;
+        if present {
+            connection
+                .execute(
+                    &format!(
+                        "UPDATE {table} SET {kind_column}='profile', {value_column}='profile' \
+                         WHERE {kind_column}='system' AND {value_column}='system'"
+                    ),
+                    [],
+                )
+                .map_err(|error| {
+                    format!("migrate profile idempotency scope in {table}: {error}")
+                })?;
+        }
+    }
+    Ok(())
+}
+
 /// Fully scoped idempotency key.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IdempotencyKey {
     /// Function the key belongs to.
     pub function_id: FunctionId,
@@ -182,7 +223,7 @@ pub enum IdempotencyStatus {
 }
 
 /// Persisted idempotency reservation/result.
-#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IdempotencyEntry {
     /// Fully scoped key.
     pub key: IdempotencyKey,

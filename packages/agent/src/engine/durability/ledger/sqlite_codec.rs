@@ -134,10 +134,10 @@ pub(super) fn raw_invocation_record(row: RawInvocationRow) -> Result<InvocationR
         session_id: row.session_id,
         workspace_id: row.workspace_id,
         idempotency_key: row.idempotency_key,
-        idempotency_scope: match (row.idempotency_scope_kind, row.idempotency_scope_value) {
-            (Some(kind), Some(value)) => Some(IdempotencyScope::new(kind, value)),
-            _ => None,
-        },
+        idempotency_scope: decode_optional_idempotency_scope(
+            row.idempotency_scope_kind,
+            row.idempotency_scope_value,
+        )?,
         replayed_from: row.replayed_from.map(InvocationId::new).transpose()?,
         succeeded: row.succeeded == 1,
         result_value: optional_from_json_string("invocation.result", &row.result_json)?,
@@ -150,7 +150,7 @@ pub(super) fn raw_idempotency_entry(row: RawIdempotencyRow) -> Result<Idempotenc
     Ok(IdempotencyEntry {
         key: IdempotencyKey {
             function_id: FunctionId::new(row.function_id)?,
-            scope: IdempotencyScope::new(row.scope_kind, row.scope_value),
+            scope: decode_idempotency_scope(row.scope_kind, row.scope_value)?,
             key: row.idempotency_key,
         },
         payload_fingerprint: row.payload_fingerprint,
@@ -168,6 +168,33 @@ pub(super) fn raw_idempotency_entry(row: RawIdempotencyRow) -> Result<Idempotenc
         created_at: parse_time("idempotency.created_at", &row.created_at)?,
         updated_at: parse_time("idempotency.updated_at", &row.updated_at)?,
     })
+}
+
+fn decode_optional_idempotency_scope(
+    kind: Option<String>,
+    value: Option<String>,
+) -> Result<Option<IdempotencyScope>> {
+    match (kind, value) {
+        (None, None) => Ok(None),
+        (Some(kind), Some(value)) => decode_idempotency_scope(kind, value).map(Some),
+        _ => Err(EngineError::LedgerFailure {
+            operation: "idempotency.scope",
+            message: "idempotency scope kind and value must both be present".to_owned(),
+        }),
+    }
+}
+
+fn decode_idempotency_scope(kind: String, value: String) -> Result<IdempotencyScope> {
+    match (kind.as_str(), value.as_str()) {
+        ("profile", "profile") => Ok(IdempotencyScope::Profile),
+        ("session", session_id) if !session_id.trim().is_empty() => {
+            Ok(IdempotencyScope::session(session_id))
+        }
+        _ => Err(EngineError::LedgerFailure {
+            operation: "idempotency.scope",
+            message: format!("invalid idempotency scope {kind}:{value}"),
+        }),
+    }
 }
 
 pub(super) fn optional_stored_error_json(

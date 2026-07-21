@@ -1,6 +1,5 @@
 //! Function catalog and policy contracts.
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{FunctionRevision, FunctionVisibility};
@@ -97,9 +96,9 @@ impl IdempotencyContract {
 
     /// Deduplicate across the profile runtime.
     #[must_use]
-    pub fn system() -> Self {
+    pub fn profile() -> Self {
         Self {
-            dedupe_scope: DedupeScope::System,
+            dedupe_scope: DedupeScope::Profile,
         }
     }
 }
@@ -109,26 +108,41 @@ impl IdempotencyContract {
 pub enum DedupeScope {
     /// Unique within the invocation's session.
     Session,
-    /// Unique across the running Tron system.
-    System,
+    /// Unique across the current profile runtime.
+    Profile,
 }
 
 /// Concrete dedupe scope attached to an invocation's idempotency key.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct IdempotencyScope {
-    /// Scope kind: `session` or `system`.
-    pub kind: String,
-    /// Concrete scope value.
-    pub value: String,
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IdempotencyScope {
+    /// Unique across the current profile runtime.
+    Profile,
+    /// Unique within one session.
+    Session(String),
 }
 
 impl IdempotencyScope {
-    /// Create a scope.
+    /// Create a session scope.
     #[must_use]
-    pub fn new(kind: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            kind: kind.into(),
-            value: value.into(),
+    pub fn session(session_id: impl Into<String>) -> Self {
+        Self::Session(session_id.into())
+    }
+
+    /// Stable storage kind.
+    #[must_use]
+    pub(crate) const fn kind(&self) -> &'static str {
+        match self {
+            Self::Profile => "profile",
+            Self::Session(_) => "session",
+        }
+    }
+
+    /// Stable storage value.
+    #[must_use]
+    pub(crate) fn value(&self) -> &str {
+        match self {
+            Self::Profile => "profile",
+            Self::Session(session_id) => session_id,
         }
     }
 }

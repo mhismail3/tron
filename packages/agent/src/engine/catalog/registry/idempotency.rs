@@ -146,13 +146,13 @@ fn idempotency_scope_value(
             .causal_context
             .session_id
             .clone()
-            .map(|session| IdempotencyScope::new("session", session))
+            .map(IdempotencyScope::session)
             .ok_or_else(|| {
                 EngineError::PolicyViolation(
                     "session-scoped idempotency requires a session id".to_owned(),
                 )
             }),
-        DedupeScope::System => Ok(IdempotencyScope::new("system", "system")),
+        DedupeScope::Profile => Ok(IdempotencyScope::Profile),
     }
 }
 

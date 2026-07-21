@@ -570,8 +570,10 @@ types instead of the former generic visibility scope:
 
 Actor identity has only four production variants: Agent, Client, Worker, and
 System. Session and workspace are causal observations rather than actor fields.
-Unknown persisted stream scopes fail closed. This keeps admission, duplicate
-suppression, and delivery from becoming another synthetic authorization model.
+Runtime state and idempotency have closed profile/session scopes, while stream
+delivery has closed system/session visibility. Unknown persisted values fail
+closed. This keeps admission, duplicate suppression, state, and delivery from
+becoming another synthetic authorization model.
 The generic function-definition provenance record was removed because no
 runtime consumed it; executable worker bundles retain the source revisions and
 checksums that actually support inspection, ranking, recovery, and audit.

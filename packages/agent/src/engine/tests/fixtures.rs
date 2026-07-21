@@ -318,7 +318,7 @@ pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLed
 
     let key = IdempotencyKey {
         function_id: fid("alpha::write"),
-        scope: IdempotencyScope::new("session", "session-a"),
+        scope: IdempotencyScope::session("session-a"),
         key: "dedupe-key".to_owned(),
     };
     let reservation = IdempotencyReservation {

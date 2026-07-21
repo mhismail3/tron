@@ -420,8 +420,8 @@ struct ReplayIdempotencyScope {
 impl ReplayIdempotencyScope {
     fn from_scope(scope: &IdempotencyScope) -> Self {
         Self {
-            kind: scope.kind.clone(),
-            value: scope.value.clone(),
+            kind: scope.kind().to_owned(),
+            value: scope.value().to_owned(),
         }
     }
 }

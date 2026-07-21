@@ -26,7 +26,7 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
     let reservation = IdempotencyReservation {
         key: IdempotencyKey {
             function_id: fid("alpha::write"),
-            scope: IdempotencyScope::new("session", "session-a"),
+            scope: IdempotencyScope::session("session-a"),
             key: "dedupe-key".to_owned(),
         },
         payload_fingerprint: "fingerprint-a".to_owned(),
@@ -48,6 +48,105 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
         IdempotencyReservationOutcome::Existing(entry)
             if entry.status == IdempotencyStatus::Completed
     ));
+}
+
+#[test]
+fn sqlite_migrates_legacy_global_scope_to_profile_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tron.sqlite");
+    let key = IdempotencyKey {
+        function_id: fid("alpha::write"),
+        scope: IdempotencyScope::Profile,
+        key: "profile-key".to_owned(),
+    };
+    {
+        let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+        store
+            .reserve_idempotency(IdempotencyReservation {
+                key: key.clone(),
+                payload_fingerprint: "profile-fingerprint".to_owned(),
+                function_revision: FunctionRevision(1),
+                invocation_id: InvocationId::new("profile-reservation").unwrap(),
+            })
+            .unwrap();
+    }
+    let connection = rusqlite::Connection::open(&db_path).unwrap();
+    connection
+        .execute(
+            "UPDATE engine_idempotency_entries
+             SET scope_kind='system', scope_value='system'",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+
+    let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    assert!(matches!(
+        store
+            .reserve_idempotency(IdempotencyReservation {
+                key,
+                payload_fingerprint: "profile-fingerprint".to_owned(),
+                function_revision: FunctionRevision(1),
+                invocation_id: InvocationId::new("profile-replay").unwrap(),
+            })
+            .unwrap(),
+        IdempotencyReservationOutcome::Existing(entry)
+            if entry.key.scope == IdempotencyScope::Profile
+    ));
+}
+
+#[test]
+fn sqlite_rejects_unknown_idempotency_scope_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("tron.sqlite");
+    let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    let key = IdempotencyKey {
+        function_id: fid("alpha::write"),
+        scope: IdempotencyScope::Profile,
+        key: "invalid-scope-key".to_owned(),
+    };
+    let invocation = Invocation::new_sync(
+        fid("alpha::write"),
+        json!({"x": 1}),
+        causal().with_session_id("scope-audit-session"),
+    );
+    let result = crate::engine::invocation::model::InvocationResult::success(
+        &invocation,
+        wid("w1"),
+        FunctionRevision(1),
+        CatalogRevision(1),
+        json!({"ok": true}),
+    );
+    store
+        .append_invocation(
+            &crate::engine::invocation::model::InvocationRecord::from_result(
+                &invocation,
+                &result,
+                Some(IdempotencyScope::Profile),
+            ),
+        )
+        .unwrap();
+    store
+        .reserve_idempotency(IdempotencyReservation {
+            key: key.clone(),
+            payload_fingerprint: "fingerprint".to_owned(),
+            function_revision: FunctionRevision(1),
+            invocation_id: invocation.id,
+        })
+        .unwrap();
+    store
+        .connection()
+        .execute(
+            "UPDATE engine_idempotency_entries
+             SET scope_kind='workspace', scope_value='legacy'",
+            [],
+        )
+        .unwrap();
+
+    let error = store
+        .list_idempotency_by_session("scope-audit-session")
+        .expect_err("unknown scope must fail closed when decoded");
+    assert!(error.to_string().contains("invalid idempotency scope"));
 }
 
 #[test]
@@ -128,7 +227,7 @@ fn ledger_boundaries_redact_manually_constructed_results_and_idempotency_outcome
 
     let key = IdempotencyKey {
         function_id: fid("worker_kernel::webhook_rotate"),
-        scope: IdempotencyScope::new("session", "session-secret"),
+        scope: IdempotencyScope::session("session-secret"),
         key: "rotate-secret".to_owned(),
     };
     let reservation = IdempotencyReservation {
@@ -287,7 +386,7 @@ fn sqlite_stream_blobs_large_payload_but_poll_returns_original_payload() {
 }
 
 #[tokio::test]
-async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() {
+async fn idempotency_replays_matching_and_rejects_conflicting_duplicates() {
     let mut catalog = LiveCatalog::new();
     let calls = Arc::new(AtomicUsize::new(0));
     catalog

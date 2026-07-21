@@ -125,7 +125,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "path": {"type": "string"}
             }
         }))
-        .idempotency(IdempotencyContract::system())
+        .idempotency(IdempotencyContract::profile())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .build()?,
     ])

@@ -584,7 +584,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .visibility(FunctionVisibility::Internal)
         .request_schema(json!({"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":32},"relevanceQuery":{"type":"string"}}}))
         .response_schema(open_response())
-        .idempotency(IdempotencyContract::system())
+        .idempotency(IdempotencyContract::profile())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .description("Claim notable unseen worker inbox observations for transient session context.")
         .build()?,
@@ -598,7 +598,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .visibility(FunctionVisibility::Internal)
         .request_schema(json!({"type":"object","additionalProperties":false,"required":["workerId","triggerId","token","input","idempotencyKey"],"properties":{"workerId":{"type":"string"},"triggerId":{"type":"string"},"token":{"type":"string"},"input":{},"idempotencyKey":{"type":"string"}}}))
         .response_schema(open_response())
-        .idempotency(IdempotencyContract::system())
+        .idempotency(IdempotencyContract::profile())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .description("Authenticated local webhook dispatch into the persistent worker runtime.")
         .build()?,

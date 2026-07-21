@@ -17,7 +17,7 @@ use super::{
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::InvocationId;
-use crate::engine::kernel::types::CatalogRevision;
+use crate::engine::kernel::types::{CatalogRevision, IdempotencyScope};
 
 mod rows;
 
@@ -73,6 +73,8 @@ impl SqliteEngineLedgerStore {
             .map_err(|err| sqlite_err("initialize_invocation_index", err))?;
         ensure_column(&self.conn, "engine_invocations", "session_id", "TEXT")?;
         ensure_column(&self.conn, "engine_invocations", "workspace_id", "TEXT")?;
+        super::migrate_profile_idempotency_scope(&self.conn)
+            .map_err(|err| ledger_failure("ledger.profile_scope_migration", err))?;
         Ok(())
     }
 
@@ -134,8 +136,8 @@ impl SqliteEngineLedgerStore {
         stmt.query_row(
             params![
                 key.function_id.as_str(),
-                key.scope.kind,
-                key.scope.value,
+                key.scope.kind(),
+                key.scope.value(),
                 key.key
             ],
             |row| {
@@ -247,11 +249,11 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                     record
                         .idempotency_scope
                         .as_ref()
-                        .map(|scope| scope.kind.as_str()),
+                        .map(IdempotencyScope::kind),
                     record
                         .idempotency_scope
                         .as_ref()
-                        .map(|scope| scope.value.as_str()),
+                        .map(IdempotencyScope::value),
                     record.idempotency_key.as_deref(),
                     record.replayed_from.as_ref().map(InvocationId::as_str),
                     i64::from(record.succeeded),
@@ -385,8 +387,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                        AND idempotency_key = ?4",
                     params![
                         reservation.key.function_id.as_str(),
-                        reservation.key.scope.kind,
-                        reservation.key.scope.value,
+                        reservation.key.scope.kind(),
+                        reservation.key.scope.value(),
                         reservation.key.key,
                         reservation.invocation_id.as_str(),
                         updated_at.to_rfc3339(),
@@ -409,8 +411,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     reservation.key.function_id.as_str(),
-                    reservation.key.scope.kind,
-                    reservation.key.scope.value,
+                    reservation.key.scope.kind(),
+                    reservation.key.scope.value(),
                     reservation.key.key,
                     reservation.payload_fingerprint,
                     reservation.function_revision.0,
@@ -451,8 +453,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                    AND idempotency_key = ?4",
                 params![
                     key.function_id.as_str(),
-                    key.scope.kind,
-                    key.scope.value,
+                    key.scope.kind(),
+                    key.scope.value(),
                     key.key,
                     to_json_string("complete_idempotency.status", &IdempotencyStatus::Completed)?,
                     invocation_id.as_str(),
@@ -462,8 +464,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         &format!(
                             "{}:{}:{}:{}",
                             key.function_id.as_str(),
-                            key.scope.kind,
-                            key.scope.value,
+                            key.scope.kind(),
+                            key.scope.value(),
                             key.key
                         ),
                         "outcome_value",
@@ -478,8 +480,8 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
                         &format!(
                             "{}:{}:{}:{}",
                             key.function_id.as_str(),
-                            key.scope.kind,
-                            key.scope.value,
+                            key.scope.kind(),
+                            key.scope.value(),
                             key.key
                         ),
                         "outcome_error",

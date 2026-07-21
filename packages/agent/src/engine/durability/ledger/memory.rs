@@ -9,7 +9,7 @@ use crate::engine::durability::ledger::{
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::InvocationId;
-use crate::engine::kernel::types::CatalogRevision;
+use crate::engine::kernel::types::{CatalogRevision, IdempotencyScope};
 
 /// In-memory ledger store used by `LiveCatalog::new`.
 #[derive(Default)]
@@ -79,7 +79,7 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             .idempotency
             .values()
             .filter(|entry| {
-                (entry.key.scope.kind == "session" && entry.key.scope.value == session_id)
+                (entry.key.scope == IdempotencyScope::Session(session_id.to_owned()))
                     || session_invocations.contains(&entry.first_invocation_id)
                     || session_invocations.contains(&entry.latest_invocation_id)
             })

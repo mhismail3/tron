@@ -304,7 +304,7 @@ mod tests {
             crate::engine::FunctionVisibility::Internal,
             EffectClass::IdempotentWrite,
         )
-        .with_idempotency(crate::engine::IdempotencyContract::system())
+        .with_idempotency(crate::engine::IdempotencyContract::profile())
         .with_request_schema(serde_json::json!({"type":"object"}))
         .with_response_schema(serde_json::json!({"type":"object"}));
         host.register_function_for_setup(attach, Arc::new(InboxAttachHandler))
