@@ -41,7 +41,9 @@ pub struct CoreProposalService {
 
 impl CoreProposalService {
     pub fn new(home: &Path, event_store: Arc<EventStore>) -> Result<Self, String> {
-        let root = home.join("workspace").join("core-proposals");
+        let root = home
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join("core-proposals");
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         Ok(Self { root, event_store })
     }

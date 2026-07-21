@@ -337,7 +337,7 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
     // Wire compatibility: `active_sessions` reports cached session projections.
     let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let event_store = state.runtime_context.event_store.clone();
-    let tron_home = crate::domains::settings::profile::tron_home_dir();
+    let tron_home = crate::shared::foundation::paths::tron_home();
     let response = state
         .runtime_context
         .run_blocking("http.health.deep", move || {

@@ -1,8 +1,9 @@
 //! API provider settings.
 //!
-//! Configuration for LLM provider endpoints. Cloud providers (Anthropic,
-//! `OpenAI`) have OAuth URLs, client IDs, and scopes. Local providers
-//! (Ollama) only need a base URL.
+//! Configuration that changes model-provider behavior at runtime. OAuth
+//! endpoints and scopes are deliberately absent: the authentication domain
+//! owns those protocol constants, and exposing duplicate settings that no
+//! production caller reads would create a false configuration surface.
 
 use serde::{Deserialize, Serialize};
 
@@ -12,9 +13,6 @@ use serde::{Deserialize, Serialize};
 pub struct ApiSettings {
     /// Anthropic/Claude API settings.
     pub anthropic: AnthropicApiSettings,
-    /// `OpenAI` Codex API settings (optional — absent if not configured).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub openai_codex: Option<OpenAiCodexApiSettings>,
     /// `MiniMax` API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimax: Option<MiniMaxApiSettings>,
@@ -26,20 +24,12 @@ pub struct ApiSettings {
     pub ollama: Option<OllamaApiSettings>,
 }
 
-/// Anthropic API and OAuth settings.
+/// Anthropic model-provider settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct AnthropicApiSettings {
-    /// OAuth authorization URL.
-    pub auth_url: String,
-    /// OAuth token exchange URL.
-    pub token_url: String,
-    /// OAuth redirect URI.
-    pub redirect_uri: String,
     /// OAuth client ID.
     pub client_id: String,
-    /// OAuth scopes requested.
-    pub scopes: Vec<String>,
     /// System prompt prefix for OAuth-authenticated requests.
     pub system_prompt_prefix: String,
     /// Beta headers sent with OAuth requests.
@@ -51,73 +41,11 @@ pub struct AnthropicApiSettings {
 impl Default for AnthropicApiSettings {
     fn default() -> Self {
         Self {
-            auth_url: "https://claude.ai/oauth/authorize".to_string(),
-            token_url: "https://console.anthropic.com/v1/oauth/token".to_string(),
-            redirect_uri: "https://console.anthropic.com/oauth/code/callback".to_string(),
             client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e".to_string(),
-            scopes: vec![
-                "org:create_api_key".to_string(),
-                "user:profile".to_string(),
-                "user:inference".to_string(),
-            ],
             system_prompt_prefix:
                 "You are Claude Code, Anthropic's official CLI for Claude.".to_string(),
             oauth_beta_headers: "oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14".to_string(),
             token_expiry_buffer_seconds: 300,
-        }
-    }
-}
-
-/// Default reasoning effort for `OpenAI` models.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningEffort {
-    /// Low reasoning effort.
-    Low,
-    /// Medium reasoning effort.
-    #[default]
-    Medium,
-    /// High reasoning effort.
-    High,
-    /// Extra-high reasoning effort.
-    Xhigh,
-}
-
-/// `OpenAI` Codex API and OAuth settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct OpenAiCodexApiSettings {
-    /// OAuth authorization URL.
-    pub auth_url: String,
-    /// OAuth token exchange URL.
-    pub token_url: String,
-    /// OAuth client ID.
-    pub client_id: String,
-    /// OAuth scopes requested.
-    pub scopes: Vec<String>,
-    /// Base URL for the API.
-    pub base_url: String,
-    /// Seconds before token expiry to trigger refresh.
-    pub token_expiry_buffer_seconds: u64,
-    /// Default reasoning effort level.
-    pub default_reasoning_effort: ReasoningEffort,
-}
-
-impl Default for OpenAiCodexApiSettings {
-    fn default() -> Self {
-        Self {
-            auth_url: "https://auth.openai.com/oauth/authorize".to_string(),
-            token_url: "https://auth.openai.com/oauth/token".to_string(),
-            client_id: "app_EMoamEEZ73f0CkXaXp7hrann".to_string(),
-            scopes: vec![
-                "openid".to_string(),
-                "profile".to_string(),
-                "email".to_string(),
-                "offline_access".to_string(),
-            ],
-            base_url: "https://chatgpt.com/backend-api".to_string(),
-            token_expiry_buffer_seconds: 300,
-            default_reasoning_effort: ReasoningEffort::Medium,
         }
     }
 }
@@ -181,7 +109,6 @@ mod tests {
     #[test]
     fn api_defaults() {
         let api = ApiSettings::default();
-        assert!(api.openai_codex.is_none());
         assert_eq!(
             api.anthropic.client_id,
             "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -191,34 +118,29 @@ mod tests {
     #[test]
     fn anthropic_defaults() {
         let a = AnthropicApiSettings::default();
-        assert_eq!(a.auth_url, "https://claude.ai/oauth/authorize");
+        assert!(!a.client_id.is_empty());
         assert_eq!(a.token_expiry_buffer_seconds, 300);
-        assert_eq!(a.scopes.len(), 3);
     }
 
     #[test]
     fn anthropic_serde_roundtrip() {
         let a = AnthropicApiSettings::default();
         let json = serde_json::to_value(&a).unwrap();
-        assert_eq!(json["authUrl"], "https://claude.ai/oauth/authorize");
+        assert_eq!(json["clientId"], a.client_id);
         assert_eq!(json["tokenExpiryBufferSeconds"], 300);
         let back: AnthropicApiSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(back.auth_url, a.auth_url);
+        assert_eq!(back.client_id, a.client_id);
     }
 
     #[test]
-    fn openai_codex_defaults() {
-        let o = OpenAiCodexApiSettings::default();
-        assert_eq!(o.client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
-        assert_eq!(o.default_reasoning_effort, ReasoningEffort::Medium);
-    }
-
-    #[test]
-    fn reasoning_effort_serde() {
-        let json = serde_json::to_string(&ReasoningEffort::Xhigh).unwrap();
-        assert_eq!(json, "\"xhigh\"");
-        let back: ReasoningEffort = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, ReasoningEffort::Xhigh);
+    fn authentication_protocol_fields_are_not_settings() {
+        for retired in ["authUrl", "tokenUrl", "redirectUri", "scopes"] {
+            let value = serde_json::Value::Object(serde_json::Map::from_iter([(
+                retired.to_owned(),
+                serde_json::json!("unused"),
+            )]));
+            assert!(serde_json::from_value::<AnthropicApiSettings>(value).is_err());
+        }
     }
 
     /// Provider settings only accept the current provider-specific fields.
@@ -343,20 +265,7 @@ mod tests {
     fn api_settings_omits_null_sections() {
         let api = ApiSettings::default();
         let json = serde_json::to_value(&api).unwrap();
-        assert!(json.get("openaiCodex").is_none());
+        assert!(json.get("minimax").is_none());
         assert!(json.get("anthropic").is_some());
-    }
-
-    #[test]
-    fn api_settings_with_optional_providers() {
-        let json = serde_json::json!({
-            "anthropic": {},
-            "openaiCodex": {
-                "clientId": "custom-id"
-            }
-        });
-        let api: ApiSettings = serde_json::from_value(json).unwrap();
-        assert!(api.openai_codex.is_some());
-        assert_eq!(api.openai_codex.unwrap().client_id, "custom-id");
     }
 }

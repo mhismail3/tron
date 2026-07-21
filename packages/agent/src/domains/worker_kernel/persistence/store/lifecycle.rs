@@ -1,4 +1,4 @@
-//! Enable, failure, rollback, retirement, purge, and profile stop mutations.
+//! Enable, failure, rollback, retirement, purge, and engine stop mutations.
 
 use super::*;
 

@@ -5,7 +5,7 @@ use serde_json::Value;
 
 pub(super) const BUNDLE_SCHEMA: &str = "tron.worker_bundle.v1";
 pub(super) const MAX_CAUSAL_DEPTH: u32 = 16;
-pub(super) const MAX_PROFILE_CONCURRENCY: usize = 32;
+pub(super) const MAX_ENGINE_CONCURRENCY: usize = 32;
 pub(super) const MAX_WORKER_CONCURRENCY: usize = 8;
 pub(super) const MAX_INVOCATION_SECONDS: u64 = 7_200;
 

@@ -74,12 +74,9 @@ pub fn deep_health_check(
         // 1. Database
         check_database(event_store),
         // 2. Settings
-        check_settings(
-            &tron_home
-                .join(crate::shared::foundation::paths::dirs::PROFILES)
-                .join(crate::shared::foundation::profile::USER_PROFILE)
-                .join(crate::shared::foundation::paths::files::PROFILE_TOML),
-        ),
+        check_settings(&crate::shared::foundation::paths::settings_path_for_home(
+            tron_home,
+        )),
         // 3. Auth
         check_auth(
             &tron_home
@@ -129,7 +126,7 @@ fn check_database(
 }
 
 fn check_settings(path: &Path) -> DeepHealthCheck {
-    match crate::domains::settings::profile::load_settings_from_path(path) {
+    match crate::domains::settings::config::load_settings_from_path(path) {
         Ok(_) => DeepHealthCheck {
             name: "settings".into(),
             status: "ok".into(),
@@ -391,12 +388,8 @@ mod tests {
         let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
         crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
-        let settings_dir = dir
-            .path()
-            .join(crate::shared::foundation::paths::dirs::PROFILES)
-            .join(crate::shared::foundation::profile::USER_PROFILE);
         std::fs::write(
-            settings_dir.join(crate::shared::foundation::paths::files::PROFILE_TOML),
+            crate::shared::foundation::paths::settings_path_for_home(dir.path()),
             "{broken",
         )
         .unwrap();
@@ -425,21 +418,10 @@ mod tests {
         let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
         crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
-        let settings_dir = dir
-            .path()
-            .join(crate::shared::foundation::paths::dirs::PROFILES)
-            .join(crate::shared::foundation::profile::USER_PROFILE);
         std::fs::write(
-            settings_dir.join(crate::shared::foundation::paths::files::PROFILE_TOML),
+            crate::shared::foundation::paths::settings_path_for_home(dir.path()),
             r#"
-version = "2"
-name = "user"
-managed = false
-profileClass = "custom"
-inherits = []
-authProfile = "default"
-
-[settings.server.auth]
+[server.auth]
 enforced = true
 "#,
         )

@@ -300,7 +300,7 @@ fn rust_worker_kernel_keeps_composition_root_thin() {
 fn rust_settings_domain_keeps_worker_root_thin() {
     let root = read_repo_file("packages/agent/src/domains/settings/mod.rs");
     assert!(
-        repo_path("packages/agent/src/domains/settings/profile/operations.rs").exists(),
+        repo_path("packages/agent/src/domains/settings/config/operations.rs").exists(),
         "settings operation bodies should live under the settings profile owner"
     );
     assert!(
@@ -313,7 +313,7 @@ fn rust_settings_domain_keeps_worker_root_thin() {
         "async fn settings_reset_to_defaults_value",
         "async fn read_sparse_settings_snapshot",
         "async fn rollback_sparse_settings",
-        "async fn reload_profile_runtime_or_rollback",
+        "async fn reload_settings_runtime_or_rollback",
     ] {
         assert!(
             !root.contains(banned),

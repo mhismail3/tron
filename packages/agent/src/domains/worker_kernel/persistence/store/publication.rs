@@ -1,5 +1,5 @@
 //! Candidate preparation, immutable version publication, canonical loading,
-//! and profile inventory queries.
+//! and engine inventory queries.
 
 use super::*;
 

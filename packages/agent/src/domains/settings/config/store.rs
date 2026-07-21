@@ -1,9 +1,9 @@
 //! Strict settings persistence.
 //!
 //! `SettingsStore` owns sparse user settings writes for
-//! `~/.tron/profiles/user/profile.toml`. Reads never silently repair malformed
-//! files: missing means defaults, but invalid TOML, non-object settings roots,
-//! and failed writes are surfaced to callers so user settings are not erased.
+//! `~/.tron/settings.toml`. Reads never silently repair malformed files:
+//! missing means defaults, while invalid TOML, non-object roots, and failed
+//! writes are surfaced so user settings are never erased implicitly.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -12,10 +12,10 @@ use std::sync::{Arc, OnceLock};
 use parking_lot::Mutex;
 use serde_json::{Map, Value};
 
-use crate::domains::settings::errors::{Result, SettingsError};
-use crate::domains::settings::profile::storage::loader::{
+use crate::domains::settings::config::storage::loader::{
     deep_merge, load_settings_from_path, read_sparse_settings_overlay,
 };
+use crate::domains::settings::errors::{Result, SettingsError};
 use crate::domains::settings::types::TronSettings;
 
 static SETTINGS_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -39,11 +39,6 @@ impl SettingsStore {
         }
     }
 
-    /// Path this store writes.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// Serialize higher-level async settings operations that must keep runtime
     /// state and file state consistent across multiple store calls.
     pub async fn operation_lock() -> tokio::sync::OwnedMutexGuard<()> {
@@ -64,24 +59,24 @@ impl SettingsStore {
     /// Read the sparse settings file as JSON. Missing files return `{}`.
     pub fn read_sparse_value(&self) -> Result<Value> {
         let _guard = write_lock().lock();
-        self.read_sparse_profile_settings_locked()
+        self.read_sparse_settings_locked()
     }
 
-    /// Reset sparse settings to `{}` and return the resulting effective value.
+    /// Remove sparse settings and return the resulting compiled defaults.
     pub fn reset(&self) -> Result<Value> {
         let _guard = write_lock().lock();
-        self.write_profile_toml_locked(&Value::Object(Map::new()))?;
+        self.write_settings_toml_locked(&Value::Object(Map::new()))?;
         self.load_value()
     }
 
     /// Merge a sparse update into the existing sparse file, validate, and write.
     pub fn update(&self, updates: Value) -> Result<()> {
         let _guard = write_lock().lock();
-        let current = self.read_sparse_profile_settings_locked()?;
+        let current = self.read_sparse_settings_locked()?;
         let merged = deep_merge(current, updates);
         validate_sparse_settings(&merged, &self.path)?;
 
-        self.write_profile_toml_locked(&merged)?;
+        self.write_settings_toml_locked(&merged)?;
         Ok(())
     }
 
@@ -89,32 +84,46 @@ impl SettingsStore {
     pub fn replace_sparse_value(&self, value: Value) -> Result<()> {
         let _guard = write_lock().lock();
         validate_sparse_settings(&value, &self.path)?;
-        self.write_profile_toml_locked(&value)?;
+        self.write_settings_toml_locked(&value)?;
         Ok(())
     }
 
     /// Restore a previously read sparse settings value after a higher-level
     /// runtime reload failed.
     ///
-    /// This intentionally bypasses validation because the active profile files
-    /// may be the thing that failed validation. `ProfileRuntime` rejects the
-    /// invalid compile without swapping, so its last-known-good snapshot stays
-    /// active while the caller restores this file.
+    /// This intentionally bypasses validation because `SettingsRuntime`
+    /// already rejected the invalid candidate without swapping; the caller is
+    /// restoring the exact previously validated sparse value.
     pub fn restore_sparse_value_for_rollback(&self, value: Value) -> Result<()> {
         let _guard = write_lock().lock();
         ensure_object(&value)?;
-        self.write_profile_toml_locked(&value)?;
+        self.write_settings_toml_locked(&value)?;
         Ok(())
     }
 
-    fn read_sparse_profile_settings_locked(&self) -> Result<Value> {
+    fn read_sparse_settings_locked(&self) -> Result<Value> {
         let value = read_sparse_settings_overlay(&self.path)?;
         ensure_object(&value)?;
         Ok(value)
     }
 
-    fn write_profile_toml_locked(&self, value: &Value) -> Result<()> {
+    fn write_settings_toml_locked(&self, value: &Value) -> Result<()> {
         ensure_object(value)?;
+        if value
+            .as_object()
+            .is_some_and(|settings| settings.is_empty())
+        {
+            match std::fs::remove_file(&self.path) {
+                Ok(()) => {
+                    if let Some(parent) = self.path.parent() {
+                        sync_parent_dir(parent)?;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(SettingsError::Io(error)),
+            }
+            return Ok(());
+        }
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -126,7 +135,7 @@ impl SettingsStore {
             .prefix(".settings.")
             .suffix(".tmp")
             .tempfile_in(parent)?;
-        let content = sparse_settings_profile_toml(value)?;
+        let content = sparse_settings_toml(value)?;
         temp.write_all(content.as_bytes())?;
         temp.write_all(b"\n")?;
         temp.as_file_mut().sync_all()?;
@@ -137,32 +146,8 @@ impl SettingsStore {
     }
 }
 
-fn sparse_settings_profile_toml(value: &Value) -> Result<String> {
-    let mut table = toml::value::Table::new();
-    table.insert(
-        "version".to_string(),
-        toml::Value::String(
-            crate::shared::foundation::profile::CURRENT_PROFILE_VERSION.to_string(),
-        ),
-    );
-    table.insert(
-        "name".to_string(),
-        toml::Value::String(crate::shared::foundation::profile::USER_PROFILE.to_string()),
-    );
-    table.insert("managed".to_string(), toml::Value::Boolean(false));
-    table.insert(
-        "profileClass".to_string(),
-        toml::Value::String("custom".to_string()),
-    );
-    table.insert("inherits".to_string(), toml::Value::Array(Vec::new()));
-    table.insert(
-        "authProfile".to_string(),
-        toml::Value::String(crate::shared::foundation::profile::DEFAULT_AUTH_PROFILE.to_string()),
-    );
-    if value.as_object().is_some_and(|object| !object.is_empty()) {
-        table.insert("settings".to_string(), json_to_toml_value(value)?);
-    }
-    toml::to_string_pretty(&toml::Value::Table(table)).map_err(|error| {
+fn sparse_settings_toml(value: &Value) -> Result<String> {
+    toml::to_string_pretty(&json_to_toml_value(value)?).map_err(|error| {
         SettingsError::InvalidValue(format!("failed to encode settings TOML: {error}"))
     })
 }
@@ -221,12 +206,10 @@ fn ensure_object(value: &Value) -> Result<()> {
     }
 }
 
-fn validate_sparse_settings(value: &Value, path: &Path) -> Result<()> {
+fn validate_sparse_settings(value: &Value, _path: &Path) -> Result<()> {
     ensure_object(value)?;
-    let defaults = serde_json::to_value(
-        crate::domains::settings::profile::storage::loader::load_settings_defaults_for(path)?,
-    )
-    .map_err(|error| SettingsError::json("encode default settings", error))?;
+    let defaults = serde_json::to_value(TronSettings::default())
+        .map_err(|error| SettingsError::json("encode default settings", error))?;
     let effective = deep_merge(defaults, value.clone());
     let validated: TronSettings = serde_json::from_value(effective)
         .map_err(|error| SettingsError::json("decode effective settings", error))?;
@@ -254,23 +237,11 @@ mod tests {
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
         let home = dir.path().join(".tron");
         crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
-        home.join(crate::shared::foundation::paths::dirs::PROFILES)
-            .join(crate::shared::foundation::profile::USER_PROFILE)
-            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
+        crate::shared::foundation::paths::settings_path_for_home(&home)
     }
 
-    fn sparse_profile(settings_toml: &str) -> String {
-        format!(
-            r#"version = "2"
-name = "user"
-managed = false
-profileClass = "custom"
-inherits = []
-authProfile = "default"
-
-{settings_toml}
-"#
-        )
+    fn sparse_settings(settings_toml: &str) -> String {
+        settings_toml.to_owned()
     }
 
     #[test]
@@ -300,10 +271,9 @@ authProfile = "default"
     fn update_rejects_non_object_roots() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        std::fs::write(&path, "settings = []\n").unwrap();
         let store = SettingsStore::new(path);
 
-        let err = store.update(json!({"server": {}})).unwrap_err();
+        let err = store.replace_sparse_value(json!([])).unwrap_err();
 
         assert!(err.to_string().contains("root must be an object"));
     }
@@ -312,8 +282,8 @@ authProfile = "default"
     fn update_rejects_zero_heartbeat_interval_and_preserves_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        let original = sparse_profile(
-            r#"[settings.server]
+        let original = sparse_settings(
+            r#"[server]
 defaultModel = "claude-sonnet-4-6"
 "#,
         );
@@ -375,7 +345,7 @@ defaultModel = "claude-sonnet-4-6"
     }
 
     #[test]
-    fn reset_writes_empty_object() {
+    fn reset_removes_the_behaviorless_empty_overlay() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         let store = SettingsStore::new(&path);
@@ -387,6 +357,7 @@ defaultModel = "claude-sonnet-4-6"
         let saved = store.read_sparse_value().unwrap();
 
         assert_eq!(saved, json!({}));
+        assert!(!path.exists());
         assert_eq!(value["server"]["heartbeatIntervalMs"], 30_000);
     }
 }

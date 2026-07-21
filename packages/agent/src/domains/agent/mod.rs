@@ -4,7 +4,7 @@
 //! limited to accepting prompts, reporting runtime status, and aborting active
 //! work. Hidden functions serialize those prompts into the provider loop; the
 //! model-facing capability surface after that loop starts is the direct typed
-//! kernel tools plus the relevant profile-global worker tools.
+//! kernel tools plus the relevant engine-global worker tools.
 //! Worker composition carries the optional model responder factory directly;
 //! prompt validation reports `NotAvailable` when that runtime owner is absent.
 //!
@@ -59,7 +59,7 @@ pub(crate) mod handlers;
 pub(crate) mod r#loop;
 pub(crate) mod prompt;
 pub(crate) use deps::Deps;
-pub use r#loop::{Orchestrator, ProfileRuntime, SessionManager};
+pub use r#loop::{Orchestrator, SessionManager};
 pub(crate) use worker::worker_module;
 
 pub(crate) mod runtime;

@@ -2,28 +2,25 @@
 //!
 //! All types use `#[serde(rename_all = "camelCase")]` to match the TypeScript
 //! JSON wire format. Each type implements [`Default`] with the emergency
-//! default values that must stay in parity with the bundled default profile's
-//! `[settings]` table. Types marked with `#[serde(default)]` allow partial JSON:
+//! compiled default values. Types marked with `#[serde(default)]` allow partial JSON:
 //! missing fields get their default value during deserialization. Root and
-//! nested settings structs deny unknown fields so stale profile keys cannot
+//! nested settings structs deny unknown fields so stale settings keys cannot
 //! drift silently.
 
 mod api;
 mod context;
 mod server;
-mod ui;
 
 pub use api::*;
 pub use context::*;
 pub use server::*;
-pub use ui::*;
 
 use serde::{Deserialize, Serialize};
 
 /// Root settings type for the Tron agent.
 ///
-/// Loaded from the active profile's `[settings]`, then sparse
-/// `~/.tron/profiles/user/profile.toml` `[settings]`, with defaults applied for missing fields.
+/// Loaded from compiled defaults plus sparse `~/.tron/settings.toml`, with
+/// defaults applied for missing fields.
 /// Only the explicit settings environment variables in the loader can override
 /// specific values.
 ///
@@ -33,19 +30,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// ```json
 /// {
-///   "version": "0.1.0",
-///   "name": "tron",
 ///   "server": { "heartbeatIntervalMs": 30000 }
 /// }
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct TronSettings {
-    /// Settings schema version.
-    pub version: String,
-    /// Application name.
-    pub name: String,
-    /// Enables the trusted-local, self-authoring worker runtime for this profile.
+    /// Enables the trusted-local, self-authoring worker runtime for this engine.
     pub autonomous_workers: bool,
     /// API provider settings (Anthropic, `OpenAI`, Google).
     pub api: ApiSettings,
@@ -57,28 +48,17 @@ pub struct TronSettings {
     pub agent: AgentRuntimeSettings,
     /// Server network settings.
     pub server: ServerSettings,
-    /// Tmux integration settings.
-    pub tmux: TmuxSettings,
-    /// Session behavior settings.
-    pub session: SessionSettings,
-    /// UI/TUI appearance settings.
-    pub ui: UiSettings,
 }
 
 impl Default for TronSettings {
     fn default() -> Self {
         Self {
-            version: "0.1.0".to_string(),
-            name: "tron".to_string(),
             autonomous_workers: false,
             api: ApiSettings::default(),
             retry: RetrySettings::default(),
             context: ContextSettings::default(),
             agent: AgentRuntimeSettings::default(),
             server: ServerSettings::default(),
-            tmux: TmuxSettings::default(),
-            session: SessionSettings::default(),
-            ui: UiSettings::default(),
         }
     }
 }
@@ -155,27 +135,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_settings_version() {
-        let s = TronSettings::default();
-        assert_eq!(s.version, "0.1.0");
-        assert_eq!(s.name, "tron");
-    }
-
-    #[test]
     fn default_settings_serde_roundtrip() {
         let defaults = TronSettings::default();
         let json = serde_json::to_string(&defaults).unwrap();
         let back: TronSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.version, defaults.version);
-        assert_eq!(back.name, defaults.name);
         assert_eq!(back.autonomous_workers, defaults.autonomous_workers);
         assert_eq!(
             back.server.heartbeat_interval_ms,
             defaults.server.heartbeat_interval_ms
         );
         assert_eq!(
-            back.context.compactor.max_tokens,
-            defaults.context.compactor.max_tokens
+            back.context.compactor.preserve_recent_count,
+            defaults.context.compactor.preserve_recent_count
         );
     }
 
@@ -185,7 +156,6 @@ mod tests {
         let json = serde_json::to_value(&defaults).unwrap();
 
         // Root fields are camelCase
-        assert!(json.get("version").is_some());
         assert!(json.get("api").is_some());
         assert_eq!(json["autonomousWorkers"], false);
         assert!(json["server"].get("transcription").is_none());
@@ -215,7 +185,6 @@ mod tests {
     fn empty_json_produces_defaults() {
         let settings: TronSettings = serde_json::from_str("{}").unwrap();
         let defaults = TronSettings::default();
-        assert_eq!(settings.version, defaults.version);
         assert_eq!(
             settings.server.heartbeat_interval_ms,
             defaults.server.heartbeat_interval_ms
@@ -237,7 +206,6 @@ mod tests {
         assert_eq!(settings.server.heartbeat_interval_ms, 20_000);
         assert_eq!(settings.retry.max_retries, 3);
         assert_eq!(settings.retry.base_delay_ms, 1000);
-        assert_eq!(settings.version, "0.1.0");
     }
 
     #[test]
@@ -358,12 +326,12 @@ mod tests {
         let json = serde_json::json!({
             "context": {
                 "compactor": {
-                    "maxTokens": 50000
+                    "compactionThreshold": 0.75
                 }
             }
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.context.compactor.max_tokens, 50_000);
+        assert!((settings.context.compactor.compaction_threshold - 0.75).abs() < f64::EPSILON);
     }
 
     #[test]

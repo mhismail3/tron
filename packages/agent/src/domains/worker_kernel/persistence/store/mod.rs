@@ -63,10 +63,12 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
-        let root = home.join("workspace").join("workers");
+        let root = home
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join(crate::shared::foundation::paths::dirs::WORKERS);
         let database = home
-            .join("internal")
-            .join("database")
+            .join(crate::shared::foundation::paths::dirs::INTERNAL)
+            .join(crate::shared::foundation::paths::dirs::DB)
             .join("workers.sqlite");
         fs::create_dir_all(&root).map_err(|error| format!("create worker root: {error}"))?;
         if let Some(parent) = database.parent() {
@@ -84,10 +86,12 @@ impl WorkerStore {
 
     #[cfg(test)]
     pub fn open_without_snapshot(home: PathBuf) -> Result<Self, String> {
-        let root = home.join("workspace").join("workers");
+        let root = home
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join(crate::shared::foundation::paths::dirs::WORKERS);
         let database = home
-            .join("internal")
-            .join("database")
+            .join(crate::shared::foundation::paths::dirs::INTERNAL)
+            .join(crate::shared::foundation::paths::dirs::DB)
             .join("workers.sqlite");
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         if let Some(parent) = database.parent() {

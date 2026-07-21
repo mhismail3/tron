@@ -146,7 +146,7 @@ side effects:
 If step 4 fails, onboarding rolls back the local paired-server store and
 Keychain token for that attempt, restoring the previous token when a token
 refresh fails, then leaves the user on the pairing page.
-Pairing never writes the iOS server list into server profile settings; the
+Pairing never writes the iOS server list into engine settings; the
 server only owns server runtime settings and secrets.
 
 ## Settings Setup Pages
@@ -217,11 +217,11 @@ individual provider rows so the sheet reads as two clear sections: model
 providers first, then search services.
 
 Provider credentials are written through `auth.*` engine invocations, so secrets land in
-`auth.json`, not profile settings.
+`auth.json`, not engine settings.
 
 Engine settings and app settings are intentionally separate. Server-backed
 settings live as sparse `[settings]` overrides in
-`~/.tron/profiles/user/profile.toml`; they remain behind the server-backed
+`~/.tron/settings.toml`; they remain behind the server-backed
 settings controls and are enabled only after the active server connects and
 `settings.get` returns real values. The main Settings sheet starts at the
 medium detent and presents Engine, Providers, and App as separate destination

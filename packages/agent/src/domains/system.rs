@@ -4,12 +4,12 @@
 //! registration dependencies, handler binding, and operation execution.
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
-use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::registration::worker::DomainWorkerModule;
+use crate::domains::settings::SettingsRuntime;
 use crate::engine::{EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::shared::server::errors::CapabilityError;
@@ -27,7 +27,7 @@ const STREAM_TOPICS: &[&str] = &["system.status"];
 pub(crate) struct Deps {
     onboarded_marker_path: PathBuf,
     orchestrator: Arc<Orchestrator>,
-    profile_runtime: Arc<ProfileRuntime>,
+    settings_runtime: Arc<SettingsRuntime>,
     server_start_time: Instant,
     ws_port: Arc<AtomicU16>,
 }
@@ -37,7 +37,7 @@ impl Deps {
         Self {
             onboarded_marker_path: deps.onboarded_marker_path.clone(),
             orchestrator: deps.orchestrator.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
+            settings_runtime: deps.settings_runtime.clone(),
             server_start_time: deps.server_start_time,
             ws_port: deps.ws_port.clone(),
         }
@@ -183,7 +183,7 @@ fn system_info_value(payload: &Value, deps: &Deps, allow_server_context: bool) -
         "arch": std::env::consts::ARCH,
         "runtime": "agent",
         "port": deps.ws_port.load(Ordering::SeqCst),
-        "tailscaleIp": deps.profile_runtime.current().settings.server.tailscale_ip,
+        "tailscaleIp": deps.settings_runtime.current().settings.server.tailscale_ip,
         "paired": crate::app::lifecycle::onboarding::is_onboarded(&marker_path),
     })
 }

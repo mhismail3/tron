@@ -5,7 +5,7 @@
 //! worker kernel. Proposal-only modules, capability routing, procedural
 //! candidates, metadata schedulers, and the legacy worker lifecycle are not
 //! compiled or registered. New higher-level behavior belongs in persistent
-//! worker bundles under the profile-global worker store.
+//! worker bundles under the engine-global worker store.
 //!
 //! ## Fixed domains
 //!

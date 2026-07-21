@@ -9,7 +9,7 @@ operation_bindings! {
     hidden = [];
     bindings = [
         "get" => |_invocation, deps| {
-            serde_json::to_value(&deps.profile_runtime.current().settings).map_err(|error| {
+            serde_json::to_value(&deps.settings_runtime.current().settings).map_err(|error| {
                 CapabilityError::Internal {
                     message: format!("Failed to serialize settings: {error}"),
                 }

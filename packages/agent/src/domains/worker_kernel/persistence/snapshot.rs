@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+use crate::shared::foundation::paths::{dirs, files as path_files};
+
 const SNAPSHOT_FORMAT_V1: &str = "tron.worker_state_snapshot.v1";
 const SNAPSHOT_FORMAT: &str = "tron.worker_state_snapshot.v2";
 
@@ -15,7 +17,8 @@ struct SnapshotManifest {
     format: String,
     schema_version: u32,
     source_home: String,
-    source_profile: String,
+    #[serde(alias = "sourceProfile")]
+    source_label: String,
     #[serde(default)]
     source_inventory_sha256: String,
     created_at: String,
@@ -39,10 +42,10 @@ fn default_snapshot_file_kind() -> String {
 
 pub(super) fn ensure_pre_worker_snapshot(
     home: &Path,
-    source_profile: &str,
+    source_label: &str,
     source_inventory_sha256: &str,
 ) -> io::Result<Option<PathBuf>> {
-    let snapshots = home.join("internal").join("snapshots");
+    let snapshots = home.join(dirs::INTERNAL).join(dirs::SNAPSHOTS);
     fs::create_dir_all(&snapshots)?;
     let marker = snapshots.join("worker-first-v2.complete.json");
     if let Ok(bytes) = fs::read(&marker)
@@ -55,16 +58,26 @@ pub(super) fn ensure_pre_worker_snapshot(
     }
 
     let created_at = chrono::Utc::now();
-    let name = format!("worker-first-v2-{}", created_at.format("%Y%m%dT%H%M%SZ"));
+    let name = format!(
+        "worker-first-v2-{}-{}",
+        created_at.format("%Y%m%dT%H%M%SZ"),
+        uuid::Uuid::now_v7()
+    );
     let staging = snapshots.join(format!(".{name}.staging"));
     let destination = snapshots.join(&name);
     fs::create_dir_all(&staging)?;
 
     let mut files = Vec::new();
-    snapshot_tree(home, &home.join("profiles"), &staging, &mut files)?;
+    snapshot_tree(home, &home.join(dirs::PROFILES), &staging, &mut files)?;
     snapshot_tree(
         home,
-        &home.join("workspace").join("workers"),
+        &home.join(path_files::SETTINGS_TOML),
+        &staging,
+        &mut files,
+    )?;
+    snapshot_tree(
+        home,
+        &home.join(dirs::WORKSPACE).join(dirs::WORKERS),
         &staging,
         &mut files,
     )?;
@@ -74,13 +87,13 @@ pub(super) fn ensure_pre_worker_snapshot(
         format: SNAPSHOT_FORMAT.to_owned(),
         schema_version: 2,
         source_home: home.display().to_string(),
-        source_profile: source_profile.to_owned(),
+        source_label: source_label.to_owned(),
         source_inventory_sha256: source_inventory_sha256.to_owned(),
         created_at: created_at.to_rfc3339(),
         files,
         restore: vec![
             "Stop Tron before restoring state.".to_owned(),
-            "Copy the snapshot profiles/, workspace/workers/, and internal/database/tron.sqlite back under the recorded sourceHome.".to_owned(),
+            "Copy snapshot settings.toml, profiles/, workspace/workers/, and internal/database/tron.sqlite back under the recorded sourceHome.".to_owned(),
             "Remove internal/database/workers.sqlite so indexes rebuild from worker bundles.".to_owned(),
         ],
     };
@@ -104,7 +117,7 @@ pub(super) fn ensure_pre_worker_snapshot(
 }
 
 pub(super) fn list_snapshots(home: &Path) -> io::Result<Vec<PathBuf>> {
-    let root = home.join("internal").join("snapshots");
+    let root = home.join(dirs::INTERNAL).join(dirs::SNAPSHOTS);
     if !root.is_dir() {
         return Ok(Vec::new());
     }
@@ -177,20 +190,36 @@ pub(super) fn restore_snapshot(snapshot: &Path, home: &Path) -> io::Result<PathB
             home.display()
         )));
     }
-    let recovery = home.join("internal").join("snapshots").join(format!(
-        "pre-restore-{}",
-        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
-    ));
+    let recovery = home
+        .join(dirs::INTERNAL)
+        .join(dirs::SNAPSHOTS)
+        .join(format!(
+            "pre-restore-{}",
+            chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+        ));
     fs::create_dir_all(&recovery)?;
     for relative in [
-        PathBuf::from("profiles"),
-        PathBuf::from("workspace/workers"),
-        PathBuf::from("internal/database/tron.sqlite"),
-        PathBuf::from("internal/database/tron.sqlite-wal"),
-        PathBuf::from("internal/database/tron.sqlite-shm"),
-        PathBuf::from("internal/database/workers.sqlite"),
-        PathBuf::from("internal/database/workers.sqlite-wal"),
-        PathBuf::from("internal/database/workers.sqlite-shm"),
+        PathBuf::from(path_files::SETTINGS_TOML),
+        PathBuf::from(dirs::PROFILES),
+        PathBuf::from(dirs::WORKSPACE).join(dirs::WORKERS),
+        PathBuf::from(dirs::INTERNAL)
+            .join(dirs::DB)
+            .join("tron.sqlite"),
+        PathBuf::from(dirs::INTERNAL)
+            .join(dirs::DB)
+            .join("tron.sqlite-wal"),
+        PathBuf::from(dirs::INTERNAL)
+            .join(dirs::DB)
+            .join("tron.sqlite-shm"),
+        PathBuf::from(dirs::INTERNAL)
+            .join(dirs::DB)
+            .join("workers.sqlite"),
+        PathBuf::from(dirs::INTERNAL)
+            .join(dirs::DB)
+            .join("workers.sqlite-wal"),
+        PathBuf::from(dirs::INTERNAL)
+            .join(dirs::DB)
+            .join("workers.sqlite-shm"),
     ] {
         let source = home.join(&relative);
         if source.exists() {
@@ -218,8 +247,8 @@ pub(super) fn restore_snapshot(snapshot: &Path, home: &Path) -> io::Result<PathB
         fs::rename(temporary, target)?;
     }
     let worker_index = home
-        .join("internal")
-        .join("database")
+        .join(dirs::INTERNAL)
+        .join(dirs::DB)
         .join("workers.sqlite");
     if worker_index.exists() {
         fs::remove_file(worker_index)?;
@@ -251,13 +280,13 @@ fn snapshot_database(
     destination: &Path,
     files: &mut Vec<SnapshotFile>,
 ) -> io::Result<()> {
-    let source = home.join("internal").join("database").join("tron.sqlite");
+    let source = home.join(dirs::INTERNAL).join(dirs::DB).join("tron.sqlite");
     if !source.exists() {
         return Ok(());
     }
     let target = destination
-        .join("internal")
-        .join("database")
+        .join(dirs::INTERNAL)
+        .join(dirs::DB)
         .join("tron.sqlite");
     let Some(parent) = target.parent() else {
         return Err(io::Error::other("snapshot database target has no parent"));
@@ -369,7 +398,7 @@ mod tests {
         assert_eq!(manifest.format, SNAPSHOT_FORMAT);
         assert_eq!(manifest.schema_version, 2);
         assert_eq!(manifest.source_inventory_sha256, "database-sha");
-        assert_eq!(manifest.source_profile, "test-profile");
+        assert_eq!(manifest.source_label, "test-profile");
         assert_eq!(manifest.source_home, home.display().to_string());
         assert!(!manifest.files.is_empty());
         assert!(
@@ -424,5 +453,53 @@ mod tests {
                 .contains("checksum")
         );
         assert!(restore_snapshot(&snapshot, home).is_err());
+    }
+
+    #[test]
+    fn legacy_settings_migration_restores_the_exact_pre_migration_state() {
+        let source = tempfile::tempdir().unwrap();
+        let home = source.path();
+        fs::create_dir_all(home.join("profiles/user")).unwrap();
+        fs::create_dir_all(home.join("workspace/workers/legacy")).unwrap();
+        fs::write(home.join("profiles/auth.json"), "{\"token\":\"kept\"}").unwrap();
+        fs::write(home.join("profiles/active.toml"), "active = \"normal\"\n").unwrap();
+        fs::write(
+            home.join("profiles/user/profile.toml"),
+            "[settings]\nautonomousWorkers = true\n[settings.server.transcription]\nmodel = \"retired\"\n",
+        )
+        .unwrap();
+        fs::write(home.join("workspace/workers/legacy/state"), "before").unwrap();
+
+        let retirement = crate::domains::settings::LegacyProfileRetirement::plan(home)
+            .unwrap()
+            .unwrap();
+        let snapshot =
+            ensure_pre_worker_snapshot(home, retirement.source_label(), retirement.fingerprint())
+                .unwrap()
+                .unwrap();
+        retirement.apply().unwrap();
+
+        assert!(home.join("settings.toml").is_file());
+        assert!(!home.join("profiles/user").exists());
+        assert_eq!(
+            fs::read_to_string(home.join("workspace/workers/legacy/state")).unwrap(),
+            "before"
+        );
+
+        restore_snapshot(&snapshot, home).unwrap();
+
+        assert!(!home.join("settings.toml").exists());
+        assert_eq!(
+            fs::read_to_string(home.join("profiles/user/profile.toml")).unwrap(),
+            "[settings]\nautonomousWorkers = true\n[settings.server.transcription]\nmodel = \"retired\"\n"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("profiles/auth.json")).unwrap(),
+            "{\"token\":\"kept\"}"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("workspace/workers/legacy/state")).unwrap(),
+            "before"
+        );
     }
 }

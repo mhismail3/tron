@@ -43,12 +43,6 @@ impl EffectClass {
     pub fn requires_idempotency(self) -> bool {
         self.is_mutating()
     }
-
-    /// Whether agent visibility requires an idempotency contract.
-    #[must_use]
-    pub fn requires_idempotency_for_agent_visibility(self) -> bool {
-        self.requires_idempotency()
-    }
 }
 
 /// Risk level for discovery and policy, including its stable lowercase
@@ -164,9 +158,10 @@ pub struct IdempotencyContract {
 }
 
 impl IdempotencyContract {
-    /// Caller-supplied session-scoped idempotency.
+    /// Test-only in-memory idempotency fixture.
+    #[cfg(test)]
     #[must_use]
-    pub fn caller_session() -> Self {
+    pub(in crate::engine) fn caller_session() -> Self {
         Self {
             key_source: IdempotencyKeySource::Caller,
             dedupe_scope: VisibilityScope::Session,
@@ -303,13 +298,6 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_health(mut self, health: FunctionHealth) -> Self {
         self.health = health;
-        self
-    }
-
-    /// Set allowed delivery modes.
-    #[must_use]
-    pub fn with_allowed_delivery_modes(mut self, modes: Vec<DeliveryMode>) -> Self {
-        self.allowed_delivery_modes = modes;
         self
     }
 

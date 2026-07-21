@@ -56,11 +56,11 @@ fn test_runtime_at(
     responder: Option<Arc<dyn ModelResponderFactory>>,
 ) -> Arc<WorkerRuntime> {
     let context = crate::shared::server::test_support::make_test_context_with_responder(responder);
-    crate::domains::settings::profile::SettingsStore::new(&context.settings_path)
+    crate::domains::settings::config::SettingsStore::new(&context.settings_path)
         .update(json!({"autonomousWorkers": true}))
         .unwrap();
     context
-        .profile_runtime
+        .settings_runtime
         .reload_now("worker kernel test")
         .unwrap();
     let store = WorkerStore::open_without_snapshot(home.to_path_buf()).unwrap();
@@ -70,7 +70,7 @@ fn test_runtime_at(
         context.orchestrator.clone(),
         context.session_manager.clone(),
         context.event_store.clone(),
-        context.profile_runtime.clone(),
+        context.settings_runtime.clone(),
     )
     .unwrap()
 }

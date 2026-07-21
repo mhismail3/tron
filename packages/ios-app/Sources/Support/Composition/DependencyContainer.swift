@@ -130,7 +130,7 @@ final class DependencyContainer {
     /// Server-backed workspace browser repository.
     private(set) var workspaceBrowserRepository: any WorkspaceBrowserRepository
 
-    /// Profile-global worker repository for the worker console.
+    /// Engine-global worker repository for the worker console.
     private(set) var workerKernelRepository: any WorkerKernelRepository
 
     var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {

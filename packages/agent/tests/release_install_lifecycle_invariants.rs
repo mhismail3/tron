@@ -35,6 +35,7 @@ fn git_ls_files(prefix: &str) -> Vec<String> {
     String::from_utf8(output.stdout)
         .expect("git output should be utf8")
         .lines()
+        .filter(|path| repo_path(path).is_file())
         .map(str::to_owned)
         .collect()
 }
@@ -499,7 +500,7 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
     for required in [
         "Shared contributor-shell paths and functions",
-        "Rust foundation owners define the complete runtime home/profile layout",
+        "Rust foundation owners define the complete runtime home layout",
         "RUN_DIR=\"$TRON_HOME/internal/run\"",
         "AUTH_FILE=\"$TRON_HOME/profiles/auth.json\"",
         "DEPLOY_UPDATE_FILE=\"$RUN_DIR/deploy.in-progress\"",
@@ -572,17 +573,6 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
             "shell layout must not restore retired path set {retired}"
         );
     }
-
-    let constitution = read_repo_file("packages/agent/src/shared/foundation/constitution.rs");
-    assert!(constitution.contains("fn profile_first_dirs"));
-    assert!(constitution.contains("Constitution seeds"));
-    assert!(constitution.contains("managed_default!(\"profiles/auth.json\", false)"));
-    assert!(constitution.contains("write_private_default_if_absent"));
-    assert!(constitution.contains("persist_noclobber"));
-    assert!(
-        repo_path("packages/agent/defaults/profiles/auth.json").exists(),
-        "profile validation requires the private empty auth compatibility sentinel"
-    );
 
     let auth = read_repo_file("scripts/tron-lib.d/auth.sh");
     assert!(
@@ -800,7 +790,7 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         "--reset-settings",
         "--reset-credentials",
         "Database and workspace data preserved",
-        "clear_user_profile_settings",
+        "clear_user_settings",
         "rm -f \"$AUTH_FILE\"",
     ] {
         assert!(
@@ -823,7 +813,8 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let uninstaller =
         read_repo_file("packages/mac-app/Sources/Server/ProcessControl/TronUninstaller.swift");
     assert!(uninstaller.contains("preserveUserData"));
-    assert!(uninstaller.contains("removeSettingsOverlay"));
+    assert!(uninstaller.contains("ServerSettingsWriter.deleteSettings"));
+    assert!(uninstaller.contains("setup.settingsPath"));
     assert!(uninstaller.contains("setup.bearerTokenPath"));
     assert!(
         !uninstaller.contains("database") && !uninstaller.contains("workspace"),

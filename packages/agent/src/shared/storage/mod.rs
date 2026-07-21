@@ -334,13 +334,6 @@ impl StorePayloadOptions {
         self
     }
 
-    /// Override payload kind.
-    #[must_use]
-    pub fn with_payload_kind(mut self, payload_kind: impl Into<String>) -> Self {
-        self.payload_kind = payload_kind.into();
-        self
-    }
-
     /// Override redaction level.
     #[must_use]
     pub fn with_redaction_level(mut self, redaction_level: impl Into<String>) -> Self {
@@ -348,9 +341,10 @@ impl StorePayloadOptions {
         self
     }
 
-    /// Override inline threshold.
+    /// Override inline threshold in storage branch tests.
+    #[cfg(test)]
     #[must_use]
-    pub fn with_inline_threshold(mut self, inline_threshold: usize) -> Self {
+    pub(crate) fn with_inline_threshold(mut self, inline_threshold: usize) -> Self {
         self.inline_threshold = inline_threshold;
         self
     }

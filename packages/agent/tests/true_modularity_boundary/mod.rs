@@ -187,7 +187,7 @@ fn state_stores_are_owner_private() {
         "packages/agent/src/app/bootstrap/",
         "packages/agent/src/domains/auth/",
         "packages/agent/src/domains/session/event_store/",
-        "packages/agent/src/domains/settings/profile/",
+        "packages/agent/src/domains/settings/config/",
         "packages/agent/src/domains/worker_kernel/persistence/",
         "packages/agent/src/engine/authority/",
         "packages/agent/src/engine/durability/",

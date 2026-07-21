@@ -356,31 +356,10 @@ impl FailureEnvelope {
         self
     }
 
-    /// Attach an invocation id.
-    #[must_use]
-    pub fn with_invocation_id(mut self, invocation_id: Option<String>) -> Self {
-        self.references.invocation_id = invocation_id;
-        self
-    }
-
-    /// Attach a parent invocation id.
-    #[must_use]
-    pub fn with_parent_invocation_id(mut self, parent_invocation_id: Option<String>) -> Self {
-        self.references.parent_invocation_id = parent_invocation_id;
-        self
-    }
-
     /// Attach a session id.
     #[must_use]
     pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
         self.references.session_id = session_id;
-        self
-    }
-
-    /// Attach a durable source event id.
-    #[must_use]
-    pub fn with_source_event_id(mut self, source_event_id: Option<String>) -> Self {
-        self.references.source_event_id = source_event_id;
         self
     }
 

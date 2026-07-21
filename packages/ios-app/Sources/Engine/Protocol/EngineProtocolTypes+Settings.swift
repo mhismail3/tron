@@ -4,7 +4,7 @@ import Foundation
 
 /// Server-authoritative settings decoded from `settings::get`.
 ///
-/// The server returns its complete validated profile. This DTO intentionally
+/// The server returns its complete validated engine settings. This DTO intentionally
 /// admits only the mobile product-settings projection, ignores unrelated
 /// provider/runtime/TUI keys, and decodes every admitted field strictly.
 struct ServerSettings: Decodable {

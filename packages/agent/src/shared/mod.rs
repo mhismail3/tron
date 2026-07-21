@@ -8,7 +8,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`foundation`] | Constants, IDs, paths, profile specs, retry/text helpers, and shared errors |
+//! | [`foundation`] | Constants, IDs, canonical paths, retry/text helpers, and shared errors |
 //! | [`protocol`] | Public DTOs for content, events, messages, memory, and model capability data |
 //! | [`server`] | Transport-neutral runtime context, validation, params, and capability errors |
 //! | [`storage`] | SQLite storage helpers used by engine, session, and logs |
@@ -16,8 +16,8 @@
 //!
 //! ## Entry Points
 //!
-//! - [`foundation::paths`] and [`foundation::profile`] own filesystem/profile
-//!   source truth shared by app, domains, iOS/Mac parity checks, and tests.
+//! - [`foundation::paths`] owns filesystem source truth shared by app, domains,
+//!   iOS/Mac parity checks, and tests.
 //! - [`server::context::ServerRuntimeContext`] is the transport-neutral handle
 //!   bundle passed into retained domains and runtime services.
 //! - [`storage::StorageRuntime`] owns database startup maintenance,

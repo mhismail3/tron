@@ -17,10 +17,10 @@ use std::time::Instant;
 use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
 use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::registration::catalog;
 use crate::domains::session::event_store::EventStore;
+use crate::domains::settings::SettingsRuntime;
 use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerDefinition, WorkerKind};
 use crate::shared::server::context::ServerRuntimeContext;
 
@@ -30,7 +30,7 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) session_manager: Arc<SessionManager>,
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) responder_factory: Option<Arc<dyn ModelResponderFactory>>,
-    pub(crate) profile_runtime: Arc<ProfileRuntime>,
+    pub(crate) settings_runtime: Arc<SettingsRuntime>,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     pub(crate) origin: String,
     pub(crate) server_start_time: Instant,
@@ -53,7 +53,7 @@ impl DomainRegistrationContext {
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
             responder_factory: ctx.responder_factory.clone(),
-            profile_runtime: Arc::clone(&ctx.profile_runtime),
+            settings_runtime: Arc::clone(&ctx.settings_runtime),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
             origin: ctx.origin.clone(),
             server_start_time: ctx.server_start_time,

@@ -1,4 +1,4 @@
-//! Server, agent, session, and tmux settings.
+//! Server and agent settings.
 //!
 //! These are grouped here because they are all relatively small and
 //! server-oriented.
@@ -71,36 +71,6 @@ pub struct AgentRuntimeSettings {
 impl Default for AgentRuntimeSettings {
     fn default() -> Self {
         Self { max_turns: 250 }
-    }
-}
-
-/// Tmux integration settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct TmuxSettings {
-    /// Timeout for tmux commands in milliseconds.
-    pub command_timeout_ms: u64,
-    /// Polling interval for tmux state in milliseconds.
-    pub polling_interval_ms: u64,
-}
-
-impl Default for TmuxSettings {
-    fn default() -> Self {
-        Self {
-            command_timeout_ms: 30_000,
-            polling_interval_ms: 500,
-        }
-    }
-}
-
-/// Session behavior settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct SessionSettings {}
-
-impl Default for SessionSettings {
-    fn default() -> Self {
-        Self {}
     }
 }
 
@@ -189,33 +159,6 @@ mod tests {
 
         let roundtrip = serde_json::to_value(&a).unwrap();
         assert_eq!(roundtrip["maxTurns"], 250);
-    }
-
-    #[test]
-    fn tmux_defaults() {
-        let t = TmuxSettings::default();
-        assert_eq!(t.command_timeout_ms, 30_000);
-        assert_eq!(t.polling_interval_ms, 500);
-    }
-
-    #[test]
-    fn session_defaults() {
-        let s = SessionSettings::default();
-        assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!({}));
-    }
-
-    #[test]
-    fn empty_session_json_uses_defaults() {
-        let s: SessionSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!({}));
-    }
-
-    #[test]
-    fn session_unknown_field_rejected() {
-        let key = ["queue", "DrainMode"].concat();
-        let err = serde_json::from_str::<SessionSettings>(&format!(r#"{{"{key}":"sequential"}}"#))
-            .unwrap_err();
-        assert!(err.to_string().contains(&key));
     }
 
     #[test]

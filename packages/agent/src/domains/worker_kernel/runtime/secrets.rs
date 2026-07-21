@@ -7,7 +7,11 @@ impl WorkerRuntime {
         &self,
         bundle: &WorkerBundle,
     ) -> Result<HashMap<String, String>, String> {
-        let vault = self.store.home().join("workspace").join("vault");
+        let vault = self
+            .store
+            .home()
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join(crate::shared::foundation::paths::dirs::VAULT);
         let mut secrets = HashMap::new();
         for binding in &bundle.secret_bindings {
             let name = binding.name();
@@ -74,7 +78,11 @@ impl WorkerRuntime {
     }
 
     pub(super) fn load_all_vault_secrets(&self) -> Result<HashMap<String, String>, String> {
-        let vault = self.store.home().join("workspace").join("vault");
+        let vault = self
+            .store
+            .home()
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join(crate::shared::foundation::paths::dirs::VAULT);
         if !vault.is_dir() {
             return Ok(HashMap::new());
         }

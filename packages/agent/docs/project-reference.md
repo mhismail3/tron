@@ -9,7 +9,7 @@ is not an active compatibility contract.
 ## Product Model
 
 Tron is a persistent local agent. A Rust service on the user's Mac owns model
-turns, session/event truth, authenticated client transport, and profile-global
+turns, session/event truth, authenticated client transport, and engine-global
 workers. The iOS app is a thin chat and worker-operations client. The Mac app
 packages and supervises the service and owns pairing; it does not maintain a
 parallel engine model.
@@ -89,20 +89,19 @@ tool is collapsed merely to make the manifest numerically smaller.
 
 ## Autonomy Modes
 
-`autonomousWorkers` is a profile setting.
+`autonomousWorkers` is an engine setting.
 
-- Existing profiles default to `false`. The agent remains conversational and
+- It defaults to `false`. The agent remains conversational and
   explains that autonomous action can be enabled in Settings.
-- The bundled `worker-poc` profile defaults to `true`.
 - With the setting enabled, accepted user sessions and workers are trusted
   local operators. Direct host and worker calls do not derive, mint, inspect,
   or consume per-call capability grants.
-- Changes apply to the running profile without a server restart. Disabling
+- Changes apply to the running engine without a server restart. Disabling
   hides the fixed worker primitives, unregisters direct worker tools, cancels
   active execution, and stops resident services while preserving canonical
   bundles and queued work. Re-enabling restores the primitives, rebuilds the
   enabled direct-tool surface from canonical state, and resumes dispatch unless
-  profile stop-all is still engaged.
+  engine stop-all is still engaged.
 - The authenticated Engine Dashboard remains operational while autonomy is off:
   it may inspect state and history or use enable/disable, rollback,
   retire/purge, webhook rotation, and stop controls. Those operations do not
@@ -311,11 +310,11 @@ suppression counts, and the unique worker/trigger/idempotency deliveries seen in
 that trace. Repeated deliveries are returned idempotently without another
 execution and leave explicit suppression audit evidence.
 
-Profile ceilings are fixed reliability limits:
+Engine ceilings are fixed reliability limits:
 
 | Limit | Value |
 |---|---:|
-| Concurrent invocations per profile | 32 |
+| Concurrent invocations per engine | 32 |
 | Concurrent invocations per worker | 8 |
 | Non-resident invocation timeout | 2 hours |
 | Causal trigger depth | 16 |
@@ -458,7 +457,7 @@ evidence plus four explicitly different inventories:
   primitive group, and whether autonomy currently exposes them;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, health, and immutable worker version;
-- canonical profile worker summaries, stop-all state, and autonomy state.
+- canonical engine worker summaries, stop-all state, and autonomy state.
 
 The selected `surface.tools` array is the exact next provider projection; the
 fixed and available-worker inventories are operator evidence and must not be
@@ -468,7 +467,7 @@ fixed tools. The operation is deliberately not projected as model vocabulary.
 
 ## Local Authority and Provenance
 
-For an autonomous profile, local model calls use a trusted-local causal context.
+When autonomous workers are enabled, local model calls use a trusted-local causal context.
 The invocation executor records actor, session, workspace, model/provider call,
 trace, parent invocation, working directory, turn, and deterministic
 idempotency metadata. None of those observations is a permission grant.
@@ -479,14 +478,31 @@ runtime metadata, but no grant id or permission scope. Catalog discovery actor
 context likewise contains no grant field. Public transport cannot inject the
 trusted-local marker or other runtime metadata.
 
-Before the current schema opens a live profile, the worker-first retirement
-migration creates a verified snapshot, imports only complete executable legacy
-bundles as inactive candidates, reports incomplete proposals, and then removes
-the old grant/resource/lease/compensation tables and invocation columns in one
-transaction. It does not retain a synthetic grant, compatibility adapter, or
-nullable permission observation.
+Engine settings are one sparse strict document at `~/.tron/settings.toml` over
+compiled typed defaults. Named profiles, inheritance, `active.toml`, profile
+classes, and the compiled auth registry do not exist in the running engine.
+Provider credentials remain separately protected in
+`~/.tron/profiles/auth.json`.
 
-There are no local operation claims, resource selectors, synthetic profile
+The settings schema admits only values with an independent production
+consumer. Tests, serialization, dashboard display, or schema presence alone do
+not justify a field. Authentication protocol URLs, redirect URIs, and scopes
+remain owned by the auth implementation rather than appearing as duplicate
+settings the runtime never reads.
+
+Before bootstrap retires legacy named-profile files, it creates and verifies a
+versioned whole-state snapshot using a stable inventory hash. Known legacy user
+settings are projected into the current typed schema and written to the flat
+file; removed or unknown fields are reported rather than fabricated. The
+original profile documents remain recoverable from the snapshot and are then
+deleted from the live home. Database retirement separately imports only
+complete executable legacy bundles as inactive candidates, reports incomplete
+proposals, and removes the old grant/resource/lease/compensation tables and
+invocation columns in one transaction. Neither path retains a synthetic grant,
+compatibility adapter, nullable permission observation, or permissive legacy
+parser in steady-state execution.
+
+There are no local operation claims, resource selectors, synthetic
 grants, or agent-kind rejections. Executable workers can change local files and
 make consequential external requests without fresh confirmation. This is the
 intentional POC threat model.
@@ -560,13 +576,17 @@ directly; no capability grant is minted.
 
 ## State Snapshot and Legacy Import
 
-Before a profile first opens the worker schema, Tron creates a verified snapshot
+Before the engine first opens the worker schema, Tron creates a verified snapshot
 under `~/.tron/internal/snapshots/`. The manifest records format/schema,
-source home/profile, creation time, every relative path, byte count, SHA-256,
-and restoration instructions. It captures profiles, prior worker files, and a
+source home/label, creation time, every relative path, byte count, SHA-256,
+and restoration instructions. It captures root settings, protected credentials,
+prior worker files, and a
 consistent `VACUUM INTO` copy of the primary SQLite database. Symlink targets
 are checksum-covered snapshot entries and are restored as symlinks rather than
-silently omitted.
+silently omitted. Legacy settings retirement runs before current settings load;
+database-table retirement runs before current engine/session schemas open.
+Both use this snapshot boundary, and unique snapshot directory ids prevent two
+valid retirement checkpoints in the same second from colliding.
 
 Offline commands:
 
@@ -636,7 +656,7 @@ operational evidence:
 | `worker_inbox` | durable visible results/failures and seen state |
 | `worker_audit` | lifecycle and mutation evidence |
 | `worker_health` | versioned activation/lifecycle/execution health history |
-| `worker_runtime_settings` | durable profile stop-all state |
+| `worker_runtime_settings` | durable engine stop-all state |
 
 The fixed kernel has no device-token registration, notification inbox, or APNs
 delivery plane. A future notification workflow must be authored and exercised
@@ -660,7 +680,7 @@ final drain of that retained batch.
 Worker live topics are:
 
 - `worker.lifecycle` — activation, per-worker stop, enablement, disablement,
-  rollback, retirement, purge, profile stop/resume, failure, and related state;
+  rollback, retirement, purge, engine stop/resume, failure, and related state;
 - `worker.invocations` — started/completed/failed invocation summaries.
 
 The session log has **24 typed event variants**:
@@ -697,7 +717,7 @@ It exposes:
 - published workers with distinct Published, This session, and Promoted state;
 - worker list, health, runner, active content version, provenance, and triggers;
 - JSON-schema-aware typed invocation;
-- profile-wide Activity plus per-worker runs, durable inbox, and audit history;
+- engine-wide Activity plus per-worker runs, durable inbox, and audit history;
 - stop current work without disabling future dispatch, enable/disable, rollback,
   retained-version restoration after retirement, purge, webhook rotation, and
   stop-all;
@@ -807,11 +827,11 @@ prove that accepted worker workflows remain uninterrupted.
 ## Source Owners
 
 Source hierarchy is an ownership mechanism, not a placeholder mechanism.
-Repository-owned configuration, automation, default-profile, source, test, and
+Repository-owned configuration, automation, source, test, and
 package-documentation trees contain no empty directories and no leaf directory
 that exists only to wrap one file. The only narrow exceptions are layouts with
 a concrete external or canonical contract: Codex environment and skill
-packages, benchmark baselines, profile bundles, the canonical agent reference
+packages, benchmark baselines, the canonical agent reference
 directory, the iOS documentation asset directory, Apple color sets, the bundled
 font directory, and generated helper-app `MacOS` payload directories. The
 hierarchy guard walks these repository-owned trees so deleted planes cannot
@@ -831,7 +851,7 @@ real ownership split rather than a budget increase.
 - Provider-neutral tool selection: `packages/agent/src/domains/worker_kernel/surface.rs`
 - Provider schema adaptation: `packages/agent/src/domains/agent/loop/primitive_surface.rs`
 - Trusted-local execution: `packages/agent/src/domains/agent/loop/capability_invocation_executor/`
-- Profile settings: `packages/agent/src/domains/settings/profile/types/`
+- Engine settings: `packages/agent/src/domains/settings/config/types/`
 - Transport/auth: `packages/agent/src/transport/` and `packages/agent/src/app/bootstrap/server.rs`
 - iOS engine/worker protocol: `packages/ios-app/Sources/Engine/Protocol/EngineProtocolTypes+Catalog.swift` and `EngineProtocolTypes+WorkerKernel.swift`
 - iOS Engine Dashboard: `packages/ios-app/Sources/Session/WorkerKernel/` and `Sources/UI/WorkerConsole/`

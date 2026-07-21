@@ -14,7 +14,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "init_directories()",
             "initialize_bearer_token_at",
             "init_database(args.db_path)",
-            "ProfileRuntime::load",
+            "SettingsRuntime::load",
             "init_logging",
             "retention_run(false",
             "enforce_size_budget",
@@ -43,7 +43,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "resolve_production_db_path",
             "ensure_parent_dir",
             "acquire_database_lock",
-            "prepare_profile_state_retirement",
+            "prepare_worker_state_retirement",
             "prepare_active_database",
             "new_file",
             "check_integrity",
@@ -269,17 +269,12 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
             "shutdown.register_phase_callback",
         ],
     );
-    assert!(
-        server_context.contains("shutdown.register_task(handle)"),
-        "detached blocking tasks must register with the shutdown coordinator"
-    );
-
     let bootstrap = read_repo_file("packages/agent/src/app/bootstrap/mod.rs");
     for required in [
         "spawn_background_tasks",
         "server.shutdown().register_task(eviction_task)",
         "register_blocking_supervisor_shutdown(server.shutdown())",
-        "register_task(profile_runtime_for_watcher.spawn_watcher",
+        "register_task(settings_runtime_for_watcher.spawn_watcher",
     ] {
         assert!(
             bootstrap.contains(required),

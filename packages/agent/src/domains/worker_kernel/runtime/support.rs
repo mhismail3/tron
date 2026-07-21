@@ -66,7 +66,7 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
     async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
         if !self.runtime.autonomous_enabled() {
             return Err(crate::engine::EngineError::HandlerFailed(
-                "autonomous workers are disabled for this profile; set autonomousWorkers=true"
+                "autonomous workers are disabled for this engine; set autonomousWorkers=true"
                     .to_owned(),
             ));
         }

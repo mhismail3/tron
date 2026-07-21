@@ -88,7 +88,10 @@ The two helper `Info.plist` files and two LaunchAgent plists under
 or repair them while staging a binary. Edit and review the tracked plist owner
 directly when bundle identity, arguments, ports, or associations change.
 
-The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. Managed skills, transcription sidecars, and product capability assets are not bundled.
+The Xcode target bundles only the staged agent executable and the wrapper-owned
+resources declared in `project.yml`. Engine settings come from compiled Rust
+defaults plus optional `~/.tron/settings.toml`; no Constitution defaults,
+managed skills, or product capability assets are copied into the app.
 
 Generate the Xcode project after clone and after any change to `project.yml`
 (the wrapper/test bundle-identity and shared deployment/Swift/project-shape
@@ -110,7 +113,7 @@ Xcode's `Copy Bundled Login Item` script copies the whole `Sources/Resources/Lib
 
 If you change Rust agent code that the Mac wrapper depends on — engine capabilities, onboarding/install behavior, settings defaults, or anything used before pairing — rerun `packages/mac-app/scripts/bundle-agent.sh` before launching the Mac app from Xcode. Xcode copies the already-staged `Sources/Resources/Library` tree; it does not rebuild that binary for you. Forgetting this step makes the Swift UI talk to an older embedded server, which is especially confusing when testing new engine invocations such as `logs::recent`.
 
-There is no installer cleanup path that edits production artifacts in place: the app bundle is immutable, launch registration is owned by `SMAppService`, and user data is preserved under `~/.tron`. Menu-bar uninstall unregisters `com.tron.server`, removes runtime state in `internal/run/`, and can optionally clear `[settings]` overrides from `profiles/user/profile.toml` and/or remove `profiles/auth.json`; database and workspace data stay intact. For pre-onboarding production cleanup where no menu bar exists, run `/Applications/Tron.app/Contents/MacOS/Tron --tron-uninstall-and-quit` so the same SMAppService unregister path executes without opening the wizard. The default Debug companion refuses that operation for production.
+There is no installer cleanup path that edits production artifacts in place: the app bundle is immutable, launch registration is owned by `SMAppService`, and user data is preserved under `~/.tron`. Menu-bar uninstall unregisters `com.tron.server`, removes runtime state in `internal/run/`, and can optionally remove `settings.toml` and/or `profiles/auth.json`; database and workspace data stay intact. For pre-onboarding production cleanup where no menu bar exists, run `/Applications/Tron.app/Contents/MacOS/Tron --tron-uninstall-and-quit` so the same SMAppService unregister path executes without opening the wizard. The default Debug companion refuses that operation for production.
 
 ### Building
 
@@ -271,7 +274,7 @@ If it's missing, the wizard will re-run. If it's a directory, something is very 
 | Release install is blocked from Downloads or the DMG | Move the app to `/Applications/Tron.app` and relaunch. Release registration from any other path is intentionally unsupported. |
 | Debug wrapper cannot pause/restart/uninstall the server | This is expected in companion mode. Use `/Applications/Tron.app` for production server controls, `tron dev` for server takeover, or `TronMac Isolated Install` for installer testing. If a stale Debug/DerivedData build owns the production label, launching the installed app repairs that registration during update finalization or the next Restart server action. |
 | Need to run a dev server takeover | Start it from the checkout with `scripts/tron dev` or the installed `tron dev` CLI. The menu bar observes active `Tron-Dev.app` takeovers and keeps only the `Stop dev server` recovery action in the server-control section. |
-| Stop dev server reports `Resume failed` after ServiceManagement loads the helper | The installed `/Applications/Tron.app` helper loaded but never passed `/health`, usually because the installed app is older than the current profile/defaults. Update or reinstall `/Applications/Tron.app`, then restart the server. |
+| Stop dev server reports `Resume failed` after ServiceManagement loads the helper | The installed `/Applications/Tron.app` helper loaded but never passed `/health`, usually because the installed app is older than the current engine/settings contract. Update or reinstall `/Applications/Tron.app`, then restart the server. |
 | `internal/run/mac-app-version.json` stays on an older build after `tron start`/`restart` | Rebuild/copy the current Release app into `/Applications/Tron.app` and run `scripts/tron start` or `scripts/tron restart`. Command-mode startup records the marker only after the installed helper passes `/health`; stale markers with healthy current helpers indicate the wrapper start path needs investigation. |
 | Release install repairs a stale DerivedData helper registration or `needs LWCR update` state | Expected. The installer reads `launchctl print`; if the loaded label points at a missing/mismatched helper executable, a stale parent bundle build, or stale launch constraints, the installed app replaces that stale SMAppService registration before waiting for heartbeat. |
 | Debug install registers, then heartbeat times out with `launchctl` exit `78` | The isolated helper cannot spawn. Verify the active plist points at `Tron Server Dev.app`, that the helper bundle id is `com.tron.server.dev`, that the Debug wrapper is Apple Development signed, and that the outer wrapper signature verifies after the Library copy. |

@@ -73,16 +73,16 @@ impl WorkerRuntime {
     ) -> Result<(InvocationRecord, bool), String> {
         if !self.autonomous_enabled() {
             return Err(
-                "autonomous workers are disabled for this profile; set autonomousWorkers=true"
+                "autonomous workers are disabled for this engine; set autonomousWorkers=true"
                     .to_owned(),
             );
         }
         if self.stopped.load(Ordering::SeqCst) || self.store.stop_all()? {
-            return Err("worker dispatch is stopped for this profile".to_owned());
+            return Err("worker dispatch is stopped for this engine".to_owned());
         }
         if request.causal_depth > MAX_CAUSAL_DEPTH {
             return Err(format!(
-                "worker causal depth {} exceeds the profile limit {MAX_CAUSAL_DEPTH}",
+                "worker causal depth {} exceeds the engine limit {MAX_CAUSAL_DEPTH}",
                 request.causal_depth
             ));
         }
@@ -154,13 +154,13 @@ impl WorkerRuntime {
         };
         let global_stop = self.execution_stop.lock().await.clone();
         let worker_stop = self.worker_stop(&queued.worker_id);
-        let profile_permit = self.profile_limit.clone().acquire_owned();
-        let profile_permit = tokio::select! {
-            permit = profile_permit => permit,
+        let engine_permit = self.engine_limit.clone().acquire_owned();
+        let engine_permit = tokio::select! {
+            permit = engine_permit => permit,
             () = global_stop.cancelled() => return Err("worker dispatch stopped while queued".to_owned()),
             () = worker_stop.cancelled() => return Err(self.worker_cancelled_error(&queued.worker_id, true)),
         }
-            .map_err(|_| "worker profile concurrency gate is closed".to_owned())?;
+            .map_err(|_| "worker engine concurrency gate is closed".to_owned())?;
         let worker_limit = self
             .worker_limits
             .entry(queued.worker_id.clone())
@@ -172,7 +172,7 @@ impl WorkerRuntime {
             () = worker_stop.cancelled() => return Err(self.worker_cancelled_error(&queued.worker_id, true)),
         }
             .map_err(|_| "worker concurrency gate is closed".to_owned())?;
-        let _permits = (profile_permit, worker_permit);
+        let _permits = (engine_permit, worker_permit);
         if !self.store.claim_running(&queued.invocation_id)? {
             return self
                 .store
@@ -202,7 +202,7 @@ impl WorkerRuntime {
             result = timed => result
                 .map_err(|_| format!("worker invocation exceeded {MAX_INVOCATION_SECONDS} seconds"))
                 .and_then(|result| result),
-            () = global_stop.cancelled() => Err("worker invocation stopped by profile stop-all".to_owned()),
+            () = global_stop.cancelled() => Err("worker invocation stopped by engine stop-all".to_owned()),
             () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false)),
         };
         if self.shutting_down.load(Ordering::SeqCst) && global_stop.is_cancelled() {
@@ -446,8 +446,8 @@ impl WorkerRuntime {
         let runtime_root = self
             .store
             .home()
-            .join("internal")
-            .join("run")
+            .join(crate::shared::foundation::paths::dirs::INTERNAL)
+            .join(crate::shared::foundation::paths::dirs::RUN)
             .join(category)
             .join(identity);
         if runtime_root.exists() {
@@ -485,7 +485,7 @@ impl WorkerRuntime {
             }
         }
         let default_model = self
-            .profile_runtime
+            .settings_runtime
             .current()
             .settings
             .server

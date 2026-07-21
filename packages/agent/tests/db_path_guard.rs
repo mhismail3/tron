@@ -388,7 +388,7 @@ fn retired_tron_home_paths_are_absent() {
         "exports_dir".to_owned(),
         "dirs::ARTIFACTS".to_owned(),
         "dirs::EXPORTS".to_owned(),
-        "~/.tron/settings".to_owned(),
+        "~/.tron/settings/".to_owned(),
         "~/.tron/knowledge/".to_owned(),
         "~/.tron/vault/".to_owned(),
         "~/.tron/instructions".to_owned(),
@@ -466,7 +466,7 @@ fn runtime_does_not_use_global_active_profile_helpers() {
 
     assert!(
         violations.is_empty(),
-        "runtime must consume ProfileRuntime/session/process plans, not global active-profile helpers:\n{}",
+        "runtime must consume SettingsRuntime/session/process plans, not global active-profile helpers:\n{}",
         violations.join("\n")
     );
 }

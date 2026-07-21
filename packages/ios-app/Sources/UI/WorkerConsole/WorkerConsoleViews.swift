@@ -88,7 +88,7 @@ struct WorkerConsoleDashboardBand: View {
 
     private var summaryDetail: String {
         if viewModel.stopAll { return "Dispatch is paused; durable work remains queued." }
-        if !viewModel.autonomousWorkers { return "Autonomous workers are off for this profile." }
+        if !viewModel.autonomousWorkers { return "Autonomous workers are off for this engine." }
         if viewModel.workers.isEmpty { return "Core ready; create persistent workers conversationally." }
         if viewModel.attentionCount > 0 {
             return "\(viewModel.attentionCount) worker\(viewModel.attentionCount == 1 ? " needs" : "s need") review."
@@ -388,7 +388,7 @@ struct WorkerConsoleSheet: View {
             return ("Engine unavailable", connectionState.displayText, "network.slash", .tronTextMuted)
         }
         if !viewModel.autonomousWorkers {
-            return ("Core visible · autonomy off", "The fixed engine is healthy; model-facing worker tools are disabled for this profile.", "lock.circle", .tronWarning)
+            return ("Core visible · autonomy off", "The fixed engine is healthy; model-facing worker tools are disabled for this engine.", "lock.circle", .tronWarning)
         }
         if viewModel.stopAll {
             return ("Dispatch paused", "Queued work is durable and ready to resume.", "pause.circle", .tronWarning)

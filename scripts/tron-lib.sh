@@ -2,7 +2,7 @@
 # tron-lib.sh - Shared library for Tron CLI scripts
 #
 # Shared contributor-shell paths and functions for scripts/tron and tron-cli.
-# Rust foundation owners define the complete runtime home/profile layout.
+# Rust foundation owners define the complete runtime home layout.
 #
 # Do NOT execute this file directly.
 
@@ -17,7 +17,7 @@ BIN_DIR="$HOME/.local/bin"
 # `/Applications/Tron.app` and is registered by the Swift wrapper via SMAppService;
 # these bundles are only for shell-script development flows.
 RUN_DIR="$TRON_HOME/internal/run"
-USER_PROFILE_FILE="$TRON_HOME/profiles/user/profile.toml"
+SETTINGS_FILE="$TRON_HOME/settings.toml"
 CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
 DEPLOY_UPDATE_FILE="$RUN_DIR/deploy.in-progress"
@@ -98,30 +98,8 @@ confirm_action() {
     [[ $REPLY =~ ^[Yy]$ ]]
 }
 
-clear_user_profile_settings() {
-    if [ ! -f "$USER_PROFILE_FILE" ]; then
-        return 0
-    fi
-
-    local tmp_file="$USER_PROFILE_FILE.tmp.$$"
-    awk '
-        /^[[:space:]]*\[+[^][]+\]+[[:space:]]*($|#)/ {
-            table = $0
-            sub(/^[[:space:]]*\[+/, "", table)
-            sub(/\]+[[:space:]]*($|#.*$)/, "", table)
-            skip = (table == "settings" || table ~ /^settings\./)
-            if (skip) {
-                next
-            }
-        }
-        !skip { print }
-    ' "$USER_PROFILE_FILE" > "$tmp_file"
-
-    if grep -q '[^[:space:]]' "$tmp_file"; then
-        mv "$tmp_file" "$USER_PROFILE_FILE"
-    else
-        rm -f "$tmp_file" "$USER_PROFILE_FILE"
-    fi
+clear_user_settings() {
+    rm -f "$SETTINGS_FILE"
 }
 
 #=============================================================================

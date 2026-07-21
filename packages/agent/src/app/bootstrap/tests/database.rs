@@ -1,15 +1,8 @@
 use super::*;
 use crate::domains::settings::db_path_policy::{
-    PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_tron_home,
+    PRODUCTION_DB_FILENAME, production_db_dir_from_tron_home,
     validate_production_db_path_for_tron_home,
 };
-
-#[test]
-fn default_db_path_under_tron_dir() {
-    let path = default_production_db_path();
-    assert!(path.to_string_lossy().contains(".tron"));
-    assert!(path.to_string_lossy().ends_with(PRODUCTION_DB_FILENAME));
-}
 
 #[test]
 fn ensure_parent_dir_creates_nested() {
@@ -103,12 +96,6 @@ fn db_policy_rejects_symlink_db_file() {
 
     let err = validate_production_db_path_for_tron_home(&symlink_path, &tron_home).unwrap_err();
     assert!(err.to_string().contains("symlink"));
-}
-#[test]
-fn auth_path_under_tron_dir() {
-    let path = auth_path();
-    assert!(path.to_string_lossy().contains(".tron"));
-    assert!(path.to_string_lossy().ends_with("auth.json"));
 }
 #[test]
 fn server_creates_db_on_first_run() {

@@ -26,12 +26,12 @@ struct EnvironmentSetup: Sendable {
     /// Returns nil if missing/unreadable.
     var readBearerToken: @Sendable () -> String?
 
-    /// Reads `server.tailscaleIp` from `~/.tron/profiles/user/profile.toml`.
+    /// Reads `server.tailscaleIp` from `~/.tron/settings.toml`.
     /// Returns nil if missing/unset. Pairing treats this as a last-known
     /// cache only; fresh installs resolve Tailscale live first.
     var readTailscaleIPFromSettings: @Sendable () -> String?
 
-    /// Writes `server.tailscaleIp` into `~/.tron/profiles/user/profile.toml`
+    /// Writes `server.tailscaleIp` into `~/.tron/settings.toml`
     /// without disturbing any existing settings. Best-effort cache for
     /// later server/menu-bar reads; pairing must not depend on this
     /// write succeeding.

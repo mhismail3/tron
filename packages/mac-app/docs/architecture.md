@@ -50,7 +50,7 @@ packages/mac-app/
 │   │   ├── BearerTokenReader.swift # auth.json bearer-token reader
 │   │   ├── LaunchAgent/            # protocol + SMAppService-backed LiveLaunchAgentManager
 │   │   ├── Health/                 # one-shot ping, health waiting, status polling
-│   │   ├── Paths/                  # TronPaths plus profile settings TOML cache
+│   │   ├── Paths/                  # TronPaths plus engine settings TOML cache
 │   │   └── ProcessControl/         # dev stopper, process probe, wrapper lock, uninstall
 │   ├── Support/
 │   │   ├── DiagnosticsRedactor.swift # strip paths, mask bearer/API/OAuth fields, drop chat content
@@ -228,13 +228,13 @@ to that tester group. The page also exposes copy/open actions for the same
 URL, but it does not call the server or mutate onboarding state beyond normal
 step persistence.
 
-The Pairing step does not require a pre-existing user profile. It reads the
+The Pairing step does not require a pre-existing settings file. It reads the
 agent-issued `auth.json` bearer token, confirms the server is answering
 `system::ping`, and resolves the host in this order: a fresh Tailscale probe,
 the wizard's latest Tailscale state, then the settings cache. The configured
 `EnvironmentSetup.serverPort` remains the pairing and local-process owner; ping
 does not duplicate connection metadata. The selected host is cached best-effort in
-`profiles/user/profile.toml`; a cache write failure does not invalidate the QR
+`settings.toml`; a cache write failure does not invalidate the QR
 payload.
 The QR/manual payload builder accepts only a bare DNS name, IPv4 address, or
 unbracketed IPv6 address plus a `1...65535` port, mirroring iOS
@@ -268,7 +268,7 @@ directly, while snapshots store only orthogonal process and host metadata.
 `ServerPing.decodeFrame` parses each WebSocket frame once, requires the
 canonical pong, timestamp, server/protocol versions, minimum client protocol,
 and compatibility fields, and projects only the server version. The configured
-port and profile-backed Tailscale cache stay with `EnvironmentSetup`; `paired`
+port and settings-backed Tailscale cache stay with `EnvironmentSetup`; `paired`
 belongs to `system::get_info`, not the ping response. The status poller,
 pairing window, log window, and feedback action each read the bearer token
 through `EnvironmentSetup.readBearerToken` at the point of use and never retain
@@ -371,10 +371,10 @@ Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` both call
 `SMAppService.unregister`, remove runtime state
 (`run/.onboarded`, `run/auth.lock`, and
 the current `run/.mac-wrapper.<bundle-id>.lock`), and quit the wrapper. By default, auth,
-profile settings, databases, and workspace files remain intact, so the next app
+engine settings, databases, and workspace files remain intact, so the next app
 launch returns to the onboarding wizard instead of a broken menu-bar-only
 state. The menu confirmation dialog can also clear `[settings]` overrides from
-`profiles/user/profile.toml` and/or remove `auth.json`; databases and workspace
+`settings.toml` and/or remove `auth.json`; databases and workspace
 files are still preserved.
 
 ## Key Invariants
@@ -384,7 +384,7 @@ files are still preserved.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
 - **The helper app must be signed before registration.** Validation fails loudly if the active helper app, its binary, the bundled LaunchAgent plist, or the helper signature is missing/corrupt. Production/local Release use `Tron Server.app` with bundle id `com.tron.server`; isolated Debug uses `Tron Server Dev.app` with bundle id `com.tron.server.dev`. The helper bundle id intentionally matches the active LaunchAgent label, while the LaunchAgent associates with the wrapper bundle ids because macOS presents some TCC services under the responsible wrapper app.
-- **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may clear `[settings]` overrides from `profiles/user/profile.toml` and/or remove `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
+- **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may remove `settings.toml` and/or `profiles/auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier and event-trigger executable before deciding whether to reuse, repair, or fail. Missing/mismatched helper executables are stale registrations and manager builds repair them; default Debug companion builds never repair or own production registration.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. Its recurring probe loop runs directly in the view's SwiftUI `.task`, which owns cancellation when the page disappears; the separate gear-button watcher remains bounded and explicitly cancelled because button actions can restart it. App activation, Re-check, and that watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after Full Disk Access is green and the user presses Continue.
 - **Optional managed runtime assets stay out of the wrapper.** The build bundles helper apps and Constitution defaults. Skills, transcription sidecars, and product capability assets are not copied into the app or `~/.tron`.
@@ -416,7 +416,7 @@ Production workflows operate against the same `~/.tron/internal/` data tree and 
 
 - **Port `9847`** — the production WS bind. Always exclusive — see "Mutual exclusion" below. Workflow 4 uses `9848`.
 - **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed production server. Workflows 1 and 2 register it through `SMAppService`; workflow 3 observes it; workflow 5 stops it before binding the port itself. Workflow 4 registers only `com.tron.server.dev` and points `BundleProgram` at `Tron Server Dev.app`.
-- **`~/.tron/` Constitution home** — production profiles/auth, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
+- **`~/.tron/` engine home** — flat settings, provider/client auth, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
 - **`auth.json.bearerToken`** — workflows 1, 2, 3, and 5 share the production token. The isolated workflow has a separate token under `~/.tron-dev`.
 - **Release identity** — `VERSION.env` is the only hand-edited release source.
   `scripts/tron version sync` mirrors the canonical Cargo/GitHub version into

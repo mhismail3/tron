@@ -429,7 +429,7 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
     assert_eq!(
         reopened.inspect("recent-research").unwrap()["triggers"][0]["enabled"],
         false,
-        "profile enablement must not revive a rebuilt webhook without a token"
+        "engine enablement must not revive a rebuilt webhook without a token"
     );
     assert_eq!(
         reopened

@@ -39,10 +39,8 @@ pub(crate) fn unique_tron_home() -> PathBuf {
     home
 }
 
-pub(crate) fn test_user_profile_path(home: &Path) -> PathBuf {
-    home.join(crate::shared::foundation::paths::dirs::PROFILES)
-        .join(crate::shared::foundation::profile::USER_PROFILE)
-        .join(crate::shared::foundation::paths::files::PROFILE_TOML)
+pub(crate) fn test_settings_path(home: &Path) -> PathBuf {
+    crate::shared::foundation::paths::settings_path_for_home(home)
 }
 
 pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
@@ -50,10 +48,8 @@ pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
         .join(crate::shared::foundation::paths::files::AUTH_JSON)
 }
 
-pub(crate) fn test_profile_runtime(
-    home: &Path,
-) -> Arc<crate::domains::agent::r#loop::ProfileRuntime> {
-    Arc::new(crate::domains::agent::r#loop::ProfileRuntime::load(home).unwrap())
+pub(crate) fn test_settings_runtime(home: &Path) -> Arc<crate::domains::settings::SettingsRuntime> {
+    Arc::new(crate::domains::settings::SettingsRuntime::load(home).unwrap())
 }
 
 /// A no-op model responder for tests.
@@ -166,16 +162,16 @@ fn make_test_context_with_responder_and_autonomy(
     let mgr = Arc::new(SessionManager::new(store.clone()));
     let orch = Arc::new(Orchestrator::new(mgr.clone()));
     let home = unique_tron_home();
-    let settings_path = test_user_profile_path(&home);
+    let settings_path = test_settings_path(&home);
     let auth_path = test_auth_path(&home);
-    let profile_runtime = test_profile_runtime(&home);
+    let settings_runtime = test_settings_runtime(&home);
     if autonomous_workers {
-        crate::domains::settings::profile::SettingsStore::new(&settings_path)
+        crate::domains::settings::config::SettingsStore::new(&settings_path)
             .update(serde_json::json!({"autonomousWorkers": true}))
             .expect("enable autonomous workers for test context");
-        profile_runtime
+        settings_runtime
             .reload_now("autonomous worker test context")
-            .expect("reload autonomous worker test profile");
+            .expect("reload autonomous worker test settings");
     }
     let ctx = ServerRuntimeContext {
         orchestrator: orch,
@@ -183,7 +179,7 @@ fn make_test_context_with_responder_and_autonomy(
         event_store: store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         settings_path,
-        profile_runtime,
+        settings_runtime,
         responder_factory,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
@@ -202,16 +198,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn make_test_context_owns_isolated_profile_runtime() {
+    fn make_test_context_owns_isolated_settings_runtime() {
         let ctx = make_test_context();
         assert!(
             ctx.settings_path.starts_with(std::env::temp_dir()),
-            "test settings path must be isolated from the live user profile"
+            "test settings path must be isolated from live engine settings"
         );
-        assert!(ctx.profile_runtime.home().starts_with(std::env::temp_dir()));
+        assert!(
+            ctx.settings_runtime
+                .home()
+                .starts_with(std::env::temp_dir())
+        );
         assert_eq!(
-            ctx.profile_runtime.current().settings.name,
-            crate::domains::settings::TronSettings::default().name
+            ctx.settings_runtime
+                .current()
+                .settings
+                .server
+                .heartbeat_interval_ms,
+            crate::domains::settings::TronSettings::default()
+                .server
+                .heartbeat_interval_ms
         );
     }
 }

@@ -86,8 +86,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let defaultVerbosity: String?
     /// Whether the active OpenAI profile supports streaming Responses.
     let supportsStreaming: Bool?
-    /// Whether the active profile supports provider-native function invocation
-    /// for the single primitive `execute` surface.
+    /// Whether the active provider configuration supports native direct tools.
     let supportsCapabilityPrimitives: Bool?
     /// For Gemini models: default thinking level
     let thinkingLevel: String?

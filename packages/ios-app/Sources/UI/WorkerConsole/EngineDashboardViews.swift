@@ -45,7 +45,7 @@ struct EngineComponentCard: View {
         case "worker_runtime": "bolt.horizontal.circle"
         case "secret_observation_boundary": "key.viewfinder"
         case "authenticated_transport": "lock.shield"
-        case "profile_provider_shell": "switch.2"
+        case "settings_provider_shell": "switch.2"
         case "core_change_guard": "arrow.triangle.branch"
         default: "square.stack.3d.up"
         }

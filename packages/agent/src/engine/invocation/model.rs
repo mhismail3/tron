@@ -146,9 +146,10 @@ impl CausalContext {
         self
     }
 
-    /// Set the trigger id.
+    /// Set the trigger id in engine invocation tests.
+    #[cfg(test)]
     #[must_use]
-    pub fn with_trigger_id(mut self, trigger_id: TriggerId) -> Self {
+    pub(in crate::engine) fn with_trigger_id(mut self, trigger_id: TriggerId) -> Self {
         self.trigger_id = Some(trigger_id);
         self
     }
@@ -284,22 +285,6 @@ impl InvocationResult {
             value: None,
             error: Some(error),
             replayed_from: None,
-        }
-    }
-
-    /// Build a result by replaying a previous idempotent result.
-    #[must_use]
-    pub fn replay_previous(invocation: &Invocation, previous: &Self) -> Self {
-        Self {
-            invocation_id: invocation.id.clone(),
-            function_id: invocation.function_id.clone(),
-            worker_id: previous.worker_id.clone(),
-            function_revision: previous.function_revision,
-            catalog_revision: previous.catalog_revision,
-            trace_id: invocation.causal_context.trace_id.clone(),
-            value: previous.value.clone(),
-            error: previous.error.clone(),
-            replayed_from: Some(previous.invocation_id.clone()),
         }
     }
 

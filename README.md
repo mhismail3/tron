@@ -9,8 +9,8 @@
 Tron runs an AI agent as a background service on your Mac and provides a native
 iOS interface for conversations, durable sessions, and worker operations. The
 current worker-first POC deliberately favors useful autonomous adaptation over
-permission ceremony: a model can research, author, test, activate, and reuse a
-profile-global worker through one atomic operation.
+permission ceremony: a model can research, author, test, activate, and reuse an
+engine-global worker through one atomic operation.
 
 ## Why Tron
 
@@ -50,7 +50,7 @@ evidence.
 The Rust server owns model execution, authenticated transport, durable session
 truth, worker dispatch, and worker storage. The iOS app is a thin client with a
 Worker Console for health, versions, triggers, typed invocation, runs, inbox,
-rollback, retirement, per-worker stop/disable, and profile stop-all controls.
+rollback, retirement, per-worker stop/disable, and engine stop-all controls.
 The Mac app packages and supervises the server and owns pairing; it is not a
 second engine client.
 
@@ -103,8 +103,7 @@ scripts/tron state restore /absolute/path/to/snapshot
 scripts/tron ci fmt check clippy test
 ```
 
-The dedicated `worker-poc` profile enables `autonomousWorkers` by default.
-Existing profiles remain opt-in through Settings, and the toggle applies to the
+Autonomous workers remain opt-in through Settings. The toggle applies to the
 running server without a restart while preserving persistent worker state.
 
 Build the iOS app:
@@ -165,6 +164,8 @@ TRON_WORKER_LIVE_NETWORK=1 \
 - Root-cause fixes take priority over compatibility adapters.
 - Secrets and personal information never belong in the repository.
 - Filesystem bundles are canonical worker state; clients do not invent truth.
+- Production code must have an independent production consumer; tests and
+  self-description do not justify inert runtime surfaces.
 - Re-hardening must respond to an observed failure and preserve accepted worker
   workflows.
 - Production deployment is manual-only.

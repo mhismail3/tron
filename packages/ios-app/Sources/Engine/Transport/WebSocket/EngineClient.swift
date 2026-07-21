@@ -136,7 +136,7 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 
-    /// Profile-global worker-kernel operations.
+    /// Engine-global worker-kernel operations.
     @ObservationIgnored
     lazy var workerKernel: WorkerKernelClient = WorkerKernelClient(transport: self)
 

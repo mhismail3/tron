@@ -135,7 +135,7 @@ struct ServerStatusPollerTests {
         #expect(snapshot.state == .failed(reason: "malformed response"))
     }
 
-    @Test("uses cached profile TOML Tailscale IP when server doesn't report one")
+    @Test("uses cached engine settings Tailscale IP when server doesn't report one")
     func cachedTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",

@@ -5,12 +5,10 @@ import Foundation
 @Suite("ServerSettings Tests")
 struct ServerSettingsTests {
 
-    @Test("full profile response projects mobile settings and ignores server-only fields")
-    func fullProfileResponseProjectsMobileSettings() throws {
+    @Test("full settings response projects mobile settings and ignores server-only fields")
+    func fullSettingsResponseProjectsMobileSettings() throws {
         let json = """
         {
-            "version": "0.1.0",
-            "name": "tron",
             "autonomousWorkers": true,
             "api": { "anthropic": { "authUrl": "https://example.invalid" } },
             "retry": { "maxRetries": 3 },
@@ -23,13 +21,10 @@ struct ServerSettingsTests {
             },
             "context": {
                 "compactor": {
-                    "maxTokens": 25000,
                     "preserveRecentCount": 3,
                     "triggerTokenThreshold": 0.80
                 }
-            },
-            "tmux": { "commandTimeoutMs": 30000 },
-            "ui": { "theme": "forest_green" }
+            }
         }
         """
 

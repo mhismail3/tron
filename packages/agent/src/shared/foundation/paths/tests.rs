@@ -40,15 +40,8 @@ fn workspace_has_no_personal_info_literals() {
         format!("{}{}{}", "is", "ma", "il"),
         format!("{}{}{}", "mh", "is", "mail"),
     ];
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let offenders: Vec<(&str, String)> = vec![
-        ("paths/mod.rs", include_str!("../mod.rs").to_owned()),
-        (
-            "defaults/profiles/default/profile.toml",
-            std::fs::read_to_string(manifest_dir.join("defaults/profiles/default/profile.toml"))
-                .unwrap(),
-        ),
-    ];
+    let offenders: Vec<(&str, String)> =
+        vec![("paths/mod.rs", include_str!("../mod.rs").to_owned())];
     for (name, src) in &offenders {
         for needle in &needles {
             assert!(
@@ -106,35 +99,13 @@ fn normalize_working_directory_rejects_missing_paths() {
 #[test]
 fn primitive_top_level_dirs_stay_under_tron_home() {
     assert!(internal_dir().ends_with(format!(".tron/{}", dirs::INTERNAL)));
-    assert!(profiles_dir().ends_with(format!(".tron/{}", dirs::PROFILES)));
-    assert!(workspace_dir().ends_with(format!(".tron/{}", dirs::WORKSPACE)));
 }
 
 #[test]
-fn workspace_subdirs_chain_correctly() {
-    assert!(scratch_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::SCRATCH)));
-    assert!(screenshots_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::SCREENSHOTS)));
-    assert!(renders_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::RENDERS)));
-    assert!(reports_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::REPORTS)));
-    assert!(projects_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::PROJECTS)));
-    assert!(labs_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::LABS)));
-    assert!(archive_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::ARCHIVE)));
-    assert!(knowledge_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::KNOWLEDGE)));
-    assert!(vault_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::VAULT)));
-    assert!(worker_packages_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::WORKERS)));
-}
-
-#[test]
-fn settings_paths_use_profile_root() {
-    assert!(settings_path().ends_with(format!("{}/user/{}", dirs::PROFILES, files::PROFILE_TOML)));
-    assert!(settings_defaults_path().ends_with(format!(
-        "{}/default/{}",
-        dirs::PROFILES,
-        files::PROFILE_TOML
-    )));
-    assert!(active_profile_path().ends_with(format!("{}/{}", dirs::PROFILES, files::ACTIVE_TOML)));
-    assert!(auth_registry_path().ends_with(format!("{}/{}", dirs::PROFILES, files::AUTH_TOML)));
+fn settings_and_auth_have_distinct_canonical_paths() {
+    assert!(settings_path().ends_with(files::SETTINGS_TOML));
     assert!(auth_path().ends_with(format!("{}/{}", dirs::PROFILES, files::AUTH_JSON)));
+    assert_ne!(settings_path(), auth_path());
 }
 
 #[test]
@@ -156,19 +127,6 @@ fn runtime_paths_live_under_internal_run() {
     assert_eq!(
         auth_lock_path_for_home(home),
         home.join(dirs::INTERNAL).join(dirs::RUN).join("auth.lock")
-    );
-    assert!(auth_lock_path().ends_with(format!("{}/{}/auth.lock", dirs::INTERNAL, dirs::RUN)));
-    assert!(mac_wrapper_lock_path().ends_with(format!(
-        "{}/{}/.mac-wrapper.com.tron.mac.lock",
-        dirs::INTERNAL,
-        dirs::RUN
-    )));
-    assert!(
-        mac_wrapper_lock_path_for("com.tron.mac.dev").ends_with(format!(
-            "{}/{}/.mac-wrapper.com.tron.mac.dev.lock",
-            dirs::INTERNAL,
-            dirs::RUN
-        ))
     );
     assert!(onboarded_marker_path().ends_with(format!(
         "{}/{}/{}",

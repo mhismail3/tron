@@ -25,8 +25,8 @@ use super::core_proposals::{CoreProposal, CoreProposalService};
 use super::persistence::WorkerStore;
 use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
-    ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_INVOCATION_SECONDS,
-    MAX_PROFILE_CONCURRENCY, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
+    ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
+    MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
     WorkerCommand, WorkerDependency, WorkerRunner, WorkerTrigger,
 };
 use support::*;
@@ -41,8 +41,8 @@ mod secrets;
 mod support;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
 use crate::domains::session::event_store::EventStore;
+use crate::domains::settings::SettingsRuntime;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
     FunctionHealth, FunctionId, IdempotencyContract, InProcessFunctionHandler, Invocation,
@@ -112,8 +112,8 @@ pub struct WorkerRuntime {
     orchestrator: Arc<Orchestrator>,
     session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
-    profile_runtime: Arc<ProfileRuntime>,
-    profile_limit: Arc<Semaphore>,
+    settings_runtime: Arc<SettingsRuntime>,
+    engine_limit: Arc<Semaphore>,
     worker_limits: DashMap<String, Arc<Semaphore>>,
     inflight: DashSet<String>,
     worker_stops: DashMap<String, CancellationToken>,
@@ -136,13 +136,13 @@ impl WorkerRuntime {
         orchestrator: Arc<Orchestrator>,
         session_manager: Arc<SessionManager>,
         event_store: Arc<EventStore>,
-        profile_runtime: Arc<ProfileRuntime>,
+        settings_runtime: Arc<SettingsRuntime>,
     ) -> Result<Arc<Self>, String> {
         for runtime_directory in ["worker-invocations", "worker-services"] {
             let path = store
                 .home()
-                .join("internal")
-                .join("run")
+                .join(crate::shared::foundation::paths::dirs::INTERNAL)
+                .join(crate::shared::foundation::paths::dirs::RUN)
                 .join(runtime_directory);
             if path.exists() {
                 std::fs::remove_dir_all(&path).map_err(|error| {
@@ -151,7 +151,7 @@ impl WorkerRuntime {
             }
         }
         let stopped = store.stop_all()?;
-        let kernel_visibility = profile_runtime.current().settings.autonomous_workers;
+        let kernel_visibility = settings_runtime.current().settings.autonomous_workers;
         let core_proposals = CoreProposalService::new(store.home(), Arc::clone(&event_store))?;
         Ok(Arc::new(Self {
             store,
@@ -159,8 +159,8 @@ impl WorkerRuntime {
             orchestrator,
             session_manager,
             event_store,
-            profile_runtime,
-            profile_limit: Arc::new(Semaphore::new(MAX_PROFILE_CONCURRENCY)),
+            settings_runtime,
+            engine_limit: Arc::new(Semaphore::new(MAX_ENGINE_CONCURRENCY)),
             worker_limits: DashMap::new(),
             inflight: DashSet::new(),
             worker_stops: DashMap::new(),
@@ -189,7 +189,7 @@ impl WorkerRuntime {
     }
 
     /// Return one coherent, authenticated-client projection of the live model
-    /// surface and canonical profile worker inventory.
+    /// surface and canonical engine worker inventory.
     pub(crate) async fn engine_surface_snapshot(
         &self,
         session_id: Option<&str>,
@@ -218,7 +218,7 @@ impl WorkerRuntime {
     }
 
     pub fn autonomous_enabled(&self) -> bool {
-        self.profile_runtime.current().settings.autonomous_workers
+        self.settings_runtime.current().settings.autonomous_workers
     }
 
     pub(crate) fn configure_kernel_primitives(

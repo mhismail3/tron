@@ -24,7 +24,7 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
         blocks.push(context_block_for_text(
             "agent.soul",
             "Agent Soul",
-            TronHome::Profiles,
+            TronHome::Engine,
             soul.clone(),
             ContextCacheClass::Foundation,
             10,
@@ -101,7 +101,7 @@ pub fn compose_context_audit_blocks(context: &Context) -> Vec<ContextBlock> {
         let mut block = context_block_for_text(
             "capabilities.schemas",
             "ModelCapability Schemas",
-            TronHome::Profiles,
+            TronHome::Engine,
             text,
             ContextCacheClass::Session,
             50,
@@ -148,7 +148,7 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     for block in compose_context_blocks(context) {
         match block.cache_class {
             ContextCacheClass::Foundation
-            | ContextCacheClass::Profile
+            | ContextCacheClass::Configuration
             | ContextCacheClass::Session => stable.push(block.text),
             ContextCacheClass::Turn | ContextCacheClass::None => volatile.push(block.text),
         }

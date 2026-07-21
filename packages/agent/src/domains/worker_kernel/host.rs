@@ -822,7 +822,7 @@ fn require_autonomous(runtime: &WorkerRuntime) -> Result<(), String> {
         Ok(())
     } else {
         Err(
-            "autonomous workers are disabled for this profile; set autonomousWorkers=true"
+            "autonomous workers are disabled for this engine; set autonomousWorkers=true"
                 .to_owned(),
         )
     }

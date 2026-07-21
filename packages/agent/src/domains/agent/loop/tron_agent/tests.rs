@@ -535,7 +535,7 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
 async fn natural_language_task_proactively_creates_invokes_and_reports_persistent_worker() {
     let calls = Arc::new(AtomicUsize::new(0));
     let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
-    let home = ctx.profile_runtime.home().to_path_buf();
+    let home = ctx.settings_runtime.home().to_path_buf();
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 3,

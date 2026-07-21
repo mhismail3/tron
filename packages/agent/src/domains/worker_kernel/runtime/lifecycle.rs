@@ -1,4 +1,4 @@
-//! Worker lifecycle, profile stop state, autonomy transitions, and direct-tool
+//! Worker lifecycle, engine stop state, autonomy transitions, and direct-tool
 //! publication.
 
 use super::*;

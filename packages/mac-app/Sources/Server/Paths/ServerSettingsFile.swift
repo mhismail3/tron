@@ -1,36 +1,34 @@
 import Foundation
 
-/// Reads `server.tailscaleIp` from the `[settings]` overlay in
-/// `~/.tron/profiles/user/profile.toml`.
+/// Reads `server.tailscaleIp` from `~/.tron/settings.toml`.
 enum ServerSettingsReader {
     static func tailscaleIP(at path: URL) -> String? {
         guard let text = try? String(contentsOf: path, encoding: .utf8), !text.isEmpty else {
             return nil
         }
-        let trimmed = ProfileSettingsToml.value(in: text, table: "settings.server", key: "tailscaleIp")?
+        let trimmed = SettingsToml.value(in: text, table: "server", key: "tailscaleIp")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 }
 
-/// Writes wrapper-owned settings into `profiles/user/profile.toml`.
+/// Writes wrapper-owned settings into `~/.tron/settings.toml`.
 ///
-/// The Rust agent can boot from profile-seeded defaults, so a fresh install
-/// must not need this file before pairing. The Mac wrapper only creates or
-/// updates the minimal `[settings]` keys it owns, preserving any custom
-/// profile behavior the user or iOS app already wrote.
+/// The Rust agent uses compiled defaults when this file is absent. The wrapper
+/// creates or updates only the server key it owns and preserves every other
+/// settings table.
 enum ServerSettingsWriter {
     enum Failure: Error, LocalizedError, Equatable {
         case emptyTailscaleIP
-        case malformedProfile
+        case malformedSettings
         case writeFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .emptyTailscaleIP:
                 return "Tailscale IP was empty"
-            case .malformedProfile:
-                return "profile.toml is not valid UTF-8"
+            case .malformedSettings:
+                return "settings.toml is not valid UTF-8"
             case .writeFailed(let reason):
                 return reason
             }
@@ -45,38 +43,30 @@ enum ServerSettingsWriter {
 
         try updateToml(
             at: path,
-            table: "settings.server",
+            table: "server",
             key: "tailscaleIp",
-            value: ProfileSettingsToml.stringLiteral(trimmed)
+            value: SettingsToml.stringLiteral(trimmed)
         )
     }
 
-    static func removeSettingsOverlay(at path: URL) throws {
-        guard FileManager.default.fileExists(atPath: path.path) else {
-            return
-        }
-        let text = try readTomlText(at: path)
-        let updated = ProfileSettingsToml.removingSettingsTables(from: text)
-        if updated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try? FileManager.default.removeItem(at: path)
-            return
-        }
-        try write(Data(updated.utf8), to: path)
+    static func deleteSettings(at path: URL) throws {
+        guard FileManager.default.fileExists(atPath: path.path) else { return }
+        try FileManager.default.removeItem(at: path)
     }
 
     private static func updateToml(at path: URL, table: String, key: String, value: String) throws {
         let existing = FileManager.default.fileExists(atPath: path.path)
             ? try readTomlText(at: path)
-            : ProfileSettingsToml.defaultUserProfile
-        let updated = ProfileSettingsToml.updating(text: existing, table: table, key: key, value: value)
+            : ""
+        let updated = SettingsToml.updating(text: existing, table: table, key: key, value: value)
         try write(Data(updated.utf8), to: path)
     }
 
     private static func readTomlText(at path: URL) throws -> String {
         guard let text = try? String(contentsOf: path, encoding: .utf8) else {
-            throw Failure.malformedProfile
+            throw Failure.malformedSettings
         }
-        return text.isEmpty ? ProfileSettingsToml.defaultUserProfile : text
+        return text
     }
 
     private static func write(_ data: Data, to path: URL) throws {
@@ -84,7 +74,7 @@ enum ServerSettingsWriter {
         let parent = path.deletingLastPathComponent()
         do {
             try fm.createDirectory(at: parent, withIntermediateDirectories: true)
-            let tmp = parent.appendingPathComponent(".profile.\(UUID().uuidString).tmp", isDirectory: false)
+            let tmp = parent.appendingPathComponent(".settings.\(UUID().uuidString).tmp", isDirectory: false)
             try data.write(to: tmp, options: [.atomic])
             if fm.fileExists(atPath: path.path) {
                 _ = try fm.replaceItemAt(path, withItemAt: tmp)
@@ -97,17 +87,7 @@ enum ServerSettingsWriter {
     }
 }
 
-private enum ProfileSettingsToml {
-    static let defaultUserProfile = """
-    version = "3"
-    name = "user"
-    managed = false
-    profileClass = "custom"
-    inherits = []
-    authProfile = "default"
-
-    """
-
+private enum SettingsToml {
     static func value(in text: String, table targetTable: String, key targetKey: String) -> String? {
         var currentTable: String?
         for line in text.components(separatedBy: .newlines) {
@@ -163,26 +143,6 @@ private enum ProfileSettingsToml {
         lines.append("[\(targetTable)]")
         lines.append(settingLine)
         return joined(lines)
-    }
-
-    static func removingSettingsTables(from text: String) -> String {
-        var output: [String] = []
-        var skipping = false
-        for line in normalizedLines(from: text) {
-            if let table = tableName(from: line) {
-                skipping = table == "settings" || table.hasPrefix("settings.")
-                if skipping {
-                    continue
-                }
-            }
-            if !skipping {
-                output.append(line)
-            }
-        }
-        while output.last == "" {
-            output.removeLast()
-        }
-        return output.isEmpty ? "" : joined(output)
     }
 
     static func stringLiteral(_ value: String) -> String {

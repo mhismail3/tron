@@ -136,7 +136,7 @@ async fn invalid_engine_event_projection_disables_worker_instead_of_jamming_curs
 }
 
 #[tokio::test]
-async fn profile_and_worker_concurrency_overflow_stays_durably_queued() {
+async fn engine_and_worker_concurrency_overflow_stays_durably_queued() {
     let (runtime, _home) = test_runtime(None);
     let mut worker_ids = Vec::new();
     for index in 0..5 {
@@ -176,8 +176,8 @@ async fn profile_and_worker_concurrency_overflow_stays_durably_queued() {
         let runs = runtime.store().runs(None, 100).unwrap();
         let running = runs.iter().filter(|run| run.status == "running").count();
         let queued = runs.iter().filter(|run| run.status == "queued").count();
-        if runtime.profile_limit.available_permits() == 0
-            && running <= MAX_PROFILE_CONCURRENCY
+        if runtime.engine_limit.available_permits() == 0
+            && running <= MAX_ENGINE_CONCURRENCY
             && queued >= 8
         {
             observed_limits = true;
@@ -187,9 +187,9 @@ async fn profile_and_worker_concurrency_overflow_stays_durably_queued() {
     }
     assert!(
         observed_limits,
-        "profile overflow was not observed as queued"
+        "engine overflow was not observed as queued"
     );
-    assert_eq!(runtime.profile_limit.available_permits(), 0);
+    assert_eq!(runtime.engine_limit.available_permits(), 0);
     for worker_id in &worker_ids {
         let running = runtime
             .store()
@@ -875,12 +875,12 @@ async fn dynamic_tool_registration_cannot_escape_disabled_autonomy() {
     );
 
     let settings_path =
-        crate::shared::server::test_support::test_user_profile_path(runtime.profile_runtime.home());
-    crate::domains::settings::profile::SettingsStore::new(settings_path)
+        crate::shared::server::test_support::test_settings_path(runtime.settings_runtime.home());
+    crate::domains::settings::config::SettingsStore::new(settings_path)
         .update(json!({"autonomousWorkers":false}))
         .unwrap();
     runtime
-        .profile_runtime
+        .settings_runtime
         .reload_now("dynamic registration autonomy race test")
         .unwrap();
 
@@ -909,6 +909,6 @@ async fn dynamic_tool_registration_cannot_escape_disabled_autonomy() {
             .unwrap()
             .unwrap()
             .enabled,
-        "profile mode changes must preserve canonical worker enablement"
+        "engine mode changes must preserve canonical worker enablement"
     );
 }

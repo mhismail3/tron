@@ -1,6 +1,6 @@
 import Foundation
 
-/// Client for profile-global worker inspection, invocation, and lifecycle control.
+/// Client for engine-global worker inspection, invocation, and lifecycle control.
 final class WorkerKernelClient: EngineDomainClient {
     func engineSurfaceSnapshot(
         sessionId: String?,

@@ -1,9 +1,10 @@
 //! Server startup/runtime wiring for the `tron` binary.
 //!
 //! The thin `main.rs` entry point handles process-level dispatch. This module
-//! owns long-running server initialization so bootstrap, service construction,
-//! shutdown registration, legacy transport-state reconciliation, and
-//! background task wiring stay below one audited boundary.
+//! owns long-running server initialization so bootstrap, snapshot-first legacy
+//! settings/database retirement, service construction, shutdown registration,
+//! legacy transport-state reconciliation, and background task wiring stay
+//! below one audited boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,14 +103,30 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the auth file path (`~/.tron/profiles/auth.json`).
-pub(crate) fn auth_path() -> PathBuf {
-    crate::domains::settings::profile::auth_path()
-}
-
 /// Ensure `~/.tron/` has the primitive Tron Home layout.
 pub(crate) fn init_directories() -> Result<crate::shared::foundation::constitution::SeedReport> {
-    crate::shared::foundation::constitution::ensure_tron_home()
+    let home = crate::shared::foundation::paths::tron_home();
+    init_directories_at(&home)
+}
+
+fn init_directories_at(home: &Path) -> Result<crate::shared::foundation::constitution::SeedReport> {
+    if let Some(retirement) = crate::domains::settings::LegacyProfileRetirement::plan(home)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to inspect legacy profile settings")?
+    {
+        crate::domains::worker_kernel::ensure_state_snapshot(
+            home,
+            retirement.source_label(),
+            retirement.fingerprint(),
+        )
+        .map_err(anyhow::Error::msg)
+        .context("Failed to snapshot legacy profile settings")?;
+        retirement
+            .apply()
+            .map_err(anyhow::Error::msg)
+            .context("Failed to retire legacy profile settings")?;
+    }
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home)
         .context("Failed to initialize primitive Tron Home")
 }
 
@@ -148,16 +165,12 @@ pub(crate) fn init_database(
 
     let tron_home = crate::shared::foundation::paths::tron_home();
     let canonical_database = tron_home
-        .join("internal")
-        .join("database")
+        .join(crate::shared::foundation::paths::dirs::INTERNAL)
+        .join(crate::shared::foundation::paths::dirs::DB)
         .join(crate::shared::storage::UNIFIED_DB_FILENAME);
     if db_path == canonical_database && db_path.is_file() {
-        let source_profile = crate::shared::foundation::profile::active_profile_name_at(&tron_home)
-            .unwrap_or_else(|| "unknown".to_owned());
-        crate::domains::worker_kernel::prepare_profile_state_retirement(
-            &tron_home,
-            &source_profile,
-            &db_path,
+        crate::domains::worker_kernel::prepare_worker_state_retirement(
+            &tron_home, "engine", &db_path,
         )
         .map_err(anyhow::Error::msg)
         .context("Failed to snapshot and retire legacy worker state")?;
@@ -298,7 +311,7 @@ fn build_server_runtime_context(
     services: ServiceState,
     engine_host: crate::engine::EngineHostHandle,
     settings_path: PathBuf,
-    profile_runtime: Arc<crate::domains::agent::r#loop::ProfileRuntime>,
+    settings_runtime: Arc<crate::domains::settings::SettingsRuntime>,
     origin: String,
 ) -> ServerRuntimeContext {
     ServerRuntimeContext {
@@ -307,12 +320,12 @@ fn build_server_runtime_context(
         event_store: services.event_store.clone(),
         engine_host,
         settings_path,
-        profile_runtime,
+        settings_runtime,
         responder_factory: Some(services.responder_factory),
         server_start_time: std::time::Instant::now(),
         shutdown_coordinator: None,
         origin,
-        auth_path: auth_path(),
+        auth_path: crate::shared::foundation::paths::auth_path(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         // Provisional defaults; `TronServer::new` overwrites both with the
         // actual `ServerConfig::port` and the canonical onboarded marker path
@@ -366,14 +379,14 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     // process-level lock on the event-store DB. Keep in scope explicitly so
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
-    let profile_runtime = Arc::new(
-        crate::domains::agent::r#loop::ProfileRuntime::load(
+    let settings_runtime = Arc::new(
+        crate::domains::settings::SettingsRuntime::load(
             crate::shared::foundation::paths::tron_home(),
         )
-        .context("Failed to load active profile runtime")?,
+        .context("Failed to load engine settings")?,
     );
-    let settings_path = crate::domains::settings::profile::settings_path();
-    let settings = profile_runtime.current().settings.clone();
+    let settings_path = crate::shared::foundation::paths::settings_path();
+    let settings = settings_runtime.current().settings.clone();
     let origin = format!("localhost:{}", args.port);
     let (log_handle, flush_task) = init_logging(&db_path, !args.quiet)?;
     match crate::shared::storage::StorageRuntime::new(db_path.clone()).retention_run(false) {
@@ -430,12 +443,12 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     // Phase 4: Runtime context
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_stream_events = services.orchestrator.clone();
-    let profile_runtime_for_watcher = profile_runtime.clone();
+    let settings_runtime_for_watcher = settings_runtime.clone();
     let runtime_context = build_server_runtime_context(
         services,
         engine_host,
         settings_path,
-        profile_runtime,
+        settings_runtime,
         origin.clone(),
     );
 
@@ -462,7 +475,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     spawn_background_tasks(&session_manager_for_startup, &server);
     server
         .shutdown()
-        .register_task(profile_runtime_for_watcher.spawn_watcher(server.shutdown().token()));
+        .register_task(settings_runtime_for_watcher.spawn_watcher(server.shutdown().token()));
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!("{}", format_listening_log(&addr, &bind_host_label));
 

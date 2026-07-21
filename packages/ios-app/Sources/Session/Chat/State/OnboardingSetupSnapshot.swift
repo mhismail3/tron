@@ -5,7 +5,7 @@ import Foundation
 /// The snapshot is intentionally memory-only. Pairing state remains iOS-local,
 /// while server settings/auth remain authoritative on the Mac. If a user forgot
 /// a server locally and later pairs it again, this snapshot lets the remaining
-/// onboarding pages reflect the server's existing profile-backed settings and
+/// onboarding pages reflect the server's existing engine settings and
 /// masked `auth.json` state without copying those files into iOS storage.
 struct OnboardingSetupSnapshot {
     static let defaultApiKeyLabel = "Default"

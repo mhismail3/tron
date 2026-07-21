@@ -17,8 +17,9 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use tron::app::bootstrap::config::ServerConfig;
 use tron::app::bootstrap::server::TronServer;
-use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
+use tron::domains::agent::{Orchestrator, SessionManager};
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
+use tron::domains::settings::SettingsRuntime;
 use tron::engine::{ActorContext, ActorId, ActorKind, FunctionQuery};
 use tron::shared::server::context::ServerRuntimeContext;
 
@@ -80,15 +81,12 @@ async fn boot_server_with_config_and_autonomy(
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(Arc::clone(&event_store)));
     let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
-    let settings_path = home
-        .join(tron::shared::foundation::paths::dirs::PROFILES)
-        .join(tron::shared::foundation::profile::USER_PROFILE)
-        .join(tron::shared::foundation::paths::files::PROFILE_TOML);
+    let settings_path = tron::shared::foundation::paths::settings_path_for_home(&home);
     let auth_path = home
         .join(tron::shared::foundation::paths::dirs::PROFILES)
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
     if autonomous_workers {
-        tron::domains::settings::profile::SettingsStore::new(&settings_path)
+        tron::domains::settings::config::SettingsStore::new(&settings_path)
             .update(json!({"autonomousWorkers": true}))
             .expect("enable autonomous workers for worker-kernel integration test");
     }
@@ -98,7 +96,7 @@ async fn boot_server_with_config_and_autonomy(
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         settings_path,
-        profile_runtime: Arc::new(ProfileRuntime::load(&home).unwrap()),
+        settings_runtime: Arc::new(SettingsRuntime::load(&home).unwrap()),
         responder_factory: None,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,

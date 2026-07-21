@@ -13,9 +13,6 @@ use std::path::{Path, PathBuf};
 pub const TRON_DATA_DIR_ENV: &str = "TRON_DATA_DIR";
 /// Home-relative data-root override used by the Mac isolated install scheme.
 pub const TRON_HOME_NAME_ENV: &str = "TRON_HOME_NAME";
-/// Production Mac wrapper bundle identifier.
-pub const MAC_RELEASE_BUNDLE_ID: &str = "com.tron.mac";
-
 // ── Directory segment constants ────────────────────────────────────────
 
 /// Directory name constants for the `~/.tron/` layout.
@@ -28,7 +25,7 @@ pub mod dirs {
 
     /// Tron-owned runtime machinery: databases, locks, journals, caches.
     pub const INTERNAL: &str = "internal";
-    /// Profile settings and auth refs.
+    /// Protected provider and transport credentials.
     pub const PROFILES: &str = "profiles";
     /// Active work, generated artifacts, plans, reports, and experiments.
     pub const WORKSPACE: &str = "workspace";
@@ -71,12 +68,8 @@ pub mod dirs {
 pub mod files {
     /// Protected built-in authentication credentials (API keys, tokens).
     pub const AUTH_JSON: &str = "auth.json";
-    /// Readable credential registry.
-    pub const AUTH_TOML: &str = "auth.toml";
-    /// Profile execution spec.
-    pub const PROFILE_TOML: &str = "profile.toml";
-    /// Active profile pointer.
-    pub const ACTIVE_TOML: &str = "active.toml";
+    /// Sparse user-owned engine settings.
+    pub const SETTINGS_TOML: &str = "settings.toml";
     /// First-run sentinel: empty marker file at `~/.tron/internal/run/.onboarded`.
     /// Touched by the Mac wizard at the end of its install flow OR on
     /// the first successful engine authentication from any iOS device. The
@@ -186,31 +179,11 @@ pub fn internal_dir_for_home(home: &Path) -> PathBuf {
     home.join(dirs::INTERNAL)
 }
 
-/// `~/.tron/profiles/`
-pub fn profiles_dir() -> PathBuf {
-    tron_home().join(dirs::PROFILES)
-}
-
-/// `~/.tron/workspace/`
-pub fn workspace_dir() -> PathBuf {
-    tron_home().join(dirs::WORKSPACE)
-}
-
 // ── Internal subdirectory helpers ──────────────────────────────────────
 
 /// `~/.tron/internal/database/`
 pub fn db_dir() -> PathBuf {
     internal_dir().join(dirs::DB)
-}
-
-/// `~/.tron/internal/snapshots/`
-pub fn snapshots_dir() -> PathBuf {
-    internal_dir().join(dirs::SNAPSHOTS)
-}
-
-/// Worker-kernel SQLite operational index.
-pub fn worker_database_path() -> PathBuf {
-    db_dir().join("workers.sqlite")
 }
 
 /// `~/.tron/internal/run/`
@@ -228,58 +201,6 @@ pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
 }
 
-// ── Workspace subdirectory helpers ─────────────────────────────────────
-
-/// `~/.tron/workspace/reports/`
-pub fn reports_dir() -> PathBuf {
-    workspace_dir().join(dirs::REPORTS)
-}
-
-/// `~/.tron/workspace/scratch/`
-pub fn scratch_dir() -> PathBuf {
-    workspace_dir().join(dirs::SCRATCH)
-}
-
-/// `~/.tron/workspace/renders/`
-pub fn renders_dir() -> PathBuf {
-    workspace_dir().join(dirs::RENDERS)
-}
-
-/// `~/.tron/workspace/screenshots/`
-pub fn screenshots_dir() -> PathBuf {
-    workspace_dir().join(dirs::SCREENSHOTS)
-}
-
-/// `~/.tron/workspace/projects/`
-pub fn projects_dir() -> PathBuf {
-    workspace_dir().join(dirs::PROJECTS)
-}
-
-/// `~/.tron/workspace/labs/`
-pub fn labs_dir() -> PathBuf {
-    workspace_dir().join(dirs::LABS)
-}
-
-/// `~/.tron/workspace/archive/`
-pub fn archive_dir() -> PathBuf {
-    workspace_dir().join(dirs::ARCHIVE)
-}
-
-/// `~/.tron/workspace/knowledge/`
-pub fn knowledge_dir() -> PathBuf {
-    workspace_dir().join(dirs::KNOWLEDGE)
-}
-
-/// `~/.tron/workspace/vault/`
-pub fn vault_dir() -> PathBuf {
-    workspace_dir().join(dirs::VAULT)
-}
-
-/// `~/.tron/workspace/workers/`
-pub fn worker_packages_dir() -> PathBuf {
-    workspace_dir().join(dirs::WORKERS)
-}
-
 // ── Composite file path helpers ────────────────────────────────────────
 
 /// Path to the currently running Tron executable.
@@ -292,59 +213,24 @@ pub fn tron_binary_path() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tron"))
 }
 
-/// `~/.tron/profiles/user/profile.toml`
+/// `~/.tron/settings.toml`
 pub fn settings_path() -> PathBuf {
-    user_profile_path()
+    settings_path_for_home(&tron_home())
 }
 
-/// Managed default profile path.
-pub fn settings_defaults_path() -> PathBuf {
-    default_profile_dir().join(files::PROFILE_TOML)
+/// `<home>/settings.toml`
+pub fn settings_path_for_home(home: &Path) -> PathBuf {
+    home.join(files::SETTINGS_TOML)
 }
 
 /// `~/.tron/profiles/auth.json`
 pub fn auth_path() -> PathBuf {
-    profiles_dir().join(files::AUTH_JSON)
-}
-
-/// `~/.tron/profiles/auth.json` — WebSocket bearer-token storage and provider auth.
-///
-/// The bearer token is stored as top-level `bearerToken`. Read by the WS
-/// upgrade handler; written by
-/// [`crate::app::lifecycle::onboarding::load_or_create_bearer_token`] and
-/// [`crate::app::lifecycle::onboarding::rotate_bearer_token`].
-pub fn bearer_token_path() -> PathBuf {
-    auth_path()
-}
-
-/// `~/.tron/internal/run/auth.lock` — auth file serialization lock.
-pub fn auth_lock_path() -> PathBuf {
-    auth_lock_path_for_home(&tron_home())
+    tron_home().join(dirs::PROFILES).join(files::AUTH_JSON)
 }
 
 /// `<home>/internal/run/auth.lock` — auth file serialization lock.
 pub fn auth_lock_path_for_home(home: &Path) -> PathBuf {
     run_dir_for_home(home).join("auth.lock")
-}
-
-/// `~/.tron/internal/run/.mac-wrapper.com.tron.mac.lock` — production Mac wrapper lock.
-pub fn mac_wrapper_lock_path() -> PathBuf {
-    mac_wrapper_lock_path_for(MAC_RELEASE_BUNDLE_ID)
-}
-
-/// `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` — per-wrapper lock.
-pub fn mac_wrapper_lock_path_for(bundle_identifier: &str) -> PathBuf {
-    let safe_identifier: String = bundle_identifier
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    run_dir().join(format!(".mac-wrapper.{safe_identifier}.lock"))
 }
 
 /// `~/.tron/internal/run/.onboarded` — first-run sentinel marker.
@@ -354,28 +240,6 @@ pub fn mac_wrapper_lock_path_for(bundle_identifier: &str) -> PathBuf {
 /// wizard or [`crate::app::lifecycle::onboarding::mark_onboarded`].
 pub fn onboarded_marker_path() -> PathBuf {
     run_dir().join(files::ONBOARDED_MARKER)
-}
-
-/// `~/.tron/profiles/user/profile.toml`
-pub fn user_profile_path() -> PathBuf {
-    profiles_dir()
-        .join(crate::shared::foundation::profile::USER_PROFILE)
-        .join(files::PROFILE_TOML)
-}
-
-/// `~/.tron/profiles/default/`
-pub fn default_profile_dir() -> PathBuf {
-    profiles_dir().join(crate::shared::foundation::profile::DEFAULT_PROFILE)
-}
-
-/// `~/.tron/profiles/active.toml`
-pub fn active_profile_path() -> PathBuf {
-    profiles_dir().join(files::ACTIVE_TOML)
-}
-
-/// `~/.tron/profiles/auth.toml`
-pub fn auth_registry_path() -> PathBuf {
-    profiles_dir().join(files::AUTH_TOML)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────

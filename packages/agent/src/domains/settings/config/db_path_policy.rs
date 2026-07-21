@@ -25,12 +25,6 @@ pub fn default_production_db_path_for_tron_home(tron_home: &Path) -> PathBuf {
     production_db_dir_from_tron_home(tron_home).join(PRODUCTION_DB_FILENAME)
 }
 
-/// Default database path from the resolved Tron home.
-#[must_use]
-pub fn default_production_db_path() -> PathBuf {
-    default_production_db_path_for_tron_home(&crate::shared::foundation::paths::tron_home())
-}
-
 /// Resolve and validate the database path using the resolved Tron home.
 ///
 /// Returns the canonical allowed path (`<tron-home>/internal/database/tron.sqlite`) when valid.

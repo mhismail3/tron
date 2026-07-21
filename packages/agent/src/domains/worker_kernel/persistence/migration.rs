@@ -437,15 +437,15 @@ fn rebuild_triggers(
 /// planes before any current engine or session schema is opened.
 pub(super) fn prepare_worker_first_retirement(
     home: &Path,
-    source_profile: &str,
+    source_label: &str,
     source: &Path,
 ) -> Result<(), String> {
-    prepare_worker_first_retirement_with_fault(home, source_profile, source, false)
+    prepare_worker_first_retirement_with_fault(home, source_label, source, false)
 }
 
 fn prepare_worker_first_retirement_with_fault(
     home: &Path,
-    source_profile: &str,
+    source_label: &str,
     source: &Path,
     fail_before_commit: bool,
 ) -> Result<(), String> {
@@ -463,7 +463,9 @@ fn prepare_worker_first_retirement_with_fault(
              PRAGMA wal_checkpoint(TRUNCATE);",
         )
         .map_err(|error| format!("checkpoint state before worker-first snapshot: {error}"))?;
-    let root = home.join("workspace").join("workers");
+    let root = home
+        .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+        .join(crate::shared::foundation::paths::dirs::WORKERS);
     fs::create_dir_all(&root).map_err(|error| format!("create worker root: {error}"))?;
     let report_path = root.join(IMPORT_REPORT_FILE);
 
@@ -478,7 +480,7 @@ fn prepare_worker_first_retirement_with_fault(
     let source_sha256 = file_sha256(source)?;
     let snapshot_inventory_sha256 =
         retirement_source_fingerprint(&source_schema_sha256, &source_inventory_sha256, &counts)?;
-    super::snapshot::ensure_pre_worker_snapshot(home, source_profile, &snapshot_inventory_sha256)
+    super::snapshot::ensure_pre_worker_snapshot(home, source_label, &snapshot_inventory_sha256)
         .map_err(|error| format!("create verified worker-first retirement snapshot: {error}"))?;
     let imported_at = chrono::Utc::now().to_rfc3339();
     let (imported_candidates, unconvertible_records) =

@@ -175,10 +175,10 @@ pub struct ServerRuntimeContext {
     pub event_store: Arc<EventStore>,
     /// Shared live capability engine host.
     pub engine_host: EngineHostHandle,
-    /// Path to the sparse user profile settings overlay.
+    /// Path to the sparse engine settings file.
     pub settings_path: PathBuf,
-    /// Compiled active profile runtime.
-    pub profile_runtime: Arc<crate::domains::agent::r#loop::profile_runtime::ProfileRuntime>,
+    /// Current validated settings runtime.
+    pub settings_runtime: Arc<crate::domains::settings::SettingsRuntime>,
     /// Factory that creates a fresh model responder per prompt. When absent,
     /// the prompt handler returns `NotAvailable`.
     pub responder_factory: Option<Arc<dyn ModelResponderFactory>>,
@@ -219,25 +219,6 @@ impl ServerRuntimeContext {
         F: FnOnce() -> Result<T, CapabilityError> + Send + 'static,
     {
         run_blocking_task(task_name, f).await
-    }
-
-    /// Spawn blocking work whose result is intentionally not part of the capability
-    /// response, while still registering the async owner with shutdown.
-    pub fn spawn_blocking_detached<F>(&self, task_name: &'static str, f: F)
-    where
-        F: FnOnce() -> Result<(), CapabilityError> + Send + 'static,
-    {
-        let handle = tokio::spawn(async move {
-            if let Err(error) = run_blocking_task(task_name, f).await {
-                tracing::warn!(task = task_name, error = %error, "detached blocking capability task failed");
-            }
-        });
-
-        if let Some(shutdown) = &self.shutdown_coordinator {
-            shutdown.register_task(handle);
-        } else {
-            drop(handle);
-        }
     }
 
     /// Current WebSocket listening port.

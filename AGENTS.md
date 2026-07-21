@@ -8,6 +8,10 @@
 4. **Use `@self-inspect` skill** to investigate issues. Query `~/.tron/internal/database/` directly — don't guess.
 5. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
 6. **User info lives in `MEMORY.md`, secrets in vault.** Never hardcode personal info (names, emails, handles, domains) anywhere in code, tests, or skill docs. User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded into every session) or detail files under `~/.tron/memory/rules/`. Skill-owned secrets go in `~/.tron/workspace/vault/` through the `vault` skill; Tron-owned provider auth lives in `~/.tron/profiles/auth.json`. Regression-guarded by `workspace_has_no_personal_info_literals` in `packages/agent/src/shared/foundation/paths/`.
+7. **Production behavior justifies production code.** A schema field, wrapper,
+   helper, branch, or subsystem referenced only by its own tests/docs is not a
+   reason to retain it. Keep test hooks behind `cfg(test)`; delete speculative
+   runtime surfaces until an independent production caller exists.
 
 ## Commands
 
@@ -30,8 +34,8 @@ Prefer fast, focused checks while iterating. Escalate to full suites when the ch
 
 ## Settings Parity
 
-`settings::get` returns the complete validated `TronSettings` profile, including
-server-only provider, retry, runtime, tmux, and TUI configuration. iOS admits an
+`settings::get` returns the complete validated `TronSettings` document, including
+server-only provider, retry, and runtime configuration. iOS admits an
 explicit product-settings projection from that response. Every field admitted
 into the iOS `ServerSettings` DTO must have 1-to-1 ownership through:
 
@@ -42,9 +46,9 @@ into the iOS `ServerSettings` DTO must have 1-to-1 ownership through:
 
 Editable fields must also have a `SettingsMutation` and matching
 `ServerSettingsUpdate` encoding. Read-only fields must not gain a write path.
-When adding a Rust profile field under
-`packages/agent/src/domains/settings/profile/types/`, first identify its owner:
-server-only provider/runtime/TUI fields remain outside the iOS DTO, while an
+When adding a Rust settings field under
+`packages/agent/src/domains/settings/config/types/`, first identify its owner:
+server-only provider/retry/runtime fields remain outside the iOS DTO, while an
 iOS-visible product setting requires every layer above in the same commit. No
 field admitted into the mobile projection may exist in only one layer.
 
@@ -117,7 +121,7 @@ commit:
 | iOS or Mac top-level architecture | the package architecture docs; update the root README only when the product-level map changes |
 
 Canonical source roots include
-`packages/agent/src/domains/settings/profile/types/`,
+`packages/agent/src/domains/settings/config/types/`,
 `packages/agent/src/domains/auth/credentials/`,
 `packages/agent/src/shared/protocol/events/`, and
 `packages/agent/src/shared/foundation/paths/`.

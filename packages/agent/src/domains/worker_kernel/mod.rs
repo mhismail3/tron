@@ -14,7 +14,7 @@
 //! | `contract` | Fixed direct worker-management contracts and their adjacent contract tests |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
-//! | `persistence` | Canonical bundles, snapshots, index reconstruction, and durable operational ledgers |
+//! | `persistence` | Canonical bundles, snapshot-first legacy-state retirement, index reconstruction, and durable operational ledgers |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
 //! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, supervision, and their stateless support/tests |
@@ -55,7 +55,7 @@
 //! The authenticated `engine::surface_snapshot` read returns that same
 //! provider-neutral projection, every published worker's projection status,
 //! the complete fixed-tool inventory, compiled engine-component roles, and
-//! canonical profile worker summaries; it is not itself model vocabulary.
+//! canonical engine worker summaries; it is not itself model vocabulary.
 //! Fixed inventory remains inspectable while autonomy is off and marks each
 //! tool unexposed, so operator introspection never masquerades as provider
 //! availability.
@@ -115,8 +115,7 @@
 //! An agent-runner drop guard aborts its child on timeout, stop, disable, or
 //! shutdown. Causal depth survives the child hop, and pre-admission event
 //! subscription preserves even an immediate provider failure's terminal error.
-//! Core proposal diffs retain exact text, including `git apply`'s terminal
-//! newline. Purge is irreversible/critical; retirement remains recoverable.
+//! Core proposal diffs retain exact text/newlines; purge is irreversible while retirement remains recoverable.
 //! Core proposal approval rejects negated or ambiguous messages. A failed
 //! approved cherry-pick is aborted and verified back at its original commit
 //! before the proposal remains in the tested state.
@@ -147,7 +146,8 @@ mod tests;
 mod types;
 
 pub(crate) use persistence::{
-    list_state_snapshots, prepare_profile_state_retirement, restore_state_snapshot,
+    ensure_state_snapshot, list_state_snapshots, prepare_worker_state_retirement,
+    restore_state_snapshot,
 };
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]
@@ -165,8 +165,8 @@ pub(crate) struct Registration {
 pub(crate) fn registration(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Registration> {
-    let autonomous = deps.profile_runtime.current().settings.autonomous_workers;
-    let store = persistence::WorkerStore::open(deps.profile_runtime.home().to_path_buf())
+    let autonomous = deps.settings_runtime.current().settings.autonomous_workers;
+    let store = persistence::WorkerStore::open(deps.settings_runtime.home().to_path_buf())
         .map_err(crate::engine::EngineError::HandlerFailed)?;
     let runtime = WorkerRuntime::new(
         store,
@@ -174,7 +174,7 @@ pub(crate) fn registration(
         deps.orchestrator.clone(),
         deps.session_manager.clone(),
         deps.event_store.clone(),
-        deps.profile_runtime.clone(),
+        deps.settings_runtime.clone(),
     )
     .map_err(crate::engine::EngineError::HandlerFailed)?;
     let mut functions = handlers::function_registrations(

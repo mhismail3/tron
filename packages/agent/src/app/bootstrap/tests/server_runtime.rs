@@ -30,7 +30,7 @@ async fn server_boots_and_responds() {
         session_manager,
         event_store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-        profile_runtime: test_profile_runtime(&home),
+        settings_runtime: test_settings_runtime(&home),
         settings_path,
         responder_factory: None,
         server_start_time: std::time::Instant::now(),
@@ -92,7 +92,7 @@ async fn server_graceful_shutdown() {
         session_manager,
         event_store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-        profile_runtime: test_profile_runtime(&home),
+        settings_runtime: test_settings_runtime(&home),
         settings_path,
         responder_factory: None,
         server_start_time: std::time::Instant::now(),
@@ -147,11 +147,9 @@ fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
             .exists(),
         "internal/run/ holds runtime locks that normal server startup may create"
     );
+    assert!(home.join("profiles/auth.json").is_file());
     assert!(
-        home.join(crate::shared::foundation::paths::dirs::PROFILES)
-            .join(crate::shared::foundation::profile::DEFAULT_PROFILE)
-            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
-            .exists(),
-        "default profile must be seeded for auditable profile-owned settings"
+        !home.join("settings.toml").exists(),
+        "compiled defaults must not create a self-referential settings fixture"
     );
 }

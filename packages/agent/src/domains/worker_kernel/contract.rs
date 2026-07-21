@@ -281,9 +281,9 @@ const CORE_COMPONENTS: &[CoreComponentDescriptor] = &[
         status: "active",
     },
     CoreComponentDescriptor {
-        id: "profile_provider_shell",
-        title: "Profile & Provider Shell",
-        role: "Owns profile settings, provider credentials, protocol adapters, and application lifecycle.",
+        id: "settings_provider_shell",
+        title: "Settings & Provider Shell",
+        role: "Owns engine settings, provider credentials, protocol adapters, and application lifecycle.",
         category: "product_infrastructure",
         status: "active",
     },
@@ -527,7 +527,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         EffectClass::ReversibleSideEffect,
         RiskLevel::Critical,
         json!({"type":"object","additionalProperties":false,"required":["stopped"],"properties":{"stopped":{"type":"boolean"}}}),
-        "Stop or resume all persistent worker dispatch for the active profile.",
+        "Stop or resume all persistent worker dispatch for this engine.",
     )?);
     specs.push(
         CapabilityContract::new(
@@ -572,7 +572,7 @@ pub(super) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
             }
         }))
         .description(
-            "Return authoritative fixed-tool, selected-worker, and profile worker inventory for authenticated engine clients.",
+            "Return authoritative fixed-tool, selected-worker, and engine worker inventory for authenticated clients.",
         )
         .tags(vec!["kernel", "introspection", "workers", "surface"])
         .build()?,

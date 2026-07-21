@@ -291,7 +291,7 @@ protocol WorkspaceBrowserRepository: AnyObject {
 
 // MARK: - Worker Kernel Repository
 
-/// Black-box operational contract for the profile-global worker console.
+/// Black-box operational contract for the engine-global worker console.
 @MainActor
 protocol WorkerKernelRepository: AnyObject {
     func engineSurfaceSnapshot(

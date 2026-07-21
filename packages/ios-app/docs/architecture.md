@@ -23,7 +23,7 @@ The app has two primary operational surfaces:
 - Chat: create and resume sessions, submit prompts and attachments, stop work,
   inspect streamed and reconstructed messages, and manage context settings.
 - Engine Dashboard: inspect the compiled core, exact session tool surface,
-  published workers, and durable profile activity; operate worker lifecycle.
+  published workers, and durable engine activity; operate worker lifecycle.
 
 The former Agent Cockpit, module activity, capability-binding, package
 lifecycle, legacy worker-lifecycle, generated-UI resource, and display-stream
@@ -128,7 +128,7 @@ non-model-facing `engine::surface_snapshot` read with optional session context.
 Strongly typed catalog DTOs expose compiled component roles, the complete fixed
 tool inventory, catalog revision, surface hash, exact selected surface,
 function/worker versions, every published worker's promoted/projected state,
-selection evidence, and canonical profile worker inventory. UI code does not
+selection evidence, and canonical engine worker inventory. UI code does not
 reconstruct model visibility from raw catalog `[AnyCodable]` entries. The exact
 `surface.tools` projection is kept distinct from fixed/published inventories;
 when autonomy is off, fixed tools remain inspectable but explicitly unexposed.
@@ -193,7 +193,7 @@ state.
 
 - the selected-session engine snapshot, fixed inventory, published worker
   projection state, and compiled component roles;
-- profile-wide activity runs and inbox results;
+- engine-wide activity runs and inbox results;
 - current list and selection;
 - selected inspection, runs, and inbox;
 - editable JSON invocation input and rendered result;
@@ -201,7 +201,7 @@ state.
 - refresh/mutation flags, stop-all status, and the last transport error.
 
 `refresh` loads one authoritative, optionally session-scoped engine snapshot,
-then profile activity and the selected worker if it still exists. A disconnected
+then engine activity and the selected worker if it still exists. A disconnected
 refresh clears server-owned rows. `monitor` polls
 both worker stream topics with independent cursors and refreshes only after new
 events. Topic polling is historical replay, so the repository contract requires
@@ -236,7 +236,7 @@ owns both navigation and every evidence renderer. It provides:
   progressively disclosed input/output schemas and exposure state;
 - every published worker's distinction between availability, current-session
   projection, and explicit promotion;
-- profile stop-all/resume with an explanation that queued work remains durable;
+- engine stop-all/resume with an explanation that queued work remains durable;
 - worker list with runner, health, active hash prefix, and trigger count;
 - detail overview with tool identity and provenance;
 - readable schema fields, progressively disclosed raw schema, generated valid
@@ -318,7 +318,7 @@ sheet, hidden prompt memory editor, or Session Briefing surface.
 
 ## Settings Parity
 
-`settings::get` returns the complete server settings profile. iOS admits only
+`settings::get` returns the complete validated engine settings. iOS admits only
 the explicit product projection in `ServerSettings`.
 
 `autonomousWorkers` has end-to-end ownership:
@@ -329,7 +329,7 @@ the explicit product projection in `ServerSettings`.
 4. `SettingsMutation.autonomousWorkers` and `ServerSettingsUpdate` encoding;
 5. editable toggle in `EngineSettingsPage`.
 
-Existing profiles default off. The UI explains that enabling it lets local
+Existing engines default off. The UI explains that enabling it lets local
 agents create and run persistent workers with the Mac user's normal
 permissions. The setting is server-owned and applies live: disabling it hides
 the model-facing kernel and worker tools, cancels worker execution, and stops
@@ -339,7 +339,7 @@ cannot invoke workers while the mode is off. Re-enabling restores the persistent
 tools and dispatcher without restarting the server. Changing paired servers
 reloads the new server's value.
 
-No server-only provider retry, runtime, tmux, or TUI field may drift into only
+No server-only provider, retry, or runtime field may drift into only
 one Swift layer. `SettingsParityTests` guard the admitted projection.
 
 ## Notification Boundary

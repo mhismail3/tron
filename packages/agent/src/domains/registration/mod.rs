@@ -761,10 +761,10 @@ mod tests {
     }
 
     fn set_autonomous_workers(ctx: &ServerRuntimeContext, enabled: bool) {
-        crate::domains::settings::profile::SettingsStore::new(&ctx.settings_path)
+        crate::domains::settings::config::SettingsStore::new(&ctx.settings_path)
             .update(json!({"autonomousWorkers": enabled}))
             .expect("persist autonomous worker setting");
-        ctx.profile_runtime
+        ctx.settings_runtime
             .reload_now("live autonomous worker setting test")
             .expect("reload autonomous worker setting");
     }

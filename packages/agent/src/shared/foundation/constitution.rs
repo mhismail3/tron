@@ -1,12 +1,11 @@
-//! Primitive Tron Home layout, recovery, and context block types.
+//! Primitive Tron Home layout and provider-context block types.
 //!
-//! Normal runtime code reads three constitutional roots: `internal/`,
-//! `profiles/`, and `workspace/`. Server startup calls this owner to complete
-//! that layout and refresh source-owned managed profiles from the compiled
-//! bundle. Contributor shell tools may stage their own payload under
-//! `internal/run/`, but do not preseed the complete layout. Constitution seeds
-//! only a private empty auth sentinel required by profile validation; the auth
-//! domain materializes the full schema through its secure writer.
+//! Runtime state has three roots: `internal/`, `profiles/`, and `workspace/`.
+//! `profiles/` now contains protected `auth.json` only; named configuration
+//! profiles, inheritance, active pointers, and source-owned prompt assets are
+//! not part of the primitive constitution. Sparse user settings live directly
+//! at `~/.tron/settings.toml` and are created only by an explicit mutation or
+//! snapshot-first legacy migration.
 
 use std::fs;
 use std::io;
@@ -15,16 +14,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::paths::{self, dirs, files};
-use super::profile::{CHAT_PROFILE, DEFAULT_PROFILE, LOCAL_PROFILE, NORMAL_PROFILE, USER_PROFILE};
+use super::paths::{dirs, files};
 
-/// Stable top-level homes in the profile-first Tron Home.
+/// Stable top-level homes in Tron state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TronHome {
-    /// Complete agent execution specs.
-    Profiles,
-    /// Active substrate: projects, artifacts, experiments, knowledge, vault.
+    /// Engine-owned settings and protected authentication state.
+    Engine,
+    /// Active projects, artifacts, workers, knowledge, and vault.
     Workspace,
     /// Tron-owned runtime machinery.
     Internal,
@@ -34,15 +32,15 @@ pub enum TronHome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ContextCacheClass {
-    /// Rarely changing default/profile blocks.
+    /// Rarely changing foundational instructions.
     Foundation,
-    /// Active profile and user behavior overlays.
-    Profile,
-    /// Session history, environment, and agent-owned state summaries.
+    /// Operator settings and other stable engine configuration.
+    Configuration,
+    /// Session history and agent-owned state summaries.
     Session,
-    /// Latest turn input, pending execute results, and volatile stream output.
+    /// Latest turn input and volatile output.
     Turn,
-    /// Secrets, vault values, and unsafe/volatile material.
+    /// Secrets or material that must not be cached.
     None,
 }
 
@@ -66,7 +64,7 @@ pub enum ProviderSurface {
     Instructions,
     /// User/message surface.
     Message,
-    /// Capability schema or capability-description surface.
+    /// Tool schema or description surface.
     ModelCapability,
     /// Excluded from provider payload.
     Excluded,
@@ -108,62 +106,24 @@ pub struct ContextBlock {
     pub text: String,
 }
 
-/// Summary of seeding and repair work.
+/// Summary of newly created constitutional paths.
 #[derive(Debug, Default)]
 pub struct SeedReport {
     /// Created paths.
     pub seeded: Vec<PathBuf>,
-    /// Repaired managed default paths.
-    pub repaired: Vec<PathBuf>,
 }
 
-struct ManagedDefault {
-    relative_path: &'static str,
-    content: &'static str,
-    repair_if_invalid: bool,
-}
-
-macro_rules! managed_default {
-    ($path:literal, $repair_if_invalid:expr) => {
-        ManagedDefault {
-            relative_path: $path,
-            content: include_str!(concat!("../../../defaults/", $path)),
-            repair_if_invalid: $repair_if_invalid,
-        }
-    };
-}
-
-const MANAGED_DEFAULTS: &[ManagedDefault] = &[
-    managed_default!("profiles/active.toml", true),
-    managed_default!("profiles/auth.toml", false),
-    managed_default!("profiles/auth.json", false),
-    managed_default!("profiles/default/profile.toml", true),
-    managed_default!("profiles/normal/profile.toml", true),
-    managed_default!("profiles/chat/profile.toml", true),
-    managed_default!("profiles/local/profile.toml", true),
-    managed_default!("profiles/worker-poc/profile.toml", true),
-    managed_default!("profiles/user/profile.toml", false),
-];
-
-/// Ensure the current Tron Home is recovered and structurally complete.
-pub fn ensure_tron_home() -> io::Result<SeedReport> {
-    ensure_tron_home_at(&paths::tron_home())
-}
-
-/// Ensure a specific Tron Home is recovered and structurally complete.
+/// Ensure a specific Tron Home is structurally complete.
 pub fn ensure_tron_home_at(home: &Path) -> io::Result<SeedReport> {
     let mut report = SeedReport::default();
-
-    for dir in profile_first_dirs(home) {
-        create_dir(&dir, &mut report)?;
+    for directory in primitive_dirs(home) {
+        create_dir(&directory, &mut report)?;
     }
-
-    recover_managed_defaults(home, &mut report)?;
-    validate_active_profile(home)?;
+    seed_private_auth_if_absent(home, &mut report)?;
     Ok(report)
 }
 
-fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
+fn primitive_dirs(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(dirs::INTERNAL),
         home.join(dirs::INTERNAL).join(dirs::DB),
@@ -172,11 +132,6 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
             .join(dirs::DB)
             .join(dirs::JOURNALS),
         home.join(dirs::PROFILES),
-        home.join(dirs::PROFILES).join(DEFAULT_PROFILE),
-        home.join(dirs::PROFILES).join(NORMAL_PROFILE),
-        home.join(dirs::PROFILES).join(CHAT_PROFILE),
-        home.join(dirs::PROFILES).join(LOCAL_PROFILE),
-        home.join(dirs::PROFILES).join(USER_PROFILE),
         home.join(dirs::WORKSPACE),
         home.join(dirs::WORKSPACE).join(dirs::PROJECTS),
         home.join(dirs::WORKSPACE).join(dirs::REPORTS),
@@ -198,129 +153,27 @@ fn create_dir(path: &Path, report: &mut SeedReport) -> io::Result<()> {
     Ok(())
 }
 
-fn recover_managed_defaults(home: &Path, report: &mut SeedReport) -> io::Result<()> {
-    for default in MANAGED_DEFAULTS {
-        let path = home.join(default.relative_path);
-        let existed_before = path.exists();
-        let should_write = if existed_before {
-            let invalid = default.repair_if_invalid && !managed_default_valid(&path);
-            invalid
-                || (managed_default_is_source_owned(default.relative_path)
-                    && managed_default_content_differs(&path, default.content)?)
-        } else {
-            true
-        };
-
-        if should_write {
-            let wrote = write_managed_default(&path, default.content)?;
-            if wrote {
-                if existed_before {
-                    report.repaired.push(path);
-                } else {
-                    report.seeded.push(path);
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn managed_default_is_source_owned(relative_path: &str) -> bool {
-    relative_path.starts_with("profiles/default/")
-        || relative_path.starts_with("profiles/normal/")
-        || relative_path.starts_with("profiles/chat/")
-        || relative_path.starts_with("profiles/local/")
-        || relative_path.starts_with("profiles/worker-poc/")
-}
-
-fn managed_default_content_differs(path: &Path, expected: &str) -> io::Result<bool> {
-    let actual = fs::read_to_string(path)?;
-    Ok(actual != expected)
-}
-
-fn write_managed_default(path: &Path, content: &str) -> io::Result<bool> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if path.file_name().and_then(|name| name.to_str()) == Some(files::AUTH_JSON) {
-        return write_private_default_if_absent(path, content);
-    }
-    fs::write(path, content).map(|()| true)
-}
-
-fn write_private_default_if_absent(path: &Path, content: &str) -> io::Result<bool> {
+fn seed_private_auth_if_absent(home: &Path, report: &mut SeedReport) -> io::Result<()> {
     use std::io::Write as _;
 
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "private managed default path has no parent directory",
-        )
-    })?;
-    let mut temporary = tempfile::Builder::new()
+    let path = home.join(dirs::PROFILES).join(files::AUTH_JSON);
+    if path.exists() {
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("auth path has no parent"))?;
+    let mut staged = tempfile::Builder::new()
         .prefix(".auth.seed.")
         .tempfile_in(parent)?;
-    temporary.write_all(content.as_bytes())?;
-    temporary.as_file().sync_all()?;
-    match temporary.persist_noclobber(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-        Err(error) => Err(error.error),
+    staged.write_all(b"{}\n")?;
+    staged.as_file().sync_all()?;
+    match staged.persist_noclobber(&path) {
+        Ok(_) => report.seeded.push(path),
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.error),
     }
-}
-
-fn managed_default_valid(path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-    if content.trim().is_empty() {
-        return false;
-    }
-    let Ok(value) = toml::from_str::<toml::Value>(&content) else {
-        return false;
-    };
-    if path.file_name().and_then(|name| name.to_str()) == Some(files::ACTIVE_TOML) {
-        return value
-            .get("active")
-            .and_then(toml::Value::as_str)
-            .is_some_and(|active| !active.trim().is_empty() && active != DEFAULT_PROFILE);
-    }
-    if path.file_name().and_then(|name| name.to_str()) == Some(files::PROFILE_TOML)
-        && let Some(profile_name) = path
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-        && [DEFAULT_PROFILE, NORMAL_PROFILE, CHAT_PROFILE, LOCAL_PROFILE].contains(&profile_name)
-    {
-        if toml::from_str::<super::profile::ProfileDocument>(&content).is_err() {
-            return false;
-        }
-        return value
-            .get("name")
-            .and_then(toml::Value::as_str)
-            .is_some_and(|name| name == profile_name)
-            && value
-                .get("version")
-                .and_then(toml::Value::as_str)
-                .is_some_and(|version| version == super::profile::CURRENT_PROFILE_VERSION);
-    }
-    true
-}
-
-fn validate_active_profile(home: &Path) -> io::Result<()> {
-    let active =
-        super::profile::active_profile_name_at(home).unwrap_or_else(|| DEFAULT_PROFILE.to_string());
-    let path = home
-        .join(dirs::PROFILES)
-        .join(&active)
-        .join(files::PROFILE_TOML);
-    if !path.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("active profile `{active}` is missing {}", path.display()),
-        ));
-    }
-    super::profile::resolve_profile_at(home, &active).map(|_| ())
+    Ok(())
 }
 
 /// Create a context block from rendered text and Tron Home metadata.
@@ -341,7 +194,7 @@ pub fn context_block_for_text(
         source_path: None,
         source_blob_id: None,
         hash: sha256_hex(text.as_bytes()),
-        token_estimate: estimate_tokens(&text),
+        token_estimate: (text.len() as u64).div_ceil(4),
         sensitivity: ContextSensitivity::Public,
         inclusion_reason: "compiled by primitive context assembly".into(),
         precedence,
@@ -353,21 +206,10 @@ pub fn context_block_for_text(
     }
 }
 
-/// Read the active profile name.
-#[must_use]
-pub fn active_profile_name() -> Option<String> {
-    super::profile::active_profile_name()
-}
-
 /// Hash bytes with SHA-256 as lower-case hex.
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    hex::encode(digest)
-}
-
-fn estimate_tokens(text: &str) -> u64 {
-    (text.len() as u64).div_ceil(4)
+    hex::encode(Sha256::digest(bytes))
 }
 
 #[cfg(test)]
@@ -375,249 +217,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn seeding_creates_only_primitive_roots_and_private_auth() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+
+        assert!(home.join("internal/database").is_dir());
+        assert!(home.join("workspace/vault").is_dir());
+        assert!(home.join("profiles/auth.json").is_file());
+        assert!(!home.join("settings.toml").exists());
+        assert!(!home.join("profiles/active.toml").exists());
+        assert!(!home.join("profiles/default").exists());
+    }
+
+    #[test]
+    fn seeding_never_overwrites_auth_or_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+        fs::write(home.join("profiles/auth.json"), "{\"token\":\"kept\"}").unwrap();
+        fs::write(home.join("settings.toml"), "autonomousWorkers = true\n").unwrap();
+
+        ensure_tron_home_at(&home).unwrap();
+        assert_eq!(
+            fs::read_to_string(home.join("profiles/auth.json")).unwrap(),
+            "{\"token\":\"kept\"}"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("settings.toml")).unwrap(),
+            "autonomousWorkers = true\n"
+        );
+    }
+
+    #[test]
     fn context_block_hashes_rendered_text() {
         let block = context_block_for_text(
             "core",
             "Core prompt",
-            TronHome::Profiles,
+            TronHome::Engine,
             "hello",
             ContextCacheClass::Foundation,
             10,
         );
         assert_eq!(block.hash, sha256_hex(b"hello"));
-        assert_eq!(block.cache_class, ContextCacheClass::Foundation);
         assert_eq!(block.precedence, 10);
-    }
-
-    #[test]
-    fn seeding_creates_primitive_layout() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        let report = ensure_tron_home_at(&home).unwrap();
-
-        assert!(!report.seeded.is_empty());
-        assert!(home.join(dirs::INTERNAL).exists());
-        assert!(home.join(dirs::PROFILES).exists());
-        assert!(home.join(dirs::WORKSPACE).exists());
-        let mut top_level: Vec<String> = fs::read_dir(&home)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        top_level.sort();
-        assert_eq!(
-            top_level,
-            vec![
-                dirs::INTERNAL.to_string(),
-                dirs::PROFILES.to_string(),
-                dirs::WORKSPACE.to_string(),
-            ],
-            "fresh Tron Home should expose only primitive roots"
-        );
-        assert!(
-            home.join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join(files::PROFILE_TOML)
-                .exists()
-        );
-        assert!(
-            home.join(dirs::PROFILES)
-                .join(USER_PROFILE)
-                .join(files::PROFILE_TOML)
-                .exists()
-        );
-        assert!(
-            !home
-                .join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join("prompts")
-                .exists()
-        );
-        assert!(
-            !home
-                .join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join("context")
-                .exists()
-        );
-        assert!(
-            !home
-                .join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join("capabilities")
-                .exists()
-        );
-        assert!(!home.join(["sk", "ills"].concat()).exists());
-        assert!(!home.join("memory").exists());
-        assert!(home.join(dirs::WORKSPACE).join(dirs::KNOWLEDGE).exists());
-        assert!(home.join(dirs::WORKSPACE).join(dirs::VAULT).exists());
-        assert!(home.join(dirs::WORKSPACE).join(dirs::RENDERS).exists());
-        assert!(home.join(dirs::WORKSPACE).join(dirs::SCREENSHOTS).exists());
-        assert!(!home.join(dirs::WORKSPACE).join("artifacts").exists());
-        assert!(!home.join(dirs::WORKSPACE).join("exports").exists());
-        assert!(!home.join("instructions").exists());
-        assert!(!home.join("settings").exists());
-    }
-
-    #[test]
-    fn seeding_repairs_schema_stale_managed_profile() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        ensure_tron_home_at(&home).unwrap();
-
-        let default_profile = home
-            .join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(files::PROFILE_TOML);
-        let mut stale = fs::read_to_string(&default_profile).unwrap();
-        stale.push_str("\n[entrypoints.main]\nmodelPolicy = \"sessionDefault\"\n");
-        fs::write(&default_profile, stale).unwrap();
-
-        let report = ensure_tron_home_at(&home).unwrap();
-        assert!(
-            report.repaired.contains(&default_profile),
-            "schema-stale managed profile should be repaired from bundled defaults"
-        );
-        let repaired = fs::read_to_string(&default_profile).unwrap();
-        assert!(!repaired.contains("[entrypoints.main]"));
-        crate::shared::foundation::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
-    }
-
-    #[test]
-    fn seeding_does_not_restore_deleted_profile_prompt_assets() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        ensure_tron_home_at(&home).unwrap();
-
-        let core_prompt = home
-            .join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join("prompts")
-            .join("core.md");
-        fs::create_dir_all(core_prompt.parent().unwrap()).unwrap();
-        fs::write(&core_prompt, "old source-owned prompt").unwrap();
-
-        let report = ensure_tron_home_at(&home).unwrap();
-
-        assert!(
-            !report.repaired.contains(&core_prompt),
-            "deleted prompt defaults are not source-owned managed assets"
-        );
-        assert_eq!(
-            fs::read_to_string(core_prompt).unwrap(),
-            "old source-owned prompt"
-        );
-    }
-
-    #[test]
-    fn seeding_does_not_overwrite_mutable_active_auth_or_user_profile() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        ensure_tron_home_at(&home).unwrap();
-
-        let active = home.join(dirs::PROFILES).join(files::ACTIVE_TOML);
-        fs::write(&active, format!("active = \"{}\"\n", LOCAL_PROFILE)).unwrap();
-        let user_profile = home
-            .join(dirs::PROFILES)
-            .join(USER_PROFILE)
-            .join(files::PROFILE_TOML);
-        fs::write(
-            &user_profile,
-            r#"
-version = "3"
-name = "user"
-inherits = ["default"]
-"#,
-        )
-        .unwrap();
-        let auth = home.join(dirs::PROFILES).join(files::AUTH_JSON);
-        fs::write(&auth, r#"{"profiles":{"local":{"token":"redacted"}}}"#).unwrap();
-
-        let report = ensure_tron_home_at(&home).unwrap();
-
-        assert!(!report.repaired.contains(&active));
-        assert!(!report.repaired.contains(&user_profile));
-        assert!(!report.repaired.contains(&auth));
-        assert_eq!(fs::read_to_string(active).unwrap(), "active = \"local\"\n");
-        assert!(
-            fs::read_to_string(user_profile)
-                .unwrap()
-                .contains("inherits = [\"default\"]")
-        );
-        assert!(fs::read_to_string(auth).unwrap().contains("profiles"));
-    }
-
-    #[test]
-    fn seeding_creates_private_auth_compatibility_sentinel() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-
-        ensure_tron_home_at(&home).unwrap();
-
-        let auth_path = home.join(dirs::PROFILES).join(files::AUTH_JSON);
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&fs::read(&auth_path).unwrap()).unwrap();
-        assert!(
-            parsed.as_object().is_some_and(serde_json::Map::is_empty),
-            "Constitution seed must remain the exact pristine compatibility sentinel"
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            assert_eq!(
-                fs::metadata(&auth_path).unwrap().permissions().mode() & 0o777,
-                0o600,
-                "auth sentinel must be private from the moment it appears"
-            );
-        }
-    }
-
-    #[test]
-    fn private_auth_seed_does_not_clobber_an_existing_writer() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let existing = r#"{"version":1,"providers":{},"lastUpdated":"existing"}"#;
-        fs::write(&path, existing).unwrap();
-
-        assert!(!write_private_default_if_absent(&path, "{}").unwrap());
-        assert_eq!(fs::read_to_string(path).unwrap(), existing);
-    }
-
-    #[test]
-    fn managed_default_is_repaired_when_corrupt() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        ensure_tron_home_at(&home).unwrap();
-
-        let profile = home
-            .join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(files::PROFILE_TOML);
-        fs::write(&profile, "{broken").unwrap();
-
-        let report = ensure_tron_home_at(&home).unwrap();
-
-        assert!(report.repaired.iter().any(|path| path == &profile));
-        assert!(toml::from_str::<toml::Value>(&fs::read_to_string(profile).unwrap()).is_ok());
-    }
-
-    #[test]
-    fn missing_custom_active_profile_fails_clearly() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        ensure_tron_home_at(&home).unwrap();
-        fs::write(
-            home.join(dirs::PROFILES).join(files::ACTIVE_TOML),
-            "active = \"custom\"\n",
-        )
-        .unwrap();
-
-        let error = ensure_tron_home_at(&home).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("active profile `custom` is missing")
-        );
     }
 }

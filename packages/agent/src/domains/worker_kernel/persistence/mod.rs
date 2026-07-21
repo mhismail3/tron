@@ -3,7 +3,8 @@
 //! Filesystem worker bundles and active pointers are canonical. The SQLite
 //! backend owns rebuildable routing indexes plus durable operational ledgers.
 //! Database and snapshot implementation types stay private to this module;
-//! callers use [`WorkerStore`] and the snapshot functions re-exported here.
+//! callers use [`WorkerStore`] and the narrow startup/offline snapshot
+//! functions re-exported here.
 //! Store concern modules and their scenario tests live under `store/`, adjacent
 //! to their single state owner without inflating one production file.
 
@@ -13,12 +14,22 @@ mod store;
 
 pub(super) use store::WorkerStore;
 
-pub(crate) fn prepare_profile_state_retirement(
+pub(crate) fn ensure_state_snapshot(
     home: &std::path::Path,
-    source_profile: &str,
+    source_label: &str,
+    source_inventory_sha256: &str,
+) -> Result<(), String> {
+    snapshot::ensure_pre_worker_snapshot(home, source_label, source_inventory_sha256)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn prepare_worker_state_retirement(
+    home: &std::path::Path,
+    source_label: &str,
     database: &std::path::Path,
 ) -> Result<(), String> {
-    migration::prepare_worker_first_retirement(home, source_profile, database)
+    migration::prepare_worker_first_retirement(home, source_label, database)
 }
 
 pub(crate) fn list_state_snapshots() -> Result<Vec<std::path::PathBuf>, String> {

@@ -16,16 +16,8 @@ pub struct ContextSettings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct CompactorSettings {
-    /// Maximum token budget for summarized context.
-    pub max_tokens: usize,
     /// Ratio of context window usage that triggers compaction (0.0–1.0).
     pub compaction_threshold: f64,
-    /// Target token count after compaction.
-    pub target_tokens: usize,
-    /// Approximate characters per token for estimation.
-    pub chars_per_token: usize,
-    /// Token buffer reserved for responses.
-    pub buffer_tokens: usize,
     /// Context usage ratio that triggers compaction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger_token_threshold: Option<f64>,
@@ -36,11 +28,7 @@ pub struct CompactorSettings {
 impl Default for CompactorSettings {
     fn default() -> Self {
         Self {
-            max_tokens: 25_000,
             compaction_threshold: 0.85,
-            target_tokens: 10_000,
-            chars_per_token: 4,
-            buffer_tokens: 4000,
             trigger_token_threshold: Some(0.70),
             preserve_recent_count: 5,
         }
@@ -58,7 +46,6 @@ mod tests {
     #[test]
     fn compactor_defaults() {
         let c = CompactorSettings::default();
-        assert_eq!(c.max_tokens, 25_000);
         assert!((c.compaction_threshold - 0.85).abs() < f64::EPSILON);
         assert_eq!(c.trigger_token_threshold, Some(0.70));
         assert_eq!(c.preserve_recent_count, 5);
@@ -68,9 +55,7 @@ mod tests {
     fn compactor_serde_camel_case() {
         let c = CompactorSettings::default();
         let json = serde_json::to_value(&c).unwrap();
-        assert!(json.get("maxTokens").is_some());
         assert!(json.get("compactionThreshold").is_some());
-        assert!(json.get("charsPerToken").is_some());
         assert_eq!(json["preserveRecentCount"], 5);
     }
 
@@ -96,17 +81,17 @@ mod tests {
     fn context_partial_json() {
         let json = serde_json::json!({
             "compactor": {
-                "maxTokens": 50000
+                    "compactionThreshold": 0.75
             }
         });
         let ctx: ContextSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(ctx.compactor.max_tokens, 50_000);
+        assert!((ctx.compactor.compaction_threshold - 0.75).abs() < f64::EPSILON);
     }
 
     #[test]
     fn unknown_compactor_field_rejected() {
         let json = serde_json::json!({
-            "maxTokens": 50000,
+            "compactionThreshold": 0.75,
             "unusedQueueDrainMode": "sequential"
         });
         let err = serde_json::from_value::<CompactorSettings>(json).unwrap_err();
