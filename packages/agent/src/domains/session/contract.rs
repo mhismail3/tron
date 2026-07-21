@@ -12,7 +12,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["session.events", "session.lifecycle
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new("session::create", "session", EffectClass::IdempotentWrite, RiskLevel::Medium)
-            .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"transportId":{"type":"string"}},"type":"object"},"model":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workingDirectory"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"model":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workingDirectory"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .build()?,
@@ -92,7 +92,34 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+
+    #[test]
+    fn session_create_contract_contains_only_behavioral_inputs() {
+        let create = capabilities()
+            .expect("session contracts")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "session::create")
+            .expect("session::create contract");
+        let properties = create.request_schema.expect("request schema")["properties"]
+            .as_object()
+            .expect("request properties")
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            properties,
+            BTreeSet::from([
+                "model".to_owned(),
+                "sessionId".to_owned(),
+                "title".to_owned(),
+                "workingDirectory".to_owned(),
+                "workspaceId".to_owned(),
+            ])
+        );
+    }
 
     #[test]
     fn session_list_contract_accepts_a_server_issued_page_two_cursor() {
