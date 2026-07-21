@@ -133,7 +133,6 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         model_capability_id: "direct_test".to_owned(),
         function_id,
         function,
-        model_callable: true,
     };
     let surface = ResolvedPrimitiveSurface {
         capabilities: Vec::new(),

@@ -200,7 +200,6 @@ async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) 
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
-            model_callable: false,
         },
     );
     (

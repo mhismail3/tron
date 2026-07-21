@@ -67,10 +67,7 @@ pub(crate) async fn take_worker_inbox_context(
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> Option<String> {
-    let target = surface.targets_by_name.get("worker_inbox")?;
-    if !target.model_callable {
-        return None;
-    }
+    surface.targets_by_name.get("worker_inbox")?;
     // INVARIANT: inbox attachment is an engine-owned projection step, not a
     // model tool call. Attribute the observation to the session while using an
     // internal runtime actor so the hidden operation satisfies its visibility
@@ -113,8 +110,6 @@ pub struct PrimitiveExecutionTarget {
     pub model_capability_id: String,
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
-    /// Whether this function is explicitly registered for model invocation.
-    pub model_callable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -148,7 +143,6 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
         let target = PrimitiveExecutionTarget {
             model_capability_id: resolved_function.model_name,
             function_id: resolved_function.definition.id.clone(),
-            model_callable: resolved_function.model_callable,
             function: resolved_function.definition,
         };
         let capability = model_capability_schema(&target);
@@ -371,7 +365,6 @@ mod tests {
         assert!(surface.targets_by_name.contains_key("worker_upsert"));
         assert!(surface.targets_by_name.contains_key("recent_research"));
         assert!(!surface.targets_by_name.contains_key("format_notes"));
-        assert!(surface.targets_by_name["recent_research"].model_callable);
         assert_eq!(surface.snapshot.fixed_tool_count, 1);
         assert_eq!(surface.snapshot.projected_worker_count, 1);
         assert_eq!(surface.snapshot.available_worker_count, 2);

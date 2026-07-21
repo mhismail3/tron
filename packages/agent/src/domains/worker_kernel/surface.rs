@@ -201,7 +201,6 @@ pub(crate) struct EngineSurfaceSnapshot {
 pub(crate) struct ResolvedToolFunction {
     pub(crate) model_name: String,
     pub(crate) definition: FunctionDefinition,
-    pub(crate) model_callable: bool,
 }
 
 /// Function contracts plus the exact catalog evidence used to select them.
@@ -335,11 +334,11 @@ pub(crate) async fn resolve_tool_surface(
         let Some(model_name) = model_tool_name(&function) else {
             continue;
         };
-        let model_callable = function
+        if !function
             .model_tool
             .as_ref()
-            .is_some_and(|tool| tool.callable);
-        if !model_callable {
+            .is_some_and(|tool| tool.callable)
+        {
             continue;
         }
         if !seen_names.insert(model_name.clone()) {
@@ -376,7 +375,6 @@ pub(crate) async fn resolve_tool_surface(
         resolved.push(ResolvedToolFunction {
             model_name,
             definition: function,
-            model_callable,
         });
     }
 

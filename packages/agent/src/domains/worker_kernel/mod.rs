@@ -48,7 +48,9 @@
 //! stable order, and every fixed primitive has a closed top-level response
 //! contract. Function definitions carry one closed typed model-tool projection;
 //! magic metadata keys cannot silently add tools, routing modes, or test-only
-//! ranking inputs. Every provider request records the exact catalog revision,
+//! ranking inputs. Resolved provider entries are callable by construction;
+//! availability is decided once during catalog projection rather than copied
+//! into a second boolean. Every provider request records the exact catalog revision,
 //! function revisions, selected worker versions, reasons, and surface hash.
 //! Provider calls pin the advertised function revision and immutable worker
 //! version; catalog preparation rejects drift and lets the next internal turn
