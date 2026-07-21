@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::{StreamActorScope, StreamCursor};
 use crate::shared::server::context::ServerRuntimeContext;
-use crate::shared::server::error_mapping::engine_error_to_capability_error;
+use crate::shared::server::error_mapping::engine_error_to_tool_error;
 use crate::shared::server::errors::INVALID_PARAMS;
 
 use super::outbound::send_engine_ws_value_async;
@@ -54,7 +54,7 @@ impl EngineWsSession {
             {
                 Ok(cursor) => cursor,
                 Err(error) => {
-                    return self.send_error(message.id, engine_error_to_capability_error(error));
+                    return self.send_error(message.id, engine_error_to_tool_error(error));
                 }
             },
         };
@@ -196,7 +196,7 @@ impl EngineWsSession {
                     None,
                 )
             }
-            Err(error) => self.send_error(id, engine_error_to_capability_error(error)),
+            Err(error) => self.send_error(id, engine_error_to_tool_error(error)),
         }
     }
 

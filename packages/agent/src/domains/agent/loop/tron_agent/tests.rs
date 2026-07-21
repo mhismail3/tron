@@ -6,7 +6,7 @@ use crate::domains::model::responder::{
 };
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent, TronEvent};
-use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message, TokenUsage};
+use crate::shared::protocol::messages::{Message, TokenUsage, ToolResultMessageContent};
 use async_trait::async_trait;
 use futures::stream;
 use parking_lot::Mutex;
@@ -92,28 +92,27 @@ impl AutonomousAdaptationResponder {
     ) -> ModelResponse {
         model_response(vec![
             Ok(StreamEvent::Start),
-            Ok(StreamEvent::CapabilityInvocationDraftStart {
+            Ok(StreamEvent::ToolInvocationDraftStart {
                 invocation_id: invocation_id.to_owned(),
                 name: name.to_owned(),
             }),
-            Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            Ok(StreamEvent::ToolInvocationDraftDelta {
                 invocation_id: invocation_id.to_owned(),
                 arguments_delta: serde_json::to_string(&arguments).expect("arguments json"),
             }),
-            Ok(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation:
-                    crate::shared::protocol::messages::CapabilityInvocationDraft::new(
-                        invocation_id,
-                        name,
-                        arguments,
-                    ),
+            Ok(StreamEvent::ToolInvocationDraftEnd {
+                tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
+                    invocation_id,
+                    name,
+                    arguments,
+                ),
             }),
             Ok(StreamEvent::Done {
                 message: AssistantMessage {
                     content: vec![],
                     token_usage: None,
                 },
-                stop_reason: "capability_invocation".to_owned(),
+                stop_reason: "tool_invocation".to_owned(),
             }),
         ])
     }
@@ -124,19 +123,19 @@ impl AutonomousAdaptationResponder {
             .messages
             .iter()
             .find_map(|message| match message {
-                Message::CapabilityResult {
+                Message::ToolResult {
                     invocation_id: observed,
                     content,
                     ..
                 } if observed == invocation_id => Some(match content {
-                    CapabilityResultMessageContent::Text(text) => text.clone(),
-                    CapabilityResultMessageContent::Blocks(blocks) => blocks
+                    ToolResultMessageContent::Text(text) => text.clone(),
+                    ToolResultMessageContent::Blocks(blocks) => blocks
                         .iter()
                         .filter_map(|block| match block {
-                            crate::shared::protocol::content::CapabilityResultContent::Text {
-                                text,
-                            } => Some(text.as_str()),
-                            crate::shared::protocol::content::CapabilityResultContent::Image {
+                            crate::shared::protocol::content::ToolResultContent::Text { text } => {
+                                Some(text.as_str())
+                            }
+                            crate::shared::protocol::content::ToolResultContent::Image {
                                 ..
                             } => None,
                         })
@@ -162,24 +161,23 @@ impl ModelResponder for AutonomousAdaptationResponder {
         const TOOL: &str = "worker_model_authored_research";
         let names = request
             .context
-            .capabilities
+            .tools
             .as_ref()
-            .expect("provider capabilities")
+            .expect("provider tools")
             .iter()
-            .map(|capability| capability.name.as_str())
+            .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         match call {
             0 => {
                 assert!(names.contains(&"worker_upsert"), "{names:?}");
-                assert!(!names.contains(&"execute"), "{names:?}");
                 let upsert = request
                     .context
-                    .capabilities
+                    .tools
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .find(|capability| capability.name == "worker_upsert")
+                    .find(|tool| tool.name == "worker_upsert")
                     .expect("worker_upsert tool schema");
                 let bundle = &upsert.parameters.properties.as_ref().unwrap()["bundle"];
                 assert_eq!(bundle["additionalProperties"], false);
@@ -300,49 +298,41 @@ impl ModelResponder for DirectWorkerListLoopResponder {
         request: ModelResponseRequest,
     ) -> Result<ModelResponse, ModelResponseError> {
         let context = &request.context;
-        let capability_names = context
-            .capabilities
+        let tool_names = context
+            .tools
             .as_ref()
-            .expect("provider capabilities")
+            .expect("provider tools")
             .iter()
-            .map(|capability| capability.name.as_str())
+            .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
-        assert!(
-            capability_names.contains(&"worker_list"),
-            "{capability_names:?}"
-        );
-        assert!(
-            !capability_names.contains(&"execute"),
-            "{capability_names:?}"
-        );
+        assert!(tool_names.contains(&"worker_list"), "{tool_names:?}");
 
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
             let arguments = serde_json::Map::new();
             let events = vec![
                 Ok(StreamEvent::Start),
-                Ok(StreamEvent::CapabilityInvocationDraftStart {
+                Ok(StreamEvent::ToolInvocationDraftStart {
                     invocation_id: "tc-primitive-observe".into(),
                     name: "worker_list".into(),
                 }),
-                Ok(StreamEvent::CapabilityInvocationDraftDelta {
+                Ok(StreamEvent::ToolInvocationDraftDelta {
                     invocation_id: "tc-primitive-observe".into(),
                     arguments_delta: serde_json::to_string(&arguments).expect("arguments json"),
                 }),
-                Ok(StreamEvent::CapabilityInvocationDraftEnd {
-                    capability_invocation:
-                        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
-                            "tc-primitive-observe",
-                            "worker_list",
-                            arguments,
-                        ),
+                Ok(StreamEvent::ToolInvocationDraftEnd {
+                    tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
+                        "tc-primitive-observe",
+                        "worker_list",
+                        arguments,
+                    ),
                 }),
                 Ok(StreamEvent::Done {
                     message: AssistantMessage {
                         content: vec![],
                         token_usage: None,
                     },
-                    stop_reason: "capability_invocation".into(),
+                    stop_reason: "tool_invocation".into(),
                 }),
             ];
             return Ok(model_response(events));
@@ -352,20 +342,20 @@ impl ModelResponder for DirectWorkerListLoopResponder {
             .messages
             .iter()
             .find_map(|message| match message {
-                Message::CapabilityResult {
+                Message::ToolResult {
                     invocation_id,
                     content,
                     ..
                 } if invocation_id == "tc-primitive-observe" => match content {
-                    CapabilityResultMessageContent::Text(text) => Some(text.clone()),
-                    CapabilityResultMessageContent::Blocks(blocks) => Some(
+                    ToolResultMessageContent::Text(text) => Some(text.clone()),
+                    ToolResultMessageContent::Blocks(blocks) => Some(
                         blocks
                             .iter()
                             .filter_map(|block| match block {
-                                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
-                                    Some(text.as_str())
-                                }
-                                crate::shared::protocol::content::CapabilityResultContent::Image {
+                                crate::shared::protocol::content::ToolResultContent::Text {
+                                    text,
+                                } => Some(text.as_str()),
+                                crate::shared::protocol::content::ToolResultContent::Image {
                                     ..
                                 } => None,
                             })
@@ -449,7 +439,7 @@ fn make_primitive_loop_deps(
 }
 
 #[tokio::test]
-async fn text_only_run_succeeds_without_frozen_capabilities() {
+async fn text_only_run_succeeds_without_frozen_tools() {
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 1,

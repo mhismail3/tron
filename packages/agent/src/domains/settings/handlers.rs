@@ -2,7 +2,7 @@
 
 use super::{Deps, settings_reset_to_defaults_value, settings_update_value};
 use crate::domains::registration::bindings::operation_bindings;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 operation_bindings! {
     deps = Deps;
@@ -10,7 +10,7 @@ operation_bindings! {
     bindings = [
         "get" => |_invocation, deps| {
             serde_json::to_value(&deps.settings_runtime.current().settings).map_err(|error| {
-                CapabilityError::Internal {
+                ToolError::Internal {
                     message: format!("Failed to serialize settings: {error}"),
                 }
             })

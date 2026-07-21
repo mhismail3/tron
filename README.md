@@ -92,8 +92,6 @@ Useful commands:
 ```bash
 scripts/tron status --json
 scripts/tron logs
-scripts/tron state snapshots
-scripts/tron state restore /absolute/path/to/snapshot
 scripts/tron ci fmt check clippy test
 ```
 
@@ -142,7 +140,7 @@ TRON_WORKER_LIVE_NETWORK=1 \
 ## Documentation
 
 - [Technical project reference](packages/agent/docs/project-reference.md) —
-  worker contracts, dispatch, storage, migration, authority, protocol, and POC
+  worker contracts, dispatch, storage, authority, protocol, and POC
   acceptance.
 - [Contributing](CONTRIBUTING.md) — development, testing, commits, and releases.
 - [Rust module map](packages/agent/src/lib.rs) — server ownership and entry
@@ -155,7 +153,7 @@ TRON_WORKER_LIVE_NETWORK=1 \
 ## Project Rules
 
 - Code, tests, and documentation ship together.
-- Root-cause fixes take priority over compatibility adapters.
+- Root-cause fixes take priority over transitional adapters.
 - Secrets and personal information never belong in the repository.
 - Filesystem bundles are canonical worker state; clients do not invent truth.
 - Production code must have an independent production consumer; tests and

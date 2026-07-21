@@ -102,19 +102,19 @@ fn server_creates_db_on_first_run() {
     let db_str = db_path.to_string_lossy();
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();
-    let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+    let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
 
     assert!(db_path.exists());
 }
 
 #[test]
-fn server_runs_migrations() {
+fn server_installs_current_schema() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tron.sqlite");
     let db_str = db_path.to_string_lossy();
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();
-    let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+    let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
 
     // Verify tables exist
     let count: i64 = conn

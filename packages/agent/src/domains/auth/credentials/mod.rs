@@ -5,9 +5,9 @@
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
 //! Auth state is created on first use at `~/.tron/profiles/auth.json` with
-//! secure file permissions. Storage loading materializes the exact empty
-//! sentinel left by interrupted or older installs. Non-empty malformed auth
-//! files remain hard errors so real credentials are never silently overwritten.
+//! secure file permissions. Every present file must match the current schema;
+//! malformed auth files are hard errors so real credentials are never silently
+//! overwritten.
 //! `OAuthTokens::expires_at` stores the provider's actual expiry; provider
 //! refresh paths apply their safety buffer once when deciding to renew.
 //!

@@ -1,4 +1,4 @@
-//! Transport-neutral entry point into the canonical engine capability fabric.
+//! Transport-neutral entry point into the canonical engine tool fabric.
 //!
 //! Protocol-specific transports translate their wire request into
 //! [`EngineTransportRequest`] and then call [`dispatch_engine_transport_request`].
@@ -16,8 +16,8 @@ use serde_json::Value;
 
 use crate::engine::{ActorKind, CausalContext, FunctionId, Invocation, InvocationId, TraceId};
 use crate::shared::server::context::ServerRuntimeContext;
-use crate::shared::server::error_mapping::engine_error_to_capability_error;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::error_mapping::engine_error_to_tool_error;
+use crate::shared::server::errors::ToolError;
 
 /// Optional context supplied by a transport message.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -61,14 +61,14 @@ pub struct EngineTransportRequest {
 /// Build one protocol-neutral envelope for a public engine transport method.
 pub fn build_engine_transport_request(
     input: EngineTransportBuildRequest,
-) -> Result<EngineTransportRequest, CapabilityError> {
+) -> Result<EngineTransportRequest, ToolError> {
     let function_id = extract_string(&input.params_payload, "functionId").ok_or_else(|| {
-        CapabilityError::InvalidParams {
+        ToolError::InvalidParams {
             message: "invoke requires functionId".to_owned(),
         }
     })?;
     validate_canonical_target(&function_id)?;
-    let function_id = FunctionId::new(function_id).map_err(engine_error_to_capability_error)?;
+    let function_id = FunctionId::new(function_id).map_err(engine_error_to_tool_error)?;
     let payload = input
         .params_payload
         .get("payload")
@@ -77,7 +77,7 @@ pub fn build_engine_transport_request(
     let mut causal_context = transport_causal_context(&input.context)?;
     if let Some(key) = extract_string(&input.params_payload, "idempotencyKey") {
         if key.trim().is_empty() {
-            return Err(CapabilityError::InvalidParams {
+            return Err(ToolError::InvalidParams {
                 message: "idempotencyKey must not be empty".to_owned(),
             });
         }
@@ -98,7 +98,7 @@ pub fn build_engine_transport_request(
 pub async fn dispatch_engine_transport_request(
     ctx: &ServerRuntimeContext,
     envelope: EngineTransportRequest,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -107,20 +107,18 @@ pub async fn dispatch_engine_transport_request(
             envelope.causal_context,
         ))
         .await;
-    crate::shared::server::error_mapping::result_to_capability_value(result)
+    crate::shared::server::error_mapping::result_to_tool_value(result)
 }
 
-fn transport_causal_context(
-    context: &EngineTransportContext,
-) -> Result<CausalContext, CapabilityError> {
+fn transport_causal_context(context: &EngineTransportContext) -> Result<CausalContext, ToolError> {
     let trace_id = match context.trace_id.as_deref() {
         Some(id) if !id.trim().is_empty() => {
-            TraceId::new(id).map_err(engine_error_to_capability_error)?
+            TraceId::new(id).map_err(engine_error_to_tool_error)?
         }
         _ => TraceId::generate(),
     };
     let mut causal_context = CausalContext::new(
-        crate::engine::ActorId::new("engine-client").map_err(engine_error_to_capability_error)?,
+        crate::engine::ActorId::new("engine-client").map_err(engine_error_to_tool_error)?,
         ActorKind::Client,
         trace_id,
     );
@@ -144,15 +142,15 @@ fn transport_causal_context(
         .filter(|value| !value.trim().is_empty())
     {
         causal_context = causal_context.with_parent_invocation(
-            InvocationId::new(parent_id).map_err(engine_error_to_capability_error)?,
+            InvocationId::new(parent_id).map_err(engine_error_to_tool_error)?,
         );
     }
     Ok(causal_context)
 }
 
-fn validate_canonical_target(function_id: &str) -> Result<(), CapabilityError> {
+fn validate_canonical_target(function_id: &str) -> Result<(), ToolError> {
     let Some((namespace, operation)) = function_id.split_once("::") else {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "invoke requires a canonical function id".to_owned(),
         });
     };
@@ -161,7 +159,7 @@ fn validate_canonical_target(function_id: &str) -> Result<(), CapabilityError> {
         || operation.is_empty()
         || function_id.contains('.')
     {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "invoke requires a canonical function id".to_owned(),
         });
     }

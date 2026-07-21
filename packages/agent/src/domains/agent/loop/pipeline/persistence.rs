@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 /// Build a JSON content array from assistant content blocks.
 ///
-/// Uses canonical `arguments` on `capability_invocation` blocks.
+/// Uses canonical `arguments` on `tool_invocation` blocks.
 pub fn build_content_json(content: &[AssistantContent]) -> Vec<Value> {
     content.iter().map(content_block_to_json).collect()
 }
@@ -130,14 +130,14 @@ fn content_block_to_json(block: &AssistantContent) -> Value {
             }
             obj
         }
-        AssistantContent::CapabilityInvocation {
+        AssistantContent::ToolInvocation {
             id,
             name,
             arguments,
             thought_signature,
         } => {
             let mut obj = json!({
-                "type": "capability_invocation",
+                "type": "tool_invocation",
                 "id": id,
                 "name": name,
                 "arguments": Value::Object(arguments.clone()),
@@ -171,12 +171,12 @@ mod tests {
     }
 
     #[test]
-    fn build_content_json_capability_invocation_uses_arguments() {
+    fn build_content_json_tool_invocation_uses_arguments() {
         let mut args = Map::new();
         let _ = args.insert("command".into(), json!("ls"));
-        let content = vec![AssistantContent::CapabilityInvocation {
+        let content = vec![AssistantContent::ToolInvocation {
             id: "id1".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: args,
             thought_signature: None,
         }];
@@ -223,9 +223,9 @@ mod tests {
         let _ = args.insert("command".into(), json!("ls"));
         let content = vec![
             AssistantContent::text("I'll run that command"),
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id: "tc1".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: args,
                 thought_signature: None,
             },
@@ -233,14 +233,14 @@ mod tests {
         let json = build_content_json(&content);
         assert_eq!(json.len(), 2);
         assert_eq!(json[0]["type"], "text");
-        assert_eq!(json[1]["type"], "capability_invocation");
+        assert_eq!(json[1]["type"], "tool_invocation");
     }
 
     #[test]
-    fn build_content_json_capability_invocation_with_thought_signature() {
-        let content = vec![AssistantContent::CapabilityInvocation {
+    fn build_content_json_tool_invocation_with_thought_signature() {
+        let content = vec![AssistantContent::ToolInvocation {
             id: "tc1".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: Map::new(),
             thought_signature: Some("gemini-sig".into()),
         }];

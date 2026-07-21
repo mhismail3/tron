@@ -4,7 +4,7 @@
 //! kernel or worker functions with Agent identity, and writes the
 //! provider-facing result message. Each registered function owns its typed
 //! schema.
-//! Live `capability.invocation.started` and `completed` broadcasts are emitted
+//! Live `tool.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled. Result
 //! completions commit as one provider-ordered batch. If that batch fails after
@@ -29,11 +29,11 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::tool_executor;
-use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
+use crate::domains::agent::r#loop::types::{StreamResult, ToolInvocationExecutionResult};
 use crate::domains::session::event_store::EventType;
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
-use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
+use crate::shared::protocol::content::ToolResultContent;
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace, warn};
@@ -60,33 +60,29 @@ pub(super) struct ToolPhaseParams<'a> {
 
 #[derive(Default)]
 pub(super) struct ToolPhaseOutcome {
-    pub capability_invocations_executed: usize,
+    pub tool_invocations_executed: usize,
     pub interrupted: bool,
     pub error: Option<RuntimeError>,
 }
 
 struct ExecutedToolInvocation {
-    result: CapabilityInvocationExecutionResult,
+    result: ToolInvocationExecutionResult,
     provider_text: String,
 }
 
-fn primitive_identity_json(
-    model_primitive_name: &str,
-    _arguments: &serde_json::Map<String, Value>,
+fn tool_event_context_json(
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
 ) -> Value {
     json!({
-        "modelPrimitiveName": model_primitive_name,
         "traceId": trace_id.map(|id| id.as_str()),
         "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
     })
 }
 
-fn result_identity_json(
-    model_primitive_name: &str,
+fn result_event_context_json(
     base_identity: Value,
-    result: &CapabilityInvocationExecutionResult,
+    result: &ToolInvocationExecutionResult,
 ) -> Value {
     let mut identity = base_identity.as_object().cloned().unwrap_or_default();
     if let Some(details) = result.result.details.as_ref() {
@@ -105,22 +101,17 @@ fn result_identity_json(
             identity.insert("themeColor".to_owned(), value.clone());
         }
     }
-    identity.insert("modelPrimitiveName".to_owned(), json!(model_primitive_name));
     Value::Object(identity)
 }
 
-fn provider_result_text(
-    result: &crate::shared::protocol::model_capabilities::CapabilityResult,
-) -> String {
+fn provider_result_text(result: &crate::shared::protocol::model_tools::ToolResult) -> String {
     match &result.content {
-        crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
-            text.clone()
-        }
-        crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
+        crate::shared::protocol::model_tools::ToolResultBody::Text(text) => text.clone(),
+        crate::shared::protocol::model_tools::ToolResultBody::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text.as_str()),
-                CapabilityResultContent::Image { .. } => None,
+                ToolResultContent::Text { text } => Some(text.as_str()),
+                ToolResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -128,7 +119,7 @@ fn provider_result_text(
 }
 
 pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhaseOutcome {
-    if params.stream_result.capability_invocations.is_empty() {
+    if params.stream_result.tool_invocations.is_empty() {
         trace!(
             component = "agent.tool",
             agent_event = "tool_phase_skipped",
@@ -145,8 +136,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
     }
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
-    let mut started_payloads =
-        Vec::with_capacity(params.stream_result.capability_invocations.len());
+    let mut started_payloads = Vec::with_capacity(params.stream_result.tool_invocations.len());
     info!(
         component = "agent.tool",
         agent_event = "tool_phase_started",
@@ -154,14 +144,14 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         run_id = params.run_id.unwrap_or("none"),
         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
         turn = params.turn,
-        invocation_count = params.stream_result.capability_invocations.len(),
+        invocation_count = params.stream_result.tool_invocations.len(),
         "agent tool phase started"
     );
-    for capability_invocation in &params.stream_result.capability_invocations {
+    for tool_invocation in &params.stream_result.tool_invocations {
         let mut payload = json!({
-            "invocationId": capability_invocation.id,
-            "name": capability_invocation.name,
-            "arguments": capability_invocation.arguments,
+            "invocationId": tool_invocation.id,
+            "toolName": tool_invocation.name,
+            "arguments": tool_invocation.arguments,
             "turn": params.turn,
             "runId": params.run_id,
             "traceId": params.trace_id.map(|id| id.as_str()),
@@ -169,14 +159,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         });
         if let (Some(payload), Some(identity)) = (
             payload.as_object_mut(),
-            primitive_identity_json(
-                &capability_invocation.name,
-                &capability_invocation.arguments,
-                params.trace_id,
-                params.parent_invocation_id,
-            )
-            .as_object()
-            .cloned(),
+            tool_event_context_json(params.trace_id, params.parent_invocation_id)
+                .as_object()
+                .cloned(),
         ) {
             payload.extend(identity);
         }
@@ -187,7 +172,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         let events = started_payloads
             .iter()
             .cloned()
-            .map(|payload| (EventType::CapabilityInvocationStarted, payload))
+            .map(|payload| (EventType::ToolInvocationStarted, payload))
             .collect::<Vec<_>>();
         let rows = match persister.append_batch_with_runtime_sequence(
             params.session_id,
@@ -200,7 +185,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     params.session_id,
                     turn = params.turn,
                     error = %error,
-                    "failed to atomically persist capability starts; skipping execution"
+                    "failed to atomically persist tool starts; skipping execution"
                 );
                 return ToolPhaseOutcome {
                     error: Some(error),
@@ -209,7 +194,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
             }
         };
         for (row, payload) in rows.iter().zip(&started_payloads) {
-            super::persistence::emit_persisted_capability_invocation_started(
+            super::persistence::emit_persisted_tool_invocation_started(
                 params.emitter,
                 row,
                 payload,
@@ -217,59 +202,59 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         }
         trace!(
             component = "agent.tool",
-            agent_event = "capability_invocation_starts_persisted",
+            agent_event = "tool_invocation_starts_persisted",
             session_id = params.session_id,
             run_id = params.run_id.unwrap_or("none"),
             trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
             turn = params.turn,
             invocation_count = rows.len(),
-            "capability invocation starts persisted atomically"
+            "tool invocation starts persisted atomically"
         );
     }
 
-    super::persistence::emit_capability_invocation_batch(
+    super::persistence::emit_tool_invocation_batch(
         params.emitter,
         params.session_id,
-        &params.stream_result.capability_invocations,
+        &params.stream_result.tool_invocations,
         params.sequence_counter,
         params.trace_id,
         params.parent_invocation_id,
     );
     info!(
         component = "agent.tool",
-        agent_event = "capability_invocation_batch_emitted",
+        agent_event = "tool_invocation_batch_emitted",
         session_id = params.session_id,
         run_id = params.run_id.unwrap_or("none"),
         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
         turn = params.turn,
-        invocation_count = params.stream_result.capability_invocations.len(),
-        "capability invocation batch emitted"
+        invocation_count = params.stream_result.tool_invocations.len(),
+        "tool invocation batch emitted"
     );
 
     let mut results: Vec<Option<ExecutedToolInvocation>> =
-        (0..params.stream_result.capability_invocations.len())
+        (0..params.stream_result.tool_invocations.len())
             .map(|_| None)
             .collect();
-    let mut completion_payloads = vec![None; params.stream_result.capability_invocations.len()];
+    let mut completion_payloads = vec![None; params.stream_result.tool_invocations.len()];
     let interrupted;
 
     if params.cancel.is_cancelled() {
         interrupted = true;
-        let skipped = (0..params.stream_result.capability_invocations.len()).collect::<Vec<_>>();
+        let skipped = (0..params.stream_result.tool_invocations.len()).collect::<Vec<_>>();
         record_skipped_invocations(
             &skipped,
             &params,
             &mut completion_payloads,
             "agent_run_cancelled",
-            "CAPABILITY_INVOCATION_CANCELLED",
+            "TOOL_INVOCATION_CANCELLED",
         );
     } else {
         let futures: Vec<_> = params
             .stream_result
-            .capability_invocations
+            .tool_invocations
             .iter()
             .enumerate()
-            .map(|(idx, capability_invocation)| {
+            .map(|(idx, tool_invocation)| {
                 let tool_ctx = tool_executor::ToolExecutionContext {
                     primitive_surface: params.primitive_surface,
                     emitter: params.emitter,
@@ -290,18 +275,17 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                 async move {
                     info!(
                         component = "agent.tool",
-                        agent_event = "capability_invocation_execute_started",
+                        agent_event = "tool_invocation_execute_started",
                         session_id = params.session_id,
                         run_id = params.run_id.unwrap_or("none"),
                         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
                         turn = params.turn,
-                        invocation_id = %capability_invocation.id,
-                        primitive_name = %capability_invocation.name,
-                        direct_tool = %capability_invocation.name,
+                        invocation_id = %tool_invocation.id,
+                        tool_name = %tool_invocation.name,
                         "tool execution started"
                     );
                     let result = tool_executor::execute_tool(
-                        capability_invocation,
+                        tool_invocation,
                         params.session_id,
                         working_dir,
                         &tool_ctx,
@@ -310,14 +294,13 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     let provider_text = provider_result_text(&result.result);
                     info!(
                         component = "agent.tool",
-                        agent_event = "capability_invocation_execute_completed",
+                        agent_event = "tool_invocation_execute_completed",
                         session_id = params.session_id,
                         run_id = params.run_id.unwrap_or("none"),
                         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
                         turn = params.turn,
-                        invocation_id = %capability_invocation.id,
-                        primitive_name = %capability_invocation.name,
-                        direct_tool = %capability_invocation.name,
+                        invocation_id = %tool_invocation.id,
+                        tool_name = %tool_invocation.name,
                         duration_ms = result.duration_ms,
                         is_error = result.result.is_error.unwrap_or(false),
                         "tool execution completed"
@@ -325,7 +308,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
 
                     let completion_payload = params.persister.map(|_| {
                         executed_completion_payload(
-                            capability_invocation,
+                            tool_invocation,
                             &result,
                             &provider_text,
                             params.run_id,
@@ -377,8 +360,8 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
 }
 
 fn executed_completion_payload(
-    invocation: &crate::shared::protocol::messages::CapabilityInvocationDraft,
-    result: &CapabilityInvocationExecutionResult,
+    invocation: &crate::shared::protocol::messages::ToolInvocationDraft,
+    result: &ToolInvocationExecutionResult,
     provider_text: &str,
     run_id: Option<&str>,
     trace_id: Option<&crate::engine::TraceId>,
@@ -388,15 +371,10 @@ fn executed_completion_payload(
     let durable_result_text = redact_sensitive_content(&result_text);
     let durable_provider_text = redact_sensitive_content(provider_text);
     let is_error = result.result.is_error.unwrap_or(false);
-    let base_identity = primitive_identity_json(
-        &invocation.name,
-        &invocation.arguments,
-        trace_id,
-        parent_invocation_id,
-    );
+    let base_identity = tool_event_context_json(trace_id, parent_invocation_id);
     let mut payload = json!({
         "invocationId": invocation.id,
-        "name": invocation.name,
+        "toolName": invocation.name,
         "content": durable_result_text,
         "isError": is_error,
         "duration": result.duration_ms,
@@ -415,7 +393,7 @@ fn executed_completion_payload(
     }
     if let (Some(payload), Some(identity)) = (
         payload.as_object_mut(),
-        result_identity_json(&invocation.name, base_identity, result)
+        result_event_context_json(base_identity, result)
             .as_object()
             .cloned(),
     ) {
@@ -435,11 +413,11 @@ fn record_skipped_invocations(
         return;
     }
     for &idx in indices {
-        let invocation = &params.stream_result.capability_invocations[idx];
+        let invocation = &params.stream_result.tool_invocations[idx];
         let mut payload = json!({
             "invocationId": invocation.id,
-            "name": invocation.name,
-            "content": "Capability invocation was not executed because the active turn ended.",
+            "toolName": invocation.name,
+            "content": "Tool invocation was not executed because the active turn ended.",
             "isError": true,
             "duration": 0,
             "details": {
@@ -455,14 +433,9 @@ fn record_skipped_invocations(
         });
         if let (Some(payload), Some(identity)) = (
             payload.as_object_mut(),
-            primitive_identity_json(
-                &invocation.name,
-                &invocation.arguments,
-                params.trace_id,
-                params.parent_invocation_id,
-            )
-            .as_object()
-            .cloned(),
+            tool_event_context_json(params.trace_id, params.parent_invocation_id)
+                .as_object()
+                .cloned(),
         ) {
             payload.extend(identity);
         }
@@ -499,22 +472,22 @@ fn persist_failed_completion_batch(
     };
     let payloads = params
         .stream_result
-        .capability_invocations
+        .tool_invocations
         .iter()
         .enumerate()
         .map(|(idx, invocation)| {
             let executed = results[idx].as_ref();
             let mut payload = json!({
                 "invocationId": invocation.id,
-                "name": invocation.name,
-                "content": "Capability invocation terminal state could not be saved; the active turn failed.",
+                "toolName": invocation.name,
+                "content": "Tool invocation terminal state could not be saved; the active turn failed.",
                 "isError": true,
                 "duration": executed.map_or(0, |result| result.result.duration_ms),
                 "details": {
                     "status": "persistence_failed",
                     "executed": executed.is_some(),
                     "failureReason": "completion_persistence_failed",
-                    "code": "CAPABILITY_COMPLETION_PERSISTENCE_FAILED",
+                    "code": "TOOL_COMPLETION_PERSISTENCE_FAILED",
                     "providerContextResultWritten": false
                 },
                 "runId": params.run_id,
@@ -523,12 +496,7 @@ fn persist_failed_completion_batch(
             });
             if let (Some(payload), Some(identity)) = (
                 payload.as_object_mut(),
-                primitive_identity_json(
-                    &invocation.name,
-                    &invocation.arguments,
-                    params.trace_id,
-                    params.parent_invocation_id,
-                )
+                tool_event_context_json(params.trace_id, params.parent_invocation_id)
                 .as_object()
                 .cloned(),
             ) {
@@ -550,7 +518,7 @@ fn persist_and_broadcast_completion_payloads(
     let events = payloads
         .iter()
         .cloned()
-        .map(|payload| (EventType::CapabilityInvocationCompleted, payload))
+        .map(|payload| (EventType::ToolInvocationCompleted, payload))
         .collect::<Vec<_>>();
     let rows = persister.append_batch_with_runtime_sequence(
         params.session_id,
@@ -558,11 +526,7 @@ fn persist_and_broadcast_completion_payloads(
         params.sequence_counter,
     )?;
     for (row, payload) in rows.iter().zip(payloads) {
-        super::persistence::emit_persisted_capability_invocation_completed(
-            params.emitter,
-            row,
-            payload,
-        );
+        super::persistence::emit_persisted_tool_invocation_completed(params.emitter, row, payload);
     }
     Ok(())
 }
@@ -577,12 +541,7 @@ async fn process_tool_results(
         ..Default::default()
     };
 
-    for (idx, capability_invocation) in params
-        .stream_result
-        .capability_invocations
-        .iter()
-        .enumerate()
-    {
+    for (idx, tool_invocation) in params.stream_result.tool_invocations.iter().enumerate() {
         let Some(executed) = results[idx].take() else {
             continue;
         };
@@ -590,16 +549,14 @@ async fn process_tool_results(
             result: exec_result,
             provider_text,
         } = executed;
-        outcome.capability_invocations_executed += 1;
+        outcome.tool_invocations_executed += 1;
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
-        params
-            .context_manager
-            .add_message(Message::CapabilityResult {
-                invocation_id: capability_invocation.id.clone(),
-                content: CapabilityResultMessageContent::Text(provider_text),
-                is_error: if is_error { Some(true) } else { None },
-            });
+        params.context_manager.add_message(Message::ToolResult {
+            invocation_id: tool_invocation.id.clone(),
+            content: ToolResultMessageContent::Text(provider_text),
+            is_error: if is_error { Some(true) } else { None },
+        });
     }
 
     info!(
@@ -609,23 +566,21 @@ async fn process_tool_results(
         run_id = params.run_id.unwrap_or("none"),
         trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
         turn = params.turn,
-        executed_count = outcome.capability_invocations_executed,
+        executed_count = outcome.tool_invocations_executed,
         interrupted = outcome.interrupted,
         "agent tool phase completed"
     );
     outcome
 }
 
-fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> String {
+fn extract_result_text(exec_result: &ToolInvocationExecutionResult) -> String {
     match &exec_result.result.content {
-        crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
-            text.clone()
-        }
-        crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
+        crate::shared::protocol::model_tools::ToolResultBody::Text(text) => text.clone(),
+        crate::shared::protocol::model_tools::ToolResultBody::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text.as_str()),
-                CapabilityResultContent::Image { .. } => None,
+                ToolResultContent::Text { text } => Some(text.as_str()),
+                ToolResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),

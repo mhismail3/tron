@@ -1,4 +1,4 @@
-//! Authenticated server compatibility and status operations.
+//! Authenticated server status operations.
 //!
 //! This module owns the small system namespace end-to-end: contract metadata,
 //! registration dependencies, handler binding, and operation execution.
@@ -11,7 +11,7 @@ use crate::domains::registration::composition::{
 use crate::domains::registration::contract::FunctionContract;
 use crate::engine::{EffectClass, FunctionDefinition, Result as EngineResult, RiskLevel};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
@@ -75,15 +75,15 @@ operation_bindings! {
     ];
 }
 
-fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
+fn ping_value(params: Option<&Value>) -> Result<Value, ToolError> {
     let client_protocol_raw = params
         .and_then(|p| p.get("protocolVersion"))
         .and_then(Value::as_u64)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "system::ping requires numeric protocolVersion".into(),
         })?;
     let client_protocol =
-        u32::try_from(client_protocol_raw).map_err(|_| CapabilityError::InvalidParams {
+        u32::try_from(client_protocol_raw).map_err(|_| ToolError::InvalidParams {
             message: "system::ping protocolVersion is too large".into(),
         })?;
     let client_version = params
@@ -92,7 +92,7 @@ fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {
         .map(String::from);
 
     if client_protocol < engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION {
-        return Err(CapabilityError::Custom {
+        return Err(ToolError::Custom {
             code: CLIENT_VERSION_UNSUPPORTED.to_string(),
             message: format!(
                 "Client protocol version {client_protocol} is below the minimum supported version \

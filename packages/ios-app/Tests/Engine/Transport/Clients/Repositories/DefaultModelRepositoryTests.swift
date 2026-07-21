@@ -221,7 +221,7 @@ final class DefaultModelRepositoryTests: XCTestCase {
                 "supportedImageMimeTypes": ["image/jpeg", "image/png"]
             },
             "tier": "sonnet",
-            "isLegacy": false
+            "isRetiredGeneration": false
         }
         """
         return try! JSONDecoder().decode(ModelInfo.self, from: json.data(using: .utf8)!)

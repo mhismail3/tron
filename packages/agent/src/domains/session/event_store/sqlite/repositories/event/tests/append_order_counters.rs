@@ -31,19 +31,19 @@ fn insert_extracts_role() {
 }
 
 #[test]
-fn insert_extracts_model_primitive_name() {
+fn insert_extracts_tool_name() {
     let conn = setup();
     let event = make_event(
         "evt_1",
         1,
-        EventType::CapabilityInvocationStarted,
+        EventType::ToolInvocationStarted,
         None,
-        json!({"modelPrimitiveName": "execute", "invocationId": "tc_1"}),
+        json!({"toolName": "test_tool", "invocationId": "tc_1"}),
     );
     EventRepo::insert(&conn, &event).unwrap();
 
     let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
-    assert_eq!(row.model_primitive_name.as_deref(), Some("execute"));
+    assert_eq!(row.tool_name.as_deref(), Some("test_tool"));
     assert_eq!(row.invocation_id.as_deref(), Some("tc_1"));
 }
 
@@ -165,14 +165,14 @@ fn get_ancestors_chain() {
     let e4 = make_event(
         "evt_4",
         4,
-        EventType::CapabilityInvocationStarted,
+        EventType::ToolInvocationStarted,
         Some("evt_3"),
         json!({}),
     );
     let e5 = make_event(
         "evt_5",
         5,
-        EventType::CapabilityInvocationCompleted,
+        EventType::ToolInvocationCompleted,
         Some("evt_4"),
         json!({}),
     );

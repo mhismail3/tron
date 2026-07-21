@@ -4,11 +4,11 @@ use serde_json::{Value, json};
 
 use crate::domains::settings::Deps;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::require_param;
 
-fn settings_error(error: crate::domains::settings::SettingsError) -> CapabilityError {
-    CapabilityError::Internal {
+fn settings_error(error: crate::domains::settings::SettingsError) -> ToolError {
+    ToolError::Internal {
         message: error.to_string(),
     }
 }
@@ -16,7 +16,7 @@ fn settings_error(error: crate::domains::settings::SettingsError) -> CapabilityE
 pub(crate) async fn settings_update_value(
     params: Option<&Value>,
     deps: &Deps,
-) -> std::result::Result<Value, CapabilityError> {
+) -> std::result::Result<Value, ToolError> {
     let updates = require_param(params, "settings")?.clone();
     let settings_path = deps.settings_path.clone();
 
@@ -35,7 +35,7 @@ pub(crate) async fn settings_update_value(
 
 pub(crate) async fn settings_reset_to_defaults_value(
     deps: &Deps,
-) -> std::result::Result<Value, CapabilityError> {
+) -> std::result::Result<Value, ToolError> {
     let _operation_guard = crate::domains::settings::SettingsStore::operation_lock().await;
     let previous_sparse = read_sparse_settings_snapshot(deps).await?;
     let settings_path = deps.settings_path.clone();
@@ -55,7 +55,7 @@ pub(crate) async fn settings_reset_to_defaults_value(
     Ok(result)
 }
 
-async fn read_sparse_settings_snapshot(deps: &Deps) -> std::result::Result<Value, CapabilityError> {
+async fn read_sparse_settings_snapshot(deps: &Deps) -> std::result::Result<Value, ToolError> {
     let path = deps.settings_path.clone();
     run_blocking_task("settings.readSparseSnapshot", move || {
         crate::domains::settings::SettingsStore::new(path)
@@ -69,7 +69,7 @@ async fn restore_sparse_settings_file(
     deps: &Deps,
     previous_sparse: Value,
     reason: &str,
-) -> std::result::Result<(), CapabilityError> {
+) -> std::result::Result<(), ToolError> {
     let path = deps.settings_path.clone();
     run_blocking_task("settings.rollbackSparseSettings", move || {
         crate::domains::settings::SettingsStore::new(path)
@@ -85,12 +85,12 @@ async fn reload_settings_runtime_or_rollback(
     deps: &Deps,
     previous_sparse: Value,
     reason: &'static str,
-) -> std::result::Result<(), CapabilityError> {
+) -> std::result::Result<(), ToolError> {
     match deps.settings_runtime.reload_now(reason) {
         Ok(_) => Ok(()),
         Err(error) => {
             restore_sparse_settings_file(deps, previous_sparse, reason).await?;
-            Err(CapabilityError::Internal {
+            Err(ToolError::Internal {
                 message: format!(
                     "settings runtime rejected the update; sparse settings were rolled back: {error}"
                 ),

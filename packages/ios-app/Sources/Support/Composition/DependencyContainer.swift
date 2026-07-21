@@ -60,7 +60,7 @@ final class DependencyContainer {
     private let pairedServerDefaults: UserDefaults
 
     /// Documents root selected with the same typed storage input as drafts and
-    /// the database. Empty working-directory fallback must never bypass it.
+    /// the database. Empty working-directory default resolution must never bypass it.
     @ObservationIgnored
     private let documentsURL: URL
 

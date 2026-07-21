@@ -7,7 +7,7 @@ use crate::domains::session::event_store::identity::{
     EventIdentity, SessionCreationIdentity, SessionIdentity, WorkspaceIdentity,
 };
 use crate::domains::session::event_store::{
-    AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
+    AppendOptions, ConnectionConfig, EventStore, EventType, ensure_schema, new_file,
 };
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EffectClass, EngineHostHandle, FunctionDefinition,
@@ -40,7 +40,7 @@ fn harness() -> ReplayHarness {
     .expect("event store");
     {
         let conn = pool.get().expect("connection");
-        run_migrations(&conn).expect("migrations");
+        ensure_schema(&conn).expect("schema");
         crate::shared::storage::ensure_storage_schema(&conn).expect("storage schema");
     }
     let event_store = Arc::new(EventStore::new(pool));
@@ -233,10 +233,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         failed_invocation["error"]["failure"]["code"],
         "ENGINE_STORED_INVOCATION_ERROR"
     );
-    assert_eq!(
-        failed_invocation["error"]["failure"]["category"],
-        "capability"
-    );
+    assert_eq!(failed_invocation["error"]["failure"]["category"], "tool");
     assert_eq!(
         failed_invocation["error"]["kind"],
         "stored_invocation_error"

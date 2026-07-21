@@ -96,12 +96,12 @@ struct IsolatedTestStateLifecycleTests {
         #expect(capture.records.count == 4)
     }
 
-    @Test("process fallback cleans each registered fixture exactly once")
-    func processFallbackLifecycleIsUniqueAndBalanced() {
+    @Test("process-exit cleanup handles each registered fixture exactly once")
+    func processExitLifecycleIsUniqueAndBalanced() {
         let capture = LifecycleCapture(forwardToStandard: true)
         let cleanupRegistry = HostedTestCleanupRegistry()
         let state = IsolatedTestState(
-            label: "process-fallback",
+            label: "process-exit",
             lifecycleEmitter: capture.emitter,
             cleanupRegistry: cleanupRegistry
         )
@@ -119,13 +119,13 @@ struct IsolatedTestStateLifecycleTests {
     }
 
     @Test("visual artifacts default under the registered root and are removed")
-    func artifactFallbackIsOwnedAndCleaned() async throws {
+    func artifactDefaultIsOwnedAndCleaned() async throws {
         let capture = LifecycleCapture(forwardToStandard: true)
         let cleanupRegistry = HostedTestCleanupRegistry()
         var ownedRoot: URL?
         var suiteName: String?
         try await IsolatedTestState.withState(
-            label: "artifact-fallback",
+            label: "artifact-default",
             lifecycleEmitter: capture.emitter,
             cleanupRegistry: cleanupRegistry
         ) { state in

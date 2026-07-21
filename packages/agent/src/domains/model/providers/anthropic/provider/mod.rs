@@ -164,12 +164,12 @@ impl AnthropicProvider {
     /// Build tool definitions with cache breakpoints.
     #[allow(clippy::unused_self)]
     fn build_tools(&self, context: &Context) -> Option<Vec<AnthropicTool>> {
-        let capabilities = context.capabilities.as_ref()?;
-        if capabilities.is_empty() {
+        let tools = context.tools.as_ref()?;
+        if tools.is_empty() {
             return None;
         }
 
-        let mut anthropic_capabilities: Vec<AnthropicTool> = capabilities
+        let mut anthropic_tools: Vec<AnthropicTool> = tools
             .iter()
             .map(|t| AnthropicTool {
                 name: t.name.clone(),
@@ -180,14 +180,14 @@ impl AnthropicProvider {
             .collect();
 
         // Breakpoint 1: Last tool → 1h TTL
-        if let Some(last) = anthropic_capabilities.last_mut() {
+        if let Some(last) = anthropic_tools.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: Some("1h".into()),
             });
         }
 
-        Some(anthropic_capabilities)
+        Some(anthropic_tools)
     }
 
     /// Build thinking configuration.
@@ -270,7 +270,7 @@ impl AnthropicProvider {
             max_tokens: self.calculate_max_tokens(options),
             messages,
             system: self.build_system_param(context),
-            capabilities: self.build_tools(context),
+            tools: self.build_tools(context),
             stream: true,
             thinking: self.build_thinking_config(options),
             output_config: self.build_output_config(options),
@@ -321,7 +321,7 @@ impl AnthropicProvider {
             model = %request.model,
             max_tokens = request.max_tokens,
             message_count = request.messages.len(),
-            has_tools = request.capabilities.is_some(),
+            has_tools = request.tools.is_some(),
             has_thinking = request.thinking.is_some(),
             "Sending Anthropic request"
         );

@@ -9,8 +9,8 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`foundation`] | Constants, IDs, canonical paths, retry/text helpers, and shared errors |
-//! | [`protocol`] | Public DTOs for content, events, messages, memory, and model capability data |
-//! | [`server`] | Transport-neutral runtime context, validation, params, and capability errors |
+//! | [`protocol`] | Public DTOs for content, events, messages, memory, and model tool data |
+//! | [`server`] | Transport-neutral runtime context, validation, params, and tool errors |
 //! | [`storage`] | SQLite storage helpers used by engine, session, and logs |
 //! | [`observability`] | Tracing/log persistence transport and test capture helpers |
 //!

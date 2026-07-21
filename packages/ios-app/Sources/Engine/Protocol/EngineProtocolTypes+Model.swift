@@ -74,7 +74,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let isRetired: Bool?
     /// Retirement date (YYYY-MM-DD) for display.
     let retirementDate: String?
-    /// For models with reasoning capability (e.g., OpenAI)
+    /// For models with reasoning tool (e.g., OpenAI)
     let supportsReasoning: Bool?
     /// Available reasoning effort levels (minimal, low, medium, high, xhigh)
     let reasoningLevels: [String]?
@@ -87,7 +87,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Whether the active OpenAI profile supports streaming Responses.
     let supportsStreaming: Bool?
     /// Whether the active provider configuration supports native direct tools.
-    let supportsCapabilityPrimitives: Bool?
+    let supportsTools: Bool?
     /// For Gemini models: default thinking level
     let thinkingLevel: String?
     /// For Gemini models: available thinking levels
@@ -127,12 +127,12 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case id, canonicalModelId, name, provider, apiEndpoint, authPaths, aliasIds
         case replacementModel, isHidden, contextWindow, maxContextWindow, maxOutputTokens
         case supportsThinking, supportsImages, supportsDocuments, attachmentPolicy, tier
-        case isRetiredGeneration = "isLegacy"
+        case isRetiredGeneration
         case isRetired = "isDeprecated"
         case retirementDate = "deprecationDate"
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case supportsVerbosity, defaultVerbosity
-        case supportsStreaming, supportsCapabilityPrimitives
+        case supportsStreaming, supportsTools
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
         case providerDisplayName, providerSortOrder
@@ -174,7 +174,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         supportsVerbosity: Bool? = nil,
         defaultVerbosity: String? = nil,
         supportsStreaming: Bool? = nil,
-        supportsCapabilityPrimitives: Bool? = nil,
+        supportsTools: Bool? = nil,
         thinkingLevel: String? = nil,
         supportedThinkingLevels: [String]? = nil,
         family: String? = nil,
@@ -216,7 +216,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.supportsVerbosity = supportsVerbosity
         self.defaultVerbosity = defaultVerbosity
         self.supportsStreaming = supportsStreaming
-        self.supportsCapabilityPrimitives = supportsCapabilityPrimitives
+        self.supportsTools = supportsTools
         self.thinkingLevel = thinkingLevel
         self.supportedThinkingLevels = supportedThinkingLevels
         self.family = family

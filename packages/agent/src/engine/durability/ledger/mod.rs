@@ -15,16 +15,11 @@
 //! credentials cannot enter SQLite, payload blobs, replay exports, or later
 //! idempotent replays. Both ledger implementations apply that policy at their
 //! storage boundary even when a caller manually constructs a record.
-//! The worker-first retirement migration removes historical authority, lease,
-//! compensation, produced-resource, and generic-trigger records in one
-//! transaction while preserving causal and outcome evidence.
 //! Duplicate handling has one contract: a matching key, payload, and function
 //! revision returns the stored result; conflicts and unfinished attempts fail.
 //! There is no configurable replay-policy plane.
 //! The concrete scope codec accepts only profile-global and non-empty session
-//! values. It migrates the former `system:system` spelling to
-//! `profile:profile`; every other unknown or partial persisted pair fails
-//! closed.
+//! values; every unknown or partial persisted pair fails closed.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -42,165 +37,6 @@ mod sqlite_store;
 pub use memory::InMemoryEngineLedgerStore;
 pub use outcome::{StoredEngineError, StoredInvocationOutcome};
 pub use sqlite_store::SqliteEngineLedgerStore;
-
-use sqlite_codec::ledger_failure;
-
-/// Rebuild the invocation ledger without columns owned by retired execution
-/// planes. The caller owns the surrounding worker-first retirement transaction.
-pub(crate) fn retire_legacy_invocation_columns(
-    transaction: &rusqlite::Transaction<'_>,
-) -> std::result::Result<bool, String> {
-    let retired_columns = [
-        "authority_grant_id",
-        "authority_scopes_json",
-        "resource_lease_ids_json",
-        "compensation_status",
-        "produced_resource_refs_json",
-        "delivery_mode_json",
-        "trigger_id",
-    ];
-    let mut statement = transaction
-        .prepare("PRAGMA table_info(engine_invocations)")
-        .map_err(|error| format!("inspect invocation columns: {error}"))?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|error| format!("query invocation columns: {error}"))?
-        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
-        .map_err(|error| format!("decode invocation columns: {error}"))?;
-    drop(statement);
-    if columns.is_empty()
-        || retired_columns
-            .iter()
-            .all(|column| !columns.contains(*column))
-    {
-        return Ok(false);
-    }
-    let retained = [
-        "invocation_id",
-        "function_id",
-        "worker_id",
-        "function_revision",
-        "catalog_revision",
-        "actor_id",
-        "actor_kind_json",
-        "trace_id",
-        "parent_invocation_id",
-        "session_id",
-        "workspace_id",
-        "idempotency_scope_kind",
-        "idempotency_scope_value",
-        "idempotency_key",
-        "replayed_from",
-        "succeeded",
-        "result_json",
-        "error_json",
-        "timestamp",
-    ];
-    for column in retained {
-        if !columns.contains(column) {
-            return Err(format!(
-                "cannot retire invocation observations: retained column {column} is missing"
-            ));
-        }
-    }
-    let column_list = retained.join(",");
-    transaction
-        .execute_batch(
-            "DROP TABLE IF EXISTS engine_invocations__worker_first_retirement;
-             ALTER TABLE engine_invocations RENAME TO engine_invocations__worker_first_retirement;
-             DROP INDEX IF EXISTS idx_engine_invocations_trace;",
-        )
-        .map_err(|error| format!("stage invocation ledger rebuild: {error}"))?;
-    transaction
-        .execute_batch(sqlite_codec::INVOCATION_TABLE_SCHEMA)
-        .map_err(|error| format!("create worker-first invocation ledger: {error}"))?;
-    transaction
-        .execute(
-            &format!(
-                "INSERT INTO engine_invocations ({column_list}) \
-                 SELECT {column_list} FROM engine_invocations__worker_first_retirement"
-            ),
-            [],
-        )
-        .map_err(|error| format!("copy retained invocation rows: {error}"))?;
-    transaction
-        .execute_batch(
-            "DROP TABLE engine_invocations__worker_first_retirement;
-             CREATE INDEX idx_engine_invocations_trace ON engine_invocations(trace_id);",
-        )
-        .map_err(|error| format!("finish invocation ledger rebuild: {error}"))?;
-    Ok(true)
-}
-
-/// Remove the retired configurable duplicate-policy column while preserving
-/// every idempotency key, fingerprint, status, and outcome row.
-pub(crate) fn retire_legacy_idempotency_replay_column(
-    connection: &rusqlite::Connection,
-) -> std::result::Result<bool, String> {
-    let table_exists = connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_idempotency_entries')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(|error| format!("inspect idempotency table: {error}"))?;
-    if !table_exists {
-        return Ok(false);
-    }
-    let mut statement = connection
-        .prepare("PRAGMA table_info(engine_idempotency_entries)")
-        .map_err(|error| format!("inspect idempotency columns: {error}"))?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|error| format!("query idempotency columns: {error}"))?
-        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
-        .map_err(|error| format!("read idempotency columns: {error}"))?;
-    drop(statement);
-    if !columns.contains("replay_behavior_json") {
-        return Ok(false);
-    }
-    connection
-        .execute_batch("ALTER TABLE engine_idempotency_entries DROP COLUMN replay_behavior_json;")
-        .map_err(|error| format!("retire idempotency replay column: {error}"))?;
-    Ok(true)
-}
-
-/// Rename the former process-global spelling to the profile boundary that the
-/// profile-owned database has always enforced.
-pub(crate) fn migrate_profile_idempotency_scope(
-    connection: &rusqlite::Connection,
-) -> std::result::Result<(), String> {
-    for (table, kind_column, value_column) in [
-        ("engine_idempotency_entries", "scope_kind", "scope_value"),
-        (
-            "engine_invocations",
-            "idempotency_scope_kind",
-            "idempotency_scope_value",
-        ),
-    ] {
-        let present = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-                [table],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(|error| format!("inspect {table}: {error}"))?;
-        if present {
-            connection
-                .execute(
-                    &format!(
-                        "UPDATE {table} SET {kind_column}='profile', {value_column}='profile' \
-                         WHERE {kind_column}='system' AND {value_column}='system'"
-                    ),
-                    [],
-                )
-                .map_err(|error| {
-                    format!("migrate profile idempotency scope in {table}: {error}")
-                })?;
-        }
-    }
-    Ok(())
-}
 
 /// Fully scoped idempotency key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

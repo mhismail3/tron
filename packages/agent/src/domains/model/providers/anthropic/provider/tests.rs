@@ -240,56 +240,45 @@ fn build_tools_none() {
 fn build_tools_api_key_has_cache() {
     let provider = AnthropicProvider::new(api_key_config());
     let ctx = Context {
-        capabilities: Some(vec![
-            crate::shared::protocol::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Execute inspected capabilities".into(),
-                parameters:
-                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::default(),
-                    },
+        tools: Some(vec![crate::shared::protocol::model_tools::ModelTool {
+            name: "test_tool".into(),
+            description: "Execute inspected tools".into(),
+            parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+                description: None,
+                extra: serde_json::Map::default(),
             },
-        ]),
+        }]),
         ..Context::default()
     };
-    let capabilities = provider.build_tools(&ctx).unwrap();
-    assert_eq!(capabilities.len(), 1);
-    assert_eq!(capabilities[0].name, "execute");
+    let tools = provider.build_tools(&ctx).unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "test_tool");
     // API key now gets cache too
-    assert!(capabilities[0].cache_control.is_some());
+    assert!(tools[0].cache_control.is_some());
     assert_eq!(
-        capabilities[0]
-            .cache_control
-            .as_ref()
-            .unwrap()
-            .ttl
-            .as_deref(),
+        tools[0].cache_control.as_ref().unwrap().ttl.as_deref(),
         Some("1h")
     );
 }
 
 #[test]
-fn request_serializes_capabilities_as_provider_tools() {
+fn request_serializes_tools_as_provider_tools() {
     let provider = AnthropicProvider::new(api_key_config());
     let ctx = Context {
-        capabilities: Some(vec![
-            crate::shared::protocol::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Execute inspected capabilities".into(),
-                parameters:
-                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::default(),
-                    },
+        tools: Some(vec![crate::shared::protocol::model_tools::ModelTool {
+            name: "test_tool".into(),
+            description: "Execute inspected tools".into(),
+            parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+                description: None,
+                extra: serde_json::Map::default(),
             },
-        ]),
+        }]),
         ..Context::default()
     };
     let request = provider.build_request(
@@ -303,51 +292,43 @@ fn request_serializes_capabilities_as_provider_tools() {
     let body = serde_json::to_value(&request).expect("request serializes");
 
     assert!(body.get("tools").is_some());
-    assert!(body.get("capabilities").is_none());
-    assert_eq!(body["tools"][0]["name"], "execute");
+    assert_eq!(body["tools"][0]["name"], "test_tool");
 }
 
 #[test]
 fn build_tools_oauth_last_has_cache() {
     let provider = AnthropicProvider::new(oauth_config());
     let ctx = Context {
-        capabilities: Some(vec![
-            crate::shared::protocol::model_capabilities::ModelCapability {
+        tools: Some(vec![
+            crate::shared::protocol::model_tools::ModelTool {
                 name: "search".into(),
-                description: "Search capability catalog".into(),
-                parameters:
-                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::default(),
-                    },
+                description: "Search tool catalog".into(),
+                parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
+                },
             },
-            crate::shared::protocol::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Execute inspected capabilities".into(),
-                parameters:
-                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                        schema_type: "object".into(),
-                        properties: None,
-                        required: None,
-                        description: None,
-                        extra: serde_json::Map::default(),
-                    },
+            crate::shared::protocol::model_tools::ModelTool {
+                name: "test_tool".into(),
+                description: "Execute inspected tools".into(),
+                parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
+                },
             },
         ]),
         ..Context::default()
     };
-    let capabilities = provider.build_tools(&ctx).unwrap();
-    assert!(capabilities[0].cache_control.is_none()); // First tool: no cache
+    let tools = provider.build_tools(&ctx).unwrap();
+    assert!(tools[0].cache_control.is_none()); // First tool: no cache
     assert_eq!(
-        capabilities[1]
-            .cache_control
-            .as_ref()
-            .unwrap()
-            .ttl
-            .as_deref(),
+        tools[1].cache_control.as_ref().unwrap().ttl.as_deref(),
         Some("1h")
     );
 }

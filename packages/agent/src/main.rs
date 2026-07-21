@@ -8,7 +8,7 @@
 //! ```text
 //! tron::app           Bootstrap, HTTP shell, health, metrics, onboarding, shutdown
 //! tron::transport     authenticated /engine and worker-webhook surfaces
-//! tron::engine        Live capability fabric, host lifecycle, engine ledger
+//! tron::engine        Live tool fabric, host lifecycle, engine ledger
 //! tron::domains       Worker-owned contracts, handlers, operations, services
 //! tron::shared        Foundation types, protocol DTOs, neutral helpers
 //! ```

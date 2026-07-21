@@ -13,7 +13,7 @@
 //! | [`message_converter`]  | `Vec<Message>` → `messages`+`system` blocks; Anthropic `tool_use` / `tool_result` provider blocks, thinking blocks, content-block ordering |
 //! | [`stream_handler`]     | Anthropic SSE (`message_start`, `content_block_*`, `message_delta`, `message_stop`) → `StreamEvent` ([`crate::shared::protocol::events`]) |
 //! | [`cache_pruning`]      | Remove the oldest `cache_control` marker(s) when the 4-breakpoint cap is hit; preserves the system prompt marker |
-//! | [`message_sanitizer`]  | Drop empty assistant messages and normalise internal capability-result ordering before provider conversion |
+//! | [`message_sanitizer`]  | Drop empty assistant messages and normalise internal tool-result ordering before provider conversion |
 //! | [`types`]              | [`AnthropicAuth`] (ApiKey / Oauth / ClaudeAgentSdk), [`AnthropicConfig`], [`AnthropicProviderSettings`] |
 //!
 //! ## Invariants
@@ -22,7 +22,7 @@
 //!   (Anthropic API limit); [`cache_pruning`] strips the oldest when the
 //!   cap would be exceeded. The system-prompt marker is permanent.
 //! - Provider-wire tool blocks use Anthropic's canonical `tool_use` and
-//!   `tool_result` shape; internal messages keep Tron capability-invocation names.
+//!   `tool_result` shape; internal messages keep Tron tool-invocation names.
 //! - v1beta (ApiKey) rejects unknown fields; v1internal (OAuth / SDK)
 //!   tolerates them. Request builders branch on auth type.
 

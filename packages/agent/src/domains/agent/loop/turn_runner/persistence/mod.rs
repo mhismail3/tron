@@ -3,15 +3,15 @@ use std::sync::atomic::AtomicI64;
 
 use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::EventType;
-use crate::domains::session::event_store::types::payloads::capability_invocation::{
-    CapabilityInvocationCompletedPayload, CapabilityInvocationStartedPayload,
+use crate::domains::session::event_store::types::payloads::tool_invocation::{
+    ToolInvocationCompletedPayload, ToolInvocationStartedPayload,
 };
 use crate::shared::foundation::redaction::redact_sensitive_json;
 use crate::shared::protocol::events::{
-    AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
+    AssistantMessage, BaseEvent, ToolInvocationSummary, TronEvent,
 };
 use crate::shared::protocol::messages::{Provider, TokenUsage};
-use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::model_tools::{ToolResult, ToolResultBody};
 use serde_json::{Value, json};
 use tracing::{error, warn};
 
@@ -52,68 +52,51 @@ fn base_event_from_row(row: &EventRow, payload: &Value) -> BaseEvent {
 }
 
 fn started_event_from_row(row: &EventRow, payload_value: &Value) -> Option<TronEvent> {
-    let payload: CapabilityInvocationStartedPayload = serde_json::from_value(payload_value.clone())
+    let payload: ToolInvocationStartedPayload = serde_json::from_value(payload_value.clone())
         .inspect_err(|error| {
             warn!(
                 event_id = %row.id,
                 error = %error,
-                "failed to decode capability start row for live broadcast"
+                "failed to decode tool start row for live broadcast"
             );
         })
         .ok()?;
-    let model_primitive_name = payload
-        .capability_identity
-        .model_primitive_name
-        .clone()
-        .unwrap_or_else(|| payload.name.clone());
     let arguments = payload.arguments.as_object().cloned();
 
-    Some(TronEvent::CapabilityInvocationStarted {
+    Some(TronEvent::ToolInvocationStarted {
         base: base_event_from_row(row, &payload_value),
         invocation_id: payload.invocation_id,
-        model_primitive_name,
+        tool_name: payload.tool_name,
         arguments,
-        capability_identity: payload.capability_identity,
+        tool_identity: payload.tool_identity,
     })
 }
 
 fn completed_event_from_row(row: &EventRow, payload_value: &Value) -> Option<TronEvent> {
-    let payload: CapabilityInvocationCompletedPayload =
-        serde_json::from_value(payload_value.clone())
-            .inspect_err(|error| {
-                warn!(
-                    event_id = %row.id,
-                    error = %error,
-                    "failed to decode capability completion row for live broadcast"
-                );
-            })
-            .ok()?;
-    let model_primitive_name = payload
-        .capability_identity
-        .model_primitive_name
-        .clone()
-        .unwrap_or_else(|| {
-            payload_value
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("execute")
-                .to_owned()
-        });
+    let payload: ToolInvocationCompletedPayload = serde_json::from_value(payload_value.clone())
+        .inspect_err(|error| {
+            warn!(
+                event_id = %row.id,
+                error = %error,
+                "failed to decode tool completion row for live broadcast"
+            );
+        })
+        .ok()?;
     let duration = u64::try_from(payload.duration).unwrap_or(0);
-    let result = CapabilityResult {
-        content: CapabilityResultBody::Text(payload.content),
+    let result = ToolResult {
+        content: ToolResultBody::Text(payload.content),
         details: payload.details,
         is_error: Some(payload.is_error),
     };
 
-    Some(TronEvent::CapabilityInvocationCompleted {
+    Some(TronEvent::ToolInvocationCompleted {
         base: base_event_from_row(row, &payload_value),
         invocation_id: payload.invocation_id,
-        model_primitive_name,
+        tool_name: payload.tool_name,
         duration,
         is_error: Some(payload.is_error),
         result: Some(result),
-        capability_identity: payload.capability_identity,
+        tool_identity: payload.tool_identity,
     })
 }
 
@@ -126,13 +109,13 @@ fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Optio
     }
 }
 
-/// Broadcast a persisted capability start row with the row's durable sequence.
+/// Broadcast a persisted tool start row with the row's durable sequence.
 ///
 /// INVARIANT: start broadcasts are row-backed. Callers must first persist every
 /// start in a requested execution batch, then broadcast these rows before any
 /// child execution future is polled so live clients see all chips before the
 /// first completion can arrive.
-pub(super) fn emit_persisted_capability_invocation_started(
+pub(super) fn emit_persisted_tool_invocation_started(
     emitter: &Arc<EventEmitter>,
     row: &EventRow,
     payload: &Value,
@@ -143,12 +126,12 @@ pub(super) fn emit_persisted_capability_invocation_started(
     let _ = emitter.emit(event);
 }
 
-/// Broadcast a persisted capability completion row with the row's durable sequence.
+/// Broadcast a persisted tool completion row with the row's durable sequence.
 ///
 /// INVARIANT: the executor returns a result only. The turn runner owns durable
 /// completion persistence and broadcasts this row-backed event only after the
 /// write succeeds, keeping live lifecycle order identical to reconstruction.
-pub(crate) fn emit_persisted_capability_invocation_completed(
+pub(crate) fn emit_persisted_tool_invocation_completed(
     emitter: &Arc<EventEmitter>,
     row: &EventRow,
     payload: &Value,
@@ -361,8 +344,8 @@ pub(super) fn emit_response_complete(
             turn,
             stop_reason: stream_result.stop_reason.clone(),
             token_usage: response_token_usage,
-            has_capability_invocations: !stream_result.capability_invocations.is_empty(),
-            capability_invocation_count: stream_result.capability_invocations.len() as u32,
+            has_tool_invocations: !stream_result.tool_invocations.is_empty(),
+            tool_invocation_count: stream_result.tool_invocations.len() as u32,
             token_record: token_record_json,
             model: Some(model_name.to_owned()),
         },
@@ -386,7 +369,7 @@ pub(super) fn add_assistant_message_to_context(
         content_types = ?stream_result.message.content.iter().map(|c| match c {
             crate::shared::protocol::content::AssistantContent::Text { .. } => "Text",
             crate::shared::protocol::content::AssistantContent::Thinking { .. } => "Thinking",
-            crate::shared::protocol::content::AssistantContent::CapabilityInvocation { .. } => "CapabilityInvocation",
+            crate::shared::protocol::content::AssistantContent::ToolInvocation { .. } => "ToolInvocation",
         }).collect::<Vec<_>>(),
         "persistence: add_assistant_message_to_context"
     );
@@ -583,33 +566,31 @@ pub(super) fn emit_turn_end(
     Ok(())
 }
 
-pub(super) fn emit_capability_invocation_batch(
+pub(super) fn emit_tool_invocation_batch(
     emitter: &Arc<EventEmitter>,
     session_id: &str,
-    capability_invocations: &[crate::shared::protocol::messages::CapabilityInvocationDraft],
+    tool_invocations: &[crate::shared::protocol::messages::ToolInvocationDraft],
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) {
-    let summaries: Vec<CapabilityInvocationSummary> = capability_invocations
+    let summaries: Vec<ToolInvocationSummary> = tool_invocations
         .iter()
-        .map(|capability_invocation| CapabilityInvocationSummary {
-            id: capability_invocation.id.clone(),
-            name: capability_invocation.name.clone(),
-            arguments: redact_sensitive_json(&Value::Object(
-                capability_invocation.arguments.clone(),
-            ))
-            .as_object()
-            .cloned()
-            .unwrap_or_default(),
+        .map(|tool_invocation| ToolInvocationSummary {
+            id: tool_invocation.id.clone(),
+            name: tool_invocation.name.clone(),
+            arguments: redact_sensitive_json(&Value::Object(tool_invocation.arguments.clone()))
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
         })
         .collect();
 
     emit_maybe_sequenced(
         emitter,
-        TronEvent::CapabilityInvocationBatch {
+        TronEvent::ToolInvocationBatch {
             base: base_event(session_id, trace_id, parent_invocation_id),
-            capability_invocations: summaries,
+            tool_invocations: summaries,
         },
         sequence_counter,
     );

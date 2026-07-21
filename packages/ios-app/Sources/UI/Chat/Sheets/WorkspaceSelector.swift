@@ -507,7 +507,7 @@ struct WorkspaceSelector: View {
         guard let protocolError = error as? EngineProtocolError else {
             return error.localizedDescription
         }
-        if protocolError.errorCode == .capabilityNotFound {
+        if protocolError.errorCode == .toolNotFound {
             return "Workspace browser is not available on this server. Restart or update Tron, then retry."
         }
         if let suggestion = protocolError.suggestion, !suggestion.isEmpty {

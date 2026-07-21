@@ -71,9 +71,9 @@ extension SourceGuardTests {
         )
         #expect(
             source.contains("ComposerAttachmentButton(") &&
-                source.contains("attachmentCapability: config.attachmentCapability") &&
+                source.contains("attachmentSupport: config.attachmentSupport") &&
                 source.contains("includeRecentInputs: shouldShowRecentInputsMenuAction"),
-            "The attachment action menu should stay attached to the composer plus button with the current model capability"
+            "The attachment action menu should stay attached to the composer plus button with the current model support"
         )
         #expect(
             !source.contains(".popover(isPresented: $showAttachmentMenu") &&

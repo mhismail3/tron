@@ -1,8 +1,8 @@
 //! Auth storage file I/O.
 //!
 //! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions
-//! (`0o600`). A missing file is a legitimate first-write case. The loader also
-//! materializes the exact empty sentinel left by interrupted or older installs.
+//! (`0o600`). A missing file is a legitimate first-write case. Present files
+//! must match the current strict schema.
 
 use std::path::{Path, PathBuf};
 
@@ -23,16 +23,13 @@ pub fn auth_file_path(data_dir: &Path) -> PathBuf {
 /// Load auth storage from file (sync).
 ///
 /// * `Ok(None)`     — file does not exist (first-use on a clean machine).
-/// * `Ok(Some(..))` — file exists, parsed successfully, version matches. An
-///   exact empty JSON object (`{}`) returns a pristine [`AuthStorage::new()`]
-///   so legacy pristine sentinels can be materialized by the next write.
+/// * `Ok(Some(..))` — file exists, parsed successfully, version matches.
 /// * `Err(..)`      — read I/O failure, parse failure, or unsupported version.
 ///
 /// INVARIANT: A parse error surfaces as [`AuthError::MalformedAuthFile`] and
 /// is **never** silently treated as "no auth configured". The only
-/// present-file exception is the exact empty object sentinel (`{}`). Callers
-/// must distinguish "not configured" (`Ok(None)` or the pristine sentinel)
-/// from "broken on disk" (`Err(_)`) so writers cannot replace invalid stored
+/// present file must match the schema. Callers must distinguish "not
+/// configured" (`Ok(None)`) from "broken on disk" (`Err(_)`) so writers cannot replace invalid stored
 /// credentials with an empty default.
 pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> {
     let data = match std::fs::read_to_string(path) {
@@ -47,10 +44,6 @@ pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> 
             details: e.to_string(),
         }
     })?;
-    if value.as_object().is_some_and(serde_json::Map::is_empty) {
-        return Ok(Some(AuthStorage::new()));
-    }
-
     match serde_json::from_value::<AuthStorage>(value) {
         Ok(storage) if storage.version == 1 => Ok(Some(storage)),
         Ok(storage) => Err(AuthError::MalformedAuthFile {
@@ -141,7 +134,7 @@ pub fn get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth
 }
 
 /// Strict Google provider auth getter — returns `Err` when the stored
-/// shape fails to deserialize (e.g. retired `endpoint` field). Used by
+/// shape fails to deserialize. Used by
 /// `load_server_auth` to surface `MalformedProviderAuth` with re-auth
 /// guidance instead of silently falling back to "not configured".
 pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth>, AuthError> {

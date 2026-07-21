@@ -69,27 +69,26 @@ fn build_request_gpt5_platform_sends_minimal_reasoning() {
 fn build_request_text_only_model_omits_reasoning_and_tools() {
     let provider = OpenAIProvider::new(api_key_config("gpt-4"));
     let context = Context {
-        capabilities: Some(vec![test_tool()]),
+        tools: Some(vec![test_tool()]),
         ..Default::default()
     };
     let request = provider.build_request(&context, &ProviderStreamOptions::default());
     assert_eq!(request.model, "gpt-4");
     assert!(request.reasoning.is_none());
-    assert!(request.capabilities.is_none());
+    assert!(request.tools.is_none());
 }
 
 #[test]
-fn build_request_serializes_capabilities_as_provider_tools() {
+fn build_request_serializes_tools_as_provider_tools() {
     let provider = OpenAIProvider::new(api_key_config("gpt-5"));
     let context = Context {
-        capabilities: Some(vec![test_tool()]),
+        tools: Some(vec![test_tool()]),
         ..Default::default()
     };
     let request = provider.build_request(&context, &ProviderStreamOptions::default());
     let body = serde_json::to_value(&request).expect("request serializes");
 
     assert!(body.get("tools").is_some());
-    assert!(body.get("capabilities").is_none());
     assert_eq!(body["tools"][0]["name"], "echo");
 }
 
@@ -99,7 +98,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
     let context = Context {
         system_prompt: Some("Product intent".into()),
         messages: std::sync::Arc::from([Message::user("Hello")]),
-        capabilities: Some(vec![test_tool()]),
+        tools: Some(vec![test_tool()]),
         working_directory: Some("/workspace".into()),
         server_origin: Some("localhost:9847".into()),
     };

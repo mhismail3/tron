@@ -1,4 +1,4 @@
-//! Session reconstruction service — single capability call returns complete session state.
+//! Session reconstruction service — single tool call returns complete session state.
 //!
 //! Replaces ad hoc client-side reconstruction from separate session/event
 //! calls. The server is the single source of truth: persisted history
@@ -15,11 +15,11 @@
 //!
 //! ## In-flight reconciliation
 //!
-//! When capabilities are executing, `message.assistant` has already been persisted (containing
-//! thinking, text, and capability_invocation blocks), but the turn accumulator still holds the same
-//! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when capabilities
+//! When tools are executing, `message.assistant` has already been persisted (containing
+//! thinking, text, and tool_invocation blocks), but the turn accumulator still holds the same
+//! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when tools
 //! are past "generating" status, preventing duplicate content on iOS reconstruction.
-//! Before capability execution starts, `streaming.type` is derived from the last
+//! Before tool execution starts, `streaming.type` is derived from the last
 //! active content-sequence item, so reconnects distinguish active thinking from
 //! active assistant text. Reconstruction snapshots the turn accumulator directly
 //! only while the run registry reports an active run. Prompt admission remains
@@ -53,13 +53,13 @@ use crate::domains::agent::r#loop::orchestrator::turn_accumulator::TurnReconstru
 use crate::domains::session::Deps;
 use crate::domains::session::event_store::{EventRow, EventStore};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::{self, CapabilityError};
+use crate::shared::server::errors::{self, ToolError};
 use crate::shared::server::events::event_row_to_wire_with_payload;
 
 /// Hard ceiling on the number of events returned by a single
 /// `session.reconstruct` call, regardless of what the client asks for.
 ///
-/// The capability is a single synchronous load into memory followed by a single
+/// The tool is a single synchronous load into memory followed by a single
 /// JSON serialization; letting a client request an unbounded window is a
 /// trivial self-DoS. 10k events is roughly 25–50 turns of history for a
 /// typical Tron session, which more than covers any UX that needs the full
@@ -77,12 +77,12 @@ fn paginate_ordered_chain(
     mut events: Vec<EventRow>,
     before_event_id: Option<&str>,
     limit: i64,
-) -> Result<(Vec<EventRow>, bool), CapabilityError> {
+) -> Result<(Vec<EventRow>, bool), ToolError> {
     if let Some(cursor) = before_event_id {
         let cursor_index = events
             .iter()
             .position(|event| event.id == cursor)
-            .ok_or_else(|| CapabilityError::NotFound {
+            .ok_or_else(|| ToolError::NotFound {
                 code: errors::EVENT_NOT_FOUND.into(),
                 message: format!("Event '{cursor}' not found in reconstruction chain"),
             })?;
@@ -130,31 +130,30 @@ async fn load_durable_reconstruction(
     cursor_event_id: Option<String>,
     effective_limit: i64,
     top_level_sequence_cut: Option<i64>,
-) -> Result<(Vec<EventRow>, bool, Value), CapabilityError> {
+) -> Result<(Vec<EventRow>, bool, Value), ToolError> {
     run_blocking_task("session.reconstruct.load", move || {
         let session = event_store
             .get_session(&session_id)
-            .map_err(|e| CapabilityError::Internal {
+            .map_err(|e| ToolError::Internal {
                 message: format!("Persistence error: {e}"),
             })?
-            .ok_or_else(|| CapabilityError::NotFound {
+            .ok_or_else(|| ToolError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: format!("Session '{session_id}' not found"),
             })?;
 
         let limit = Some(effective_limit);
         let (events, has_more) = if session.parent_session_id.is_some() {
-            let head_id =
-                session
-                    .head_event_id
-                    .as_deref()
-                    .ok_or_else(|| CapabilityError::Internal {
-                        message: "Forked session has no head event".into(),
-                    })?;
+            let head_id = session
+                .head_event_id
+                .as_deref()
+                .ok_or_else(|| ToolError::Internal {
+                    message: "Forked session has no head event".into(),
+                })?;
             let mut ancestors =
                 event_store
                     .get_ancestors(head_id)
-                    .map_err(|e| CapabilityError::Internal {
+                    .map_err(|e| ToolError::Internal {
                         message: format!("Failed to load fork ancestors: {e}"),
                     })?;
             if cursor_event_id.is_none()
@@ -166,22 +165,22 @@ async fn load_durable_reconstruction(
         } else if let Some(before_id) = cursor_event_id.as_deref() {
             let cursor = event_store
                 .get_event(before_id)
-                .map_err(|e| CapabilityError::Internal {
+                .map_err(|e| ToolError::Internal {
                     message: format!("Failed to load cursor event: {e}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::EVENT_NOT_FOUND.into(),
                     message: format!("Event '{before_id}' not found"),
                 })?;
             if cursor.session_id != session_id {
-                return Err(CapabilityError::NotFound {
+                return Err(ToolError::NotFound {
                     code: errors::EVENT_NOT_FOUND.into(),
                     message: format!("Event '{before_id}' is not in session '{session_id}'"),
                 });
             }
             let events = event_store
                 .get_events_before(&session_id, cursor.sequence, limit)
-                .map_err(|e| CapabilityError::Internal {
+                .map_err(|e| ToolError::Internal {
                     message: format!("Failed to load events: {e}"),
                 })?;
             let has_more = events.first().is_some_and(|first| {
@@ -195,7 +194,7 @@ async fn load_durable_reconstruction(
                 if let Some(before) = cut.checked_add(1) {
                     event_store
                         .get_events_before(&session_id, before, limit)
-                        .map_err(|e| CapabilityError::Internal {
+                        .map_err(|e| ToolError::Internal {
                             message: format!(
                                 "Failed to load events through reconstruction cut: {e}"
                             ),
@@ -203,14 +202,14 @@ async fn load_durable_reconstruction(
                 } else {
                     event_store
                         .get_latest_events(&session_id, limit)
-                        .map_err(|e| CapabilityError::Internal {
+                        .map_err(|e| ToolError::Internal {
                             message: format!("Failed to load events: {e}"),
                         })?
                 }
             } else {
                 event_store
                     .get_latest_events(&session_id, limit)
-                    .map_err(|e| CapabilityError::Internal {
+                    .map_err(|e| ToolError::Internal {
                         message: format!("Failed to load events: {e}"),
                     })?
             };
@@ -249,7 +248,7 @@ impl SessionReconstructionService {
         session_id: String,
         limit: Option<i64>,
         before_event_id: Option<String>,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         // INVARIANT: client-supplied `limit` is always clamped to
         // [0, MAX_RECONSTRUCT_EVENTS]. `None` means "give me the default
         // window" — the default IS the cap, not "unbounded". A negative
@@ -344,8 +343,8 @@ impl SessionReconstructionService {
         if let Some(state) = in_flight.as_ref() {
             debug!(
                 session_id,
-                capability_count = state
-                    .get("capabilityInvocations")
+                tool_count = state
+                    .get("toolInvocations")
                     .and_then(|value| value.as_array())
                     .map_or(0, Vec::len),
                 seq_count = state
@@ -374,7 +373,7 @@ impl SessionReconstructionService {
         let resolved_payloads =
             deps.event_store
                 .resolve_event_payloads(&events)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Failed to resolve event payloads: {error}"),
                 })?;
         let wire_events: Vec<Value> = events
@@ -410,17 +409,17 @@ impl SessionReconstructionService {
     }
 
     fn reconcile_turn_snapshot(snapshot: (String, Value, Value, bool)) -> Value {
-        let (text, capability_invocations, content_sequence, response_complete) = snapshot;
-        let mut state = Self::reconcile_in_flight(text, capability_invocations, content_sequence);
+        let (text, tool_invocations, content_sequence, response_complete) = snapshot;
+        let mut state = Self::reconcile_in_flight(text, tool_invocations, content_sequence);
         if response_complete {
-            let capability_refs = state["contentSequence"]
+            let tool_refs = state["contentSequence"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter(|item| item["type"] == "capability_ref")
+                .filter(|item| item["type"] == "tool_ref")
                 .cloned()
                 .collect();
-            state["contentSequence"] = Value::Array(capability_refs);
+            state["contentSequence"] = Value::Array(tool_refs);
             state["streaming"] = Value::Null;
         }
         state
@@ -428,21 +427,21 @@ impl SessionReconstructionService {
 
     /// Reconcile in-flight accumulator state against persisted events.
     ///
-    /// When any capability has progressed past "generating" status, capability invocation has
-    /// started, which means `message.assistant` was persisted (capabilities only execute
+    /// When any tool has progressed past "generating" status, tool invocation has
+    /// started, which means `message.assistant` was persisted (tools only execute
     /// after persist). In that case, text and thinking in the accumulator duplicate
     /// the persisted event — strip them from the response to prevent iOS duplication.
     ///
-    /// Capability invocations and capability_ref items are always preserved since they carry live
+    /// Tool invocations and tool_ref items are always preserved since they carry live
     /// status (running/completed, streamingOutput, startedAt) not in persisted events.
     fn reconcile_in_flight(
         text: String,
-        capability_invocations: Value,
+        tool_invocations: Value,
         content_sequence: Value,
     ) -> Value {
         // Detect if message.assistant has been persisted for this turn.
-        // Any capability past "generating" means capability invocation started → message.assistant persisted.
-        let capabilities_executing = capability_invocations
+        // Any tool past "generating" means tool invocation started → message.assistant persisted.
+        let tools_executing = tool_invocations
             .as_array()
             .map(|calls| {
                 calls.iter().any(|tc| {
@@ -453,19 +452,19 @@ impl SessionReconstructionService {
             })
             .unwrap_or(false);
 
-        if capabilities_executing {
+        if tools_executing {
             // Strip text/thinking from content sequence — already in persisted message.assistant.
-            // Keep only capability_ref items (they carry live status not in persisted events).
+            // Keep only tool_ref items (they carry live status not in persisted events).
             let filtered: Vec<Value> = content_sequence
                 .as_array()
                 .unwrap_or(&vec![])
                 .iter()
-                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("capability_ref"))
+                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("tool_ref"))
                 .cloned()
                 .collect();
 
             json!({
-                "capabilityInvocations": capability_invocations,
+                "toolInvocations": tool_invocations,
                 "contentSequence": filtered,
                 "streaming": null,
             })
@@ -474,7 +473,7 @@ impl SessionReconstructionService {
             let streaming = Self::streaming_from_sequence(&content_sequence, &text);
 
             json!({
-                "capabilityInvocations": capability_invocations,
+                "toolInvocations": tool_invocations,
                 "contentSequence": content_sequence,
                 "streaming": streaming,
             })
@@ -511,12 +510,12 @@ mod tests {
     // ── reconcile_in_flight tests ──
 
     #[test]
-    fn strips_text_thinking_when_capabilities_executing() {
+    fn strips_text_thinking_when_tools_executing() {
         let result = SessionReconstructionService::reconcile_in_flight(
             "I'll run sleep 10.".into(),
             json!([{
                 "invocationId": "tc_1",
-                "modelPrimitiveName": "execute",
+                "toolName": "test_tool",
                 "status": "running",
                 "startedAt": "2026-04-07T12:00:00Z",
                 "streamingOutput": "running...",
@@ -524,25 +523,25 @@ mod tests {
             json!([
                 { "type": "thinking", "thinking": "The user wants sleep 10." },
                 { "type": "text", "text": "I'll run sleep 10." },
-                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_1" },
             ]),
         );
 
         // Text/thinking stripped — already in persisted message.assistant
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 1);
-        assert_eq!(seq[0]["type"], "capability_ref");
+        assert_eq!(seq[0]["type"], "tool_ref");
         assert_eq!(seq[0]["invocationId"], "tc_1");
 
         // Streaming cleared
         assert!(result["streaming"].is_null());
 
-        // Capability invocations preserved with full detail
-        let capabilities = result["capabilityInvocations"].as_array().unwrap();
-        assert_eq!(capabilities.len(), 1);
-        assert_eq!(capabilities[0]["status"], "running");
-        assert_eq!(capabilities[0]["startedAt"], "2026-04-07T12:00:00Z");
-        assert_eq!(capabilities[0]["streamingOutput"], "running...");
+        // Tool invocations preserved with full detail
+        let tools = result["toolInvocations"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["status"], "running");
+        assert_eq!(tools[0]["startedAt"], "2026-04-07T12:00:00Z");
+        assert_eq!(tools[0]["streamingOutput"], "running...");
     }
 
     #[test]
@@ -551,13 +550,13 @@ mod tests {
             "Let me think...".into(),
             json!([{
                 "invocationId": "tc_1",
-                "modelPrimitiveName": "execute",
+                "toolName": "test_tool",
                 "status": "generating",
             }]),
             json!([
                 { "type": "thinking", "thinking": "Planning..." },
                 { "type": "text", "text": "Let me think..." },
-                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_1" },
             ]),
         );
 
@@ -566,7 +565,7 @@ mod tests {
         assert_eq!(seq.len(), 3);
         assert_eq!(seq[0]["type"], "thinking");
         assert_eq!(seq[1]["type"], "text");
-        assert_eq!(seq[2]["type"], "capability_ref");
+        assert_eq!(seq[2]["type"], "tool_ref");
 
         // Streaming active
         assert_eq!(result["streaming"]["type"], "text");
@@ -574,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_everything_when_no_capabilities() {
+    fn keeps_everything_when_no_tools() {
         let result = SessionReconstructionService::reconcile_in_flight(
             "Here is my response...".into(),
             json!([]),
@@ -595,75 +594,75 @@ mod tests {
     }
 
     #[test]
-    fn strips_when_mixed_capability_statuses() {
-        // One capability running, one still generating — strip because at least one is executing
+    fn strips_when_mixed_tool_statuses() {
+        // One tool running, one still generating — strip because at least one is executing
         let result = SessionReconstructionService::reconcile_in_flight(
-            "Running capabilities...".into(),
+            "Running tools...".into(),
             json!([
-                { "invocationId": "tc_1", "modelPrimitiveName": "execute", "status": "running" },
-                { "invocationId": "tc_2", "modelPrimitiveName": "inspect", "status": "generating" },
+                { "invocationId": "tc_1", "toolName": "test_tool", "status": "running" },
+                { "invocationId": "tc_2", "toolName": "inspect", "status": "generating" },
             ]),
             json!([
                 { "type": "thinking", "thinking": "Let me run both." },
-                { "type": "text", "text": "Running capabilities..." },
-                { "type": "capability_ref", "invocationId": "tc_1" },
-                { "type": "capability_ref", "invocationId": "tc_2" },
+                { "type": "text", "text": "Running tools..." },
+                { "type": "tool_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_2" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
-        assert_eq!(seq.len(), 2); // Only capability_refs
+        assert_eq!(seq.len(), 2); // Only tool_refs
         assert_eq!(seq[0]["invocationId"], "tc_1");
         assert_eq!(seq[1]["invocationId"], "tc_2");
         assert!(result["streaming"].is_null());
 
-        // Both capability invocations preserved
-        assert_eq!(result["capabilityInvocations"].as_array().unwrap().len(), 2);
+        // Both tool invocations preserved
+        assert_eq!(result["toolInvocations"].as_array().unwrap().len(), 2);
     }
 
     #[test]
-    fn strips_when_capability_completed() {
+    fn strips_when_tool_completed() {
         let result = SessionReconstructionService::reconcile_in_flight(
             "Done.".into(),
             json!([{
                 "invocationId": "tc_1",
-                "modelPrimitiveName": "inspect",
+                "toolName": "inspect",
                 "status": "completed",
                 "result": "file contents...",
                 "completedAt": "2026-04-07T12:00:01Z",
             }]),
             json!([
                 { "type": "text", "text": "Done." },
-                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_1" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 1);
-        assert_eq!(seq[0]["type"], "capability_ref");
+        assert_eq!(seq[0]["type"], "tool_ref");
         assert!(result["streaming"].is_null());
     }
 
     #[test]
-    fn strips_when_capability_errored() {
+    fn strips_when_tool_errored() {
         let result = SessionReconstructionService::reconcile_in_flight(
             "Trying...".into(),
             json!([{
                 "invocationId": "tc_1",
-                "modelPrimitiveName": "execute",
+                "toolName": "test_tool",
                 "status": "error",
                 "isError": true,
                 "result": "command not found",
             }]),
             json!([
                 { "type": "text", "text": "Trying..." },
-                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_1" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 1);
-        assert_eq!(seq[0]["type"], "capability_ref");
+        assert_eq!(seq[0]["type"], "tool_ref");
     }
 
     #[test]
@@ -672,7 +671,7 @@ mod tests {
             "text".into(),
             json!([{
                 "invocationId": "tc_1",
-                "modelPrimitiveName": "execute",
+                "toolName": "test_tool",
                 "status": "running",
                 "arguments": { "command": "sleep 10" },
                 "startedAt": "2026-04-07T12:00:00Z",
@@ -680,22 +679,19 @@ mod tests {
                 "isError": false,
             }]),
             json!([
-                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_1" },
             ]),
         );
 
-        let capability = &result["capabilityInvocations"][0];
-        assert_eq!(capability["startedAt"], "2026-04-07T12:00:00Z");
-        assert_eq!(
-            capability["streamingOutput"],
-            "partial output line 1\nline 2\n"
-        );
-        assert_eq!(capability["arguments"]["command"], "sleep 10");
-        assert_eq!(capability["isError"], false);
+        let tool = &result["toolInvocations"][0];
+        assert_eq!(tool["startedAt"], "2026-04-07T12:00:00Z");
+        assert_eq!(tool["streamingOutput"], "partial output line 1\nline 2\n");
+        assert_eq!(tool["arguments"]["command"], "sleep 10");
+        assert_eq!(tool["isError"], false);
     }
 
     #[test]
-    fn no_streaming_when_text_empty_and_no_capabilities() {
+    fn no_streaming_when_text_empty_and_no_tools() {
         let result = SessionReconstructionService::reconcile_in_flight(
             String::new(),
             json!([]),
@@ -738,26 +734,26 @@ mod tests {
 
     #[test]
     fn strips_multiple_text_and_thinking_blocks() {
-        // Interleaved: thinking, text, capability, text, capability
+        // Interleaved: thinking, text, tool, text, tool
         let result = SessionReconstructionService::reconcile_in_flight(
             "second text".into(),
             json!([
-                { "invocationId": "tc_1", "modelPrimitiveName": "execute", "status": "running" },
-                { "invocationId": "tc_2", "modelPrimitiveName": "inspect", "status": "running" },
+                { "invocationId": "tc_1", "toolName": "test_tool", "status": "running" },
+                { "invocationId": "tc_2", "toolName": "inspect", "status": "running" },
             ]),
             json!([
                 { "type": "thinking", "thinking": "plan A" },
                 { "type": "text", "text": "first text" },
-                { "type": "capability_ref", "invocationId": "tc_1" },
+                { "type": "tool_ref", "invocationId": "tc_1" },
                 { "type": "thinking", "thinking": "plan B" },
                 { "type": "text", "text": "second text" },
-                { "type": "capability_ref", "invocationId": "tc_2" },
+                { "type": "tool_ref", "invocationId": "tc_2" },
             ]),
         );
 
         let seq = result["contentSequence"].as_array().unwrap();
         assert_eq!(seq.len(), 2);
-        assert!(seq.iter().all(|item| item["type"] == "capability_ref"));
+        assert!(seq.iter().all(|item| item["type"] == "tool_ref"));
     }
 
     #[test]
@@ -1067,8 +1063,8 @@ mod tests {
                 turn: 1,
                 stop_reason: "end_turn".into(),
                 token_usage: None,
-                has_capability_invocations: false,
-                capability_invocation_count: 0,
+                has_tool_invocations: false,
+                tool_invocation_count: 0,
                 token_record: None,
                 model: Some("model".into()),
             });

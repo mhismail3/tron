@@ -3,12 +3,12 @@ import Foundation
 // MARK: - Message Extensions
 
 extension ChatMessage {
-    /// Extract the transport invocationId/capability invocation id from this message.
+    /// Extract the transport invocationId/tool invocation id from this message.
     var invocationId: String? {
         switch content {
-        case .capabilityInvocation(let data):
+        case .toolInvocation(let data):
             return data.id
-        case .capabilityResult(let data):
+        case .toolResult(let data):
             return data.id
         default:
             return nil

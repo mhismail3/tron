@@ -12,11 +12,11 @@ struct MessageIndexTests {
         ChatMessage(id: id, role: .assistant, content: .text(text))
     }
 
-    private func makeCapabilityMessage(id: UUID = UUID(), invocationId: String) -> ChatMessage {
+    private func makeToolMessage(id: UUID = UUID(), invocationId: String) -> ChatMessage {
         ChatMessage(
             id: id,
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: invocationId, status: .running))
+            content: .toolInvocation(testToolInvocation(id: invocationId, status: .running))
         )
     }
 
@@ -93,53 +93,53 @@ struct MessageIndexTests {
 
     // MARK: - invocationId index
 
-    @Test("invocationId index tracks capability invocation messages")
-    func invocationIdIndex_tracksCapabilityInvocation() {
+    @Test("invocationId index tracks tool invocation messages")
+    func invocationIdIndex_tracksToolInvocation() {
         let index = MessageIndex()
-        let capability = makeCapabilityMessage(invocationId: "toolu_abc")
+        let tool = makeToolMessage(invocationId: "toolu_abc")
 
-        index.didAppend(capability, at: 0)
+        index.didAppend(tool, at: 0)
 
-        #expect(index.index(forCapabilityInvocationId: "toolu_abc") == 0)
+        #expect(index.index(forToolInvocationId: "toolu_abc") == 0)
     }
 
     @Test("invocationId index removed when message removed")
     func invocationIdIndex_removedOnRemove() {
         let index = MessageIndex()
-        let capability = makeCapabilityMessage(invocationId: "toolu_abc")
+        let tool = makeToolMessage(invocationId: "toolu_abc")
 
-        index.didAppend(capability, at: 0)
-        index.didRemove(capability, at: 0, newTotalCount: 0)
+        index.didAppend(tool, at: 0)
+        index.didRemove(tool, at: 0, newTotalCount: 0)
 
-        #expect(index.index(forCapabilityInvocationId: "toolu_abc") == nil)
+        #expect(index.index(forToolInvocationId: "toolu_abc") == nil)
     }
 
-    @Test("updateMessage removes stale invocation mapping when row stops being capability")
+    @Test("updateMessage removes stale invocation mapping when row stops being tool")
     func updateMessage_removesStaleInvocationMapping() {
-        let capability = makeCapabilityMessage(invocationId: "toolu_abc")
-        let store = MessageStore(messages: [capability])
+        let tool = makeToolMessage(invocationId: "toolu_abc")
+        let store = MessageStore(messages: [tool])
 
-        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_abc") == 0)
+        #expect(store.messageIndex.index(forToolInvocationId: "toolu_abc") == 0)
 
         store.updateMessage(at: 0) { message in
             message.content = .text("done")
         }
 
-        #expect(store.messageIndex.index(for: capability.id) == 0)
-        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_abc") == nil)
+        #expect(store.messageIndex.index(for: tool.id) == 0)
+        #expect(store.messageIndex.index(forToolInvocationId: "toolu_abc") == nil)
     }
 
-    @Test("updateMessage replaces invocation mapping when capability id changes")
+    @Test("updateMessage replaces invocation mapping when tool id changes")
     func updateMessage_replacesInvocationMapping() {
-        let capability = makeCapabilityMessage(invocationId: "toolu_old")
-        let store = MessageStore(messages: [capability])
+        let tool = makeToolMessage(invocationId: "toolu_old")
+        let store = MessageStore(messages: [tool])
 
         store.updateMessage(at: 0) { message in
-            message.content = .capabilityInvocation(testCapabilityInvocation(id: "toolu_new", status: .success))
+            message.content = .toolInvocation(testToolInvocation(id: "toolu_new", status: .success))
         }
 
-        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_old") == nil)
-        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_new") == 0)
+        #expect(store.messageIndex.index(forToolInvocationId: "toolu_old") == nil)
+        #expect(store.messageIndex.index(forToolInvocationId: "toolu_new") == 0)
     }
 
     // MARK: - Edge cases
@@ -150,7 +150,7 @@ struct MessageIndexTests {
         index.rebuild(from: [])
 
         #expect(index.index(for: UUID()) == nil)
-        #expect(index.index(forCapabilityInvocationId: "anything") == nil)
+        #expect(index.index(forToolInvocationId: "anything") == nil)
     }
 
     @Test("handles duplicate ids — last one wins")
@@ -170,15 +170,15 @@ struct MessageIndexTests {
     func clearMessages_clearsIndex() {
         let index = MessageIndex()
         let m1 = makeMessage()
-        let capability = makeCapabilityMessage(invocationId: "toolu_xyz")
+        let tool = makeToolMessage(invocationId: "toolu_xyz")
 
         index.didAppend(m1, at: 0)
-        index.didAppend(capability, at: 1)
+        index.didAppend(tool, at: 1)
 
         index.clear()
 
         #expect(index.index(for: m1.id) == nil)
-        #expect(index.index(forCapabilityInvocationId: "toolu_xyz") == nil)
+        #expect(index.index(forToolInvocationId: "toolu_xyz") == nil)
     }
 
     @Test("index correct after bulk load via rebuild")
@@ -187,7 +187,7 @@ struct MessageIndexTests {
         var messages: [ChatMessage] = []
         for i in 0..<100 {
             if i % 10 == 0 {
-                messages.append(makeCapabilityMessage(invocationId: "inv_\(i)"))
+                messages.append(makeToolMessage(invocationId: "inv_\(i)"))
             } else {
                 messages.append(makeMessage())
             }
@@ -199,9 +199,9 @@ struct MessageIndexTests {
             #expect(index.index(for: msg.id) == i)
         }
 
-        #expect(index.index(forCapabilityInvocationId: "inv_0") == 0)
-        #expect(index.index(forCapabilityInvocationId: "inv_50") == 50)
-        #expect(index.index(forCapabilityInvocationId: "inv_90") == 90)
+        #expect(index.index(forToolInvocationId: "inv_0") == 0)
+        #expect(index.index(forToolInvocationId: "inv_50") == 50)
+        #expect(index.index(forToolInvocationId: "inv_90") == 90)
     }
 
     @Test("didInsertAtFront shifts all existing indices")

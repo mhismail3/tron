@@ -95,7 +95,7 @@ struct InputBar: View {
                 if !config.readOnly {
                     ComposerAttachmentButton(
                         isDisabled: config.agentPhase.isActive || config.readOnly,
-                        attachmentCapability: config.attachmentCapability,
+                        attachmentSupport: config.attachmentSupport,
                         includeRecentInputs: shouldShowRecentInputsMenuAction,
                         onSelect: presentAttachmentAction,
                         buttonSize: actionButtonSize
@@ -122,7 +122,7 @@ struct InputBar: View {
         }
         .sheet(isPresented: $showFilePicker) {
             DocumentPicker(
-                capability: config.attachmentCapability,
+                tool: config.attachmentSupport,
                 onDocumentPicked: addDocumentAttachment,
                 onSizeExceeded: handleDocumentSizeExceeded
             )
@@ -161,7 +161,7 @@ struct InputBar: View {
     private var attachmentArea: some View {
         ContentAreaView(
             attachments: state.attachments,
-            attachmentCapability: config.attachmentCapability,
+            attachmentSupport: config.attachmentSupport,
             onRemoveAttachment: actions.onRemoveAttachment
         )
         .frame(maxWidth: .infinity, alignment: .leading)

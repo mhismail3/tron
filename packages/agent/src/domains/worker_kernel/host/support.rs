@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 use super::super::runtime::WorkerRuntime;
 
@@ -78,7 +78,7 @@ where
     F: FnOnce() -> Result<Value, String> + Send + 'static,
 {
     run_blocking_task(operation, move || {
-        task().map_err(|message| CapabilityError::Internal { message })
+        task().map_err(|message| ToolError::Internal { message })
     })
     .await
     .map_err(|error| error.to_string())

@@ -3,7 +3,7 @@
 //! - [`EventType`]: durable primitive-loop event discriminators.
 //! - [`SessionEvent`]: Flat struct with base fields + opaque `payload` JSON.
 //! - [`payloads`]: Token totals and the two payload validators used before
-//!   capability-invocation persistence.
+//!   tool-invocation persistence.
 //! - [`state`]: reconstructed messages and runtime session state.
 
 pub mod base;

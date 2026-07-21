@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use super::{REPLAY_MANIFEST_FORMAT, canonical_hash};
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 /// Successful offline roundtrip report for one replay manifest.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -69,9 +69,7 @@ pub(crate) struct ReplayRoundtripReferences {
 }
 
 /// Rebuild and verify a canonical replay manifest without side effects.
-pub(crate) fn roundtrip_manifest(
-    manifest: &Value,
-) -> Result<ReplayRoundtripReport, CapabilityError> {
+pub(crate) fn roundtrip_manifest(manifest: &Value) -> Result<ReplayRoundtripReport, ToolError> {
     let manifest_object = object(manifest, "manifest")?;
     let format = required_str(manifest_object, "format", "manifest")?;
     if format != REPLAY_MANIFEST_FORMAT {
@@ -139,7 +137,7 @@ pub(crate) fn roundtrip_manifest(
 
 fn recompute_section_hashes(
     sections: &Map<String, Value>,
-) -> Result<BTreeMap<String, String>, CapabilityError> {
+) -> Result<BTreeMap<String, String>, ToolError> {
     let mut hashes = BTreeMap::new();
     for (name, section) in sections {
         hashes.insert(name.clone(), canonical_hash(section)?);
@@ -169,13 +167,13 @@ fn compare_section_hashes(
     mismatches
 }
 
-fn recompute_replay_hash(manifest: &Value) -> Result<String, CapabilityError> {
+fn recompute_replay_hash(manifest: &Value) -> Result<String, ToolError> {
     let mut without_hash = manifest.clone();
     object_mut(&mut without_hash, "manifest")?.remove("replayHash");
     canonical_hash(&without_hash)
 }
 
-fn count_sections(sections: &Map<String, Value>) -> Result<ReplayRoundtripCounts, CapabilityError> {
+fn count_sections(sections: &Map<String, Value>) -> Result<ReplayRoundtripCounts, ToolError> {
     Ok(ReplayRoundtripCounts {
         session_events: array(sections, "sessionEvents")?.len(),
         provider_audits: array(sections, "providerAudits")?.len(),
@@ -188,7 +186,7 @@ fn count_sections(sections: &Map<String, Value>) -> Result<ReplayRoundtripCounts
 fn validate_cross_record_references(
     sections: &Map<String, Value>,
     session_id: &str,
-) -> Result<ReplayRoundtripReferences, CapabilityError> {
+) -> Result<ReplayRoundtripReferences, ToolError> {
     let session_events = array(sections, "sessionEvents")?;
     let provider_audits = array(sections, "providerAudits")?;
     let idempotency_entries = array(sections, "engineIdempotencyEntries")?;
@@ -342,17 +340,14 @@ fn invocation_reference_key(invocation: &Value, key: &str) -> Option<String> {
     ))
 }
 
-fn array<'a>(
-    sections: &'a Map<String, Value>,
-    key: &str,
-) -> Result<&'a Vec<Value>, CapabilityError> {
+fn array<'a>(sections: &'a Map<String, Value>, key: &str) -> Result<&'a Vec<Value>, ToolError> {
     sections
         .get(key)
         .and_then(Value::as_array)
         .ok_or_else(|| invalid(format!("sections.{key} must be an array")))
 }
 
-fn object<'a>(value: &'a Value, label: &str) -> Result<&'a Map<String, Value>, CapabilityError> {
+fn object<'a>(value: &'a Value, label: &str) -> Result<&'a Map<String, Value>, ToolError> {
     value
         .as_object()
         .ok_or_else(|| invalid(format!("{label} must be an object")))
@@ -361,7 +356,7 @@ fn object<'a>(value: &'a Value, label: &str) -> Result<&'a Map<String, Value>, C
 fn object_mut<'a>(
     value: &'a mut Value,
     label: &str,
-) -> Result<&'a mut Map<String, Value>, CapabilityError> {
+) -> Result<&'a mut Map<String, Value>, ToolError> {
     value
         .as_object_mut()
         .ok_or_else(|| invalid(format!("{label} must be an object")))
@@ -371,7 +366,7 @@ fn required_str<'a>(
     object: &'a Map<String, Value>,
     key: &str,
     label: &str,
-) -> Result<&'a str, CapabilityError> {
+) -> Result<&'a str, ToolError> {
     object
         .get(key)
         .and_then(Value::as_str)
@@ -392,8 +387,8 @@ fn display_id(value: &Value) -> String {
     "<unknown>".to_owned()
 }
 
-fn invalid(message: impl Into<String>) -> CapabilityError {
-    CapabilityError::InvalidParams {
+fn invalid(message: impl Into<String>) -> ToolError {
+    ToolError::InvalidParams {
         message: message.into(),
     }
 }

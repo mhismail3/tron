@@ -3,7 +3,7 @@
 //! Source domains declare one function contract. Building it produces the exact
 //! [`FunctionDefinition`] registered with the engine; handler binding derives
 //! the local operation key from the canonical function id. Startup retains no
-//! second capability catalog or transport-policy mirror.
+//! second tool catalog or transport-policy mirror.
 
 use serde_json::Value;
 

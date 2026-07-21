@@ -28,8 +28,8 @@ enum MessageContent: Equatable {
     case text(String)
     case streaming(String)
     case thinking(visible: String, isExpanded: Bool, isStreaming: Bool, kind: ThinkingDisplayKind)
-    case capabilityInvocation(CapabilityInvocationData)
-    case capabilityResult(CapabilityInvocationResultData)
+    case toolInvocation(ToolInvocationData)
+    case toolResult(ToolInvocationResultData)
     case error(String)
     case images([ImageContent])
     case attachments([Attachment])
@@ -93,9 +93,9 @@ enum MessageContent: Equatable {
             return text
         case .thinking(let visible, _, _, _):
             return visible
-        case .capabilityInvocation(let invocation):
+        case .toolInvocation(let invocation):
             return "[\(invocation.displayName)]"
-        case .capabilityResult(let result):
+        case .toolResult(let result):
             return result.content
         case .error(let message):
             return message
@@ -123,9 +123,9 @@ enum MessageContent: Equatable {
         }
     }
 
-    var isCapabilityRelated: Bool {
+    var isToolRelated: Bool {
         switch self {
-        case .capabilityInvocation, .capabilityResult:
+        case .toolInvocation, .toolResult:
             return true
         default:
             return false

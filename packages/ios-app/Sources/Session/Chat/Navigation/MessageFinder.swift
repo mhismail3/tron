@@ -18,22 +18,22 @@ enum MessageFinder {
         messages.firstIndex(where: { $0.eventId == eventId })
     }
 
-    // MARK: - By Capability Invocation ID
+    // MARK: - By Tool Invocation ID
 
     /// Find LAST message index with matching invocation id.
-    static func lastIndexOfCapabilityInvocation(id: String, in messages: [ChatMessage]) -> Int? {
+    static func lastIndexOfToolInvocation(id: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
-            if case .capabilityInvocation(let invocation) = message.content {
+            if case .toolInvocation(let invocation) = message.content {
                 return invocation.id == id
             }
             return false
         })
     }
 
-    /// Find LAST orphan capability result with matching invocation id.
-    static func lastIndexOfCapabilityResult(id: String, in messages: [ChatMessage]) -> Int? {
+    /// Find LAST orphan tool result with matching invocation id.
+    static func lastIndexOfToolResult(id: String, in messages: [ChatMessage]) -> Int? {
         messages.lastIndex(where: { message in
-            if case .capabilityResult(let result) = message.content {
+            if case .toolResult(let result) = message.content {
                 return result.id == id
             }
             return false
@@ -41,12 +41,12 @@ enum MessageFinder {
     }
 
     /// Check if a message with this invocation id already exists.
-    static func hasCapabilityInvocationMessage(invocationId: String, in messages: [ChatMessage]) -> Bool {
+    static func hasToolInvocationMessage(invocationId: String, in messages: [ChatMessage]) -> Bool {
         messages.contains(where: { message in
             switch message.content {
-            case .capabilityInvocation(let invocation):
+            case .toolInvocation(let invocation):
                 return invocation.id == invocationId
-            case .capabilityResult(let result):
+            case .toolResult(let result):
                 return result.id == invocationId
             default:
                 return false

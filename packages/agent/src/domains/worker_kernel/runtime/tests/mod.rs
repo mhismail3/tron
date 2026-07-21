@@ -108,7 +108,7 @@ print(json.dumps({
             schema_version: super::super::types::BUNDLE_SCHEMA.to_owned(),
             worker_id: Some("last30days-research".to_owned()),
             name: "Last 30 Days Research".to_owned(),
-            description: "Research a topic across sources published in the last 30 days with citations and graceful credential fallback".to_owned(),
+            description: "Research a topic across sources published in the last 30 days with citations and graceful behavior when optional credentials are absent".to_owned(),
             tool_name: Some("worker_last30days_research".to_owned()),
             input_schema: json!({
                 "type":"object",

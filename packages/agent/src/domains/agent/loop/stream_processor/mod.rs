@@ -6,7 +6,7 @@
 //! `process_stream` entry point that drives the `tokio::select!` loop.
 //! Final results normalize provider terminal metadata against accumulated
 //! content so persisted replay cannot claim `end_turn` while carrying a
-//! finalized capability invocation. Provider and journal failures return a
+//! finalized tool invocation. Provider and journal failures return a
 //! [`StreamFailure`] containing the content accumulated before the error; the
 //! turn runner owns atomic partial-message plus failure persistence.
 

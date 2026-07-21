@@ -15,12 +15,12 @@ final class InputBarState {
 
     var reasoningLevel: String = "medium"
 
-    /// Remove attachments incompatible with the given capability.
+    /// Remove attachments incompatible with the given tool.
     /// Returns count of removed attachments.
     @discardableResult
-    func removeIncompatibleAttachments(for capability: AttachmentCapability) -> Int {
+    func removeIncompatibleAttachments(for tool: AttachmentSupport) -> Int {
         let before = attachments.count
-        attachments.removeAll { !$0.isCompatible(with: capability) }
+        attachments.removeAll { !$0.isCompatible(with: tool) }
         return before - attachments.count
     }
 
@@ -120,9 +120,9 @@ struct InputBarConfig {
     var providerImageLimits: ProviderImageLimits {
         currentModelInfo?.providerImageLimits ?? .default
     }
-    /// Attachment capability derived from current model.
-    var attachmentCapability: AttachmentCapability {
-        AttachmentCapability.from(model: currentModelInfo)
+    /// Attachment tool derived from current model.
+    var attachmentSupport: AttachmentSupport {
+        AttachmentSupport.from(model: currentModelInfo)
     }
 
     // MARK: - Drag Hint

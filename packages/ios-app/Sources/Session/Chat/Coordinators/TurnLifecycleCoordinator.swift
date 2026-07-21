@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Responsibilities:
 /// - Handling turn start/response-complete/end events
-/// - Managing turn state (tracking indices, capability invocations)
+/// - Managing turn state (tracking indices, tool invocations)
 /// - Marking the server-identified final response and attaching its metadata
 /// - Coordinating with ThinkingState, ContextState
 /// - Managing completion state cleanup
@@ -45,20 +45,20 @@ final class TurnLifecycleCoordinator {
         // Notify ThinkingState of new turn (clears previous turn's thinking for sheet)
         context.startThinkingTurn(pluginResult.turnNumber, model: context.currentModel)
 
-        // Clear capability tracking for the new turn
-        if !context.currentTurnCapabilityMessageIds.isEmpty {
-            context.logDebug("Clearing \(context.currentTurnCapabilityMessageIds.count) capability message references from previous turn")
-            context.currentTurnCapabilityMessageIds.removeAll()
+        // Clear tool tracking for the new turn
+        if !context.currentTurnToolMessageIds.isEmpty {
+            context.logDebug("Clearing \(context.currentTurnToolMessageIds.count) tool message references from previous turn")
+            context.currentTurnToolMessageIds.removeAll()
         }
 
-        // Notify UIUpdateQueue of turn boundary (resets capability ordering)
+        // Notify UIUpdateQueue of turn boundary (resets tool ordering)
         context.enqueueTurnBoundary(UIUpdateQueue.TurnBoundaryData(
             turnNumber: pluginResult.turnNumber,
             isStart: true
         ))
 
-        // Reset AnimationCoordinator capability state for new turn
-        context.resetAnimationCoordinatorCapabilityState()
+        // Reset AnimationCoordinator tool state for new turn
+        context.resetAnimationCoordinatorToolState()
 
         // Track turn boundary for multi-turn metadata assignment
         context.turnStartMessageIndex = context.messages.count
@@ -71,16 +71,16 @@ final class TurnLifecycleCoordinator {
     /// Mark the textual response that ends the current prompt cycle.
     ///
     /// Provider stop reasons are not finality: a provider may report
-    /// `end_turn` while also returning capability invocations. A completed
+    /// `end_turn` while also returning tool invocations. A completed
     /// response with zero invocations is the conservative server-backed signal
     /// for a clean final textual response.
     func handleResponseComplete(
         _ pluginResult: AgentResponseCompletePlugin.Result,
         context: TurnLifecycleContext
     ) {
-        guard !pluginResult.hasCapabilityInvocations else {
+        guard !pluginResult.hasToolInvocations else {
             context.logDebug(
-                "Response for turn \(pluginResult.turnNumber) includes \(pluginResult.capabilityInvocationCount) capability invocation(s); omitting final-response metadata"
+                "Response for turn \(pluginResult.turnNumber) includes \(pluginResult.toolInvocationCount) tool invocation(s); omitting final-response metadata"
             )
             return
         }
@@ -146,7 +146,7 @@ final class TurnLifecycleCoordinator {
         }
 
         // Only the response previously marked by the server's exact
-        // response-complete capability signal may own presentation metadata.
+        // response-complete tool signal may own presentation metadata.
         if let index = finalResponseIndex(
             for: pluginResult.turnNumber,
             in: context
@@ -278,9 +278,9 @@ final class TurnLifecycleCoordinator {
         streamingText: String,
         context: TurnLifecycleContext
     ) {
-        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, capabilityInvocations: \(context.currentTurnCapabilityMessageIds.count))")
+        context.logInfo("Agent complete, finalizing message (streamingText: \(streamingText.count) chars, toolInvocations: \(context.currentTurnToolMessageIds.count))")
 
-        // Flush any pending UI updates to ensure all capability results are displayed
+        // Flush any pending UI updates to ensure all tool results are displayed
         context.flushUIUpdateQueue()
         context.flushPendingTextUpdates()
 
@@ -293,11 +293,11 @@ final class TurnLifecycleCoordinator {
             lastAssistantResponse: streamingText.isEmpty ? nil : String(streamingText.prefix(200))
         )
 
-        context.currentTurnCapabilityMessageIds.removeAll()
+        context.currentTurnToolMessageIds.removeAll()
 
         // Reset all manager states
         context.resetUIUpdateQueue()
-        context.resetAnimationCoordinatorCapabilityState()
+        context.resetAnimationCoordinatorToolState()
         context.resetStreamingManager()
     }
 }

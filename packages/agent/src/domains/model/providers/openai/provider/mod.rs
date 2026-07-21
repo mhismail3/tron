@@ -32,7 +32,7 @@ use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
 use super::message_converter::{
-    convert_to_responses_input, convert_tools_v2, generate_capability_instruction_text,
+    convert_to_responses_input, convert_tools_v2, generate_tool_instruction_text,
 };
 use super::stream_handler::{create_stream_state, process_provider_stream_event};
 use super::types::{
@@ -406,7 +406,7 @@ impl OpenAIProvider {
     fn build_instructions(
         context: &Context,
         options: &ProviderStreamOptions,
-        include_capability_guidance: bool,
+        include_tool_guidance: bool,
     ) -> Option<String> {
         let mut parts = Vec::new();
 
@@ -426,11 +426,11 @@ impl OpenAIProvider {
                 .filter(|text| !text.is_empty()),
         );
 
-        if include_capability_guidance
-            && let Some(ref ctx_capabilities) = context.capabilities
-            && !ctx_capabilities.is_empty()
+        if include_tool_guidance
+            && let Some(ref ctx_tools) = context.tools
+            && !ctx_tools.is_empty()
         {
-            parts.push(generate_capability_instruction_text(ctx_capabilities));
+            parts.push(generate_tool_instruction_text(ctx_tools));
         }
 
         if parts.is_empty() {
@@ -470,13 +470,12 @@ impl OpenAIProvider {
     ) -> ResponsesRequest {
         let reasoning_effort = self.resolve_reasoning_effort(options);
         let active_profile = self.active_profile();
-        let supports_capabilities =
-            active_profile.is_none_or(|profile| profile.supports_capabilities);
+        let supports_tools = active_profile.is_none_or(|profile| profile.supports_tools);
         let input = Self::build_input(context);
-        let capabilities = context
-            .capabilities
+        let tools = context
+            .tools
             .as_ref()
-            .filter(|_| supports_capabilities)
+            .filter(|_| supports_tools)
             .map(|t| convert_tools_v2(t));
         let reasoning = self
             .active_profile()
@@ -489,11 +488,11 @@ impl OpenAIProvider {
         ResponsesRequest {
             model: openai_request_model_id(&self.config.model),
             input,
-            instructions: Self::build_instructions(context, options, supports_capabilities),
+            instructions: Self::build_instructions(context, options, supports_tools),
             stream: true,
             store: false,
             temperature: options.temperature,
-            capabilities,
+            tools,
             max_output_tokens: self.resolve_max_output_tokens(options),
             reasoning,
             text: self.resolve_text_config(),
@@ -521,7 +520,7 @@ impl OpenAIProvider {
         debug!(
             model = %self.config.model,
             message_count = context.messages.len(),
-            tool_count = context.capabilities.as_ref().map_or(0, Vec::len),
+            tool_count = context.tools.as_ref().map_or(0, Vec::len),
             "Starting OpenAI stream"
         );
 

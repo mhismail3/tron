@@ -321,7 +321,7 @@ fn contributor_binary_recovery_has_one_service_owner() {
         service_start,
         "ensure_prod_binary",
         "launchd_restart \"$PLIST_NAME\"",
-        "contributor fallback must remain owned by the shared service start path",
+        "the contributor start path must remain owned by the shared service owner",
     );
     assert_order(
         service_start,
@@ -1078,12 +1078,11 @@ fn runtime_command_help_has_one_shared_owner() {
         .collect::<Vec<_>>()
         .join(" ");
     assert_eq!(
-        dispatcher_commands,
-        "status start stop restart uninstall logs errors rollback login auth state",
+        dispatcher_commands, "status start stop restart uninstall logs errors rollback login auth",
         "runtime dispatcher inventory drifted"
     );
     let expected_help_commands =
-        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate|state"
+        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate"
             .split('|')
             .collect::<Vec<_>>();
     assert_eq!(

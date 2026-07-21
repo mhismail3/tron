@@ -48,5 +48,5 @@ fn session_start() -> SessionEvent {
     )
 }
 
-mod basic_capability;
+mod basic_tool;
 mod multimodal_performance;

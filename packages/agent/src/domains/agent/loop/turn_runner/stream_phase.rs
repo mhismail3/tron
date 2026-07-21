@@ -186,7 +186,7 @@ pub(super) async fn process_provider_stream(
         provider = provider_name,
         model = %model_name,
         stop_reason = %stream_result.stop_reason,
-        capability_invocation_count = stream_result.capability_invocations.len(),
+        tool_invocation_count = stream_result.tool_invocations.len(),
         has_token_usage = stream_result.token_usage.is_some(),
         ttft_ms = stream_result.ttft_ms.unwrap_or_default(),
         interrupted = stream_result.interrupted,

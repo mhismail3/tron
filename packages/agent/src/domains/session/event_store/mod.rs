@@ -13,8 +13,8 @@
 //!   digest evidence persisted before model streams without duplicating bulk media
 //! - **Logs**: bounded operational log queries
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
-//!   history, preserving separate client display text and model-facing capability result text
-//! - **Migrations**: Version-tracked SQL schema evolution
+//!   history, preserving separate client display text and model-facing tool result text
+//! - **Schema**: Transactional installation of the one current SQL shape
 //!
 //! ## Submodules
 //!
@@ -23,7 +23,7 @@
 //! | `envelope` | Broadcast envelope creation and event type cataloging. |
 //! | `identity` | Explicit event/session/workspace identities for replay-critical constructors. |
 //! | `reconstruction` | Provider-context reconstruction from persisted event history. |
-//! | `sqlite` | Connection, migration, repository, lock, and row-type boundary. |
+//! | `sqlite` | Connection, schema, repository, lock, and row-type boundary. |
 //! | `store` | High-level transactional `EventStore` facade. |
 //! | `trace` | Agent trace record types and query options. |
 //! | `types` | Event payload, state, token, and generated event definitions. |
@@ -48,7 +48,7 @@
 //!
 //! - This root uses normal folder-backed modules only and must not hide
 //!   ownership behind `#[path]` aliases.
-//! - SQLite row shape and migrations stay under the SQLite owner.
+//! - SQLite row shape and schema installation stay under the SQLite owner.
 //! - Public event DTOs stay shared-protocol-owned; crate-private session-list
 //!   projections are not reexported through the persistence owner.
 //! - Reconstruction is deterministic over persisted event order.
@@ -102,8 +102,8 @@ pub use sqlite::repositories::event::ListEventsOptions;
 pub use sqlite::repositories::session::ListSessionsOptions;
 pub use sqlite::row_types::{BlobRow, EventRow, SessionRow, WorkspaceRow};
 pub use sqlite::{
-    ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,
-    acquire_database_lock, check_integrity, new_file, new_in_memory, run_migrations,
+    ConnectionConfig, ConnectionPool, DatabaseLock, LockError, PooledConnection,
+    acquire_database_lock, check_integrity, ensure_schema, new_file, new_in_memory,
 };
 pub(crate) use store::AppendBatchItem;
 pub use store::{

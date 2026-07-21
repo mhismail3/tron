@@ -43,7 +43,7 @@ extension SessionEvent {
                 let friendly: String
                 switch stopReason {
                 case "end_turn": friendly = "Completed"
-                case "capability_invocation": friendly = "Capability invocation"
+                case "tool_invocation": friendly = "Tool invocation"
                 case "max_tokens": friendly = "Max tokens"
                 case "interrupted": friendly = "Interrupted"
                 default: friendly = stopReason
@@ -71,10 +71,10 @@ extension SessionEvent {
 
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
 
-        case .capabilityInvocationStarted:
-            let name = (payload["modelPrimitiveName"]?.value as? String) ?? "unknown"
+        case .toolInvocationStarted:
+            let name = (payload["toolName"]?.value as? String) ?? "unknown"
             let turn = (payload["turn"]?.value as? Int) ?? 0
-            var lines = ["Capability: \(name)", "Turn: \(turn)"]
+            var lines = ["Tool: \(name)", "Turn: \(turn)"]
 
             // Format arguments if present and not too long
             if let args = payload["arguments"]?.value {
@@ -85,7 +85,7 @@ extension SessionEvent {
             }
             return lines.joined(separator: "\n")
 
-        case .capabilityInvocationCompleted:
+        case .toolInvocationCompleted:
             var lines: [String] = []
 
             // Duration

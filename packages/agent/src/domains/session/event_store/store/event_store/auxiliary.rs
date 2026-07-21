@@ -59,8 +59,7 @@ mod tests {
         .expect("pool");
         let store = EventStore::new(pool);
         let conn = store.conn().expect("conn");
-        crate::domains::session::event_store::sqlite::migrations::run_migrations(&conn)
-            .expect("migrate");
+        crate::domains::session::event_store::sqlite::schema::ensure_schema(&conn).expect("schema");
         let blob_id = store
             .store_blob(b"hello", "text/plain")
             .expect("store blob");

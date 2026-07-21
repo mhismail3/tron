@@ -5,13 +5,13 @@ enum ContentBlockType: String {
     case text
     case image
     case document
-    case capabilityInvocation = "capability_invocation"
-    case capabilityResult = "capability_result"
+    case toolInvocation = "tool_invocation"
+    case toolResult = "tool_result"
     case thinking
 }
 
-/// Model capability lifecycle states restored into the live timeline.
-enum CapabilityInvocationStatusDTO: String {
+/// Model tool lifecycle states restored into the live timeline.
+enum ToolInvocationStatusDTO: String {
     case generating
     case running
     case completed
@@ -21,7 +21,7 @@ enum CapabilityInvocationStatusDTO: String {
 /// Provider stop reasons stored with assistant messages.
 enum StopReason: String {
     case endTurn = "end_turn"
-    case capabilityInvocation = "capability_invocation"
+    case toolInvocation = "tool_invocation"
     case maxTokens = "max_tokens"
     case stopSequence = "stop_sequence"
 }

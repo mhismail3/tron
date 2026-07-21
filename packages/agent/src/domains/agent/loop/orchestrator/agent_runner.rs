@@ -204,34 +204,33 @@ mod tests {
         ]
     }
 
-    fn capability_events() -> Vec<Result<StreamEvent, ModelResponseError>> {
+    fn tool_events() -> Vec<Result<StreamEvent, ModelResponseError>> {
         let mut arguments = serde_json::Map::new();
         let _ = arguments.insert("operation".to_owned(), serde_json::json!("observe"));
         let _ = arguments.insert("input".to_owned(), serde_json::json!("lifecycle test"));
         vec![
             Ok(StreamEvent::Start),
-            Ok(StreamEvent::CapabilityInvocationDraftStart {
+            Ok(StreamEvent::ToolInvocationDraftStart {
                 invocation_id: "call-lifecycle".to_owned(),
-                name: "execute".to_owned(),
+                name: "test_tool".to_owned(),
             }),
-            Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            Ok(StreamEvent::ToolInvocationDraftDelta {
                 invocation_id: "call-lifecycle".to_owned(),
                 arguments_delta: serde_json::to_string(&arguments).unwrap(),
             }),
-            Ok(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation:
-                    crate::shared::protocol::messages::CapabilityInvocationDraft::new(
-                        "call-lifecycle",
-                        "execute",
-                        arguments,
-                    ),
+            Ok(StreamEvent::ToolInvocationDraftEnd {
+                tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
+                    "call-lifecycle",
+                    "test_tool",
+                    arguments,
+                ),
             }),
             Ok(StreamEvent::Done {
                 message: AssistantMessage {
                     content: Vec::new(),
                     token_usage: None,
                 },
-                stop_reason: "capability_invocation".to_owned(),
+                stop_reason: "tool_invocation".to_owned(),
             }),
         ]
     }
@@ -341,14 +340,14 @@ mod tests {
     async fn cancelled_turn_uses_session_ordinal_and_row_backed_sequence() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
         use crate::shared::server::failure::RUNTIME_CANCELLED;
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -424,13 +423,13 @@ mod tests {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -510,13 +509,13 @@ mod tests {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -604,13 +603,13 @@ mod tests {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -701,13 +700,13 @@ mod tests {
     async fn cancellation_before_stream_open_terminalizes_current_turn_once() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -759,13 +758,13 @@ mod tests {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TRIGGER fail_partial_cancel_terminal
                  BEFORE INSERT ON events
@@ -817,13 +816,13 @@ mod tests {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TRIGGER fail_turn_end
                  BEFORE INSERT ON events
@@ -878,33 +877,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_capability_start_batch_fails_run_and_retains_recovery_journal() {
+    async fn failed_tool_start_batch_fails_run_and_retains_recovery_journal() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
             conn.execute_batch(
-                "CREATE TRIGGER fail_capability_start
+                "CREATE TRIGGER fail_tool_start
                  BEFORE INSERT ON events
-                 WHEN NEW.type = 'capability.invocation.started'
+                 WHEN NEW.type = 'tool.invocation.started'
                  BEGIN
-                   SELECT RAISE(FAIL, 'forced capability-start failure');
+                   SELECT RAISE(FAIL, 'forced tool-start failure');
                  END;",
             )
             .unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
-            .create_session("mock", "/tmp", Some("capability start failure"), None)
+            .create_session("mock", "/tmp", Some("tool start failure"), None)
             .unwrap();
         let (mut agent, _journal) = make_agent_with_responder_for_session(
-            Arc::new(StreamBackedResponder::new(capability_events())),
+            Arc::new(StreamBackedResponder::new(tool_events())),
             session.session.id.clone(),
         );
         agent.set_persister(Some(Arc::new(EventPersister::new(Arc::clone(&store)))));
@@ -914,7 +913,7 @@ mod tests {
 
         let result = run_agent(
             &mut agent,
-            "use a capability",
+            "use a tool",
             run_context(),
             &Arc::new(EventEmitter::new()),
             Some(counter),
@@ -938,13 +937,13 @@ mod tests {
             1
         );
         assert!(rows.iter().all(|row| {
-            row.event_type != "capability.invocation.started"
-                && row.event_type != "capability.invocation.completed"
+            row.event_type != "tool.invocation.started"
+                && row.event_type != "tool.invocation.completed"
                 && row.event_type != "stream.turn_end"
         }));
         assert!(
             StreamingJournal::journal_path(&session.session.id, 1).exists(),
-            "incomplete capability lifecycle must remain recoverable on restart"
+            "incomplete tool lifecycle must remain recoverable on restart"
         );
     }
 
@@ -952,13 +951,13 @@ mod tests {
     async fn failed_turn_start_stops_before_provider_execution() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TRIGGER fail_turn_start
                  BEFORE INSERT ON events
@@ -1017,13 +1016,13 @@ mod tests {
     async fn failed_cancellation_terminalization_is_not_reported_as_interrupted_success() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TRIGGER fail_cancel_terminal
                  BEFORE INSERT ON events
@@ -1125,13 +1124,13 @@ mod tests {
     async fn provider_request_audit_persist_failure_prevents_model_response() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TRIGGER fail_model_provider_request
                  BEFORE INSERT ON events
@@ -1197,13 +1196,13 @@ mod tests {
     async fn provider_request_audit_persists_before_assistant_message() {
         use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
         use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::sqlite::schema::ensure_schema;
         use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store

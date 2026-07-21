@@ -7,7 +7,7 @@ use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager
 use crate::domains::model::responder::{ModelResponder, ModelResponderFactory, ModelResponseError};
 use crate::domains::session::event_store::{
     AppendOptions, ConnectionConfig, ConnectionPool, EventStore, EventType, ListEventsOptions,
-    new_in_memory, run_migrations,
+    ensure_schema, new_in_memory,
 };
 use crate::shared::protocol::events::TronEvent;
 use crate::shared::server::errors::EVENT_STORE_FAILURE;
@@ -55,7 +55,7 @@ impl PromptFailureHarness {
         .expect("event pool");
         {
             let conn = pool.get().expect("event connection");
-            run_migrations(&conn).expect("event migrations");
+            ensure_schema(&conn).expect("event schema");
         }
         let event_store = Arc::new(EventStore::new(pool.clone()));
         let session = event_store
@@ -238,7 +238,7 @@ async fn session_reconstruction_failure_never_substitutes_empty_history() {
 }
 
 #[tokio::test]
-async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits() {
+async fn unresolved_prior_tool_blocks_prompt_until_atomic_repair_commits() {
     let harness = PromptFailureHarness::new();
     for (event_type, payload) in [
         (EventType::StreamTurnStart, serde_json::json!({"turn": 1})),
@@ -247,21 +247,21 @@ async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits()
             serde_json::json!({
                 "turn": 1,
                 "content": [{
-                    "type": "capability_invocation",
+                    "type": "tool_invocation",
                     "id": "call-unresolved",
-                    "name": "execute",
+                    "name": "test_tool",
                     "arguments": {"operation": "observe"}
                 }],
                 "model": "mock",
-                "stopReason": "capability_invocation"
+                "stopReason": "tool_invocation"
             }),
         ),
         (
-            EventType::CapabilityInvocationStarted,
+            EventType::ToolInvocationStarted,
             serde_json::json!({
                 "turn": 1,
                 "invocationId": "call-unresolved",
-                "name": "execute",
+                "toolName": "test_tool",
                 "arguments": {"operation": "observe"}
             }),
         ),
@@ -269,7 +269,7 @@ async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits()
             EventType::TurnFailed,
             serde_json::json!({
                 "turn": 1,
-                "error": "capability terminal persistence failed"
+                "error": "tool terminal persistence failed"
             }),
         ),
     ] {
@@ -282,22 +282,22 @@ async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits()
                 parent_id: None,
                 sequence: None,
             })
-            .expect("seed failed capability turn");
+            .expect("seed failed tool turn");
     }
     {
         let conn = harness.pool.get().expect("event connection");
         conn.execute_batch(
-            "CREATE TRIGGER reject_capability_repair
+            "CREATE TRIGGER reject_tool_repair
              BEFORE INSERT ON events
-             WHEN NEW.type = 'capability.invocation.completed'
+             WHEN NEW.type = 'tool.invocation.completed'
              BEGIN
-               SELECT RAISE(FAIL, 'forced capability repair rejection');
+               SELECT RAISE(FAIL, 'forced tool repair rejection');
              END;",
         )
         .expect("repair rejection trigger");
     }
 
-    let mut blocked = harness.execute("run-blocked-by-prior-capability").await;
+    let mut blocked = harness.execute("run-blocked-by-prior-tool").await;
 
     harness.assert_stopped_before_provider(&blocked);
     let blocked_rows = harness
@@ -313,7 +313,7 @@ async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits()
     assert!(
         blocked_rows
             .iter()
-            .all(|row| { row.event_type != EventType::CapabilityInvocationCompleted.as_str() }),
+            .all(|row| { row.event_type != EventType::ToolInvocationCompleted.as_str() }),
         "failed repair must leave no partial terminal row"
     );
     assert_eq!(
@@ -323,10 +323,10 @@ async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits()
 
     {
         let conn = harness.pool.get().expect("event connection");
-        conn.execute_batch("DROP TRIGGER reject_capability_repair;")
+        conn.execute_batch("DROP TRIGGER reject_tool_repair;")
             .expect("remove repair rejection");
     }
-    let mut admitted = harness.execute("run-after-capability-repair").await;
+    let mut admitted = harness.execute("run-after-tool-repair").await;
 
     assert_eq!(
         harness.create_calls.load(Ordering::SeqCst),
@@ -349,13 +349,13 @@ async fn unresolved_prior_capability_blocks_prompt_until_atomic_repair_commits()
     let repaired = repaired_rows
         .iter()
         .find(|row| {
-            row.event_type == EventType::CapabilityInvocationCompleted.as_str()
+            row.event_type == EventType::ToolInvocationCompleted.as_str()
                 && row.invocation_id.as_deref() == Some("call-unresolved")
         })
-        .expect("durable repaired capability completion");
+        .expect("durable repaired tool completion");
     let live_repair = std::iter::from_fn(|| admitted.events.try_recv().ok())
         .find_map(|event| match event {
-            TronEvent::CapabilityInvocationCompleted {
+            TronEvent::ToolInvocationCompleted {
                 base,
                 invocation_id,
                 result,

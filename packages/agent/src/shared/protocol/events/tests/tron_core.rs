@@ -83,34 +83,31 @@ fn tron_event_turn_failed() {
 }
 
 #[test]
-fn tron_event_capability_invocation_started() {
-    let e = TronEvent::CapabilityInvocationStarted {
+fn tron_event_tool_invocation_started() {
+    let e = TronEvent::ToolInvocationStarted {
         base: BaseEvent::now("s1"),
         invocation_id: "tc-1".into(),
-        model_primitive_name: "execute".into(),
+        tool_name: "filesystem_write".into(),
         arguments: None,
-        capability_identity: CapabilityEventIdentity {
-            model_primitive_name: Some("execute".into()),
-            operation_name: Some("file_write".into()),
+        tool_identity: ToolEventIdentity {
             trace_id: Some("trace-test".into()),
             root_invocation_id: Some("root-test".into()),
             theme_color: Some("#10B981".into()),
             presentation_hints: Some(serde_json::json!({
-                "displayName": "Execute",
-                "chipTitle": "Execute",
+                "displayName": "Write File",
+                "chipTitle": "Write File",
                 "icon": "terminal",
                 "themeColor": "#10B981"
             })),
         },
     };
-    assert!(e.is_capability_invocation());
+    assert!(e.is_tool_invocation());
     let json = serde_json::to_value(&e).unwrap();
-    assert_eq!(json["modelPrimitiveName"], "execute");
-    assert_eq!(json["operationName"], "file_write");
+    assert_eq!(json["toolName"], "filesystem_write");
     assert_eq!(json["traceId"], "trace-test");
     assert_eq!(json["rootInvocationId"], "root-test");
     assert_eq!(json["themeColor"], "#10B981");
-    assert_eq!(json["presentationHints"]["displayName"], "Execute");
+    assert_eq!(json["presentationHints"]["displayName"], "Write File");
     assert_eq!(json["presentationHints"]["icon"], "terminal");
 }
 

@@ -34,16 +34,16 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
         }
     }
 
-    // MARK: - buildCapabilityInvocationMaps Tests
+    // MARK: - buildToolInvocationMaps Tests
 
-    func testBuildCapabilityMapsCollectsCapabilityInvocationsAndResults() {
+    func testBuildToolMapsCollectsToolInvocationsAndResults() {
         let events = [
             rawEvent(
                 id: "e1",
-                type: "capability.invocation.started",
+                type: "tool.invocation.started",
                 payload: [
                     "invocationId": AnyCodable("tc1"),
-                    "modelPrimitiveName": AnyCodable("execute"),
+                    "toolName": AnyCodable("process_run"),
                     "arguments": AnyCodable("{\"path\":\"/test\"}"),
                     "turn": AnyCodable(1)
                 ],
@@ -51,7 +51,7 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
             ),
             rawEvent(
                 id: "e2",
-                type: "capability.invocation.completed",
+                type: "tool.invocation.completed",
                 payload: [
                     "invocationId": AnyCodable("tc1"),
                     "content": AnyCodable("file content"),
@@ -62,30 +62,30 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
+        let maps = UnifiedEventTransformer.buildToolInvocationMaps(from: events)
 
         XCTAssertEqual(maps.startedInvocations.count, 1)
         XCTAssertEqual(maps.completedInvocations.count, 1)
-        XCTAssertEqual(maps.startedInvocations["tc1"]?.name, "execute")
+        XCTAssertEqual(maps.startedInvocations["tc1"]?.name, "process_run")
         XCTAssertEqual(maps.completedInvocations["tc1"]?.invocationId, "tc1")
         XCTAssertEqual(maps.completedInvocations["tc1"]?.durationMs, 42)
     }
 
-    func testBuildCapabilityMapsEmptyEvents() {
-        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: [RawEvent]())
+    func testBuildToolMapsEmptyEvents() {
+        let maps = UnifiedEventTransformer.buildToolInvocationMaps(from: [RawEvent]())
 
         XCTAssertTrue(maps.startedInvocations.isEmpty)
         XCTAssertTrue(maps.completedInvocations.isEmpty)
     }
 
-    func testBuildCapabilityMapsDuplicateInvocationIdLastWins() {
+    func testBuildToolMapsDuplicateInvocationIdLastWins() {
         let events = [
             rawEvent(
                 id: "e1",
-                type: "capability.invocation.started",
+                type: "tool.invocation.started",
                 payload: [
                     "invocationId": AnyCodable("tc1"),
-                    "modelPrimitiveName": AnyCodable("execute"),
+                    "toolName": AnyCodable("process_run"),
                     "arguments": AnyCodable("{}"),
                     "turn": AnyCodable(1)
                 ],
@@ -93,10 +93,10 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
             ),
             rawEvent(
                 id: "e2",
-                type: "capability.invocation.started",
+                type: "tool.invocation.started",
                 payload: [
                     "invocationId": AnyCodable("tc1"),
-                    "modelPrimitiveName": AnyCodable("execute"),
+                    "toolName": AnyCodable("process_run"),
                     "arguments": AnyCodable("{}"),
                     "turn": AnyCodable(1)
                 ],
@@ -104,18 +104,18 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
+        let maps = UnifiedEventTransformer.buildToolInvocationMaps(from: events)
 
         XCTAssertEqual(maps.startedInvocations.count, 1)
-        XCTAssertEqual(maps.startedInvocations["tc1"]?.name, "execute")
+        XCTAssertEqual(maps.startedInvocations["tc1"]?.name, "process_run")
     }
 
-    func testBuildCapabilityMapsCapabilityResultWithoutInvocationIdSkipped() {
-        // capability.invocation.completed without invocationId in payload should be gracefully skipped
+    func testBuildToolMapsToolResultWithoutInvocationIdSkipped() {
+        // tool.invocation.completed without invocationId in payload should be gracefully skipped
         let events = [
             rawEvent(
                 id: "e1",
-                type: "capability.invocation.completed",
+                type: "tool.invocation.completed",
                 payload: [
                     "content": AnyCodable("some result"),
                     "isError": AnyCodable(false)
@@ -125,7 +125,7 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
             )
         ]
 
-        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
+        let maps = UnifiedEventTransformer.buildToolInvocationMaps(from: events)
 
         XCTAssertTrue(maps.completedInvocations.isEmpty)
     }

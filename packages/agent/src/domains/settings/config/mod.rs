@@ -19,7 +19,6 @@
 //! | [`store`] | Atomic sparse settings persistence |
 //! | [`types`] | Complete strict settings schema; clients project explicitly admitted fields |
 //! | `operations` | Canonical settings read/update/reset operations |
-//! | `migration` | Snapshot-first one-time retirement of legacy named profiles |
 //! | [`db_path_policy`] | Database path guardrails |
 //! | [`errors`] | Settings error hierarchy |
 //!
@@ -65,7 +64,6 @@
 
 pub mod db_path_policy;
 pub mod errors;
-pub(crate) mod migration;
 pub(crate) mod operations;
 pub mod storage;
 pub mod store;

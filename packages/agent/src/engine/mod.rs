@@ -43,10 +43,6 @@ pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
 };
-pub(crate) use durability::ledger::{
-    migrate_profile_idempotency_scope, retire_legacy_idempotency_replay_column,
-    retire_legacy_invocation_columns,
-};
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub use durability::state::{EngineStateEntry, EngineStateScope};
 pub use durability::streams::{

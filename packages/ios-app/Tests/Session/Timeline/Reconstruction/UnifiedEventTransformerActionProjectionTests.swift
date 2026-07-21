@@ -2,31 +2,26 @@ import XCTest
 @testable import TronMobile
 
 final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
-    func testReconstructedCapabilityInvocationProjectsActionSummary() {
+    func testReconstructedToolInvocationProjectsActionSummary() {
         let events = [
             sessionEvent(type: "message.user", payload: [
                 "content": AnyCodable("Check repo state")
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("action-reconstruct-1"),
-                "operationName": AnyCodable("process_run"),
                 "traceId": AnyCodable("trace-process"),
                 "arguments": AnyCodable([
-                    "operation": "process_run",
                     "intent": "Check repository state.",
-                    "payload": [
-                        "command": "git status --short",
-                        "executionMode": "read_only"
-                    ],
+                    "command": ["git", "status", "--short"],
+                    "executionMode": "read_only",
                     "reason": "User asked for current repository state."
                 ] as [String: Any]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("action-reconstruct-1"),
-                "modelPrimitiveName": AnyCodable("execute"),
-                "operationName": AnyCodable("process_run"),
+                "toolName": AnyCodable("process_run"),
                 "traceId": AnyCodable("trace-process"),
                 "content": AnyCodable("clean"),
                 "isError": AnyCodable(false),
@@ -43,7 +38,7 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
             ], timestamp: timestamp(2), sequence: 3),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "action-reconstruct-1", "name": "execute", "input": [
+                    ["type": "tool_invocation", "id": "action-reconstruct-1", "name": "process_run", "input": [
                         "command": "git status --short"
                     ]]
                 ]),
@@ -54,15 +49,15 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
         XCTAssertEqual(messages.count, 2)
-        guard case .capabilityInvocation(let invocation) = messages[1].content else {
-            return XCTFail("Expected capability invocation content")
+        guard case .toolInvocation(let invocation) = messages[1].content else {
+            return XCTFail("Expected tool invocation content")
         }
-        XCTAssertEqual(invocation.display.primitiveTitle, "Action")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Process Run")
         XCTAssertEqual(invocation.display.chipTitle, "Process Run")
         XCTAssertEqual(invocation.display.commandText, "git status --short")
-        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Trace", value: "trace-proces")))
-        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
-        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Result", value: "clean")))
+        XCTAssertTrue(invocation.display.actionRows.contains(ToolDisplayRow(label: "Trace", value: "trace-proces")))
+        XCTAssertTrue(invocation.display.actionRows.contains(ToolDisplayRow(label: "Why", value: "User asked for current repository state.")))
+        XCTAssertTrue(invocation.display.actionRows.contains(ToolDisplayRow(label: "Result", value: "clean")))
 
         let visibleProjection = [
             invocation.display.primitiveTitle,
@@ -70,10 +65,10 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
             invocation.display.commandText,
             invocation.display.summaryText
         ].joined(separator: " ")
-        XCTAssertFalse(visibleProjection.contains("execute"))
+        XCTAssertFalse(visibleProjection.contains("process_run"))
         XCTAssertFalse(visibleProjection.contains("first_party"))
-        XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Operation", value: "process_run", isTechnical: true)))
-        XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Trace", value: "trace-process", isTechnical: true)))
+        XCTAssertTrue(invocation.display.technicalRows.contains(ToolDisplayRow(label: "Tool", value: "process_run", isTechnical: true)))
+        XCTAssertTrue(invocation.display.technicalRows.contains(ToolDisplayRow(label: "Trace", value: "trace-process", isTechnical: true)))
     }
 
     private func timestamp(_ offsetSeconds: TimeInterval = 0) -> String {

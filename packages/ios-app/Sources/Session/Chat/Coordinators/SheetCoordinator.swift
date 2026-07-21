@@ -94,14 +94,14 @@ final class SheetCoordinator {
         present(.thinkingDetail(content))
     }
 
-    /// Show capability invocation detail sheet
-    func showCapabilityInvocationDetail(_ data: CapabilityInvocationData) {
-        present(.capabilityInvocationDetail(data))
+    /// Show tool invocation detail sheet
+    func showToolInvocationDetail(_ data: ToolInvocationData) {
+        present(.toolInvocationDetail(data))
     }
 
-    /// Show a grouped capability invocation detail sheet.
-    func showCapabilityInvocationGroupDetail(_ data: CapabilityInvocationGroupData) {
-        present(.capabilityInvocationGroupDetail(data))
+    /// Show a grouped tool invocation detail sheet.
+    func showToolInvocationGroupDetail(_ data: ToolInvocationGroupData) {
+        present(.toolInvocationGroupDetail(data))
     }
 
 }

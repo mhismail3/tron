@@ -10,7 +10,7 @@ fn new_accumulator_is_empty() {
     assert!(acc.accumulated_signature.is_empty());
     assert!(!acc.text_started);
     assert!(!acc.thinking_started);
-    assert!(acc.capability_invocations.is_empty());
+    assert!(acc.tool_invocations.is_empty());
     assert_eq!(acc.input_tokens, 0);
     assert_eq!(acc.output_tokens, 0);
 }
@@ -113,43 +113,43 @@ fn accumulate_signature_appends() {
     assert_eq!(acc.accumulated_signature, "part1_part2");
 }
 
-// ── capability invocation lifecycle ─────────────────────────────────────────
+// ── tool invocation lifecycle ─────────────────────────────────────────
 
 #[test]
-fn start_capability_invocation_emits_start_event() {
+fn start_tool_invocation_emits_start_event() {
     let mut acc = StreamAccumulator::new();
-    let events = acc.start_capability_invocation("call_1".into(), "execute".into());
+    let events = acc.start_tool_invocation("call_1".into(), "test_tool".into());
     assert_eq!(events.len(), 1);
     match &events[0] {
-        StreamEvent::CapabilityInvocationDraftStart {
+        StreamEvent::ToolInvocationDraftStart {
             invocation_id,
             name,
         } => {
             assert_eq!(invocation_id, "call_1");
-            assert_eq!(name, "execute");
+            assert_eq!(name, "test_tool");
         }
-        _ => panic!("expected CapabilityInvocationDraftStart"),
+        _ => panic!("expected ToolInvocationDraftStart"),
     }
-    assert_eq!(acc.capability_invocations.len(), 1);
+    assert_eq!(acc.tool_invocations.len(), 1);
 }
 
 #[test]
 fn append_tool_args_emits_delta() {
     let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
+    let _ = acc.start_tool_invocation("call_1".into(), "test_tool".into());
     let events = acc.append_tool_args("call_1", r#"{"cmd":"#);
     assert_eq!(events.len(), 1);
     match &events[0] {
-        StreamEvent::CapabilityInvocationDraftDelta {
+        StreamEvent::ToolInvocationDraftDelta {
             invocation_id,
             arguments_delta,
         } => {
             assert_eq!(invocation_id, "call_1");
             assert_eq!(arguments_delta, r#"{"cmd":"#);
         }
-        _ => panic!("expected CapabilityInvocationDraftDelta"),
+        _ => panic!("expected ToolInvocationDraftDelta"),
     }
-    assert_eq!(acc.capability_invocations[0].args, r#"{"cmd":"#);
+    assert_eq!(acc.tool_invocations[0].args, r#"{"cmd":"#);
 }
 
 #[test]
@@ -184,93 +184,86 @@ fn thinking_delta_over_limit_emits_error_and_clears_buffer() {
 }
 
 #[test]
-fn capability_argument_over_limit_emits_error_and_clears_buffer() {
+fn tool_argument_over_limit_emits_error_and_clears_buffer() {
     let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
-    let events = acc.append_tool_args(
-        "call_1",
-        &"x".repeat(MAX_STREAM_CAPABILITY_ARGUMENT_BYTES + 1),
-    );
+    let _ = acc.start_tool_invocation("call_1".into(), "test_tool".into());
+    let events = acc.append_tool_args("call_1", &"x".repeat(MAX_STREAM_TOOL_ARGUMENT_BYTES + 1));
 
     assert!(matches!(
         &events[..],
         [StreamEvent::Error { error }]
-            if error.contains("stream capability argument buffer exceeded maximum size")
+            if error.contains("stream tool argument buffer exceeded maximum size")
     ));
-    assert_eq!(acc.capability_invocations()[0].args, "");
+    assert_eq!(acc.tool_invocations()[0].args, "");
 }
 
 #[test]
-fn active_capability_invocation_limit_rejects_fanout() {
+fn active_tool_invocation_limit_rejects_fanout() {
     let mut acc = StreamAccumulator::new();
-    for index in 0..MAX_ACTIVE_STREAM_CAPABILITY_INVOCATIONS {
-        let events = acc.start_capability_invocation(format!("call_{index}"), "execute".into());
+    for index in 0..MAX_ACTIVE_STREAM_TOOL_INVOCATIONS {
+        let events = acc.start_tool_invocation(format!("call_{index}"), "test_tool".into());
         assert!(matches!(
             &events[..],
-            [StreamEvent::CapabilityInvocationDraftStart { .. }]
+            [StreamEvent::ToolInvocationDraftStart { .. }]
         ));
     }
 
-    let events = acc.start_capability_invocation("overflow".into(), "execute".into());
+    let events = acc.start_tool_invocation("overflow".into(), "test_tool".into());
     assert!(matches!(
         &events[..],
         [StreamEvent::Error { error }]
-            if error.contains("active stream capability invocation limit exceeded")
+            if error.contains("active stream tool invocation limit exceeded")
     ));
 }
 
 #[test]
-fn finish_capability_invocation_emits_end_with_parsed_args() {
+fn finish_tool_invocation_emits_end_with_parsed_args() {
     let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
+    let _ = acc.start_tool_invocation("call_1".into(), "test_tool".into());
     let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
-    let events = acc.finish_capability_invocation("call_1");
+    let events = acc.finish_tool_invocation("call_1");
     assert_eq!(events.len(), 1);
     match &events[0] {
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        } => {
-            assert_eq!(capability_invocation.id, "call_1");
-            assert_eq!(capability_invocation.name, "execute");
-            assert_eq!(capability_invocation.arguments["cmd"], "ls");
+        StreamEvent::ToolInvocationDraftEnd { tool_invocation } => {
+            assert_eq!(tool_invocation.id, "call_1");
+            assert_eq!(tool_invocation.name, "test_tool");
+            assert_eq!(tool_invocation.arguments["cmd"], "ls");
         }
-        _ => panic!("expected CapabilityInvocationDraftEnd"),
+        _ => panic!("expected ToolInvocationDraftEnd"),
     }
-    assert!(acc.capability_invocations.is_empty());
+    assert!(acc.tool_invocations.is_empty());
 }
 
 #[test]
-fn finish_capability_invocation_unknown_id_returns_empty() {
+fn finish_tool_invocation_unknown_id_returns_empty() {
     let mut acc = StreamAccumulator::new();
-    let events = acc.finish_capability_invocation("unknown");
+    let events = acc.finish_tool_invocation("unknown");
     assert!(events.is_empty());
 }
 
 #[test]
-fn finish_capability_invocation_empty_args_gives_empty_map() {
+fn finish_tool_invocation_empty_args_gives_empty_map() {
     let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
-    let events = acc.finish_capability_invocation("call_1");
+    let _ = acc.start_tool_invocation("call_1".into(), "test_tool".into());
+    let events = acc.finish_tool_invocation("call_1");
     match &events[0] {
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        } => {
-            assert!(capability_invocation.arguments.is_empty());
+        StreamEvent::ToolInvocationDraftEnd { tool_invocation } => {
+            assert!(tool_invocation.arguments.is_empty());
         }
-        _ => panic!("expected CapabilityInvocationDraftEnd"),
+        _ => panic!("expected ToolInvocationDraftEnd"),
     }
 }
 
 #[test]
-fn finish_capability_invocation_malformed_args_emits_error() {
+fn finish_tool_invocation_malformed_args_emits_error() {
     let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
+    let _ = acc.start_tool_invocation("call_1".into(), "test_tool".into());
     let _ = acc.append_tool_args("call_1", "not json");
-    let events = acc.finish_capability_invocation_with_provider("call_1", Some("anthropic"));
+    let events = acc.finish_tool_invocation_with_provider("call_1", Some("anthropic"));
     assert_eq!(events.len(), 1);
     match &events[0] {
         StreamEvent::Error { error } => {
-            assert!(error.contains("anthropic capability invocation arguments"));
+            assert!(error.contains("anthropic tool invocation arguments"));
             assert!(error.contains("malformed JSON"));
         }
         _ => panic!("expected Error"),
@@ -376,17 +369,17 @@ fn set_tokens_updates_counts() {
     assert_eq!(acc.output_tokens, 50);
 }
 
-// ── capability_invocations accessor ─────────────────────────────────────────
+// ── tool_invocations accessor ─────────────────────────────────────────
 
 #[test]
-fn capability_invocations_returns_active_calls() {
+fn tool_invocations_returns_active_calls() {
     let mut acc = StreamAccumulator::new();
-    let _ = acc.start_capability_invocation("a".into(), "tool_a".into());
-    let _ = acc.start_capability_invocation("b".into(), "tool_b".into());
-    assert_eq!(acc.capability_invocations().len(), 2);
-    let _ = acc.finish_capability_invocation("a");
-    assert_eq!(acc.capability_invocations().len(), 1);
-    assert_eq!(acc.capability_invocations()[0].id, "b");
+    let _ = acc.start_tool_invocation("a".into(), "tool_a".into());
+    let _ = acc.start_tool_invocation("b".into(), "tool_b".into());
+    assert_eq!(acc.tool_invocations().len(), 2);
+    let _ = acc.finish_tool_invocation("a");
+    assert_eq!(acc.tool_invocations().len(), 1);
+    assert_eq!(acc.tool_invocations()[0].id, "b");
 }
 
 // ── full lifecycle ──────────────────────────────────────────────
@@ -419,24 +412,22 @@ fn full_thinking_then_text_lifecycle() {
 }
 
 #[test]
-fn full_capability_invocation_lifecycle() {
+fn full_tool_invocation_lifecycle() {
     let mut acc = StreamAccumulator::new();
-    let start = acc.start_capability_invocation("call_1".into(), "execute".into());
+    let start = acc.start_tool_invocation("call_1".into(), "test_tool".into());
     let d1 = acc.append_tool_args("call_1", r#"{"cm"#);
     let d2 = acc.append_tool_args("call_1", r#"d":"ls"}"#);
-    let end = acc.finish_capability_invocation("call_1");
+    let end = acc.finish_tool_invocation("call_1");
 
     assert_eq!(start.len(), 1);
     assert_eq!(d1.len(), 1);
     assert_eq!(d2.len(), 1);
     assert_eq!(end.len(), 1);
     match &end[0] {
-        StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation,
-        } => {
-            assert_eq!(capability_invocation.id, "call_1");
-            assert_eq!(capability_invocation.arguments["cmd"], "ls");
+        StreamEvent::ToolInvocationDraftEnd { tool_invocation } => {
+            assert_eq!(tool_invocation.id, "call_1");
+            assert_eq!(tool_invocation.arguments["cmd"], "ls");
         }
-        _ => panic!("expected CapabilityInvocationDraftEnd"),
+        _ => panic!("expected ToolInvocationDraftEnd"),
     }
 }

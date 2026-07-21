@@ -1,20 +1,20 @@
-//! Parameter extraction helpers shared by transport and capability code.
+//! Parameter extraction helpers shared by transport and tool code.
 //!
 //! Each helper turns a `Option<&Value>` (the raw `params` payload from a
-//! client request) into a typed value, returning `CapabilityError::InvalidParams`
+//! client request) into a typed value, returning `ToolError::InvalidParams`
 //! for missing or wrong-typed required fields. Optional helpers return
 //! `Option<T>` plus an explicit defaulted variant for `u64`.
 
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 /// Extract a required parameter from the params object.
 pub(crate) fn require_param<'a>(
     params: Option<&'a serde_json::Value>,
     key: &str,
-) -> Result<&'a serde_json::Value, CapabilityError> {
+) -> Result<&'a serde_json::Value, ToolError> {
     params
         .and_then(|p| p.get(key))
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: format!("Missing required parameter: {key}"),
         })
 }
@@ -23,11 +23,11 @@ pub(crate) fn require_param<'a>(
 pub(crate) fn require_string_param(
     params: Option<&serde_json::Value>,
     key: &str,
-) -> Result<String, CapabilityError> {
+) -> Result<String, ToolError> {
     require_param(params, key)?
         .as_str()
         .map(ToOwned::to_owned)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: format!("Parameter '{key}' must be a string"),
         })
 }

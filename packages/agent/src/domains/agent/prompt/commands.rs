@@ -2,15 +2,12 @@
 use super::AgentCommandService;
 use crate::domains::agent::Deps;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::require_string_param;
 use serde_json::Value;
 use serde_json::json;
 
-pub(crate) async fn status_value(
-    params: Option<&Value>,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
+pub(crate) async fn status_value(params: Option<&Value>, deps: &Deps) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     let event_store = deps.event_store.clone();
     let sid_for_check = session_id.clone();
@@ -22,13 +19,13 @@ pub(crate) async fn status_value(
     })
     .await?;
     if !session_exists {
-        return Err(CapabilityError::NotFound {
+        return Err(ToolError::NotFound {
             code: "SESSION_NOT_FOUND".into(),
             message: format!("Session '{session_id}' not found"),
         });
     }
 
-    let (run_id, current_capability) = deps.orchestrator.agent_status_snapshot(&session_id);
+    let (run_id, current_tool) = deps.orchestrator.agent_status_snapshot(&session_id);
     let phase = if run_id.is_some() {
         "processing"
     } else {
@@ -52,9 +49,9 @@ pub(crate) async fn status_value(
             delta.num_milliseconds().try_into().ok()
         })
         .map(|ms: i64| ms.max(0));
-    let current_capability_value = current_capability.map(|snap| {
+    let current_tool_value = current_tool.map(|snap| {
         json!({
-            "name": snap.model_primitive_name,
+            "name": snap.tool_name,
             "invocationId": snap.invocation_id,
             "startedAt": snap.started_at,
         })
@@ -64,16 +61,13 @@ pub(crate) async fn status_value(
         "sessionId": session_id,
         "phase": phase,
         "runId": run_id,
-        "currentCapability": current_capability_value,
+        "currentTool": current_tool_value,
         "lastEventTimestamp": latest_timestamp,
         "timeSinceLastEventMs": time_since_last_event_ms,
     }))
 }
 
-pub(crate) async fn abort_value(
-    params: Option<&Value>,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
+pub(crate) async fn abort_value(params: Option<&Value>, deps: &Deps) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     AgentCommandService::abort(deps, &session_id)
 }
@@ -81,7 +75,7 @@ pub(crate) async fn abort_value(
 pub(crate) async fn abort_invocation_value(
     params: Option<&Value>,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     let invocation_id = require_string_param(params, "invocationId")?;
     AgentCommandService::abort_invocation(deps, &session_id, &invocation_id)

@@ -3,7 +3,7 @@
 //! The large provider-native surfaces are split by ownership: endpoint/auth
 //! config, auth-path-aware model metadata, and Responses API request/SSE DTOs.
 //! Code outside the OpenAI provider should consume the canonical provider trait
-//! and stream/capability events, not these wire shapes directly.
+//! and stream/tool events, not these wire shapes directly.
 
 mod config;
 mod models;

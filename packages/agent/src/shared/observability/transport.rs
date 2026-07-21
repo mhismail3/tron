@@ -96,7 +96,7 @@ impl SqliteTransport {
     /// Create a new transport with the given connection and config.
     ///
     /// The connection must have the `logs` table already created
-    /// (via events migrations).
+    /// (through the event schema).
     pub(super) fn new(conn: Connection, config: TransportConfig) -> rusqlite::Result<Self> {
         conn.busy_timeout(std::time::Duration::from_millis(config.busy_timeout_ms))?;
         Ok(Self {

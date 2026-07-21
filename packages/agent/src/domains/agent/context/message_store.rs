@@ -416,13 +416,13 @@ mod tests {
     }
 
     #[test]
-    fn assistant_message_with_capability_invocation_has_nonzero_tokens() {
+    fn assistant_message_with_tool_invocation_has_nonzero_tokens() {
         use serde_json::Map;
         let mut store = MessageStore::new();
         store.add(Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "tc-1".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             }],

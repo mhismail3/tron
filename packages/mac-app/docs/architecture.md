@@ -22,7 +22,7 @@ first, then the outer wrapper is re-signed after copying the `Contents/Library`
 tree so ServiceManagement can verify the bundled LaunchAgent plists as sealed
 resources. The Xcode target copies `packages/agent/defaults/` into the built
 app's `Contents/Resources/Constitution/`; managed skills, transcription
-sidecars, and product capability assets are not bundled. See
+sidecars, and product tool assets are not bundled. See
 [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
@@ -269,8 +269,8 @@ directly, while snapshots store only orthogonal process and host metadata.
 canonical pong, timestamp, server/protocol versions, minimum client protocol,
 and compatibility fields directly in the invocation response's top-level
 `result`, and projects only the server version. Canonical invocation failures
-remain top-level protocol errors; the wrapper has no child-result compatibility
-decoder. The configured
+remain top-level protocol errors; the wrapper decodes only the top-level result
+or failure. The configured
 port and settings-backed Tailscale cache stay with `EnvironmentSetup`; the Mac
 app owns its wizard-completion sentinel directly. `system::get_info` returns
 only the version, uptime, and cached-session count consumed by iOS. The status
@@ -385,7 +385,7 @@ files are still preserved.
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The `tron` helper executable is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`.
+- **`Tron.app` never builds the Rust agent.** The `tron` helper executable is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine tool/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
@@ -393,7 +393,7 @@ files are still preserved.
 - **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may remove `settings.toml` and/or `profiles/auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier and event-trigger executable before deciding whether to reuse, repair, or fail. Missing/mismatched helper executables are stale registrations and manager builds repair them; default Debug companion builds never repair or own production registration.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. Its recurring probe loop runs directly in the view's SwiftUI `.task`, which owns cancellation when the page disappears; the separate gear-button watcher remains bounded and explicitly cancelled because button actions can restart it. App activation, Re-check, and that watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after Full Disk Access is green and the user presses Continue.
-- **Optional managed runtime assets stay out of the wrapper.** The build bundles helper apps and Constitution defaults. Skills, transcription sidecars, and product capability assets are not copied into the app or `~/.tron`.
+- **Optional managed runtime assets stay out of the wrapper.** The build bundles helper apps and Constitution defaults. Skills, transcription sidecars, and product tool assets are not copied into the app or `~/.tron`.
 - **Distributed app bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`. End users replace `Tron.app` from a notarized DMG; the documented local Release workflow is the explicit contributor-only exception.
 - **DMG assembly has one fail-closed owner.** `scripts/package-dmg.sh` copies the complete wrapper, accepts only an explicit structural or release layout, makes one image-creation attempt, and remounts the result to require the app, embedded helper, and `Applications -> /Applications` link. PR CI and the release workflow delegate that transaction to the script; signing, notarization, and publication remain release-workflow concerns.
 - **Wrapper and server share no in-memory state.** Interaction crosses persisted files, engine protocol calls, or OS service/process state. Crashing the wrapper does not kill the server because the LaunchAgent owns it.

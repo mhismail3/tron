@@ -22,7 +22,7 @@ use crate::engine::{
 };
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_failure;
-use crate::shared::server::errors::{self, CapabilityError};
+use crate::shared::server::errors::{self, ToolError};
 
 #[cfg(test)]
 mod roundtrip;
@@ -58,14 +58,14 @@ struct SessionReplaySnapshot {
 pub(crate) async fn replay_manifest_value(
     deps: ReplayDeps,
     session_id: String,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let session_snapshot =
         read_session_snapshot(deps.event_store.clone(), session_id.clone()).await?;
     let engine_snapshot = deps
         .engine_host
         .replay_snapshot(&session_id)
         .await
-        .map_err(|error| CapabilityError::Internal {
+        .map_err(|error| ToolError::Internal {
             message: format!("engine replay snapshot failed: {error}"),
         })?;
     build_manifest_value(session_id, session_snapshot, engine_snapshot)
@@ -74,26 +74,26 @@ pub(crate) async fn replay_manifest_value(
 async fn read_session_snapshot(
     event_store: Arc<EventStore>,
     session_id: String,
-) -> Result<SessionReplaySnapshot, CapabilityError> {
+) -> Result<SessionReplaySnapshot, ToolError> {
     run_blocking_task("session.replay_manifest", move || {
         let session = event_store
             .get_session(&session_id)
-            .map_err(|error| CapabilityError::Internal {
+            .map_err(|error| ToolError::Internal {
                 message: error.to_string(),
             })?
-            .ok_or_else(|| CapabilityError::NotFound {
+            .ok_or_else(|| ToolError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: format!("Session '{session_id}' not found"),
             })?;
 
         let event_rows = event_store
             .get_events_by_session(&session_id, &ListEventsOptions::default())
-            .map_err(|error| CapabilityError::Internal {
+            .map_err(|error| ToolError::Internal {
                 message: error.to_string(),
             })?;
         let payloads = event_store
             .resolve_event_payloads(&event_rows)
-            .map_err(|error| CapabilityError::Internal {
+            .map_err(|error| ToolError::Internal {
                 message: error.to_string(),
             })?;
         let events = event_rows
@@ -119,7 +119,7 @@ fn build_manifest_value(
     session_id: String,
     session_snapshot: SessionReplaySnapshot,
     engine_snapshot: EngineReplaySnapshot,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let engine_invocations = engine_snapshot
         .invocations
         .iter()
@@ -203,7 +203,7 @@ struct ReplaySectionHashes {
 }
 
 impl ReplaySectionHashes {
-    fn from_sections(sections: &ReplaySections) -> Result<Self, CapabilityError> {
+    fn from_sections(sections: &ReplaySections) -> Result<Self, ToolError> {
         Ok(Self {
             session: canonical_hash(&sections.session)?,
             session_events: canonical_hash(&sections.session_events)?,
@@ -230,7 +230,7 @@ struct ReplaySessionEvent {
     content_blob_id: Option<String>,
     workspace_id: String,
     role: Option<String>,
-    model_primitive_name: Option<String>,
+    tool_name: Option<String>,
     invocation_id: Option<String>,
     turn: Option<i64>,
     input_tokens: Option<i64>,
@@ -260,7 +260,7 @@ impl ReplaySessionEvent {
             content_blob_id: row.content_blob_id,
             workspace_id: row.workspace_id,
             role: row.role,
-            model_primitive_name: row.model_primitive_name,
+            tool_name: row.tool_name,
             invocation_id: row.invocation_id,
             turn: row.turn,
             input_tokens: row.input_tokens,
@@ -315,7 +315,7 @@ struct ReplayIdempotencyEntry {
 }
 
 impl ReplayIdempotencyEntry {
-    fn from_entry(entry: &IdempotencyEntry) -> Result<Self, CapabilityError> {
+    fn from_entry(entry: &IdempotencyEntry) -> Result<Self, ToolError> {
         Ok(Self {
             function_id: entry.key.function_id.to_string(),
             scope: ReplayIdempotencyScope::from_scope(&entry.key.scope),
@@ -359,7 +359,7 @@ struct ReplayInvocationRecord {
 }
 
 impl ReplayInvocationRecord {
-    fn from_record(record: &InvocationRecord) -> Result<Self, CapabilityError> {
+    fn from_record(record: &InvocationRecord) -> Result<Self, ToolError> {
         let error = record.error.as_ref().map(engine_error_value);
         let result_hash = invocation_result_hash(record.result_value.as_ref(), error.as_ref())?;
         Ok(Self {
@@ -401,7 +401,7 @@ struct ReplayStreamEvent {
 }
 
 impl ReplayStreamEvent {
-    fn from_event(event: EngineStreamEvent) -> Result<Self, CapabilityError> {
+    fn from_event(event: EngineStreamEvent) -> Result<Self, ToolError> {
         let payload_hash = canonical_hash(&event.payload)?;
         Ok(Self {
             event,
@@ -436,7 +436,7 @@ fn idempotency_status_name(status: IdempotencyStatus) -> &'static str {
 fn invocation_result_hash(
     result_value: Option<&Value>,
     error: Option<&Value>,
-) -> Result<Option<String>, CapabilityError> {
+) -> Result<Option<String>, ToolError> {
     match (result_value, error) {
         (Some(value), None) => canonical_hash(value).map(Some),
         (_, Some(error)) => canonical_hash(error).map(Some),
@@ -547,19 +547,19 @@ fn engine_error_replay_details(error: &EngineError) -> Value {
     }
 }
 
-fn canonical_hash<T: Serialize>(value: &T) -> Result<String, CapabilityError> {
+fn canonical_hash<T: Serialize>(value: &T) -> Result<String, ToolError> {
     let canonical = canonical_value_from_serialize(value)?;
-    let bytes = serde_json::to_vec(&canonical).map_err(|error| CapabilityError::Internal {
+    let bytes = serde_json::to_vec(&canonical).map_err(|error| ToolError::Internal {
         message: format!("canonical JSON serialization failed: {error}"),
     })?;
     let digest = Sha256::digest(&bytes);
     Ok(hex::encode(digest))
 }
 
-fn canonical_value_from_serialize<T: Serialize>(value: &T) -> Result<Value, CapabilityError> {
+fn canonical_value_from_serialize<T: Serialize>(value: &T) -> Result<Value, ToolError> {
     serde_json::to_value(value)
         .map(canonicalize_value)
-        .map_err(|error| CapabilityError::Internal {
+        .map_err(|error| ToolError::Internal {
             message: format!("replay manifest serialization failed: {error}"),
         })
 }

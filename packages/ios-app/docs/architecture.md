@@ -49,8 +49,7 @@ trigger status, authority, or lifecycle transitions. Mutations complete from
 server responses and then refresh canonical state.
 
 Protocol request DTOs mirror strict server contracts exactly. Session creation
-sends only `workingDirectory`, `model`, and `title`; obsolete automation-era
-`source`/`profile` metadata and the unsupported `contextFiles` field are not
+sends only `workingDirectory`, `model`, and `title`; unknown fields are not
 encoded or silently ignored.
 
 Catalog tools are callable registrations, not a second lifecycle plane, so
@@ -201,7 +200,7 @@ invalidation/change-feed contract only.
 - cursor polling for `worker.lifecycle` and `worker.invocations`.
 
 `WorkerKernelRepository` is the feature-facing contract. The default
-repository delegates without manufacturing fallback rows or local lifecycle
+repository delegates without manufacturing substitute rows or local lifecycle
 state.
 
 ### View model
@@ -301,13 +300,11 @@ client-invented terminal state.
 
 The event cache is reconstruction support, not an authority source. Live and
 stored paths both project the same typed server events into `ChatMessage`.
-Provider direct-tool calls continue to render through generic invocation/result
-chips; “capability” in those UI type names means a provider tool call, not the
-removed authorization framework. Direct typed command vectors render as a
+Provider direct-tool calls render through generic invocation/result chips;
+“tool” in those UI type names means a provider tool call. Direct typed command vectors render as a
 readable command while the technical detail retains their exact JSON evidence.
 Failure presentation classifies current schema and policy errors from their
-server evidence, but never invents an authority grant or a scoped-authorization
-retry path for legacy failure text.
+server evidence without inventing authorization state or retry policy.
 
 ## Composer and Attachments
 
@@ -422,5 +419,4 @@ xcodebuild test \
 ```
 
 Architecture changes must update this document with the source and focused
-tests in the same commit. Historical cockpit behavior is available in Git
-history and must not be reintroduced through compatibility DTOs or adapters.
+tests in the same commit.

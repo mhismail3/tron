@@ -1,4 +1,4 @@
-//! Shared query-side services for session read capabilities.
+//! Shared query-side services for session read tools.
 //!
 //! `session::list` clamps every page to 200 rows and returns an opaque cursor
 //! over immutable creation/session-ID keys beneath one server-issued
@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::domains::session::Deps;
 use crate::domains::session::event_store::ListSessionsOptions;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::{self, CapabilityError};
+use crate::shared::server::errors::{self, ToolError};
 
 pub(crate) struct SessionQueryService;
 
@@ -40,13 +40,13 @@ pub(crate) use operations::{
 };
 
 impl SessionQueryService {
-    pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_resume = session_id.clone();
         run_blocking_task("session.resume", move || {
             let state = session_manager
                 .resume_session(&session_id_for_resume)
-                .map_err(|error| CapabilityError::NotFound {
+                .map_err(|error| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: error.to_string(),
                 })?;
@@ -68,7 +68,7 @@ impl SessionQueryService {
         working_directory: Option<String>,
         offset: Option<usize>,
         cursor: Option<SessionListCursor>,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         let limit = limit
             .unwrap_or(SESSION_LIST_DEFAULT_LIMIT)
             .clamp(1, SESSION_LIST_MAX_LIMIT);
@@ -104,7 +104,7 @@ impl SessionQueryService {
                 before_session_id: before_session_id.as_deref(),
             };
             let mut sessions = event_store.list_sessions(&options).map_err(|error| {
-                CapabilityError::Internal {
+                ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 }
             })?;
@@ -150,7 +150,7 @@ impl SessionQueryService {
                         "createdAt": session.created_at,
                         "lastActivity": session.last_activity_at,
                         "endedAt": session.ended_at,
-                        // Wire compatibility: `isActive` means cache residency.
+                        // `isActive` reports session-cache residency.
                         "isActive": is_cached,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
@@ -182,19 +182,16 @@ impl SessionQueryService {
         .await
     }
 
-    pub(crate) async fn get_head(
-        deps: &Deps,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn get_head(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_head = session_id.clone();
         run_blocking_task("session.get_head", move || {
             let session = event_store
                 .get_session(&session_id_for_head)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_head}' not found"),
                 })?;
@@ -207,27 +204,24 @@ impl SessionQueryService {
         .await
     }
 
-    pub(crate) async fn get_state(
-        deps: &Deps,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn get_state(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let session_id_for_state = session_id.clone();
         run_blocking_task("session.get_state", move || {
             let session = event_store
                 .get_session(&session_id_for_state)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_state}' not found"),
                 })?;
 
             let state = session_manager
                 .resume_session(&session_id_for_state)
-                .map_err(|error| CapabilityError::NotFound {
+                .map_err(|error| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: error.to_string(),
                 })?;
@@ -267,16 +261,16 @@ impl SessionQueryService {
     /// sessions larger than ~50k events the export is large but not
     /// unbounded — the payload is serialized in memory before being
     /// returned, which matches how `session.reconstruct` already behaves.
-    pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_export = session_id.clone();
         run_blocking_task("session.export", move || {
             let session = event_store
                 .get_session(&session_id_for_export)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_export}' not found"),
                 })?;
@@ -284,15 +278,15 @@ impl SessionQueryService {
             let opts = crate::domains::session::event_store::ListEventsOptions::default();
             let events = event_store
                 .get_events_by_session(&session_id_for_export, &opts)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
 
             let event_count = events.len();
-            let session_value = serde_json::to_value(&session).map_err(|error| CapabilityError::Internal {
+            let session_value = serde_json::to_value(&session).map_err(|error| ToolError::Internal {
                 message: format!("session serialization failed: {error}"),
             })?;
-            let events_value = serde_json::to_value(&events).map_err(|error| CapabilityError::Internal {
+            let events_value = serde_json::to_value(&events).map_err(|error| ToolError::Internal {
                 message: format!("events serialization failed: {error}"),
             })?;
 
@@ -311,7 +305,7 @@ impl SessionQueryService {
     pub(crate) async fn replay_manifest(
         deps: &Deps,
         session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         crate::domains::session::replay::replay_manifest_value(
             crate::domains::session::replay::ReplayDeps::new(
                 deps.event_store.clone(),
@@ -327,16 +321,16 @@ impl SessionQueryService {
         session_id: String,
         limit: Option<usize>,
         before_id: Option<String>,
-    ) -> Result<Value, CapabilityError> {
+    ) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_history = session_id.clone();
         run_blocking_task("session.get_history", move || {
             let _ = event_store
                 .get_session(&session_id_for_history)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?
-                .ok_or_else(|| CapabilityError::NotFound {
+                .ok_or_else(|| ToolError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
                     message: format!("Session '{session_id_for_history}' not found"),
                 })?;
@@ -344,12 +338,12 @@ impl SessionQueryService {
             let message_types = [
                 "message.user",
                 "message.assistant",
-                "capability.invocation.completed",
+                "tool.invocation.completed",
             ];
             let type_strs: Vec<&str> = message_types.to_vec();
             let events = event_store
                 .get_events_by_type(&session_id_for_history, &type_strs, None)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
 
@@ -372,7 +366,7 @@ impl SessionQueryService {
             let resolved_payloads =
                 event_store
                     .resolve_event_payloads(&events)
-                    .map_err(|error| CapabilityError::Internal {
+                    .map_err(|error| ToolError::Internal {
                         message: format!("Failed to resolve event payloads: {error}"),
                     })?;
 
@@ -383,7 +377,7 @@ impl SessionQueryService {
                     let role = match event.event_type.as_str() {
                         "message.user" => "user",
                         "message.assistant" => "assistant",
-                        "capability.invocation.completed" => "capability",
+                        "tool.invocation.completed" => "tool",
                         _ => "unknown",
                     };
                     let mut message = json!({
@@ -392,10 +386,10 @@ impl SessionQueryService {
                         "content": content,
                         "timestamp": event.timestamp,
                     });
-                    if let Some(ref model_primitive_name) = event.model_primitive_name {
-                        message["capabilityInvocation"] = json!({ "name": model_primitive_name });
+                    if let Some(ref tool_name) = event.tool_name {
+                        message["toolInvocation"] = json!({ "name": tool_name });
                     }
-                    if event.event_type == "capability.invocation.completed" {
+                    if event.event_type == "tool.invocation.completed" {
                         if let Some(invocation_id) = content.get("invocationId") {
                             message["invocationId"] = invocation_id.clone();
                         }
@@ -468,7 +462,7 @@ mod tests {
     }
 
     /// Events in the export are ordered by sequence ASC. A downstream
-    /// import or replay capability relies on this; shuffling by insertion order
+    /// import or replay tool relies on this; shuffling by insertion order
     /// or ID would be a silent correctness bug.
     #[tokio::test]
     async fn export_events_are_ordered_by_sequence_asc() {
@@ -513,7 +507,7 @@ mod tests {
         assert_eq!(result["eventCount"].as_u64().unwrap(), 4);
     }
 
-    /// `exportedAt` is an RFC3339 timestamp. Downstream capabilities parse it
+    /// `exportedAt` is an RFC3339 timestamp. Downstream tools parse it
     /// as-is — if this regresses to a raw `SystemTime` or a broken format,
     /// import tooling silently breaks.
     #[tokio::test]
@@ -619,7 +613,7 @@ mod tests {
         let error = session_list_value(Some(&params), &Deps::from_test_context(&ctx))
             .await
             .unwrap_err();
-        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
+        assert!(matches!(error, ToolError::InvalidParams { .. }));
     }
 
     #[tokio::test]
@@ -645,6 +639,6 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
+        assert!(matches!(error, ToolError::InvalidParams { .. }));
     }
 }

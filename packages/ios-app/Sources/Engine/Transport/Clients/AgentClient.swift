@@ -1,7 +1,7 @@
 import Foundation
 
-/// Client for agent-related engine capabilities.
-/// Handles prompts, abort, state queries, and capability results.
+/// Client for agent-related engine tools.
+/// Handles prompts, abort, state queries, and tool results.
 final class AgentClient: EngineDomainClient, AgentRepository {
 
     // MARK: - Agent Methods
@@ -56,11 +56,11 @@ final class AgentClient: EngineDomainClient, AgentRepository {
         return result.aborted
     }
 
-    /// Abort a single in-flight capability invocation without aborting the rest of the turn.
-    /// Returns `true` when the server cancelled a registered capability, `false` when
+    /// Abort a single in-flight tool invocation without aborting the rest of the turn.
+    /// Returns `true` when the server cancelled a registered tool, `false` when
     /// the invocation had already finished or no call matched the id.
     @discardableResult
-    func abortCapabilityInvocation(invocationId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
+    func abortToolInvocation(invocationId: String, idempotencyKey: EngineIdempotencyKey) async throws -> Bool {
         let (_, sessionId) = try requireTransport().requireSession()
         let params = AgentAbortInvocationParams(sessionId: sessionId, invocationId: invocationId)
         let result: AgentAbortInvocationResult = try await invokeWrite(
@@ -70,7 +70,7 @@ final class AgentClient: EngineDomainClient, AgentRepository {
             context: sessionInvocationContext(sessionId)
         )
         logger.info(
-            "Aborted capability invocation \(invocationId): aborted=\(result.aborted)",
+            "Aborted tool invocation \(invocationId): aborted=\(result.aborted)",
             category: .chat
         )
         return result.aborted

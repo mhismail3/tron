@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use serde_json::{Map, Value};
 
-use crate::shared::server::errors::{CapabilityError, INVALID_PARAMS};
+use crate::shared::server::errors::{INVALID_PARAMS, ToolError};
 use crate::shared::server::events::ServerEventPayload;
 
 use super::{STREAM_DEFAULT_LIMIT, STREAM_MAX_LIMIT};
@@ -123,7 +123,7 @@ pub(super) struct ProtocolEvent {
     pub(super) event: ServerEventPayload,
 }
 
-pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>, CapabilityError> {
+pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>, ToolError> {
     match object.get("id") {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => {
@@ -145,7 +145,7 @@ pub(super) fn optional_id(object: &Map<String, Value>) -> Result<Option<String>,
     }
 }
 
-pub(super) fn checked_limit(limit: Option<usize>) -> Result<usize, CapabilityError> {
+pub(super) fn checked_limit(limit: Option<usize>) -> Result<usize, ToolError> {
     let limit = limit.unwrap_or(STREAM_DEFAULT_LIMIT);
     if limit == 0 {
         return Err(protocol_error(
@@ -161,8 +161,8 @@ pub(super) fn protocol_error(
     code: impl Into<String>,
     message: impl Into<String>,
     details: Option<Value>,
-) -> CapabilityError {
-    CapabilityError::Custom {
+) -> ToolError {
+    ToolError::Custom {
         code: code.into(),
         message: message.into(),
         details,

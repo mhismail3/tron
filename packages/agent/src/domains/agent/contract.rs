@@ -122,11 +122,11 @@ mod tests {
             let spec = specs
                 .iter()
                 .find(|definition| definition.id.as_str() == function_id)
-                .expect("prompt capability should be registered");
+                .expect("prompt tool should be registered");
             let schema = spec
                 .response_schema
                 .as_ref()
-                .expect("prompt capability should declare its response schema");
+                .expect("prompt tool should declare its response schema");
             assert_eq!(
                 schema["properties"]["acknowledged"]["const"],
                 json!(true),

@@ -8,12 +8,12 @@ import Foundation
     func handleThinkingEnd(_ thinking: String, kind: ThinkingDisplayKind)
 }
 
-@MainActor protocol CapabilityInvocationEventHandler: AnyObject {
-    func handleCapabilityInvocationGenerating(_ result: CapabilityInvocationGeneratingPlugin.Result)
-    func handleCapabilityInvocationStarted(_ result: CapabilityInvocationStartedPlugin.Result)
-    func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result)
-    func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result)
-    func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result)
+@MainActor protocol ToolInvocationEventHandler: AnyObject {
+    func handleToolInvocationGenerating(_ result: ToolInvocationGeneratingPlugin.Result)
+    func handleToolInvocationStarted(_ result: ToolInvocationStartedPlugin.Result)
+    func handleToolInvocationOutput(_ result: ToolInvocationOutputPlugin.Result)
+    func handleToolInvocationProgress(_ result: ToolInvocationProgressPlugin.Result)
+    func handleToolInvocationCompleted(_ result: ToolInvocationCompletedPlugin.Result)
 }
 
 @MainActor protocol TurnLifecycleEventHandler: AnyObject {
@@ -49,7 +49,7 @@ import Foundation
 /// Full dispatch target — ChatViewModel conforms to this.
 /// Composes all domain protocols into a single conformance point.
 @MainActor protocol EventDispatchTarget:
-    StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
+    StreamingEventHandler, ToolInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler,
     ServerEventHandler,
     EventDispatchLogger {}

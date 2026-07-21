@@ -67,7 +67,7 @@ final class ChatViewModelObservationTests: XCTestCase {
                 hasMoreEvents: false,
                 oldestEventId: nil,
                 inFlight: InFlightState(
-                    capabilityInvocations: [],
+                    toolInvocations: [],
                     contentSequence: [],
                     streaming: nil
                 ),

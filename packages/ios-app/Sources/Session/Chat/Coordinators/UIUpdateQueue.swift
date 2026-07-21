@@ -14,8 +14,8 @@ final class UIUpdateQueue {
 
         /// Priority ordering for updates
         static let priorityTurnBoundary = 0
-        static let priorityCapabilityStart = 1
-        static let priorityCapabilityEnd = 2
+        static let priorityToolStart = 1
+        static let priorityToolEnd = 2
         static let priorityMessageAppend = 3
         static let priorityTextDelta = 4
     }
@@ -24,16 +24,16 @@ final class UIUpdateQueue {
 
     enum UpdateType {
         case turnBoundary(TurnBoundaryData)
-        case capabilityInvocationStarted(CapabilityInvocationStartData)
-        case capabilityInvocationCompleted(CapabilityInvocationEndData)
+        case toolInvocationStarted(ToolInvocationStartData)
+        case toolInvocationCompleted(ToolInvocationEndData)
         case messageAppend(MessageAppendData)
         case textDelta(TextDeltaData)
 
         var priority: Int {
             switch self {
             case .turnBoundary: return Config.priorityTurnBoundary
-            case .capabilityInvocationStarted: return Config.priorityCapabilityStart
-            case .capabilityInvocationCompleted: return Config.priorityCapabilityEnd
+            case .toolInvocationStarted: return Config.priorityToolStart
+            case .toolInvocationCompleted: return Config.priorityToolEnd
             case .messageAppend: return Config.priorityMessageAppend
             case .textDelta: return Config.priorityTextDelta
             }
@@ -45,24 +45,24 @@ final class UIUpdateQueue {
         let isStart: Bool
     }
 
-    struct CapabilityInvocationStartData {
+    struct ToolInvocationStartData {
         let invocationId: String
-        let modelPrimitiveName: String
+        let toolName: String
         let arguments: String
         let timestamp: Date
     }
 
-    struct CapabilityInvocationEndData {
+    struct ToolInvocationEndData {
         let invocationId: String
         let success: Bool
         let result: String
         let durationMs: Int?
         let timestamp: Date
-        /// Structured result details from server (capability-specific shape)
+        /// Structured result details from server (tool-specific shape)
         let details: [String: AnyCodable]?
         /// Canonical server failure envelope when the result failed.
         let failure: CanonicalFailurePayload?
-        let identity: CapabilityIdentity
+        let identity: ToolIdentity
 
         init(
             invocationId: String,
@@ -72,7 +72,7 @@ final class UIUpdateQueue {
             timestamp: Date = Date(),
             details: [String: AnyCodable]?,
             failure: CanonicalFailurePayload? = nil,
-            identity: CapabilityIdentity? = nil
+            identity: ToolIdentity? = nil
         ) {
             self.invocationId = invocationId
             self.success = success
@@ -81,7 +81,7 @@ final class UIUpdateQueue {
             self.timestamp = timestamp
             self.details = details
             self.failure = failure
-            self.identity = identity ?? CapabilityIdentity()
+            self.identity = identity ?? ToolIdentity()
         }
     }
 
@@ -106,7 +106,7 @@ final class UIUpdateQueue {
     /// Queue of pending updates
     private var pendingUpdates: [PendingUpdate] = []
     /// Monotonic enqueue order. Equal-priority updates use this to preserve
-    /// server cursor/arrival order, which keeps parallel capability chips from
+    /// server cursor/arrival order, which keeps parallel tool chips from
     /// jumping into completion order.
     private var nextOrder: UInt64 = 0
     /// Batch processing task
@@ -115,16 +115,16 @@ final class UIUpdateQueue {
     /// Callback for processing batched updates
     var onProcessUpdates: (([UpdateType]) -> Void)?
 
-    // MARK: - Capability Enqueueing
+    // MARK: - Tool Enqueueing
 
-    /// Register a capability invocation start
-    func enqueueCapabilityInvocationStart(_ data: CapabilityInvocationStartData) {
-        enqueue(.capabilityInvocationStarted(data))
+    /// Register a tool invocation start
+    func enqueueToolInvocationStart(_ data: ToolInvocationStartData) {
+        enqueue(.toolInvocationStarted(data))
     }
 
-    /// Register a capability invocation end
-    func enqueueCapabilityInvocationEnd(_ data: CapabilityInvocationEndData) {
-        enqueue(.capabilityInvocationCompleted(data))
+    /// Register a tool invocation end
+    func enqueueToolInvocationEnd(_ data: ToolInvocationEndData) {
+        enqueue(.toolInvocationCompleted(data))
     }
 
     // MARK: - General Enqueueing
@@ -170,7 +170,7 @@ final class UIUpdateQueue {
             }
 
             // Sort by priority, then by stable enqueue order for parallel
-            // capability starts/completions with the same priority.
+            // tool starts/completions with the same priority.
             let updates = pendingUpdates
                 .sorted { lhs, rhs in
                     if lhs.update.priority == rhs.update.priority {

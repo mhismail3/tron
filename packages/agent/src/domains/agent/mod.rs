@@ -3,7 +3,7 @@
 //! This module owns the server-side prompt harness. Public agent functions are
 //! limited to accepting prompts, reporting runtime status, and aborting active
 //! work. Hidden functions serialize those prompts into the provider loop; the
-//! model-facing capability surface after that loop starts is the direct typed
+//! model-facing tool surface after that loop starts is the direct typed
 //! kernel tools plus the relevant engine-global worker tools.
 //! Worker composition carries the optional model responder factory directly;
 //! prompt validation reports `NotAvailable` when that runtime owner is absent.
@@ -34,14 +34,14 @@
 //! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;
 //!    transport code does not own agent behavior.
 //! 8. The backend emits structured `component` + `agent_event` logs across
-//!    runtime, loop, turn, provider stream, capability, and primitive execute
+//!    runtime, loop, turn, provider stream, and tool-execution
 //!    phases. Those logs carry durable IDs and lifecycle metadata for agent and
 //!    operator inspection, while prompt text, streamed text, and tool arguments
 //!    stay in the event/trace owners instead of logs.
 //!
 //! ## Submodules
 //!
-//! - `contract`: public and hidden `agent::*` capability contracts.
+//! - `contract`: public and hidden `agent::*` tool contracts.
 //! - `handlers` / `prompt`: worker entrypoints and prompt command flow.
 //! - `loop`: turn execution, primitive tool invocation, and recovery.
 //! - `context`: context assembly and compaction.

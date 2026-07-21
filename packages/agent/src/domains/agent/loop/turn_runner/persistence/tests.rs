@@ -7,9 +7,9 @@ use super::*;
 use crate::domains::agent::r#loop::types::StreamResult;
 use crate::domains::session::event_store::ListEventsOptions;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+use crate::domains::session::event_store::sqlite::schema::ensure_schema;
 use crate::domains::session::event_store::{AppendOptions, EventStore};
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::messages::ToolInvocationDraft;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -26,7 +26,7 @@ fn harness() -> Harness {
     let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
-        run_migrations(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
     }
     let store = Arc::new(EventStore::new(pool));
     let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -218,7 +218,7 @@ fn stream_result_stub() -> StreamResult {
         },
         stop_reason: "end_turn".into(),
         token_usage: None,
-        capability_invocations: Vec::new(),
+        tool_invocations: Vec::new(),
         interrupted: false,
         partial_content: None,
         ttft_ms: None,
@@ -226,10 +226,10 @@ fn stream_result_stub() -> StreamResult {
 }
 
 #[tokio::test]
-async fn capability_batch_redacts_arguments_before_live_broadcast() {
+async fn tool_batch_redacts_arguments_before_live_broadcast() {
     let mut h = harness();
     let token = "trwh_0123456789abcdef0123456789abcdef";
-    let invocation = CapabilityInvocationDraft::new(
+    let invocation = ToolInvocationDraft::new(
         "call-secret",
         "worker_webhook_rotate",
         serde_json::Map::from_iter([
@@ -238,7 +238,7 @@ async fn capability_batch_redacts_arguments_before_live_broadcast() {
         ]),
     );
 
-    emit_capability_invocation_batch(
+    emit_tool_invocation_batch(
         &h.emitter,
         &h.session_id,
         &[invocation],
@@ -247,21 +247,17 @@ async fn capability_batch_redacts_arguments_before_live_broadcast() {
         None,
     );
 
-    let event = h.rx.recv().await.expect("capability batch broadcast");
-    let TronEvent::CapabilityInvocationBatch {
-        capability_invocations,
-        ..
+    let event = h.rx.recv().await.expect("tool batch broadcast");
+    let TronEvent::ToolInvocationBatch {
+        tool_invocations, ..
     } = event
     else {
-        panic!("expected capability invocation batch");
+        panic!("expected tool invocation batch");
     };
-    assert_eq!(capability_invocations[0].arguments["token"], "****");
-    assert_eq!(
-        capability_invocations[0].arguments["workerId"],
-        "recent-research"
-    );
+    assert_eq!(tool_invocations[0].arguments["token"], "****");
+    assert_eq!(tool_invocations[0].arguments["workerId"], "recent-research");
     assert!(
-        !serde_json::to_string(&capability_invocations)
+        !serde_json::to_string(&tool_invocations)
             .unwrap()
             .contains(token)
     );

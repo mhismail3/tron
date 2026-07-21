@@ -191,13 +191,7 @@ fn worker_kernel_and_dashboard_files_stay_concern_sized() {
         {
             continue;
         }
-        let limit = if relative.ends_with("/persistence/migration.rs") {
-            // The one versioned, transactional retirement/import boundary is
-            // cohesive but still explicitly capped.
-            1_100
-        } else {
-            1_000
-        };
+        let limit = 1_000;
         let lines = std::fs::read_to_string(&file).unwrap().lines().count();
         if lines > limit {
             oversized.push(format!("{relative}: {lines} > {limit}"));

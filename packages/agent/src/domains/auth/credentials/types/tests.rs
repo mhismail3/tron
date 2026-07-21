@@ -53,11 +53,8 @@ fn google_provider_auth_serde() {
     assert_eq!(gpa.base.accounts.as_ref().unwrap()[0].label, "test");
 }
 
-/// R3: retired auth.json files carrying `endpoint: "antigravity"` (from
-/// before the CCA migration) must fail to load with an error naming
-/// the unknown field. The user has to re-authenticate.
 #[test]
-fn google_provider_auth_rejects_retired_endpoint() {
+fn google_provider_auth_rejects_unknown_endpoint_field() {
     let json = r#"{
         "clientId": "cid",
         "endpoint": "antigravity",
@@ -67,12 +64,10 @@ fn google_provider_auth_rejects_retired_endpoint() {
     let msg = err.to_string();
     assert!(
         msg.contains("endpoint"),
-        "error should name the retired `endpoint` field, got: {msg}"
+        "error should name the unknown `endpoint` field, got: {msg}"
     );
 }
 
-/// R3 companion: completely unknown fields — not just `endpoint` — also
-/// fail to load, so no other retired shape can slip through.
 #[test]
 fn google_provider_auth_rejects_arbitrary_unknown_field() {
     let json = r#"{

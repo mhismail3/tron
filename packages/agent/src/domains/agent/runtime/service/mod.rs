@@ -12,7 +12,7 @@
 //! calls have committed; it does not rebuild that wire event, retain
 //! session-cache ownership, or duplicate final assistant state.
 //! Before durable history is reconstructed, prompt admission atomically closes
-//! any terminal prior turn's unmatched capability starts and broadcasts those
+//! any terminal prior turn's unmatched tool starts and broadcasts those
 //! row-backed repairs to live clients. A repair failure rejects the prompt
 //! before `message.user` persistence or provider construction. Durable
 //! prior-history reconstruction and the new `message.user` append are likewise

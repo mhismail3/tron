@@ -14,7 +14,7 @@ use crate::engine::{
     EffectClass, FunctionDefinition, IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 use crate::shared::server::errors;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::opt_string;
 use crate::shared::server::params::require_string_param;
 use serde_json::Value;
@@ -66,7 +66,7 @@ operation_bindings! {
     ];
 }
 
-async fn message_delete_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+async fn message_delete_value(payload: &Value, deps: &Deps) -> Result<Value, ToolError> {
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let event_id = require_string_param(Some(payload), "targetEventId")?;
     let reason = opt_string(Some(payload), "reason");
@@ -77,12 +77,12 @@ async fn message_delete_value(payload: &Value, deps: &Deps) -> Result<Value, Cap
         .map_err(|error| {
             let message = error.to_string();
             if message.contains("not found") {
-                CapabilityError::NotFound {
+                ToolError::NotFound {
                     code: errors::NOT_FOUND.into(),
                     message: format!("Event '{event_id}' not found"),
                 }
             } else {
-                CapabilityError::Internal { message }
+                ToolError::Internal { message }
             }
         })?;
 

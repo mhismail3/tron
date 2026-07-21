@@ -1,7 +1,7 @@
 import Foundation
 
-/// Client for model-related engine capabilities.
-/// Thinly maps model operations onto engine capabilities.
+/// Client for model-related engine tools.
+/// Thinly maps model operations onto engine tools.
 final class ModelClient: EngineDomainClient {
 
     // MARK: - Model Methods

@@ -30,12 +30,12 @@ pub enum EventType {
     /// Soft-deletion record for a prior message.
     #[serde(rename = "message.deleted")]
     MessageDeleted,
-    /// Capability invocation start record.
-    #[serde(rename = "capability.invocation.started")]
-    CapabilityInvocationStarted,
-    /// Capability invocation terminal record.
-    #[serde(rename = "capability.invocation.completed")]
-    CapabilityInvocationCompleted,
+    /// Tool invocation start record.
+    #[serde(rename = "tool.invocation.started")]
+    ToolInvocationStarted,
+    /// Tool invocation terminal record.
+    #[serde(rename = "tool.invocation.completed")]
+    ToolInvocationCompleted,
     /// Agent turn start record.
     #[serde(rename = "stream.turn_start")]
     StreamTurnStart,
@@ -62,8 +62,8 @@ impl EventType {
             Self::MessageAssistant => "message.assistant",
             Self::ModelProviderRequest => "model.provider_request",
             Self::MessageDeleted => "message.deleted",
-            Self::CapabilityInvocationStarted => "capability.invocation.started",
-            Self::CapabilityInvocationCompleted => "capability.invocation.completed",
+            Self::ToolInvocationStarted => "tool.invocation.started",
+            Self::ToolInvocationCompleted => "tool.invocation.completed",
             Self::StreamTurnStart => "stream.turn_start",
             Self::StreamTurnEnd => "stream.turn_end",
             Self::CompactBoundary => "compact.boundary",
@@ -90,8 +90,8 @@ impl std::str::FromStr for EventType {
             "message.assistant" => Ok(Self::MessageAssistant),
             "model.provider_request" => Ok(Self::ModelProviderRequest),
             "message.deleted" => Ok(Self::MessageDeleted),
-            "capability.invocation.started" => Ok(Self::CapabilityInvocationStarted),
-            "capability.invocation.completed" => Ok(Self::CapabilityInvocationCompleted),
+            "tool.invocation.started" => Ok(Self::ToolInvocationStarted),
+            "tool.invocation.completed" => Ok(Self::ToolInvocationCompleted),
             "stream.turn_start" => Ok(Self::StreamTurnStart),
             "stream.turn_end" => Ok(Self::StreamTurnEnd),
             "compact.boundary" => Ok(Self::CompactBoundary),
@@ -113,8 +113,8 @@ mod tests {
         EventType::MessageAssistant,
         EventType::ModelProviderRequest,
         EventType::MessageDeleted,
-        EventType::CapabilityInvocationStarted,
-        EventType::CapabilityInvocationCompleted,
+        EventType::ToolInvocationStarted,
+        EventType::ToolInvocationCompleted,
         EventType::StreamTurnStart,
         EventType::StreamTurnEnd,
         EventType::CompactBoundary,

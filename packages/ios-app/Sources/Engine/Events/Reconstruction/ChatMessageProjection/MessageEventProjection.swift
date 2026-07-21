@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Projects: message.user and message.assistant
 ///
-/// Note: The interleaved message.assistant transformation (preserving text/capability order)
+/// Note: The interleaved message.assistant transformation (preserving text/tool order)
 /// is handled separately in InterleavedContentProcessor.
 enum MessageEventProjection {
 
@@ -17,9 +17,9 @@ enum MessageEventProjection {
     ) -> ChatMessage? {
         guard let parsed = UserMessagePayload(from: payload) else { return nil }
 
-        // Skip capability_result context messages - they're LLM conversation context,
-        // not displayable user messages. Capability results are displayed via capability.invocation.completed events.
-        if parsed.isCapabilityResultContext {
+        // Skip tool_result context messages - they're LLM conversation context,
+        // not displayable user messages. Tool results are displayed via tool.invocation.completed events.
+        if parsed.isToolResultContext {
             return nil
         }
 
@@ -37,7 +37,7 @@ enum MessageEventProjection {
     /// Transform message.assistant event into a ChatMessage.
     ///
     /// This projection extracts only TEXT content from assistant messages.
-    /// Capability blocks are handled separately by capability.invocation.started/capability.invocation.completed events
+    /// Tool blocks are handled separately by tool.invocation.started/tool.invocation.completed events
     /// or by the interleaved content processor.
     static func transformAssistantMessage(
         _ payload: [String: AnyCodable],
@@ -48,7 +48,7 @@ enum MessageEventProjection {
         }
 
         // CRITICAL: Only extract TEXT from assistant messages
-        // Capability blocks are handled by capability.invocation.started/capability.invocation.completed events
+        // Tool blocks are handled by tool.invocation.started/tool.invocation.completed events
         guard let text = parsed.textContent, !text.isEmpty else { return nil }
 
         var message = ChatMessage(

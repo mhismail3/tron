@@ -239,7 +239,7 @@ impl EventStore {
     /// Delete a message by appending a `message.deleted` event.
     ///
     /// The target event must be a message event (`message.user`, `message.assistant`,
-    /// or `capability.invocation.completed`). The original event is never modified — deletion is recorded
+    /// or `tool.invocation.completed`). The original event is never modified — deletion is recorded
     /// as a new event and applied during message reconstruction.
     #[tracing::instrument(skip(self), fields(session_id, target_event_id))]
     pub fn delete_message(
@@ -260,10 +260,10 @@ impl EventStore {
 
             if !matches!(
                 target_type,
-                EventType::MessageUser | EventType::MessageAssistant | EventType::CapabilityInvocationCompleted
+                EventType::MessageUser | EventType::MessageAssistant | EventType::ToolInvocationCompleted
             ) {
                 return Err(EventStoreError::InvalidOperation(format!(
-                    "Cannot delete event of type '{}' — only message and capability result events can be deleted",
+                    "Cannot delete event of type '{}' — only message and tool result events can be deleted",
                     target.event_type
                 )));
             }
@@ -342,7 +342,7 @@ impl EventStore {
         EventRepo::get_latest_events(&conn, session_id, limit)
     }
 
-    /// Resolve payloads for event rows returned to capability clients.
+    /// Resolve payloads for event rows returned to tool clients.
     ///
     /// Persisted event rows may store large JSON payloads out-of-line behind an
     /// internal `__tronPayloadRef` envelope. Active runtime APIs must expose the

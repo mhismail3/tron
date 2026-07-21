@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(test)]
 use crate::engine::StreamCursor;
 use crate::shared::server::context::ServerRuntimeContext;
-use crate::shared::server::errors::{CapabilityError, INVALID_PARAMS};
+use crate::shared::server::errors::{INVALID_PARAMS, ToolError};
 use crate::shared::server::failure::FailureOrigin;
 use crate::shared::server::validation::{MAX_JSON_DEPTH, validate_json_depth};
 use crate::transport::engine::{
@@ -491,14 +491,14 @@ impl EngineWsSession {
         .await
     }
 
-    fn send_error(&self, id: Option<String>, error: CapabilityError) -> bool {
+    fn send_error(&self, id: Option<String>, error: ToolError) -> bool {
         self.send_error_with_trace(id, error, None)
     }
 
     fn send_error_with_trace(
         &self,
         id: Option<String>,
-        error: CapabilityError,
+        error: ToolError,
         trace_id: Option<String>,
     ) -> bool {
         let failure = error

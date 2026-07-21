@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tron::app::bootstrap::config::ServerConfig;
 use tron::app::bootstrap::server::TronServer;
 use tron::domains::agent::{Orchestrator, SessionManager};
-use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
+use tron::domains::session::event_store::{ConnectionConfig, EventStore, ensure_schema, new_file};
 use tron::domains::settings::SettingsRuntime;
 use tron::engine::{ActorContext, ActorId, ActorKind};
 use tron::shared::server::context::ServerRuntimeContext;
@@ -74,7 +74,7 @@ async fn boot_server_with_config_and_autonomy(
     let pool = new_file(db_path.to_str().unwrap(), &ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
-        run_migrations(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
     }
 
     let event_store = Arc::new(EventStore::new(pool));

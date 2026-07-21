@@ -1,7 +1,7 @@
 //! Message types for the Tron agent conversation model.
 //!
 //! Messages form the conversation history passed to LLM providers.
-//! Three roles: user, assistant, and capability result. Each uses distinct
+//! Three roles: user, assistant, and tool result. Each uses distinct
 //! content types appropriate to that role.
 
 use std::sync::Arc;
@@ -9,38 +9,38 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
-use crate::shared::protocol::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, ToolResultContent, UserContent};
+use crate::shared::protocol::model_tools::ModelTool;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Capability invocation
+// Tool invocation
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn default_capability_invocation() -> String {
-    "capability_invocation".into()
+fn default_tool_invocation() -> String {
+    "tool_invocation".into()
 }
 
-/// A capability invocation emitted by the assistant.
+/// A tool invocation emitted by the assistant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CapabilityInvocationDraft {
-    /// Discriminator — always `"capability_invocation"`.
-    #[serde(rename = "type", default = "default_capability_invocation")]
+pub struct ToolInvocationDraft {
+    /// Discriminator — always `"tool_invocation"`.
+    #[serde(rename = "type", default = "default_tool_invocation")]
     content_type: String,
-    /// Unique capability invocation ID.
+    /// Unique tool invocation ID.
     pub id: String,
-    /// Capability name.
+    /// Tool name.
     pub name: String,
-    /// Capability arguments (JSON object).
+    /// Tool arguments (JSON object).
     pub arguments: Map<String, Value>,
     /// Thought signature for Gemini models.
     #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
     pub thought_signature: Option<String>,
 }
 
-impl Default for CapabilityInvocationDraft {
+impl Default for ToolInvocationDraft {
     fn default() -> Self {
         Self {
-            content_type: "capability_invocation".into(),
+            content_type: "tool_invocation".into(),
             id: String::new(),
             name: String::new(),
             arguments: Map::new(),
@@ -49,8 +49,8 @@ impl Default for CapabilityInvocationDraft {
     }
 }
 
-impl CapabilityInvocationDraft {
-    /// Create a new capability invocation.
+impl ToolInvocationDraft {
+    /// Create a new tool invocation.
     #[must_use]
     pub fn new(
         id: impl Into<String>,
@@ -58,7 +58,7 @@ impl CapabilityInvocationDraft {
         arguments: Map<String, Value>,
     ) -> Self {
         Self {
-            content_type: "capability_invocation".into(),
+            content_type: "tool_invocation".into(),
             id: id.into(),
             name: name.into(),
             arguments,
@@ -66,7 +66,7 @@ impl CapabilityInvocationDraft {
         }
     }
 
-    /// Create a new capability invocation with a thought signature.
+    /// Create a new tool invocation with a thought signature.
     #[must_use]
     pub fn with_thought_signature(mut self, sig: impl Into<String>) -> Self {
         self.thought_signature = Some(sig.into());
@@ -215,8 +215,8 @@ pub struct Cost {
 pub enum StopReason {
     /// Natural end of response.
     EndTurn,
-    /// Model wants to invoke a capability.
-    CapabilityInvocation,
+    /// Model wants to invoke a tool.
+    ToolInvocation,
     /// Hit the max output token limit.
     MaxTokens,
     /// Hit a stop sequence.
@@ -242,14 +242,14 @@ pub enum UserMessageContent {
     Blocks(Vec<UserContent>),
 }
 
-/// Content of a capability result message — either a plain string or structured blocks.
+/// Content of a tool result message — either a plain string or structured blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum CapabilityResultMessageContent {
+pub enum ToolResultMessageContent {
     /// Simple text.
     Text(String),
     /// Structured content blocks.
-    Blocks(Vec<CapabilityResultContent>),
+    Blocks(Vec<ToolResultContent>),
 }
 
 /// A conversation message (discriminated by `role`).
@@ -283,14 +283,14 @@ pub enum Message {
         #[serde(skip_serializing_if = "Option::is_none")]
         thinking: Option<String>,
     },
-    /// Capability result message.
-    #[serde(rename = "capabilityResult")]
-    CapabilityResult {
-        /// Capability invocation ID.
+    /// Tool result message.
+    #[serde(rename = "toolResult")]
+    ToolResult {
+        /// Tool invocation ID.
         #[serde(rename = "invocationId")]
         invocation_id: String,
         /// Result content.
-        content: CapabilityResultMessageContent,
+        content: ToolResultMessageContent,
         /// Error flag.
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
@@ -314,10 +314,10 @@ impl Message {
         matches!(self, Self::Assistant { .. })
     }
 
-    /// Returns `true` if this is a capability result message.
+    /// Returns `true` if this is a tool result message.
     #[must_use]
-    pub fn is_capability_result(&self) -> bool {
-        matches!(self, Self::CapabilityResult { .. })
+    pub fn is_tool_result(&self) -> bool {
+        matches!(self, Self::ToolResult { .. })
     }
 
     /// Create a user message from a plain string.
@@ -378,9 +378,9 @@ pub struct Context {
     pub system_prompt: Option<String>,
     /// Conversation messages (shared via `Arc` to avoid deep cloning per turn).
     pub messages: Arc<[Message]>,
-    /// Available capabilities.
+    /// Available tools.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<Vec<ModelCapability>>,
+    pub tools: Option<Vec<ModelTool>>,
     /// Working directory for file operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,

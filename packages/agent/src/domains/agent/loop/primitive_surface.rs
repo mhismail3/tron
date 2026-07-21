@@ -10,7 +10,7 @@ use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, FunctionDefinition, FunctionId,
     Invocation, InvocationId, TraceId,
 };
-use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
+use crate::shared::protocol::model_tools::{ModelTool, ToolParameterSchema};
 
 #[cfg(test)]
 pub(crate) async fn promote_worker_for_session(
@@ -127,14 +127,14 @@ pub(crate) async fn take_worker_inbox_context(
 
 #[derive(Clone, Debug)]
 pub struct PrimitiveExecutionTarget {
-    pub model_capability_id: String,
+    pub model_tool_id: String,
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
 }
 
 #[derive(Clone, Debug)]
 pub struct ResolvedPrimitiveSurface {
-    pub capabilities: Vec<ModelCapability>,
+    pub tools: Vec<ModelTool>,
     pub targets_by_name: BTreeMap<String, PrimitiveExecutionTarget>,
     /// Exact provider-neutral catalog evidence used to construct this surface.
     pub snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot,
@@ -161,30 +161,30 @@ pub(crate) async fn resolve_provider_primitive_surface_for_query(
         origin_worker_id,
     )
     .await?;
-    let mut capabilities = Vec::new();
+    let mut tools = Vec::new();
     let mut targets_by_name = BTreeMap::new();
 
     for resolved_function in resolved.functions {
         let target = PrimitiveExecutionTarget {
-            model_capability_id: resolved_function.model_name,
+            model_tool_id: resolved_function.model_name,
             function_id: resolved_function.definition.id.clone(),
             function: resolved_function.definition,
         };
-        let capability = model_capability_schema(&target);
-        let _ = targets_by_name.insert(target.model_capability_id.clone(), target);
-        capabilities.push(capability);
+        let tool = model_tool_schema(&target);
+        let _ = targets_by_name.insert(target.model_tool_id.clone(), target);
+        tools.push(tool);
     }
 
     Ok(ResolvedPrimitiveSurface {
-        capabilities,
+        tools,
         targets_by_name,
         snapshot: resolved.snapshot,
     })
 }
 
-fn model_capability_schema(target: &PrimitiveExecutionTarget) -> ModelCapability {
-    ModelCapability {
-        name: target.model_capability_id.clone(),
+fn model_tool_schema(target: &PrimitiveExecutionTarget) -> ModelTool {
+    ModelTool {
+        name: target.model_tool_id.clone(),
         description: target.function.description.clone(),
         parameters: parameter_schema_from_value(
             target
@@ -196,8 +196,8 @@ fn model_capability_schema(target: &PrimitiveExecutionTarget) -> ModelCapability
     }
 }
 
-fn parameter_schema_from_value(value: Value) -> CapabilityParameterSchema {
-    serde_json::from_value(value).unwrap_or_else(|_| CapabilityParameterSchema {
+fn parameter_schema_from_value(value: Value) -> ToolParameterSchema {
+    serde_json::from_value(value).unwrap_or_else(|_| ToolParameterSchema {
         schema_type: "object".to_owned(),
         properties: None,
         required: None,
@@ -302,7 +302,7 @@ mod tests {
         let surface = resolve_provider_primitive_surface(&host, "session-a")
             .await
             .expect("surface");
-        assert!(surface.capabilities.is_empty());
+        assert!(surface.tools.is_empty());
     }
 
     #[tokio::test]
@@ -390,7 +390,6 @@ mod tests {
         .await
         .expect("autonomous surface");
 
-        assert!(!surface.targets_by_name.contains_key("execute"));
         assert!(surface.targets_by_name.contains_key("worker_upsert"));
         assert!(surface.targets_by_name.contains_key("recent_research"));
         assert!(!surface.targets_by_name.contains_key("format_notes"));
@@ -416,9 +415,9 @@ mod tests {
         );
         assert_eq!(surface.snapshot.surface_hash.len(), 64);
         let schema = surface
-            .capabilities
+            .tools
             .iter()
-            .find(|capability| capability.name == "recent_research")
+            .find(|tool| tool.name == "recent_research")
             .expect("worker schema");
         assert_eq!(schema.parameters.schema_type, "object");
         assert_eq!(schema.parameters.required, Some(vec!["query".to_owned()]));

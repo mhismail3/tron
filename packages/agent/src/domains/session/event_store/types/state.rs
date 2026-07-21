@@ -13,7 +13,7 @@ pub struct Message {
     pub role: String,
     /// Message content (string for user/system, array for assistant).
     pub content: Value,
-    /// Capability invocation ID (for `capabilityResult` messages).
+    /// Tool invocation ID (for `toolResult` messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocation_id: Option<String>,
     /// Whether this is an error result.

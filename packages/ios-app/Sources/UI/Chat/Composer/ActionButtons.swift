@@ -11,11 +11,11 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
     var id: String { rawValue }
 
     static func availableActions(
-        for capability: AttachmentCapability,
+        for tool: AttachmentSupport,
         includeRecentInputs: Bool = false
     ) -> [AttachmentMenuAction] {
         var actions: [AttachmentMenuAction] = []
-        if capability.supportsImages {
+        if tool.supportsImages {
             actions += [.camera, .photoLibrary]
         }
         actions.append(.files)
@@ -54,7 +54,7 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
 
 struct ComposerAttachmentButton: View {
     let isDisabled: Bool
-    let attachmentCapability: AttachmentCapability
+    let attachmentSupport: AttachmentSupport
     let includeRecentInputs: Bool
     let onSelect: (AttachmentMenuAction) -> Void
     let buttonSize: CGFloat
@@ -73,7 +73,7 @@ struct ComposerAttachmentButton: View {
             .overlay {
                 Menu {
                     ForEach(AttachmentMenuAction.availableActions(
-                        for: attachmentCapability,
+                        for: attachmentSupport,
                         includeRecentInputs: includeRecentInputs
                     )) { action in
                         Button {

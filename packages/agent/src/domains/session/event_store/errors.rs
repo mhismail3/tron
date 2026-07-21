@@ -30,10 +30,10 @@ pub enum EventStoreError {
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
 
-    /// Schema migration failed.
-    #[error("migration error: {message}")]
-    Migration {
-        /// Describes which migration failed and why.
+    /// Current-schema installation or verification failed.
+    #[error("schema error: {message}")]
+    Schema {
+        /// Describes which schema operation failed and why.
         message: String,
     },
 
@@ -107,14 +107,11 @@ mod tests {
     }
 
     #[test]
-    fn migration_error_display() {
-        let err = EventStoreError::Migration {
-            message: "v003 failed: table already exists".into(),
+    fn schema_error_display() {
+        let err = EventStoreError::Schema {
+            message: "table creation failed".into(),
         };
-        assert_eq!(
-            err.to_string(),
-            "migration error: v003 failed: table already exists"
-        );
+        assert_eq!(err.to_string(), "schema error: table creation failed");
     }
 
     #[test]

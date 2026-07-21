@@ -1,7 +1,7 @@
 import Foundation
 
 /// Server-authored failure envelope shared by engine protocol errors, live
-/// events, durable event replay, and capability result details.
+/// events, durable event replay, and tool result details.
 struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
     let code: String
     let category: String
@@ -119,8 +119,7 @@ struct CanonicalFailurePayload: Codable, Equatable, Hashable, Sendable {
     }
 
     /// The server's canonical terminal classification for a cancelled turn.
-    /// Code is authoritative; category preserves compatibility with older rows.
-    static func isTurnCancellation(code: String?, category: String?) -> Bool {
-        code == "RUNTIME_CANCELLED" || category == "cancelled"
+    static func isTurnCancellation(code: String?) -> Bool {
+        code == "RUNTIME_CANCELLED"
     }
 }

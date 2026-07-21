@@ -117,8 +117,8 @@ struct PairedServerTokenStoreTests {
         #expect(records.allSatisfy { $0.service != PairedServerTokenStore.keychainServicePrefix })
     }
 
-    @Test("throw cleanup and process fallback are idempotent")
-    func throwAndProcessFallbackCleanup() throws {
+    @Test("throw cleanup and process-exit cleanup are idempotent")
+    func throwAndProcessExitCleanup() throws {
         struct ProbeError: Error {}
         let capture = KeychainLifecycleCapture()
         let registry = HostedTestCleanupRegistry()

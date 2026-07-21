@@ -8,7 +8,7 @@ fn simple_context() -> Context {
     Context {
         system_prompt: Some("You are helpful.".into()),
         messages: vec![Message::user("hello")].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     }
@@ -99,12 +99,12 @@ fn convert_assistant_thinking_without_signature_filtered() {
 }
 
 #[test]
-fn convert_assistant_capability_invocation() {
+fn convert_assistant_tool_invocation() {
     let mut args = Map::new();
     let _ = args.insert("cmd".into(), json!("ls"));
-    let content = vec![AssistantContent::CapabilityInvocation {
+    let content = vec![AssistantContent::ToolInvocation {
         id: "toolu_01abc".into(),
-        name: "execute".into(),
+        name: "test_tool".into(),
         arguments: args,
         thought_signature: None,
     }];
@@ -112,17 +112,17 @@ fn convert_assistant_capability_invocation() {
     let param = convert_assistant_message(&content, &id_mapping);
     assert_eq!(param.content[0]["type"], "tool_use");
     assert_eq!(param.content[0]["id"], "toolu_01abc");
-    assert_eq!(param.content[0]["name"], "execute");
+    assert_eq!(param.content[0]["name"], "test_tool");
     assert_eq!(param.content[0]["input"]["cmd"], "ls");
 }
 
 #[test]
-fn convert_assistant_capability_invocation_remaps_openai_id() {
+fn convert_assistant_tool_invocation_remaps_openai_id() {
     let mut args = Map::new();
     let _ = args.insert("cmd".into(), json!("ls"));
-    let content = vec![AssistantContent::CapabilityInvocation {
+    let content = vec![AssistantContent::ToolInvocation {
         id: "call_abc123xyz".into(),
-        name: "execute".into(),
+        name: "test_tool".into(),
         arguments: args,
         thought_signature: None,
     }];
@@ -136,17 +136,17 @@ fn convert_assistant_capability_invocation_remaps_openai_id() {
     );
 }
 
-// ── Capability result conversion ───────────────────────────────────────────
+// ── Tool result conversion ───────────────────────────────────────────
 
 #[test]
-fn convert_capability_result_text() {
+fn convert_tool_result_text() {
     let output_envelope = format!(
         "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
         "safe-évidence-".repeat(1_400)
     );
-    let content = CapabilityResultMessageContent::Text(output_envelope.clone());
+    let content = ToolResultMessageContent::Text(output_envelope.clone());
     let id_mapping = HashMap::new();
-    let param = convert_capability_result("toolu_01abc", &content, None, &id_mapping);
+    let param = convert_tool_result("toolu_01abc", &content, None, &id_mapping);
     assert_eq!(param.role, "user");
     assert_eq!(param.content[0]["type"], "tool_result");
     assert_eq!(param.content[0]["tool_use_id"], "toolu_01abc");
@@ -158,21 +158,21 @@ fn convert_capability_result_text() {
 }
 
 #[test]
-fn convert_capability_result_error() {
-    let content = CapabilityResultMessageContent::Text("failed".into());
+fn convert_tool_result_error() {
+    let content = ToolResultMessageContent::Text("failed".into());
     let id_mapping = HashMap::new();
-    let param = convert_capability_result("toolu_01abc", &content, Some(true), &id_mapping);
+    let param = convert_tool_result("toolu_01abc", &content, Some(true), &id_mapping);
     assert_eq!(param.content[0]["is_error"], true);
 }
 
 #[test]
-fn convert_capability_result_with_image() {
-    let content = CapabilityResultMessageContent::Blocks(vec![
-        CapabilityResultContent::text("screenshot taken"),
-        CapabilityResultContent::image("imgdata", "image/png"),
+fn convert_tool_result_with_image() {
+    let content = ToolResultMessageContent::Blocks(vec![
+        ToolResultContent::text("screenshot taken"),
+        ToolResultContent::image("imgdata", "image/png"),
     ]);
     let id_mapping = HashMap::new();
-    let param = convert_capability_result("toolu_01abc", &content, None, &id_mapping);
+    let param = convert_tool_result("toolu_01abc", &content, None, &id_mapping);
     let inner = &param.content[0]["content"];
     assert_eq!(inner[0]["type"], "text");
     assert_eq!(inner[1]["type"], "image");
@@ -235,9 +235,9 @@ fn build_id_mapping_from_messages() {
     let messages = vec![
         Message::user("hi"),
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "call_abc123def456".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             }],
@@ -257,9 +257,9 @@ fn build_id_mapping_empty_for_anthropic_ids() {
     let messages = vec![
         Message::user("hi"),
         Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "toolu_01abc".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: Map::new(),
                 thought_signature: None,
             }],
@@ -277,13 +277,13 @@ fn build_id_mapping_empty_for_anthropic_ids() {
 // ── dedup_tool_blocks ──────────────────────────────────────────────
 
 #[test]
-fn dedup_assistant_capability_invocation_keeps_last() {
+fn dedup_assistant_tool_invocation_keeps_last() {
     let messages = vec![AnthropicMessageParam {
         role: "assistant".into(),
         content: vec![
-            json!({"type": "tool_use", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo old"}}),
+            json!({"type": "tool_use", "id": "toolu_remap_1", "name": "test_tool", "input": {"cmd": "echo old"}}),
             json!({"type": "text", "text": "thinking..."}),
-            json!({"type": "tool_use", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo new"}}),
+            json!({"type": "tool_use", "id": "toolu_remap_1", "name": "test_tool", "input": {"cmd": "echo new"}}),
         ],
     }];
     let deduped = dedup_tool_blocks(messages);
@@ -294,7 +294,7 @@ fn dedup_assistant_capability_invocation_keeps_last() {
 }
 
 #[test]
-fn dedup_user_capability_result_keeps_last() {
+fn dedup_user_tool_result_keeps_last() {
     let messages = vec![AnthropicMessageParam {
         role: "user".into(),
         content: vec![
@@ -389,29 +389,29 @@ fn merge_empty_input() {
     assert!(merged.is_empty());
 }
 
-// ── Full flow: capability results merge into single user message ──────────
+// ── Full flow: tool results merge into single user message ──────────
 
 #[test]
-fn full_flow_multiple_capability_results_become_single_user_message() {
+fn full_flow_multiple_tool_results_become_single_user_message() {
     let mut args = Map::new();
     let _ = args.insert("cmd".into(), json!("ls"));
     let messages = vec![
         Message::user("do three things"),
         Message::Assistant {
             content: vec![
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "toolu_01a".into(),
-                    name: "execute".into(),
+                    name: "test_tool".into(),
                     arguments: args.clone(),
                     thought_signature: None,
                 },
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "toolu_01b".into(),
                     name: "inspect".into(),
                     arguments: args.clone(),
                     thought_signature: None,
                 },
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "toolu_01c".into(),
                     name: "search".into(),
                     arguments: args,
@@ -423,23 +423,23 @@ fn full_flow_multiple_capability_results_become_single_user_message() {
             stop_reason: None,
             thinking: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01a".into(),
-            content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+            content: crate::shared::protocol::messages::ToolResultMessageContent::Text(
                 "out1".into(),
             ),
             is_error: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01b".into(),
-            content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+            content: crate::shared::protocol::messages::ToolResultMessageContent::Text(
                 "out2".into(),
             ),
             is_error: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "toolu_01c".into(),
-            content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+            content: crate::shared::protocol::messages::ToolResultMessageContent::Text(
                 "out3".into(),
             ),
             is_error: None,
@@ -461,21 +461,21 @@ fn full_flow_multiple_capability_results_become_single_user_message() {
 // ── End-to-end: cross-provider duplicate result dedup ────────────────────
 
 #[test]
-fn full_flow_duplicate_openai_capability_results_deduped_after_remap() {
-    // Simulates OpenAI-format IDs plus duplicate capability results from DB.
+fn full_flow_duplicate_openai_tool_results_deduped_after_remap() {
+    // Simulates OpenAI-format IDs plus duplicate tool results from DB.
     let mut args = Map::new();
     let _ = args.insert("command".into(), json!("ls"));
     let messages = vec![
         Message::user("run something"),
         Message::Assistant {
             content: vec![
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "call_abc123".into(),
-                    name: "execute".into(),
+                    name: "test_tool".into(),
                     arguments: args.clone(),
                     thought_signature: None,
                 },
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "call_def456".into(),
                     name: "inspect".into(),
                     arguments: args,
@@ -487,25 +487,25 @@ fn full_flow_duplicate_openai_capability_results_deduped_after_remap() {
             stop_reason: None,
             thinking: None,
         },
-        // Duplicate capability results from DB (same invocation_id executed twice).
-        Message::CapabilityResult {
+        // Duplicate tool results from DB (same invocation_id executed twice).
+        Message::ToolResult {
             invocation_id: "call_abc123".into(),
-            content: CapabilityResultMessageContent::Text("first execution".into()),
+            content: ToolResultMessageContent::Text("first execution".into()),
             is_error: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "call_abc123".into(),
-            content: CapabilityResultMessageContent::Text("second execution".into()),
+            content: ToolResultMessageContent::Text("second execution".into()),
             is_error: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "call_def456".into(),
-            content: CapabilityResultMessageContent::Text("read output".into()),
+            content: ToolResultMessageContent::Text("read output".into()),
             is_error: None,
         },
-        Message::CapabilityResult {
+        Message::ToolResult {
             invocation_id: "call_def456".into(),
-            content: CapabilityResultMessageContent::Text("read output dup".into()),
+            content: ToolResultMessageContent::Text("read output dup".into()),
             is_error: None,
         },
     ];
@@ -517,7 +517,7 @@ fn full_flow_duplicate_openai_capability_results_deduped_after_remap() {
     assert_eq!(
         converted[2].content.len(),
         2,
-        "duplicate capability results should be deduped to one per tool_use_id"
+        "duplicate tool results should be deduped to one per tool_use_id"
     );
     // Both should be Anthropic tool_result blocks.
     assert_eq!(converted[2].content[0]["type"], "tool_result");

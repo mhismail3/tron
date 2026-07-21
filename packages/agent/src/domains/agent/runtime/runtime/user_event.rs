@@ -1,7 +1,7 @@
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::map_event_store_error;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -122,7 +122,7 @@ pub async fn persist_user_message_event(
     event_store: Arc<EventStore>,
     session_id: String,
     payload: Value,
-) -> Result<crate::domains::session::event_store::EventRow, CapabilityError> {
+) -> Result<crate::domains::session::event_store::EventRow, ToolError> {
     run_blocking_task("agent.prompt.persist_user", move || {
         let event = event_store
             .append(&crate::domains::session::event_store::AppendOptions {

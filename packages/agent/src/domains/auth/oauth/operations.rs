@@ -5,20 +5,17 @@ use crate::domains::auth::credentials::{
     ActiveCredential, map_auth_error, write_auth_and_broadcast,
 };
 use crate::engine::Invocation;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::require_string_param;
 use serde_json::Value;
 use serde_json::json;
 
-pub(crate) async fn auth_oauth_begin(
-    payload: &Value,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
+pub(crate) async fn auth_oauth_begin(payload: &Value, deps: &Deps) -> Result<Value, ToolError> {
     let provider = require_string_param(Some(payload), "provider")?;
 
     let flow = crate::domains::auth::oauth::flows::prepare_oauth_flow(&provider, &deps.auth_path)
         .map_err(map_auth_error)?
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: if provider == "google" {
                 "Google OAuth requires a client_id - configure it in Settings > Providers > Google"
                     .into()
@@ -53,7 +50,7 @@ pub(crate) async fn auth_oauth_begin(
 pub(crate) async fn auth_oauth_complete(
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let flow_id = require_string_param(Some(payload), "flowId")?;
     let code = require_string_param(Some(payload), "code")?;
@@ -63,12 +60,12 @@ pub(crate) async fn auth_oauth_complete(
         let mut flows = deps.oauth_flows.lock().await;
         flows.remove(&flow_id)
     }
-    .ok_or_else(|| CapabilityError::InvalidParams {
+    .ok_or_else(|| ToolError::InvalidParams {
         message: "OAuth flow not found or expired".into(),
     })?;
 
     if flow.created_at.elapsed() > std::time::Duration::from_secs(OAUTH_FLOW_TTL_SECS) {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "OAuth flow expired".into(),
         });
     }
@@ -84,11 +81,11 @@ pub(crate) async fn auth_oauth_complete(
     .map_err(map_auth_error)?
     .ok_or_else(|| {
         if flow.provider == "google" {
-            CapabilityError::Internal {
+            ToolError::Internal {
                 message: "Google client_id is no longer configured - cannot complete OAuth".into(),
             }
         } else {
-            CapabilityError::InvalidParams {
+            ToolError::InvalidParams {
                 message: format!("Unsupported OAuth provider: {}", flow.provider),
             }
         }
@@ -110,7 +107,7 @@ pub(crate) async fn auth_oauth_complete(
 pub(crate) async fn auth_rename_account(
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let old_label = require_string_param(Some(payload), "oldLabel")?;
@@ -128,19 +125,17 @@ pub(crate) async fn auth_rename_account(
 pub(crate) async fn auth_set_active(
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let cred_val = payload
         .get("credential")
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "Missing required parameter: credential".into(),
         })?;
     let credential: ActiveCredential =
-        serde_json::from_value(cred_val.clone()).map_err(|error| {
-            CapabilityError::InvalidParams {
-                message: format!("Invalid credential: {error}"),
-            }
+        serde_json::from_value(cred_val.clone()).map_err(|error| ToolError::InvalidParams {
+            message: format!("Invalid credential: {error}"),
         })?;
 
     write_auth_and_broadcast(deps, invocation, "auth::set_active", move |auth_path| {
@@ -149,7 +144,7 @@ pub(crate) async fn auth_set_active(
             &provider,
             &credential,
         )
-        .map_err(|error| CapabilityError::InvalidParams {
+        .map_err(|error| ToolError::InvalidParams {
             message: format!("Failed to set active credential: {error}"),
         })
     })
@@ -159,7 +154,7 @@ pub(crate) async fn auth_set_active(
 pub(crate) async fn auth_remove_account(
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;
@@ -173,7 +168,7 @@ pub(crate) async fn auth_remove_account(
 pub(crate) async fn auth_remove_api_key(
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let provider = require_string_param(Some(payload), "provider")?;
     let label = require_string_param(Some(payload), "label")?;

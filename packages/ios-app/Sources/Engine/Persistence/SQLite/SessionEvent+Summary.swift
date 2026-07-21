@@ -50,12 +50,12 @@ extension SessionEvent {
             let hasThinking = payload.bool("hasThinking") == true
             let stopReason = payload.string("stopReason")
 
-            if hasThinking && stopReason == "capability_invocation" {
-                parts.append("Thinking → capability invocation")
+            if hasThinking && stopReason == "tool_invocation" {
+                parts.append("Thinking → tool invocation")
             } else if hasThinking {
                 parts.append("Thinking response")
-            } else if stopReason == "capability_invocation" {
-                parts.append("Capability invocation")
+            } else if stopReason == "tool_invocation" {
+                parts.append("Tool invocation")
             } else {
                 parts.append("Assistant response")
             }
@@ -66,12 +66,9 @@ extension SessionEvent {
 
             return parts.joined(separator: " • ")
 
-        case .capabilityInvocationStarted:
-            let name = payload.string("operationName") ??
-                payload.string("operation") ??
-                payload.string("modelPrimitiveName") ??
-                "execute"
-            let displayName = formatCapabilityName(name)
+        case .toolInvocationStarted:
+            let name = payload.string("toolName") ?? "unknown_tool"
+            let displayName = formatToolName(name)
             let args = payload.dict("arguments") ?? [:]
             let keyArg = extractKeyArgument(from: args)
             if !keyArg.isEmpty {
@@ -79,7 +76,7 @@ extension SessionEvent {
             }
             return displayName
 
-        case .capabilityInvocationCompleted:
+        case .toolInvocationCompleted:
             let isError = payload.bool("isError") ?? false
             let duration = payload.int("duration")
             let status = isError ? "error" : "success"
@@ -151,7 +148,7 @@ extension SessionEvent {
         return ""
     }
 
-    func formatCapabilityName(_ name: String) -> String {
+    func formatToolName(_ name: String) -> String {
         let tail = name.split(separator: "::").last.map(String.init) ?? name
         return tail
             .replacingOccurrences(of: "_", with: " ")

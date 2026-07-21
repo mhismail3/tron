@@ -97,69 +97,69 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_withCapabilityInvocationBlock_isForkable() {
+    func testAssistant_withToolInvocationBlock_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "text", "text": "Let me run that"],
-                ["type": "capability_invocation", "id": "toolu_123", "name": "execute", "input": ["command": "ls"]],
+                ["type": "tool_invocation", "id": "toolu_123", "name": "process_run", "input": ["command": "ls"]],
             ]),
-            "stopReason": AnyCodable("capability_invocation"),
+            "stopReason": AnyCodable("tool_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stopReasonCapabilityInvocation_isForkable() {
+    func testAssistant_stopReasonToolInvocation_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
-                ["type": "capability_invocation", "id": "toolu_456", "name": "execute", "input": ["path": "/tmp"]],
+                ["type": "tool_invocation", "id": "toolu_456", "name": "process_run", "input": ["path": "/tmp"]],
             ]),
-            "stopReason": AnyCodable("capability_invocation"),
+            "stopReason": AnyCodable("tool_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_interruptedWithCapabilityInvocationInContent_isForkable() {
+    func testAssistant_interruptedWithToolInvocationInContent_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "text", "text": "Running..."],
-                ["type": "capability_invocation", "id": "toolu_789", "name": "execute", "input": ["command": "test"]],
+                ["type": "tool_invocation", "id": "toolu_789", "name": "process_run", "input": ["command": "test"]],
             ]),
             "stopReason": AnyCodable("interrupted"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_mixedContentWithCapabilityInvocation_isForkable() {
+    func testAssistant_mixedContentWithToolInvocation_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "thinking", "thinking": "Let me think..."],
                 ["type": "text", "text": "I'll check that file"],
-                ["type": "capability_invocation", "id": "toolu_abc", "name": "execute", "input": ["path": "/etc"]],
+                ["type": "tool_invocation", "id": "toolu_abc", "name": "process_run", "input": ["path": "/etc"]],
             ]),
-            "stopReason": AnyCodable("capability_invocation"),
+            "stopReason": AnyCodable("tool_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stopReasonCapabilityInvocation_noContent_isForkable() {
+    func testAssistant_stopReasonToolInvocation_noContent_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
-            "stopReason": AnyCodable("capability_invocation"),
+            "stopReason": AnyCodable("tool_invocation"),
         ])
         XCTAssertTrue(event.isForkable)
     }
 
     // MARK: - Non-forkable event types
 
-    func testCapabilityInvocation_isNotForkable() {
-        let event = makeEvent(type: "capability.invocation.started", payload: [
-            "modelPrimitiveName": AnyCodable("execute"),
+    func testToolInvocation_isNotForkable() {
+        let event = makeEvent(type: "tool.invocation.started", payload: [
+            "toolName": AnyCodable("process_run"),
             "arguments": AnyCodable(["command": "ls"]),
         ])
         XCTAssertFalse(event.isForkable)
     }
 
-    func testCapabilityInvocationResult_isNotForkable() {
-        let event = makeEvent(type: "capability.invocation.completed", payload: [
+    func testToolInvocationResult_isNotForkable() {
+        let event = makeEvent(type: "tool.invocation.completed", payload: [
             "content": AnyCodable("file1.txt\nfile2.txt"),
             "isError": AnyCodable(false),
         ])

@@ -75,8 +75,8 @@ pub struct ModelInfo {
     pub supports_thinking: bool,
     /// Whether the model supports reasoning (`OpenAI`).
     pub supports_reasoning: bool,
-    /// Whether the model supports capability invocation.
-    pub supports_capabilities: bool,
+    /// Whether the model supports tool invocation.
+    pub supports_tools: bool,
     /// Whether the model supports image inputs.
     pub supports_images: bool,
     /// Input cost per million tokens (USD).
@@ -281,7 +281,7 @@ mod tests {
             max_output: 128_000,
             supports_thinking: true,
             supports_reasoning: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 15.0,
             output_cost_per_million: 75.0,
@@ -312,7 +312,7 @@ mod tests {
             max_output: 8000,
             supports_thinking: false,
             supports_reasoning: false,
-            supports_capabilities: true,
+            supports_tools: true,
             supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,

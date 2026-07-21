@@ -4,7 +4,7 @@ use serde_json::Map;
 
 use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::AssistantMessage;
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::messages::ToolInvocationDraft;
 
 #[derive(Clone, Debug)]
 enum OrderedContentBlock {
@@ -14,8 +14,8 @@ enum OrderedContentBlock {
         kind: ThinkingContentKind,
         signature: Option<String>,
     },
-    CapabilityInvocation {
-        draft: CapabilityInvocationDraft,
+    ToolInvocation {
+        draft: ToolInvocationDraft,
         finalized: bool,
     },
 }
@@ -29,7 +29,7 @@ pub(super) struct OrderedAssistantContent {
     blocks: Vec<OrderedContentBlock>,
     active_text_index: Option<usize>,
     active_thinking_index: Option<usize>,
-    capability_indices: HashMap<String, usize>,
+    tool_indices: HashMap<String, usize>,
 }
 
 impl OrderedAssistantContent {
@@ -120,7 +120,7 @@ impl OrderedAssistantContent {
     ) {
         if self.active_thinking_index.is_none() {
             // Some providers emit a terminal full-snapshot ThinkingEnd after
-            // they have already started a capability invocation. The
+            // they have already started a tool invocation. The
             // invocation closes the active block to preserve ordering, so
             // finalize the matching streamed block instead of appending the
             // same thinking again after the invocation.
@@ -151,12 +151,12 @@ impl OrderedAssistantContent {
         }
     }
 
-    pub(super) fn start_capability_invocation(&mut self, id: &str, name: &str) {
+    pub(super) fn start_tool_invocation(&mut self, id: &str, name: &str) {
         self.active_text_index = None;
         self.active_thinking_index = None;
 
-        if let Some(idx) = self.capability_indices.get(id).copied() {
-            if let Some(OrderedContentBlock::CapabilityInvocation { draft, .. }) =
+        if let Some(idx) = self.tool_indices.get(id).copied() {
+            if let Some(OrderedContentBlock::ToolInvocation { draft, .. }) =
                 self.blocks.get_mut(idx)
                 && draft.name.is_empty()
             {
@@ -166,16 +166,16 @@ impl OrderedAssistantContent {
         }
 
         let idx = self.blocks.len();
-        self.blocks.push(OrderedContentBlock::CapabilityInvocation {
-            draft: CapabilityInvocationDraft::new(id.to_owned(), name.to_owned(), Map::new()),
+        self.blocks.push(OrderedContentBlock::ToolInvocation {
+            draft: ToolInvocationDraft::new(id.to_owned(), name.to_owned(), Map::new()),
             finalized: false,
         });
-        let _ = self.capability_indices.insert(id.to_owned(), idx);
+        let _ = self.tool_indices.insert(id.to_owned(), idx);
     }
 
-    pub(super) fn finish_capability_invocation(&mut self, draft: &CapabilityInvocationDraft) {
-        if let Some(idx) = self.capability_indices.get(&draft.id).copied() {
-            if let Some(OrderedContentBlock::CapabilityInvocation {
+    pub(super) fn finish_tool_invocation(&mut self, draft: &ToolInvocationDraft) {
+        if let Some(idx) = self.tool_indices.get(&draft.id).copied() {
+            if let Some(OrderedContentBlock::ToolInvocation {
                 draft: current,
                 finalized,
             }) = self.blocks.get_mut(idx)
@@ -187,11 +187,11 @@ impl OrderedAssistantContent {
         }
 
         let idx = self.blocks.len();
-        self.blocks.push(OrderedContentBlock::CapabilityInvocation {
+        self.blocks.push(OrderedContentBlock::ToolInvocation {
             draft: draft.clone(),
             finalized: true,
         });
-        let _ = self.capability_indices.insert(draft.id.clone(), idx);
+        let _ = self.tool_indices.insert(draft.id.clone(), idx);
     }
 
     pub(super) fn content_blocks(&self) -> Vec<AssistantContent> {
@@ -211,8 +211,8 @@ impl OrderedAssistantContent {
                     kind: *kind,
                     signature: signature.clone(),
                 }),
-                OrderedContentBlock::CapabilityInvocation { draft, finalized } => {
-                    finalized.then(|| AssistantContent::CapabilityInvocation {
+                OrderedContentBlock::ToolInvocation { draft, finalized } => {
+                    finalized.then(|| AssistantContent::ToolInvocation {
                         id: draft.id.clone(),
                         name: draft.name.clone(),
                         arguments: draft.arguments.clone(),
@@ -234,13 +234,13 @@ impl OrderedAssistantContent {
     }
 }
 
-/// Finalize an in-progress capability invocation from accumulated deltas.
-pub(super) fn finalize_capability_invocation(
-    capability_invocations: &mut Vec<CapabilityInvocationDraft>,
+/// Finalize an in-progress tool invocation from accumulated deltas.
+pub(super) fn finalize_tool_invocation(
+    tool_invocations: &mut Vec<ToolInvocationDraft>,
     current_id: &mut Option<String>,
     current_name: &mut Option<String>,
     current_args: &mut String,
-) -> Option<CapabilityInvocationDraft> {
+) -> Option<ToolInvocationDraft> {
     if let (Some(id), Some(name)) = (current_id.take(), current_name.take()) {
         if current_args.trim().is_empty() {
             current_args.clear();
@@ -251,21 +251,21 @@ pub(super) fn finalize_capability_invocation(
             Err(e) => {
                 tracing::warn!(
                     component = "agent.stream",
-                    agent_event = "stream_capability_invocation_arguments_malformed",
-                    model_primitive_name = %name,
+                    agent_event = "stream_tool_invocation_arguments_malformed",
+                    tool_name = %name,
                     invocation_id = %id,
                     error = %e,
                     args_len = current_args.len(),
-                    "malformed capability invocation arguments, using empty map"
+                    "malformed tool invocation arguments, using empty map"
                 );
                 Map::new()
             }
         };
-        let draft = CapabilityInvocationDraft::new(id.clone(), name.clone(), arguments);
-        if let Some(pos) = capability_invocations.iter().position(|tc| tc.id == id) {
-            capability_invocations[pos] = draft.clone();
+        let draft = ToolInvocationDraft::new(id.clone(), name.clone(), arguments);
+        if let Some(pos) = tool_invocations.iter().position(|tc| tc.id == id) {
+            tool_invocations[pos] = draft.clone();
         } else {
-            capability_invocations.push(draft.clone());
+            tool_invocations.push(draft.clone());
         }
         current_args.clear();
         return Some(draft);
@@ -278,7 +278,7 @@ pub(super) fn build_message(
     text: &str,
     thinking: &str,
     thinking_signature: Option<&str>,
-    capability_invocations: &[CapabilityInvocationDraft],
+    tool_invocations: &[ToolInvocationDraft],
 ) -> AssistantMessage {
     let mut content: Vec<AssistantContent> = Vec::with_capacity(3);
 
@@ -297,8 +297,8 @@ pub(super) fn build_message(
         }
     }
 
-    for tc in capability_invocations {
-        content.push(AssistantContent::CapabilityInvocation {
+    for tc in tool_invocations {
+        content.push(AssistantContent::ToolInvocation {
             id: tc.id.clone(),
             name: tc.name.clone(),
             arguments: tc.arguments.clone(),

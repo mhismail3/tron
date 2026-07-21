@@ -37,7 +37,7 @@ fn token_estimation_uses_deps() {
         current_tokens: 80_000,
         context_limit: 100_000,
         system_prompt_tokens: 1_000,
-        capabilities_tokens: 500,
+        tools_tokens: 500,
         message_token_value: 250,
         token_fn: None,
     };
@@ -49,18 +49,18 @@ fn token_estimation_uses_deps() {
 }
 
 // ========================================================================
-// Integration: no orphaned capability results
+// Integration: no orphaned tool results
 // ========================================================================
 
-/// Assert that every `CapabilityResult` in `messages` has a preceding `Assistant`
-/// containing a `CapabilityInvocation` with the matching ID.
-fn assert_no_orphaned_capability_results(messages: &[Message]) {
+/// Assert that every `ToolResult` in `messages` has a preceding `Assistant`
+/// containing a `ToolInvocation` with the matching ID.
+fn assert_no_orphaned_tool_results(messages: &[Message]) {
     for (i, msg) in messages.iter().enumerate() {
-        if let Message::CapabilityResult { invocation_id, .. } = msg {
-            let has_matching_capability_invocation = (0..i).rev().any(|j| {
+        if let Message::ToolResult { invocation_id, .. } = msg {
+            let has_matching_tool_invocation = (0..i).rev().any(|j| {
                 if let Message::Assistant { content, .. } = &messages[j] {
                     content.iter().any(|c| {
-                        if let AssistantContent::CapabilityInvocation { id, .. } = c {
+                        if let AssistantContent::ToolInvocation { id, .. } = c {
                             id == invocation_id
                         } else {
                             false
@@ -71,31 +71,31 @@ fn assert_no_orphaned_capability_results(messages: &[Message]) {
                 }
             });
             assert!(
-                has_matching_capability_invocation,
-                "CapabilityResult(invocation_id={invocation_id}) at index {i} has no \
-                 preceding Assistant with matching CapabilityInvocation"
+                has_matching_tool_invocation,
+                "ToolResult(invocation_id={invocation_id}) at index {i} has no \
+                 preceding Assistant with matching ToolInvocation"
             );
         }
     }
 }
 
 #[tokio::test]
-async fn execute_compaction_no_orphaned_capability_results() {
+async fn execute_compaction_no_orphaned_tool_results() {
     let msgs = vec![
         Message::user("q1"),
-        assistant_with_capability_invocation(&["tc1"]),
-        capability_result("tc1"),
+        assistant_with_tool_invocation(&["tc1"]),
+        tool_result("tc1"),
         Message::user("q2"),
-        assistant_with_capability_invocation(&["tc2", "tc3"]),
-        capability_result("tc2"),
-        capability_result("tc3"),
+        assistant_with_tool_invocation(&["tc2", "tc3"]),
+        tool_result("tc2"),
+        tool_result("tc3"),
         Message::user("q3"),
         Message::assistant("final"),
     ];
     // 3 turns, preserve 1
     let deps = MockDeps::new(msgs);
     let engine = CompactionEngine::new(0.70, 1, deps);
-    let summarizer = MockSummarizer::new("Summary of capability usage");
+    let summarizer = MockSummarizer::new("Summary of tool usage");
 
     let result = engine
         .execute(&summarizer, None, &summary_context())
@@ -103,21 +103,21 @@ async fn execute_compaction_no_orphaned_capability_results() {
         .unwrap();
     assert!(result.success);
 
-    assert_no_orphaned_capability_results(&engine.deps.get_messages());
+    assert_no_orphaned_tool_results(&engine.deps.get_messages());
 }
 
 #[tokio::test]
 async fn execute_turn_based_no_orphans() {
-    // ModelCapability-heavy conversation, preserve 2 turns
+    // ModelTool-heavy conversation, preserve 2 turns
     let msgs = vec![
         Message::user("q1"),
-        assistant_with_capability_invocation(&["tc1"]),
-        capability_result("tc1"),
+        assistant_with_tool_invocation(&["tc1"]),
+        tool_result("tc1"),
         Message::assistant("r1"),
         Message::user("q2"),
-        assistant_with_capability_invocation(&["tc2", "tc3"]),
-        capability_result("tc2"),
-        capability_result("tc3"),
+        assistant_with_tool_invocation(&["tc2", "tc3"]),
+        tool_result("tc2"),
+        tool_result("tc3"),
         Message::assistant("r2"),
         Message::user("q3"),
         Message::assistant("r3"),
@@ -131,14 +131,14 @@ async fn execute_turn_based_no_orphans() {
         .await
         .unwrap();
     assert!(result.success);
-    assert_no_orphaned_capability_results(&engine.deps.get_messages());
+    assert_no_orphaned_tool_results(&engine.deps.get_messages());
 }
 
 // ========================================================================
 // 65K context window — local-model ceiling (Ollama)
 //
 // Ollama sessions run with `num_ctx = 65_536` and the default compaction
-// threshold of 0.70. These tests pin the split-point math and capability-result
+// threshold of 0.70. These tests pin the split-point math and tool-result
 // sizer at that window so the local path is parametrically covered.
 // ========================================================================
 

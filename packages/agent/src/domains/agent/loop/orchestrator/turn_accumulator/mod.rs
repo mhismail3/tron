@@ -1,13 +1,13 @@
 //! Turn accumulator — tracks in-progress turn content for session resume.
 //!
 //! When a client reconnects to a running session, `session.reconstruct` returns
-//! the accumulated text, thinking, and capability invocations as `inFlight` state so the UI
+//! the accumulated text, thinking, and tool invocations as `inFlight` state so the UI
 //! can render in-progress content without waiting for the next delta.
 //!
 //! ## Lifecycle
 //!
 //! - `TurnStart` → creates/resets the accumulator for that session
-//! - streamed content and capability lifecycle/progress → update reconnect state
+//! - streamed content and tool lifecycle/progress → update reconnect state
 //! - compaction lifecycle → update reconnect-visible compaction state
 //! - `TurnEnd` / `AgentEnd` → clear turn state while retaining processing ownership
 //! - matching run release → atomically ends processing/admission ownership
@@ -27,14 +27,14 @@ use parking_lot::Mutex;
 
 use crate::domains::agent::r#loop::event_emitter::TronEventObserver;
 use crate::shared::protocol::content::ThinkingContentKind;
-use crate::shared::protocol::events::{CapabilityEventIdentity, TronEvent};
+use crate::shared::protocol::events::{ToolEventIdentity, TronEvent};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ContentSequenceItem
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Ordered content item within a turn (text, thinking, or capability reference).
+/// Ordered content item within a turn (text, thinking, or tool reference).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ContentSequenceItem {
     /// Accumulated text content.
@@ -46,9 +46,9 @@ pub enum ContentSequenceItem {
         /// Source contract for the text.
         kind: ThinkingContentKind,
     },
-    /// Reference to a capability invocation by ID.
-    CapabilityRef {
-        /// The capability invocation this item refers to.
+    /// Reference to a tool invocation by ID.
+    ToolRef {
+        /// The tool invocation this item refers to.
         invocation_id: String,
     },
 }
@@ -64,31 +64,31 @@ impl ContentSequenceItem {
                 }
                 item
             }
-            Self::CapabilityRef { invocation_id } => {
-                serde_json::json!({ "type": "capability_ref", "invocationId": invocation_id })
+            Self::ToolRef { invocation_id } => {
+                serde_json::json!({ "type": "tool_ref", "invocationId": invocation_id })
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AccumulatedCapabilityInvocation
+// AccumulatedToolInvocation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Snapshot of a capability invocation's progress within the current turn.
+/// Snapshot of a tool invocation's progress within the current turn.
 #[derive(Clone, Debug)]
-pub struct AccumulatedCapabilityInvocation {
-    /// Unique identifier for this capability invocation.
+pub struct AccumulatedToolInvocation {
+    /// Unique identifier for this tool invocation.
     pub invocation_id: String,
-    /// Model-facing primitive name (for example `execute` or `inspect`).
-    pub model_primitive_name: String,
+    /// Direct model-facing tool name (for example `filesystem_read`).
+    pub tool_name: String,
     /// Parsed arguments, populated when execution starts.
     pub arguments: Option<Value>,
     /// Lifecycle status: "generating", "running", "completed", or "error".
     pub status: String,
-    /// Capability output text, populated on completion.
+    /// Tool output text, populated on completion.
     pub result: Option<String>,
-    /// Whether the capability invocation ended in error.
+    /// Whether the tool invocation ended in error.
     pub is_error: bool,
     /// ISO-8601 timestamp when execution started.
     pub started_at: Option<String>,
@@ -100,15 +100,15 @@ pub struct AccumulatedCapabilityInvocation {
     pub progress_message: Option<String>,
     /// Latest 0.0–1.0 progress fraction.
     pub progress_percent: Option<f64>,
-    /// Provider-visible operation and presentation identity.
-    pub capability_identity: CapabilityEventIdentity,
+    /// Causal and presentation context.
+    pub tool_identity: ToolEventIdentity,
 }
 
-impl AccumulatedCapabilityInvocation {
+impl AccumulatedToolInvocation {
     fn to_json(&self) -> Value {
         let mut obj = serde_json::json!({
             "invocationId": self.invocation_id,
-            "modelPrimitiveName": self.model_primitive_name,
+            "toolName": self.tool_name,
             "status": self.status,
             "isError": self.is_error,
         });
@@ -133,7 +133,7 @@ impl AccumulatedCapabilityInvocation {
         if let Some(percent) = self.progress_percent {
             obj["progressPercent"] = serde_json::json!(percent);
         }
-        if let Ok(Value::Object(identity)) = serde_json::to_value(&self.capability_identity) {
+        if let Ok(Value::Object(identity)) = serde_json::to_value(&self.tool_identity) {
             for (key, value) in identity {
                 obj[&key] = value;
             }
@@ -141,42 +141,36 @@ impl AccumulatedCapabilityInvocation {
         obj
     }
 
-    fn merge_identity(&mut self, identity: &CapabilityEventIdentity) {
-        if identity.model_primitive_name.is_some() {
-            self.capability_identity.model_primitive_name = identity.model_primitive_name.clone();
-        }
-        if identity.operation_name.is_some() {
-            self.capability_identity.operation_name = identity.operation_name.clone();
-        }
+    fn merge_identity(&mut self, identity: &ToolEventIdentity) {
         if identity.trace_id.is_some() {
-            self.capability_identity.trace_id = identity.trace_id.clone();
+            self.tool_identity.trace_id = identity.trace_id.clone();
         }
         if identity.root_invocation_id.is_some() {
-            self.capability_identity.root_invocation_id = identity.root_invocation_id.clone();
+            self.tool_identity.root_invocation_id = identity.root_invocation_id.clone();
         }
         if identity.theme_color.is_some() {
-            self.capability_identity.theme_color = identity.theme_color.clone();
+            self.tool_identity.theme_color = identity.theme_color.clone();
         }
         if identity.presentation_hints.is_some() {
-            self.capability_identity.presentation_hints = identity.presentation_hints.clone();
+            self.tool_identity.presentation_hints = identity.presentation_hints.clone();
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CurrentCapabilitySnapshot
+// CurrentToolSnapshot
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Minimal projection of the capability currently executing within a
-/// session's turn, returned by [`TurnAccumulatorMap::current_running_capability`].
+/// Minimal projection of the tool currently executing within a
+/// session's turn, returned by [`TurnAccumulatorMap::current_running_tool`].
 ///
-/// Kept deliberately narrow — the `agent::status` capability wants human-readable
+/// Kept deliberately narrow — the `agent::status` tool wants human-readable
 /// "what is the agent doing" info, not the full accumulator state.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CurrentCapabilitySnapshot {
-    /// The model-facing primitive or resolved capability name.
-    pub model_primitive_name: String,
-    /// Unique ID of the in-flight capability invocation.
+pub struct CurrentToolSnapshot {
+    /// The model-facing primitive or resolved tool name.
+    pub tool_name: String,
+    /// Unique ID of the in-flight tool invocation.
     pub invocation_id: String,
     /// ISO-8601 timestamp when execution started. Lets callers compute
     /// elapsed duration without a separate clock fetch.
@@ -195,11 +189,11 @@ pub struct TurnAccumulator {
     /// Concatenated thinking/reasoning output so far. `ThinkingEnd` replaces
     /// this with the server-authoritative final snapshot.
     pub thinking: String,
-    /// All capability invocations tracked in this turn.
-    pub capability_invocations: Vec<AccumulatedCapabilityInvocation>,
-    /// Ordered sequence of content items (text, thinking, capability refs).
+    /// All tool invocations tracked in this turn.
+    pub tool_invocations: Vec<AccumulatedToolInvocation>,
+    /// Ordered sequence of content items (text, thinking, tool refs).
     pub content_sequence: Vec<ContentSequenceItem>,
-    /// Whether the provider response has finished streaming. Capability
+    /// Whether the provider response has finished streaming. Tool
     /// execution may keep the turn active after this boundary.
     pub response_complete: bool,
 }
@@ -210,7 +204,7 @@ impl TurnAccumulator {
         Self {
             text: String::new(),
             thinking: String::new(),
-            capability_invocations: Vec::new(),
+            tool_invocations: Vec::new(),
             content_sequence: Vec::new(),
             response_complete: false,
         }
@@ -269,76 +263,74 @@ impl TurnAccumulator {
         }
     }
 
-    /// Mark the provider stream complete while retaining capability state for
+    /// Mark the provider stream complete while retaining tool state for
     /// the rest of the active turn.
     pub fn finish_response(&mut self) {
         self.response_complete = true;
     }
 
-    /// Add a new capability invocation in "generating" state.
-    pub fn add_capability_generating(
+    /// Add a new tool invocation in "generating" state.
+    pub fn add_tool_generating(
         &mut self,
         invocation_id: &str,
-        model_primitive_name: &str,
-        capability_identity: &CapabilityEventIdentity,
+        tool_name: &str,
+        tool_identity: &ToolEventIdentity,
     ) {
         if self
-            .capability_invocations
+            .tool_invocations
             .iter()
             .any(|tc| tc.invocation_id == invocation_id)
         {
             return;
         }
-        self.capability_invocations
-            .push(AccumulatedCapabilityInvocation {
-                invocation_id: invocation_id.to_string(),
-                model_primitive_name: model_primitive_name.to_string(),
-                arguments: None,
-                status: "generating".to_string(),
-                result: None,
-                is_error: false,
-                started_at: None,
-                completed_at: None,
-                streaming_output: None,
-                progress_message: None,
-                progress_percent: None,
-                capability_identity: capability_identity.clone(),
-            });
-        self.content_sequence
-            .push(ContentSequenceItem::CapabilityRef {
-                invocation_id: invocation_id.to_string(),
-            });
+        self.tool_invocations.push(AccumulatedToolInvocation {
+            invocation_id: invocation_id.to_string(),
+            tool_name: tool_name.to_string(),
+            arguments: None,
+            status: "generating".to_string(),
+            result: None,
+            is_error: false,
+            started_at: None,
+            completed_at: None,
+            streaming_output: None,
+            progress_message: None,
+            progress_percent: None,
+            tool_identity: tool_identity.clone(),
+        });
+        self.content_sequence.push(ContentSequenceItem::ToolRef {
+            invocation_id: invocation_id.to_string(),
+        });
     }
 
-    /// Transition a capability invocation to "running" state.
-    pub fn update_capability_started(
+    /// Transition a tool invocation to "running" state.
+    pub fn update_tool_started(
         &mut self,
         invocation_id: &str,
         arguments: Option<&Value>,
-        capability_identity: &CapabilityEventIdentity,
+        tool_identity: &ToolEventIdentity,
     ) {
         if let Some(tc) = self
-            .capability_invocations
+            .tool_invocations
             .iter_mut()
             .find(|tc| tc.invocation_id == invocation_id)
         {
             tc.status = "running".to_string();
             tc.arguments = arguments.cloned();
             tc.started_at = Some(chrono::Utc::now().to_rfc3339());
-            tc.merge_identity(capability_identity);
+            tc.merge_identity(tool_identity);
         }
     }
 
-    /// Transition a capability invocation to "completed" or "error" state.
-    pub fn update_capability_completed(
+    /// Transition a tool invocation to "completed" or "error" state.
+    pub fn update_tool_completed(
         &mut self,
         invocation_id: &str,
         result: Option<&str>,
         is_error: bool,
-        capability_identity: &CapabilityEventIdentity,
+        tool_identity: &ToolEventIdentity,
     ) {
         if let Some(tc) = self
-            .capability_invocations
+            .tool_invocations
             .iter_mut()
             .find(|tc| tc.invocation_id == invocation_id)
         {
@@ -352,39 +344,39 @@ impl TurnAccumulator {
             tc.completed_at = Some(chrono::Utc::now().to_rfc3339());
             tc.progress_message = None;
             tc.progress_percent = None;
-            tc.merge_identity(capability_identity);
+            tc.merge_identity(tool_identity);
         }
     }
 
-    /// Update user-visible progress for a running capability.
-    pub fn update_capability_progress(
+    /// Update user-visible progress for a running tool.
+    pub fn update_tool_progress(
         &mut self,
         invocation_id: &str,
         message: Option<&str>,
         percent: Option<f64>,
-        capability_identity: &CapabilityEventIdentity,
+        tool_identity: &ToolEventIdentity,
     ) {
-        if let Some(capability) = self
-            .capability_invocations
+        if let Some(tool) = self
+            .tool_invocations
             .iter_mut()
-            .find(|capability| capability.invocation_id == invocation_id)
+            .find(|tool| tool.invocation_id == invocation_id)
         {
             if let Some(message) = message {
-                capability.progress_message = Some(message.to_owned());
+                tool.progress_message = Some(message.to_owned());
             }
             if let Some(percent) = percent {
-                capability.progress_percent = Some(percent);
+                tool.progress_percent = Some(percent);
             }
-            capability.merge_identity(capability_identity);
+            tool.merge_identity(tool_identity);
         }
     }
 
-    /// Serialize the current state to JSON triple: (text, `capability_invocations`, `content_sequence`).
+    /// Serialize the current state to JSON triple: (text, `tool_invocations`, `content_sequence`).
     pub fn to_json(&self) -> (String, Value, Value) {
-        let capabilities = Value::Array(
-            self.capability_invocations
+        let tools = Value::Array(
+            self.tool_invocations
                 .iter()
-                .map(AccumulatedCapabilityInvocation::to_json)
+                .map(AccumulatedToolInvocation::to_json)
                 .collect(),
         );
         let sequence = Value::Array(
@@ -393,7 +385,7 @@ impl TurnAccumulator {
                 .map(ContentSequenceItem::to_json)
                 .collect(),
         );
-        (self.text.clone(), capabilities, sequence)
+        (self.text.clone(), tools, sequence)
     }
 }
 
@@ -625,46 +617,42 @@ impl TurnAccumulatorMap {
         }
     }
 
-    /// Record a new capability invocation in "generating" state.
-    pub fn handle_capability_generating(
+    /// Record a new tool invocation in "generating" state.
+    pub fn handle_tool_generating(
         &self,
         session_id: &str,
         invocation_id: &str,
-        model_primitive_name: &str,
-        capability_identity: &CapabilityEventIdentity,
+        tool_name: &str,
+        tool_identity: &ToolEventIdentity,
         sequence: Option<i64>,
     ) {
         if let Some(session) = self.accumulators.lock().get_mut(session_id) {
             if let Some(turn) = session.turn.as_mut() {
-                turn.add_capability_generating(
-                    invocation_id,
-                    model_primitive_name,
-                    capability_identity,
-                );
+                turn.add_tool_generating(invocation_id, tool_name, tool_identity);
             }
             session.observe_represented_sequence(sequence);
         }
     }
 
-    /// Transition a capability invocation to "running" state.
-    pub fn handle_capability_started(
+    /// Transition a tool invocation to "running" state.
+    pub fn handle_tool_started(
         &self,
         session_id: &str,
         invocation_id: &str,
         arguments: Option<&Value>,
-        capability_identity: &CapabilityEventIdentity,
+        tool_identity: &ToolEventIdentity,
         sequence: Option<i64>,
     ) {
         if let Some(session) = self.accumulators.lock().get_mut(session_id) {
             if let Some(turn) = session.turn.as_mut() {
-                turn.update_capability_started(invocation_id, arguments, capability_identity);
+                turn.update_tool_started(invocation_id, arguments, tool_identity);
             }
             session.observe_represented_sequence(sequence);
         }
     }
 
-    /// Append streaming output to a running capability invocation.
-    pub fn handle_capability_output(
+    /// Append streaming output to a running tool invocation.
+    pub fn handle_tool_output(
         &self,
         session_id: &str,
         invocation_id: &str,
@@ -674,7 +662,7 @@ impl TurnAccumulatorMap {
         if let Some(session) = self.accumulators.lock().get_mut(session_id) {
             if let Some(turn) = session.turn.as_mut()
                 && let Some(tc) = turn
-                    .capability_invocations
+                    .tool_invocations
                     .iter_mut()
                     .find(|tc| tc.invocation_id == invocation_id)
             {
@@ -685,46 +673,36 @@ impl TurnAccumulatorMap {
         }
     }
 
-    /// Record capability completion or error.
-    pub fn handle_capability_completed(
+    /// Record tool completion or error.
+    pub fn handle_tool_completed(
         &self,
         session_id: &str,
         invocation_id: &str,
         result: Option<&str>,
         is_error: bool,
-        capability_identity: &CapabilityEventIdentity,
+        tool_identity: &ToolEventIdentity,
         sequence: Option<i64>,
     ) {
         if let Some(session) = self.accumulators.lock().get_mut(session_id) {
             if let Some(turn) = session.turn.as_mut() {
-                turn.update_capability_completed(
-                    invocation_id,
-                    result,
-                    is_error,
-                    capability_identity,
-                );
+                turn.update_tool_completed(invocation_id, result, is_error, tool_identity);
             }
             session.observe_represented_sequence(sequence);
         }
     }
 
-    fn handle_capability_progress(
+    fn handle_tool_progress(
         &self,
         session_id: &str,
         invocation_id: &str,
         message: Option<&str>,
         percent: Option<f64>,
-        capability_identity: &CapabilityEventIdentity,
+        tool_identity: &ToolEventIdentity,
         sequence: Option<i64>,
     ) {
         if let Some(session) = self.accumulators.lock().get_mut(session_id) {
             if let Some(turn) = session.turn.as_mut() {
-                turn.update_capability_progress(
-                    invocation_id,
-                    message,
-                    percent,
-                    capability_identity,
-                );
+                turn.update_tool_progress(invocation_id, message, percent, tool_identity);
             }
             session.observe_represented_sequence(sequence);
         }
@@ -761,38 +739,38 @@ impl TurnAccumulatorMap {
             admission_committed: *session.admission_committed.borrow(),
             compaction_reason: session.compaction_reason.clone(),
             state: session.turn.as_ref().map(|turn| {
-                let (text, capabilities, sequence) = turn.to_json();
-                (text, capabilities, sequence, turn.response_complete)
+                let (text, tools, sequence) = turn.to_json();
+                (text, tools, sequence, turn.response_complete)
             }),
         })
     }
 
-    /// Name of the capability currently executing in the session's turn,
+    /// Name of the tool currently executing in the session's turn,
     /// if any. Returns the model-facing primitive of the most recently-started invocation
-    /// whose status is `running` (capability.invocation.started persisted; capability.invocation.completed not
+    /// whose status is `running` (tool.invocation.started persisted; tool.invocation.completed not
     /// yet). `generating` doesn't count — the LLM is still streaming
-    /// the capability_invocation block and hasn't begun execution. Returns `None`
-    /// when no turn is in flight or no capability has entered `running`.
-    pub(crate) fn current_running_capability(
+    /// the tool_invocation block and hasn't begun execution. Returns `None`
+    /// when no turn is in flight or no tool has entered `running`.
+    pub(crate) fn current_running_tool(
         &self,
         session_id: &str,
         run_id: &str,
-    ) -> Option<CurrentCapabilitySnapshot> {
+    ) -> Option<CurrentToolSnapshot> {
         let guard = self.accumulators.lock();
         let session = guard.get(session_id)?;
         if session.run_id != run_id {
             return None;
         }
         let acc = session.turn.as_ref()?;
-        // Iterate from the end: the most recent running invocation wins. Capability
-        // calls can run in parallel within one turn; the "current capability"
+        // Iterate from the end: the most recent running invocation wins. Tool
+        // calls can run in parallel within one turn; the "current tool"
         // returned here is the most recently started.
-        acc.capability_invocations
+        acc.tool_invocations
             .iter()
             .rev()
             .find(|tc| tc.status == "running")
-            .map(|tc| CurrentCapabilitySnapshot {
-                model_primitive_name: tc.model_primitive_name.clone(),
+            .map(|tc| CurrentToolSnapshot {
+                tool_name: tc.tool_name.clone(),
                 invocation_id: tc.invocation_id.clone(),
                 started_at: tc.started_at.clone(),
             })
@@ -838,92 +816,88 @@ impl TurnAccumulatorMap {
             TronEvent::ResponseComplete { .. } => {
                 self.handle_response_complete(session_id, sequence);
             }
-            TronEvent::CapabilityInvocationGenerating {
+            TronEvent::ToolInvocationGenerating {
                 invocation_id,
-                model_primitive_name,
-                capability_identity,
+                tool_name,
+                tool_identity,
                 ..
             } => {
-                self.handle_capability_generating(
+                self.handle_tool_generating(
                     session_id,
                     invocation_id,
-                    model_primitive_name,
-                    capability_identity,
+                    tool_name,
+                    tool_identity,
                     sequence,
                 );
             }
-            TronEvent::CapabilityInvocationStarted {
+            TronEvent::ToolInvocationStarted {
                 invocation_id,
                 arguments,
-                capability_identity,
+                tool_identity,
                 ..
             } => {
                 let args_value = arguments.as_ref().map(|m| Value::Object(m.clone()));
-                self.handle_capability_started(
+                self.handle_tool_started(
                     session_id,
                     invocation_id,
                     args_value.as_ref(),
-                    capability_identity,
+                    tool_identity,
                     sequence,
                 );
             }
-            TronEvent::CapabilityInvocationCompleted {
+            TronEvent::ToolInvocationCompleted {
                 invocation_id,
                 is_error,
                 result,
-                capability_identity,
+                tool_identity,
                 ..
             } => {
                 let result_text = result.as_ref().map(|r| match &r.content {
-                    crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(t) => {
-                        t.clone()
-                    }
-                    crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(
-                        blocks,
-                    ) => blocks
+                    crate::shared::protocol::model_tools::ToolResultBody::Text(t) => t.clone(),
+                    crate::shared::protocol::model_tools::ToolResultBody::Blocks(blocks) => blocks
                         .iter()
                         .filter_map(|b| {
-                            if let crate::shared::protocol::content::CapabilityResultContent::Text {
-                                    text,
-                                } = b
-                                {
-                                    Some(text.as_str())
-                                } else {
-                                    None
-                                }
+                            if let crate::shared::protocol::content::ToolResultContent::Text {
+                                text,
+                            } = b
+                            {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join("\n"),
                 });
-                self.handle_capability_completed(
+                self.handle_tool_completed(
                     session_id,
                     invocation_id,
                     result_text.as_deref(),
                     is_error.unwrap_or(false),
-                    capability_identity,
+                    tool_identity,
                     sequence,
                 );
             }
-            TronEvent::CapabilityInvocationOutput {
+            TronEvent::ToolInvocationOutput {
                 invocation_id,
                 update,
                 ..
             } => {
-                self.handle_capability_output(session_id, invocation_id, update, sequence);
+                self.handle_tool_output(session_id, invocation_id, update, sequence);
             }
-            TronEvent::CapabilityInvocationProgress {
+            TronEvent::ToolInvocationProgress {
                 invocation_id,
                 message,
                 percent,
-                capability_identity,
+                tool_identity,
                 ..
             } => {
-                self.handle_capability_progress(
+                self.handle_tool_progress(
                     session_id,
                     invocation_id,
                     message.as_deref(),
                     *percent,
-                    capability_identity,
+                    tool_identity,
                     sequence,
                 );
             }
@@ -942,8 +916,8 @@ impl TurnAccumulatorMap {
             // facts, or are presentation-only notifications that are not
             // replayed after reconnect. Keeping this list explicit forces a
             // new event variant to choose a reconstruction owner.
-            TronEvent::CapabilityInvocationBatch { .. }
-            | TronEvent::CapabilityInvocationArgumentDelta { .. }
+            TronEvent::ToolInvocationBatch { .. }
+            | TronEvent::ToolInvocationArgumentDelta { .. }
             | TronEvent::ContextWarning { .. }
             | TronEvent::Error { .. }
             | TronEvent::ApiRetry { .. }

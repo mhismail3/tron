@@ -1,4 +1,4 @@
-//! Provider-neutral worker retrieval and deterministic fallback ranking.
+//! Provider-neutral worker retrieval and deterministic recovery ranking.
 //!
 //! Both automatic provider projection and explicit `worker_discover` first use
 //! an active `worker_relevance` hook. The scorer below remains deterministic,
@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_promotion_precedes_relevance_and_fallback_is_deterministic() {
+    fn explicit_promotion_precedes_relevance_and_recovery_is_deterministic() {
         let ranked = rank_workers(
             [
                 document("research", "recent research", 1),

@@ -1,7 +1,7 @@
 //! Cross-domain server helpers.
 //!
 //! Shared modules are deliberately small and transport-neutral. They provide
-//! server capability context, neutral event payloads, and test construction
+//! server tool context, neutral event payloads, and test construction
 //! utilities used by multiple domain workers. Executable behavior belongs in
 //! `domains`; protocol parsing stays in the client protocol layer.
 

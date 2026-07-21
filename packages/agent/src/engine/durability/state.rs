@@ -433,7 +433,7 @@ mod tests {
             .execute(
                 "INSERT INTO engine_state_entries
                  (scope_kind, scope_value, namespace, key, value_json, revision, updated_at)
-                 VALUES ('workspace', 'legacy', 'routing', 'worker-a', '{}', 1, ?1)",
+                 VALUES ('workspace', 'invalid', 'routing', 'worker-a', '{}', 1, ?1)",
                 [Utc::now().to_rfc3339()],
             )
             .expect("insert malformed row");

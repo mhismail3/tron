@@ -100,11 +100,11 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
     }
 
     func testMalformedPayloadReturnsNil() {
-        // Capability invocation without required invocationId
+        // Tool invocation without required invocationId
         let event = rawEvent(
-            type: "capability.invocation.started",
+            type: "tool.invocation.started",
             payload: [
-                "modelPrimitiveName": AnyCodable("execute")
+                "toolName": AnyCodable("process_run")
                 // Missing invocationId and arguments
             ]
         )

@@ -1,7 +1,7 @@
 //! `TronAgent` multi-turn primitive loop.
 //!
 //! The agent owns one required engine host for its lifetime. Turn contexts and
-//! capability execution borrow that host; they do not model a hostless runtime.
+//! tool execution borrow that host; they do not model a hostless runtime.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
@@ -246,7 +246,7 @@ impl TronAgent {
                 break;
             }
 
-            if let Some(StopReason::EndTurn | StopReason::NoCapabilityInvocationDrafts) =
+            if let Some(StopReason::EndTurn | StopReason::NoToolInvocationDrafts) =
                 result.stop_reason
             {
                 final_stop_reason = result.stop_reason.unwrap_or(StopReason::EndTurn);

@@ -202,7 +202,7 @@ fn rejected_path_does_not_create_or_modify_db_files() {
 }
 
 #[test]
-fn startup_migrations_only_touch_tron_sqlite() {
+fn startup_schema_only_touches_tron_sqlite() {
     let (_tmp, tron_home) = setup_tron_home();
     let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
@@ -213,13 +213,13 @@ fn startup_migrations_only_touch_tron_sqlite() {
 
     let db_path = resolve_production_db_path_for_tron_home(None, &tron_home).unwrap();
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    tron::domains::session::event_store::run_migrations(&conn).unwrap();
+    tron::domains::session::event_store::ensure_schema(&conn).unwrap();
     drop(conn);
 
     let db_meta = std::fs::metadata(&db_path).unwrap();
     assert!(
         db_meta.len() > 0,
-        "tron.sqlite should contain schema after migration"
+        "tron.sqlite should contain the current schema"
     );
     assert_eq!(untouched_before, file_signature(&untouched));
 }
@@ -227,7 +227,7 @@ fn startup_migrations_only_touch_tron_sqlite() {
 #[test]
 fn project_reference_database_table_catalog_matches_active_sqlite_sources() {
     let schema_sources = [
-        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+        "packages/agent/src/domains/session/event_store/sqlite/schema/current.sql",
         "packages/agent/src/shared/storage/schema.rs",
         "packages/agent/src/engine/durability/ledger/sqlite_codec.rs",
         "packages/agent/src/engine/durability/streams/sqlite_store.rs",
@@ -456,7 +456,7 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
     );
     assert!(
         !body.contains("asc testflight beta-groups list"),
-        "release workflow must not retain a legacy asc command-shape fallback"
+        "release workflow must expose only the current asc command shape"
     );
     assert!(
         body.contains("attempting public-link auto-discovery"),

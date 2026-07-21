@@ -36,8 +36,6 @@ pub mod dirs {
     pub const DB: &str = "database";
     /// Ephemeral runtime lock files. Ordinary startup may create this directory.
     pub const RUN: &str = "run";
-    /// Recoverable snapshots taken before worker-kernel schema conversion.
-    pub const SNAPSHOTS: &str = "snapshots";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
     // ── Under workspace/ ──

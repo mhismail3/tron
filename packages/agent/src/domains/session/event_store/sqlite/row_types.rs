@@ -77,8 +77,8 @@ pub struct EventRow {
     pub workspace_id: String,
     /// Denormalized role.
     pub role: Option<String>,
-    /// Denormalized model primitive name.
-    pub model_primitive_name: Option<String>,
+    /// Denormalized tool name.
+    pub tool_name: Option<String>,
     /// Denormalized invocation ID.
     pub invocation_id: Option<String>,
     /// Denormalized turn number.

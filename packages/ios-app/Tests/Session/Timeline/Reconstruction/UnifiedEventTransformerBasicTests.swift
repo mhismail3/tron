@@ -112,14 +112,14 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
         XCTAssertEqual(message?.role, .assistant)
     }
 
-    // MARK: - Capability Call Tests
+    // MARK: - Tool Call Tests
 
-    func testTransformCapabilityInvocation() {
+    func testTransformToolInvocation() {
         let event = rawEvent(
-            type: "capability.invocation.started",
+            type: "tool.invocation.started",
             payload: [
                 "invocationId": AnyCodable("call_123"),
-                "modelPrimitiveName": AnyCodable("execute"),
+                "toolName": AnyCodable("process_run"),
                 "arguments": AnyCodable(["file_path": "/src/main.ts"]),
                 "turn": AnyCodable(1)
             ]
@@ -130,19 +130,19 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
         XCTAssertNotNil(message)
         XCTAssertEqual(message?.role, .assistant)
 
-        if case .capabilityInvocation(let invocation) = message?.content {
-            XCTAssertEqual(invocation.identity.modelPrimitiveName, "execute")
+        if case .toolInvocation(let invocation) = message?.content {
+            XCTAssertEqual(invocation.identity.toolName, "process_run")
             XCTAssertEqual(invocation.id, "call_123")
         } else {
-            XCTFail("Expected capability invocation content")
+            XCTFail("Expected tool invocation content")
         }
     }
 
-    // MARK: - Capability Result Tests
+    // MARK: - Tool Result Tests
 
-    func testTransformCapabilityResult() {
+    func testTransformToolResult() {
         let event = rawEvent(
-            type: "capability.invocation.completed",
+            type: "tool.invocation.completed",
             payload: [
                 "invocationId": AnyCodable("call_123"),
                 "content": AnyCodable("File contents here..."),
@@ -154,19 +154,19 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
         let message = UnifiedEventTransformer.transformPersistedEvent(event)
 
         XCTAssertNotNil(message)
-        XCTAssertEqual(message?.role, .capability)
+        XCTAssertEqual(message?.role, .tool)
 
-        if case .capabilityResult(let result) = message?.content {
+        if case .toolResult(let result) = message?.content {
             XCTAssertEqual(result.id, "call_123")
             XCTAssertFalse(result.isError)
         } else {
-            XCTFail("Expected capability result content")
+            XCTFail("Expected tool result content")
         }
     }
 
-    func testTransformCapabilityResultWithError() {
+    func testTransformToolResultWithError() {
         let event = rawEvent(
-            type: "capability.invocation.completed",
+            type: "tool.invocation.completed",
             payload: [
                 "invocationId": AnyCodable("call_456"),
                 "content": AnyCodable("File not found"),
@@ -179,10 +179,10 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
 
         XCTAssertNotNil(message)
 
-        if case .capabilityResult(let result) = message?.content {
+        if case .toolResult(let result) = message?.content {
             XCTAssertTrue(result.isError)
         } else {
-            XCTFail("Expected capability result content")
+            XCTFail("Expected tool result content")
         }
     }
 

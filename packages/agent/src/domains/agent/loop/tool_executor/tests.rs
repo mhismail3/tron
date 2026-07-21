@@ -14,8 +14,8 @@ use crate::domains::agent::r#loop::primitive_surface::{
 use crate::engine::{
     EffectClass, FunctionDefinition, FunctionId, FunctionVisibility, RiskLevel, WorkerId,
 };
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
-use crate::shared::server::failure::{CAPABILITY_PRIMITIVE_NOT_FOUND, RUNTIME_CANCELLED};
+use crate::shared::protocol::messages::ToolInvocationDraft;
+use crate::shared::server::failure::{RUNTIME_CANCELLED, TOOL_PRIMITIVE_NOT_FOUND};
 
 #[derive(Clone)]
 struct CapturingDirectHandler {
@@ -32,7 +32,7 @@ impl crate::engine::InProcessFunctionHandler for CapturingDirectHandler {
 
 fn empty_surface() -> ResolvedPrimitiveSurface {
     ResolvedPrimitiveSurface {
-        capabilities: Vec::new(),
+        tools: Vec::new(),
         targets_by_name: BTreeMap::new(),
         snapshot: Default::default(),
     }
@@ -64,12 +64,12 @@ fn execution_context<'a>(
 }
 
 #[test]
-fn transient_capability_result_copy_is_redacted_without_mutating_provider_result() {
+fn transient_tool_result_copy_is_redacted_without_mutating_provider_result() {
     let token = "trwh_0123456789abcdef0123456789abcdef";
-    let result = CapabilityResult {
-        content: CapabilityResultBody::Blocks(vec![
-            CapabilityResultContent::text(format!("credential: {token}")),
-            CapabilityResultContent::image("image-data", "image/png"),
+    let result = ToolResult {
+        content: ToolResultBody::Blocks(vec![
+            ToolResultContent::text(format!("credential: {token}")),
+            ToolResultContent::image("image-data", "image/png"),
         ]),
         details: Some(json!({"token": token, "status": "active"})),
         is_error: None,
@@ -90,13 +90,13 @@ async fn unknown_direct_tool_fails_before_engine_execution() {
     let cancel = CancellationToken::new();
     let aborts = InvocationAbortRegistry::new();
     let context = execution_context(&surface, &emitter, &cancel, &aborts, &host);
-    let call = CapabilityInvocationDraft::new("call-unknown", "missing_tool", Map::new());
+    let call = ToolInvocationDraft::new("call-unknown", "missing_tool", Map::new());
 
     let result = execute_tool(&call, "session-test", "/tmp", &context).await;
 
     assert_eq!(
         result.result.details.as_ref().unwrap()["failure"]["code"],
-        CAPABILITY_PRIMITIVE_NOT_FOUND
+        TOOL_PRIMITIVE_NOT_FOUND
     );
     assert!(result.result.is_error.unwrap_or(false));
 }
@@ -131,12 +131,12 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         .unwrap();
     function.revision = revision;
     let target = PrimitiveExecutionTarget {
-        model_capability_id: "direct_test".to_owned(),
+        model_tool_id: "direct_test".to_owned(),
         function_id,
         function,
     };
     let surface = ResolvedPrimitiveSurface {
-        capabilities: Vec::new(),
+        tools: Vec::new(),
         targets_by_name: BTreeMap::from([("direct_test".to_owned(), target)]),
         snapshot: crate::domains::worker_kernel::EngineSurfaceSnapshot {
             catalog_revision: 17,
@@ -153,7 +153,7 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
     context.trace_id = Some(&trace);
     context.parent_invocation_id = Some(&parent);
     context.worker_causal_depth = 7;
-    let call = CapabilityInvocationDraft::new(
+    let call = ToolInvocationDraft::new(
         "direct-call",
         "direct_test",
         Map::from_iter([("value".to_owned(), json!("hello"))]),
@@ -186,7 +186,7 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
     );
 
     context.origin_worker_id = Some("semantic-router");
-    let worker_call = CapabilityInvocationDraft::new(
+    let worker_call = ToolInvocationDraft::new(
         "worker-direct-call",
         "direct_test",
         Map::from_iter([("value".to_owned(), json!("from worker"))]),
@@ -210,7 +210,7 @@ async fn cancelled_direct_tool_returns_the_canonical_cancelled_failure() {
     cancel.cancel();
     let aborts = InvocationAbortRegistry::new();
     let context = execution_context(&surface, &emitter, &cancel, &aborts, &host);
-    let call = CapabilityInvocationDraft::new("cancelled", "missing_tool", Map::new());
+    let call = ToolInvocationDraft::new("cancelled", "missing_tool", Map::new());
 
     let result = execute_tool(&call, "session-test", "/tmp", &context).await;
 
@@ -218,7 +218,7 @@ async fn cancelled_direct_tool_returns_the_canonical_cancelled_failure() {
     // not-found failure and does not create an abort-registry entry.
     assert_eq!(
         result.result.details.as_ref().unwrap()["failure"]["code"],
-        CAPABILITY_PRIMITIVE_NOT_FOUND
+        TOOL_PRIMITIVE_NOT_FOUND
     );
     assert!(aborts.is_empty());
     assert_ne!(

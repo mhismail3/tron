@@ -116,18 +116,18 @@ struct Attachment: Identifiable, Equatable {
 
     // MARK: - Equatable
 
-    /// Whether this attachment is compatible with the given capability.
-    func isCompatible(with capability: AttachmentCapability) -> Bool {
+    /// Whether this attachment is compatible with the given tool.
+    func isCompatible(with tool: AttachmentSupport) -> Bool {
         switch type {
-        case .image: return capability.supportsImages
-        case .pdf: return capability.supportsPdfContent
+        case .image: return tool.supportsImages
+        case .pdf: return tool.supportsPdfContent
         case .document: return true // text files always supported via extraction
         }
     }
 
     /// Subtle warning text when content won't be fully readable.
-    func warningText(for capability: AttachmentCapability) -> String? {
-        if type == .pdf && !capability.supportsPdfContent {
+    func warningText(for tool: AttachmentSupport) -> String? {
+        if type == .pdf && !tool.supportsPdfContent {
             return "PDF content not readable by this model"
         }
         return nil

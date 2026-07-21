@@ -253,7 +253,7 @@ fn system_instruction_empty_when_no_context() {
     let context = Context {
         system_prompt: None,
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -266,7 +266,7 @@ fn system_instruction_from_prompt() {
     let context = Context {
         system_prompt: Some("You are helpful.".into()),
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -288,7 +288,7 @@ fn oauth_request_body_standard_gemini() {
     let context = Context {
         system_prompt: Some("Be helpful".into()),
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -312,7 +312,7 @@ fn request_body_same_format_for_oauth_and_api_key() {
     let context = Context {
         system_prompt: None,
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -338,7 +338,7 @@ fn api_key_request_body() {
     let context = Context {
         system_prompt: None,
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -400,7 +400,7 @@ fn api_key_body_thinking_nested_not_top_level() {
     let context = Context {
         system_prompt: None,
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -431,7 +431,7 @@ fn oauth_body_thinking_nested_not_top_level() {
     let context = Context {
         system_prompt: None,
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };
@@ -458,7 +458,7 @@ fn api_key_body_no_thinking_for_flash() {
     let context = Context {
         system_prompt: None,
         messages: vec![].into(),
-        capabilities: None,
+        tools: None,
         working_directory: None,
         server_origin: None,
     };

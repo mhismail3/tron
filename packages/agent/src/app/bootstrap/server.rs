@@ -322,7 +322,7 @@ async fn engine_upgrade_handler(
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.engine_clients.connection_count();
-    // Wire compatibility: `active_sessions` reports cached session projections.
+    // `active_sessions` reports cached session projections.
     let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let resp = health::health_check(state.start_time, connections, cached_sessions);
     Json(resp)
@@ -331,7 +331,7 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 /// GET /health/deep — Deep health check with per-subsystem results.
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.engine_clients.connection_count();
-    // Wire compatibility: `active_sessions` reports cached session projections.
+    // `active_sessions` reports cached session projections.
     let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let event_store = state.runtime_context.event_store.clone();
     let tron_home = crate::shared::foundation::paths::tron_home();

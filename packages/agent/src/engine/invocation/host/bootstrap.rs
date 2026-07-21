@@ -12,9 +12,6 @@ impl EngineHost {
     pub(in crate::engine) fn open_sqlite(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let storage_runtime = crate::shared::storage::StorageRuntime::new(path.to_path_buf());
-        storage_runtime
-            .prepare_for_startup()
-            .map_err(storage_error)?;
         drop(storage_runtime.open_connection().map_err(storage_error)?);
         let _startup_checkpoint = storage_runtime.checkpoint().map_err(storage_error)?;
         let ledger = SqliteEngineLedgerStore::open(path)?;

@@ -192,13 +192,13 @@ impl WorkspaceRepo {
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use crate::domains::session::event_store::sqlite::schema::ensure_schema;
 
     fn setup() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
             .unwrap();
-        run_migrations(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
         conn
     }
 

@@ -1,4 +1,4 @@
-//! Shared test fixtures for server capability tests.
+//! Shared test fixtures for server tool tests.
 //!
 //! Mock providers, responder factories, and an in-memory `ServerRuntimeContext` builder
 //! are used by engine and service tests via
@@ -156,7 +156,7 @@ fn make_test_context_with_responder_and_autonomy(
     .unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let store = Arc::new(EventStore::new(pool));
     let mgr = Arc::new(SessionManager::new(store.clone()));

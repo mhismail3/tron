@@ -6,7 +6,7 @@ use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
 use crate::domains::model::responder::ModelResponderFactory;
 use crate::engine::{FunctionId, Invocation};
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::params::opt_array;
 use crate::shared::server::params::opt_string;
 use crate::shared::server::params::require_string_param;
@@ -21,15 +21,12 @@ pub(crate) struct PromptSubmission {
     attachments: Option<Vec<Value>>,
 }
 
-pub(crate) async fn prompt_value(
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
+pub(crate) async fn prompt_value(invocation: &Invocation, deps: &Deps) -> Result<Value, ToolError> {
     let (submission, _, _) = validate_prompt_submission(Some(&invocation.payload), deps).await?;
     let run_id = uuid::Uuid::now_v7().to_string();
     let mut apply_payload = invocation.payload.clone();
     let Some(object) = apply_payload.as_object_mut() else {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: "agent.prompt params must be an object".into(),
         });
     };
@@ -57,7 +54,7 @@ pub(crate) async fn prompt_apply_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, _session, _responder_factory) =
         validate_prompt_submission(params, deps).await?;
@@ -85,14 +82,14 @@ pub(crate) async fn run_turn_value(
     params: Option<&Value>,
     invocation: &Invocation,
     deps: &Deps,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let run_id = require_string_param(params, "runId")?;
     let (submission, session, responder_factory) = validate_prompt_submission(params, deps).await?;
 
     let started_run = deps
         .orchestrator
         .begin_run(&submission.session_id, &run_id)
-        .map_err(|e| CapabilityError::Custom {
+        .map_err(|e| ToolError::Custom {
             code: e.category().to_uppercase(),
             message: e.to_string(),
             details: None,
@@ -139,7 +136,7 @@ pub(crate) async fn validate_prompt_submission(
         crate::domains::session::event_store::SessionRow,
         Arc<dyn ModelResponderFactory>,
     ),
-    CapabilityError,
+    ToolError,
 > {
     let session_id = require_string_param(params, "sessionId")?;
     let prompt = require_string_param(params, "prompt")?;
@@ -147,7 +144,7 @@ pub(crate) async fn validate_prompt_submission(
     let attachments = opt_array(params, "attachments").cloned();
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
-        return Err(CapabilityError::Custom {
+        return Err(ToolError::Custom {
             code: errors::SESSION_BUSY.into(),
             message: format!("Session '{session_id}' is already processing run '{active_run_id}'"),
             details: Some(json!({ "runId": active_run_id })),
@@ -163,7 +160,7 @@ pub(crate) async fn validate_prompt_submission(
             &session.latest_model,
             auth_path,
         )
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: format!(
                 "Attachments are unavailable because model '{}' has no attachment policy",
                 session.latest_model
@@ -174,7 +171,7 @@ pub(crate) async fn validate_prompt_submission(
     let responder_factory =
         deps.responder_factory
             .clone()
-            .ok_or_else(|| CapabilityError::NotAvailable {
+            .ok_or_else(|| ToolError::NotAvailable {
                 message: "Agent execution dependencies are not configured".into(),
             })?;
     Ok((
@@ -192,45 +189,45 @@ pub(crate) async fn validate_prompt_submission(
 pub(crate) fn validate_attachment_array(
     attachments: Option<&[Value]>,
     policy: &crate::domains::model::routing::attachments::AttachmentPolicy,
-) -> Result<(), CapabilityError> {
+) -> Result<(), ToolError> {
     if let Some(attachments) = attachments {
         for attachment in attachments {
             let data = attachment
                 .get("data")
                 .and_then(Value::as_str)
-                .ok_or_else(|| CapabilityError::InvalidParams {
+                .ok_or_else(|| ToolError::InvalidParams {
                     message: "Attachment is missing base64 data".into(),
                 })?;
             let mime_type = attachment
                 .get("mimeType")
                 .and_then(Value::as_str)
-                .ok_or_else(|| CapabilityError::InvalidParams {
+                .ok_or_else(|| ToolError::InvalidParams {
                     message: "Attachment is missing mimeType".into(),
                 })?;
 
             let max_bytes = if mime_type.starts_with("image/") {
                 if policy.max_image_bytes == 0 || !policy.accepts_image_mime_type(mime_type) {
-                    return Err(CapabilityError::InvalidParams {
+                    return Err(ToolError::InvalidParams {
                         message: format!("Model does not accept attachment type '{mime_type}'"),
                     });
                 }
                 policy.max_image_bytes
             } else if mime_type == "application/pdf" {
                 if !policy.supports_pdf_content {
-                    return Err(CapabilityError::InvalidParams {
+                    return Err(ToolError::InvalidParams {
                         message: "Model does not accept PDF content".into(),
                     });
                 }
                 policy.max_document_bytes
             } else if matches!(mime_type, "text/plain" | "application/json") {
                 if !policy.supports_text_files {
-                    return Err(CapabilityError::InvalidParams {
+                    return Err(ToolError::InvalidParams {
                         message: "Model does not accept text file content".into(),
                     });
                 }
                 policy.max_document_bytes
             } else {
-                return Err(CapabilityError::InvalidParams {
+                return Err(ToolError::InvalidParams {
                     message: format!("Unsupported attachment type '{mime_type}'"),
                 });
             };
@@ -248,8 +245,8 @@ pub(crate) async fn invoke_agent_function_sync(
     function_id: &str,
     idempotency_prefix: &str,
     payload: Value,
-) -> Result<Value, CapabilityError> {
-    let function_id = FunctionId::new(function_id).map_err(|e| CapabilityError::Internal {
+) -> Result<Value, ToolError> {
+    let function_id = FunctionId::new(function_id).map_err(|e| ToolError::Internal {
         message: e.to_string(),
     })?;
     let context = trusted_agent_internal_child_context(invocation, idempotency_prefix);
@@ -272,7 +269,7 @@ pub(crate) async fn invoke_agent_function_sync(
         deps.engine_host.invoke(child),
     )
     .await
-    .map_err(|_| CapabilityError::Internal {
+    .map_err(|_| ToolError::Internal {
         message: format!("Timed out waiting for prompt command {idempotency_prefix}"),
     })?;
     if let Some(error) = &result.error {
@@ -287,7 +284,7 @@ pub(crate) async fn invoke_agent_function_sync(
         )
         .await;
     }
-    crate::shared::server::error_mapping::result_to_capability_value(result)
+    crate::shared::server::error_mapping::result_to_tool_value(result)
 }
 
 fn trusted_agent_internal_child_context(
@@ -349,7 +346,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(CapabilityError::NotAvailable { message })
+            Err(ToolError::NotAvailable { message })
                 if message == "Agent execution dependencies are not configured"
         ));
     }

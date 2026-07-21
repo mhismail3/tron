@@ -12,10 +12,8 @@ use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
 use crate::shared::protocol::content::{AssistantContent, UserContent};
-use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Message, UserMessageContent,
-};
-use crate::shared::protocol::model_capabilities::ModelCapability;
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
+use crate::shared::protocol::model_tools::ModelTool;
 
 /// A single message in `OpenAI` chat completions format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,18 +23,18 @@ pub struct ChatMessage {
     /// Text content (mutually exclusive with structured content).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
-    /// Capability invocations made by the assistant.
+    /// Tool invocations made by the assistant.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capability_invocations: Option<Vec<ChatCapabilityInvocationDraft>>,
-    /// Capability invocation ID (only for role=tool).
+    pub tool_invocations: Option<Vec<ChatToolInvocationDraft>>,
+    /// Tool invocation ID (only for role=tool).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocation_id: Option<String>,
 }
 
-/// A capability invocation in chat completions format.
+/// A tool invocation in chat completions format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ChatCapabilityInvocationDraft {
-    /// Capability invocation ID.
+pub struct ChatToolInvocationDraft {
+    /// Tool invocation ID.
     pub id: String,
     /// Always `"function"`.
     #[serde(rename = "type")]
@@ -45,7 +43,7 @@ pub struct ChatCapabilityInvocationDraft {
     pub function: ChatFunction,
 }
 
-/// Function details within a capability invocation.
+/// Function details within a tool invocation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatFunction {
     /// Function name.
@@ -94,13 +92,13 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
                     result.push(msg);
                 }
             }
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id,
                 content,
                 ..
             } => {
                 let remapped_id = remap_invocation_id(invocation_id, &id_mapping).to_string();
-                result.push(convert_capability_result(&remapped_id, content));
+                result.push(convert_tool_result(&remapped_id, content));
             }
         }
     }
@@ -109,8 +107,8 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
 }
 
 /// Convert tool definitions to chat completions format.
-pub fn convert_tools(capabilities: &[ModelCapability]) -> Vec<ChatToolDef> {
-    capabilities
+pub fn convert_tools(tools: &[ModelTool]) -> Vec<ChatToolDef> {
+    tools
         .iter()
         .map(|t| ChatToolDef {
             tool_type: "function".into(),
@@ -125,7 +123,7 @@ pub fn convert_tools(capabilities: &[ModelCapability]) -> Vec<ChatToolDef> {
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
-/// Build ID mapping for capability invocations that need format conversion.
+/// Build ID mapping for tool invocations that need format conversion.
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
     let mut ids = Vec::new();
 
@@ -133,12 +131,12 @@ fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
         match msg {
             Message::Assistant { content, .. } => {
                 for block in content {
-                    if let AssistantContent::CapabilityInvocation { id, .. } = block {
+                    if let AssistantContent::ToolInvocation { id, .. } = block {
                         ids.push(id.as_str());
                     }
                 }
             }
-            Message::CapabilityResult { invocation_id, .. } => {
+            Message::ToolResult { invocation_id, .. } => {
                 ids.push(invocation_id.as_str());
             }
             Message::User { .. } => {}
@@ -153,7 +151,7 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
         UserMessageContent::Text(text) => ChatMessage {
             role: "user".into(),
             content: Some(Value::String(text.clone())),
-            capability_invocations: None,
+            tool_invocations: None,
             invocation_id: None,
         },
         UserMessageContent::Blocks(blocks) => {
@@ -166,21 +164,21 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
                 ChatMessage {
                     role: "user".into(),
                     content: Some(parts[0]["text"].clone()),
-                    capability_invocations: None,
+                    tool_invocations: None,
                     invocation_id: None,
                 }
             } else if parts.is_empty() {
                 ChatMessage {
                     role: "user".into(),
                     content: Some(Value::String(String::new())),
-                    capability_invocations: None,
+                    tool_invocations: None,
                     invocation_id: None,
                 }
             } else {
                 ChatMessage {
                     role: "user".into(),
                     content: Some(Value::Array(parts)),
-                    capability_invocations: None,
+                    tool_invocations: None,
                     invocation_id: None,
                 }
             }
@@ -224,14 +222,14 @@ fn convert_assistant_message(
     id_mapping: &HashMap<String, String>,
 ) -> Option<ChatMessage> {
     let mut text_parts = Vec::new();
-    let mut capability_invocations = Vec::new();
+    let mut tool_invocations = Vec::new();
 
     for block in content {
         match block {
             AssistantContent::Text { text, .. } => {
                 text_parts.push(text.clone());
             }
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id,
                 name,
                 arguments,
@@ -240,7 +238,7 @@ fn convert_assistant_message(
                 let remapped_id = remap_invocation_id(id, id_mapping).to_string();
                 let args_str =
                     serde_json::to_string(&Value::Object(arguments.clone())).unwrap_or_default();
-                capability_invocations.push(ChatCapabilityInvocationDraft {
+                tool_invocations.push(ChatToolInvocationDraft {
                     id: remapped_id,
                     call_type: "function".into(),
                     function: ChatFunction {
@@ -260,37 +258,34 @@ fn convert_assistant_message(
         Some(Value::String(text_parts.join("")))
     };
 
-    let capability_invocations_opt = if capability_invocations.is_empty() {
+    let tool_invocations_opt = if tool_invocations.is_empty() {
         None
     } else {
-        Some(capability_invocations)
+        Some(tool_invocations)
     };
 
-    if text.is_none() && capability_invocations_opt.is_none() {
+    if text.is_none() && tool_invocations_opt.is_none() {
         return None;
     }
 
     Some(ChatMessage {
         role: "assistant".into(),
         content: text,
-        capability_invocations: capability_invocations_opt,
+        tool_invocations: tool_invocations_opt,
         invocation_id: None,
     })
 }
 
-fn convert_capability_result(
-    invocation_id: &str,
-    content: &CapabilityResultMessageContent,
-) -> ChatMessage {
+fn convert_tool_result(invocation_id: &str, content: &ToolResultMessageContent) -> ChatMessage {
     let text = match content {
-        CapabilityResultMessageContent::Text(t) => t.clone(),
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
+        ToolResultMessageContent::Text(t) => t.clone(),
+        ToolResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
+                crate::shared::protocol::content::ToolResultContent::Text { text } => {
                     Some(text.as_str())
                 }
-                crate::shared::protocol::content::CapabilityResultContent::Image { .. } => None,
+                crate::shared::protocol::content::ToolResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -299,7 +294,7 @@ fn convert_capability_result(
     ChatMessage {
         role: "tool".into(),
         content: Some(Value::String(text)),
-        capability_invocations: None,
+        tool_invocations: None,
         invocation_id: Some(invocation_id.to_string()),
     }
 }
@@ -311,8 +306,8 @@ fn convert_capability_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::content::CapabilityResultContent;
-    use crate::shared::protocol::model_capabilities::CapabilityParameterSchema;
+    use crate::shared::protocol::content::ToolResultContent;
+    use crate::shared::protocol::model_tools::ToolParameterSchema;
     use serde_json::Map;
 
     #[test]
@@ -377,17 +372,17 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "assistant");
         assert_eq!(result[0].content.as_ref().unwrap(), "world");
-        assert!(result[0].capability_invocations.is_none());
+        assert!(result[0].tool_invocations.is_none());
     }
 
     #[test]
-    fn assistant_with_capability_invocations() {
+    fn assistant_with_tool_invocations() {
         let mut args = Map::new();
         let _ = args.insert("cmd".into(), json!("ls"));
         let msgs = vec![Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
+            content: vec![AssistantContent::ToolInvocation {
                 id: "call_abc".into(),
-                name: "execute".into(),
+                name: "test_tool".into(),
                 arguments: args,
                 thought_signature: None,
             }],
@@ -398,22 +393,22 @@ mod tests {
         }];
         let result = convert_messages(&msgs, true);
         assert_eq!(result[0].role, "assistant");
-        let tc = result[0].capability_invocations.as_ref().unwrap();
+        let tc = result[0].tool_invocations.as_ref().unwrap();
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].id, "call_abc");
         assert_eq!(tc[0].call_type, "function");
-        assert_eq!(tc[0].function.name, "execute");
+        assert_eq!(tc[0].function.name, "test_tool");
         assert_eq!(tc[0].function.arguments, r#"{"cmd":"ls"}"#);
     }
 
     #[test]
-    fn assistant_with_text_and_capability_invocations() {
+    fn assistant_with_text_and_tool_invocations() {
         let mut args = Map::new();
         let _ = args.insert("q".into(), json!("test"));
         let msgs = vec![Message::Assistant {
             content: vec![
                 AssistantContent::text("Let me check"),
-                AssistantContent::CapabilityInvocation {
+                AssistantContent::ToolInvocation {
                     id: "call_1".into(),
                     name: "search".into(),
                     arguments: args,
@@ -427,7 +422,7 @@ mod tests {
         }];
         let result = convert_messages(&msgs, true);
         assert!(result[0].content.is_some());
-        assert!(result[0].capability_invocations.is_some());
+        assert!(result[0].tool_invocations.is_some());
     }
 
     #[test]
@@ -451,13 +446,13 @@ mod tests {
     }
 
     #[test]
-    fn capability_result_message() {
+    fn tool_result_message() {
         let msgs = vec![
-            // Need an assistant message first with the capability invocation for ID mapping
+            // Need an assistant message first with the tool invocation for ID mapping
             Message::Assistant {
-                content: vec![AssistantContent::CapabilityInvocation {
+                content: vec![AssistantContent::ToolInvocation {
                     id: "call_abc".into(),
-                    name: "execute".into(),
+                    name: "test_tool".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],
@@ -466,9 +461,9 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: "call_abc".into(),
-                content: CapabilityResultMessageContent::Text("done".into()),
+                content: ToolResultMessageContent::Text("done".into()),
                 is_error: None,
             },
         ];
@@ -484,9 +479,9 @@ mod tests {
         let _ = args.insert("x".into(), json!(1));
         let msgs = vec![
             Message::Assistant {
-                content: vec![AssistantContent::CapabilityInvocation {
+                content: vec![AssistantContent::ToolInvocation {
                     id: "toolu_01abc".into(),
-                    name: "execute".into(),
+                    name: "test_tool".into(),
                     arguments: args,
                     thought_signature: None,
                 }],
@@ -495,15 +490,15 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: "toolu_01abc".into(),
-                content: CapabilityResultMessageContent::Text("ok".into()),
+                content: ToolResultMessageContent::Text("ok".into()),
                 is_error: None,
             },
         ];
         let result = convert_messages(&msgs, true);
         // Anthropic IDs should be remapped to call_ format
-        let tc = &result[0].capability_invocations.as_ref().unwrap()[0];
+        let tc = &result[0].tool_invocations.as_ref().unwrap()[0];
         assert!(
             tc.id.starts_with("call_"),
             "Expected call_ prefix, got: {}",
@@ -534,10 +529,10 @@ mod tests {
 
     #[test]
     fn convert_tools_format() {
-        let capabilities = vec![ModelCapability {
-            name: "execute".into(),
+        let tools = vec![ModelTool {
+            name: "test_tool".into(),
             description: "Run commands".into(),
-            parameters: CapabilityParameterSchema {
+            parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: None,
                 required: None,
@@ -545,10 +540,10 @@ mod tests {
                 extra: serde_json::Map::default(),
             },
         }];
-        let result = convert_tools(&capabilities);
+        let result = convert_tools(&tools);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].tool_type, "function");
-        assert_eq!(result[0].function.name, "execute");
+        assert_eq!(result[0].function.name, "test_tool");
         assert_eq!(result[0].function.description, "Run commands");
     }
 
@@ -569,12 +564,12 @@ mod tests {
     }
 
     #[test]
-    fn capability_result_blocks() {
+    fn tool_result_blocks() {
         let msgs = vec![
             Message::Assistant {
-                content: vec![AssistantContent::CapabilityInvocation {
+                content: vec![AssistantContent::ToolInvocation {
                     id: "call_1".into(),
-                    name: "execute".into(),
+                    name: "test_tool".into(),
                     arguments: Map::new(),
                     thought_signature: None,
                 }],
@@ -583,11 +578,11 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: "call_1".into(),
-                content: CapabilityResultMessageContent::Blocks(vec![
-                    CapabilityResultContent::text("line1"),
-                    CapabilityResultContent::text("line2"),
+                content: ToolResultMessageContent::Blocks(vec![
+                    ToolResultContent::text("line1"),
+                    ToolResultContent::text("line2"),
                 ]),
                 is_error: None,
             },
@@ -597,14 +592,14 @@ mod tests {
     }
 
     #[test]
-    fn capability_result_text_is_transport_exact() {
+    fn tool_result_text_is_transport_exact() {
         let output_envelope = format!(
             "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
             "safe-évidence-".repeat(1_400)
         );
-        let msgs = vec![Message::CapabilityResult {
+        let msgs = vec![Message::ToolResult {
             invocation_id: "call_1".into(),
-            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+            content: ToolResultMessageContent::Text(output_envelope.clone()),
             is_error: None,
         }];
         let result = convert_messages(&msgs, true);

@@ -8,7 +8,7 @@
 //! Durable model-tool lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
 //! primitive result; the turn runner persists and broadcasts row-backed
-//! `capability.invocation.started` / `completed` events so live clients and
+//! `tool.invocation.started` / `completed` events so live clients and
 //! reconstruction share the same sequence source. Transient lifecycle events
 //! use redacted argument and result copies; the raw operation result is kept
 //! only in memory for the active provider turn.
@@ -24,21 +24,19 @@ use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::{
 use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
-use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
+use crate::domains::agent::r#loop::types::ToolInvocationExecutionResult;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId, TraceId,
 };
 use crate::shared::foundation::redaction::{redact_sensitive_content, redact_sensitive_json};
-use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity, TronEvent};
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
-use crate::shared::protocol::model_capabilities::{
-    CapabilityResult, CapabilityResultBody, failure_result,
-};
+use crate::shared::protocol::content::ToolResultContent;
+use crate::shared::protocol::events::{BaseEvent, ToolEventIdentity, TronEvent};
+use crate::shared::protocol::messages::ToolInvocationDraft;
+use crate::shared::protocol::model_tools::{ToolResult, ToolResultBody, failure_result};
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
-    CAPABILITY_ENGINE_RESULT_MISSING, CAPABILITY_PRIMITIVE_NOT_FOUND, ENGINE_POLICY_VIOLATION,
-    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    ENGINE_POLICY_VIOLATION, FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
+    TOOL_ENGINE_RESULT_MISSING, TOOL_PRIMITIVE_NOT_FOUND,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -70,7 +68,7 @@ fn direct_tool_idempotency_key(
     session_id: &str,
     turn: i64,
     invocation_id: &str,
-    model_primitive_name: &str,
+    tool_name: &str,
     workspace_id: Option<&str>,
     arguments: &Value,
 ) -> String {
@@ -79,7 +77,7 @@ fn direct_tool_idempotency_key(
         "sessionId": session_id,
         "turn": turn,
         "providerInvocationId": invocation_id,
-        "modelPrimitiveName": model_primitive_name,
+        "toolName": tool_name,
         "workspaceId": workspace_id,
         "arguments": arguments,
     }))
@@ -88,29 +86,27 @@ fn direct_tool_idempotency_key(
 }
 
 fn primitive_tool_identity(
-    model_primitive_name: &str,
+    _tool_name: &str,
     _arguments: &Value,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
-) -> CapabilityEventIdentity {
-    CapabilityEventIdentity {
-        model_primitive_name: Some(model_primitive_name.to_owned()),
+) -> ToolEventIdentity {
+    ToolEventIdentity {
         trace_id: trace_id.map(|id| id.as_str().to_owned()),
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
-        ..CapabilityEventIdentity::default()
+        ..ToolEventIdentity::default()
     }
 }
 
 fn tool_identity_from_result(
-    model_primitive_name: &str,
-    base_identity: &CapabilityEventIdentity,
-    result: &CapabilityResult,
-) -> CapabilityEventIdentity {
+    _tool_name: &str,
+    base_identity: &ToolEventIdentity,
+    result: &ToolResult,
+) -> ToolEventIdentity {
     let Some(details) = result.details.as_ref() else {
         return base_identity.clone();
     };
-    CapabilityEventIdentity {
-        model_primitive_name: Some(model_primitive_name.to_owned()),
+    ToolEventIdentity {
         trace_id: details
             .get("traceId")
             .and_then(Value::as_str)
@@ -140,26 +136,24 @@ fn tool_identity_from_result(
     }
 }
 
-fn redacted_tool_result(result: &CapabilityResult) -> CapabilityResult {
+fn redacted_tool_result(result: &ToolResult) -> ToolResult {
     let content = match &result.content {
-        CapabilityResultBody::Text(text) => {
-            CapabilityResultBody::Text(redact_sensitive_content(text))
-        }
-        CapabilityResultBody::Blocks(blocks) => CapabilityResultBody::Blocks(
+        ToolResultBody::Text(text) => ToolResultBody::Text(redact_sensitive_content(text)),
+        ToolResultBody::Blocks(blocks) => ToolResultBody::Blocks(
             blocks
                 .iter()
                 .map(|block| match block {
-                    CapabilityResultContent::Text { text } => {
-                        CapabilityResultContent::text(redact_sensitive_content(text))
+                    ToolResultContent::Text { text } => {
+                        ToolResultContent::text(redact_sensitive_content(text))
                     }
-                    CapabilityResultContent::Image { data, mime_type } => {
-                        CapabilityResultContent::image(data.clone(), mime_type.clone())
+                    ToolResultContent::Image { data, mime_type } => {
+                        ToolResultContent::image(data.clone(), mime_type.clone())
                     }
                 })
                 .collect(),
         ),
     };
-    CapabilityResult {
+    ToolResult {
         content,
         details: result.details.as_ref().map(redact_sensitive_json),
         is_error: result.is_error,
@@ -168,7 +162,7 @@ fn redacted_tool_result(result: &CapabilityResult) -> CapabilityResult {
 
 fn tool_failure_details(
     failure: &mut FailureEnvelope,
-    model_primitive_name: &str,
+    tool_name: &str,
     provider_invocation_id: &str,
     session_id: &str,
     trace_id: Option<&TraceId>,
@@ -184,10 +178,7 @@ fn tool_failure_details(
         }
         None => serde_json::Map::new(),
     };
-    let _ = details.insert(
-        "modelPrimitiveName".to_owned(),
-        Value::String(model_primitive_name.to_owned()),
-    );
+    let _ = details.insert("toolName".to_owned(), Value::String(tool_name.to_owned()));
     let _ = details.insert(
         "providerInvocationId".to_owned(),
         Value::String(provider_invocation_id.to_owned()),
@@ -203,16 +194,16 @@ fn tool_failure_details(
 
 fn tool_failure_result(
     mut failure: FailureEnvelope,
-    model_primitive_name: &str,
+    tool_name: &str,
     provider_invocation_id: &str,
     session_id: &str,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     extra: Option<Value>,
-) -> CapabilityResult {
+) -> ToolResult {
     tool_failure_details(
         &mut failure,
-        model_primitive_name,
+        tool_name,
         provider_invocation_id,
         session_id,
         trace_id,
@@ -250,35 +241,31 @@ pub struct ToolExecutionContext<'a> {
 }
 
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
-#[instrument(skip_all, fields(model_primitive_name = capability_invocation.name, session_id))]
+#[instrument(skip_all, fields(tool_name = tool_invocation.name, session_id))]
 pub async fn execute_tool(
-    capability_invocation: &CapabilityInvocationDraft,
+    tool_invocation: &ToolInvocationDraft,
     session_id: &str,
     working_directory: &str,
     ctx: &ToolExecutionContext<'_>,
-) -> CapabilityInvocationExecutionResult {
+) -> ToolInvocationExecutionResult {
     let start = Instant::now();
-    let invocation_id = capability_invocation.id.clone();
-    let model_primitive_name = capability_invocation.name.clone();
+    let invocation_id = tool_invocation.id.clone();
+    let tool_name = tool_invocation.name.clone();
 
-    let Some(engine_target) = ctx
-        .primitive_surface
-        .targets_by_name
-        .get(&model_primitive_name)
-    else {
-        error!(model_primitive_name, "model tool not found");
+    let Some(engine_target) = ctx.primitive_surface.targets_by_name.get(&tool_name) else {
+        error!(tool_name, "model tool not found");
         let failure = FailureEnvelope::new(
-            CAPABILITY_PRIMITIVE_NOT_FOUND,
+            TOOL_PRIMITIVE_NOT_FOUND,
             FailureCategory::NotFound,
-            format!("Model tool not found: {model_primitive_name}"),
+            format!("Model tool not found: {tool_name}"),
             false,
             true,
-            FailureOrigin::Capability,
+            FailureOrigin::Tool,
         );
-        return CapabilityInvocationExecutionResult {
+        return ToolInvocationExecutionResult {
             result: tool_failure_result(
                 failure,
-                &model_primitive_name,
+                &tool_name,
                 &invocation_id,
                 session_id,
                 ctx.trace_id,
@@ -289,9 +276,9 @@ pub async fn execute_tool(
         };
     };
 
-    let effective_args = Value::Object(capability_invocation.arguments.clone());
+    let effective_args = Value::Object(tool_invocation.arguments.clone());
     let primitive_identity = primitive_tool_identity(
-        &model_primitive_name,
+        &tool_name,
         &effective_args,
         ctx.trace_id,
         ctx.parent_invocation_id,
@@ -299,16 +286,16 @@ pub async fn execute_tool(
 
     if ctx.emit_lifecycle_events {
         let redacted_arguments = redact_sensitive_json(&effective_args).as_object().cloned();
-        let started = TronEvent::CapabilityInvocationStarted {
+        let started = TronEvent::ToolInvocationStarted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             invocation_id: invocation_id.clone(),
-            model_primitive_name: model_primitive_name.clone(),
+            tool_name: tool_name.clone(),
             arguments: redacted_arguments,
-            capability_identity: primitive_identity.clone(),
+            tool_identity: primitive_identity.clone(),
         };
         emit(ctx, started);
         debug!(
-            model_primitive_name,
+            tool_name,
             invocation_id, session_id, "model tool invocation started"
         );
     }
@@ -319,18 +306,18 @@ pub async fn execute_tool(
     let _abort_guard =
         InvocationAbortGuard::new(ctx.invocation_abort_registry, session_id, &invocation_id);
 
-    let capability_result = if per_invocation_cancel.is_cancelled() {
+    let tool_result = if per_invocation_cancel.is_cancelled() {
         let failure = FailureEnvelope::new(
             RUNTIME_CANCELLED,
             FailureCategory::Cancelled,
             "Operation cancelled",
             false,
             true,
-            FailureOrigin::Capability,
+            FailureOrigin::Tool,
         );
         tool_failure_result(
             failure,
-            &model_primitive_name,
+            &tool_name,
             &invocation_id,
             session_id,
             ctx.trace_id,
@@ -341,7 +328,7 @@ pub async fn execute_tool(
         execute_tool_via_engine(
             ctx.engine_host,
             engine_target,
-            &model_primitive_name,
+            &tool_name,
             &invocation_id,
             session_id,
             working_directory,
@@ -359,34 +346,30 @@ pub async fn execute_tool(
     };
 
     let duration_ms = duration_ceil_ms(start.elapsed());
-    let resolved_identity = tool_identity_from_result(
-        &model_primitive_name,
-        &primitive_identity,
-        &capability_result,
-    );
+    let resolved_identity =
+        tool_identity_from_result(&tool_name, &primitive_identity, &tool_result);
 
-    metrics::counter!("model_tool_invocations_total", "tool" => model_primitive_name.clone())
-        .increment(1);
-    metrics::histogram!("model_tool_invocation_duration_seconds", "tool" => model_primitive_name.clone())
+    metrics::counter!("model_tool_invocations_total", "tool" => tool_name.clone()).increment(1);
+    metrics::histogram!("model_tool_invocation_duration_seconds", "tool" => tool_name.clone())
         .record(start.elapsed().as_secs_f64());
 
     if ctx.emit_lifecycle_events {
-        let event_result = redacted_tool_result(&capability_result);
-        let completed = TronEvent::CapabilityInvocationCompleted {
+        let event_result = redacted_tool_result(&tool_result);
+        let completed = TronEvent::ToolInvocationCompleted {
             base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
             invocation_id: invocation_id.clone(),
-            model_primitive_name: model_primitive_name.clone(),
+            tool_name: tool_name.clone(),
             duration: duration_ms,
-            is_error: capability_result.is_error,
+            is_error: tool_result.is_error,
             result: Some(event_result),
-            capability_identity: resolved_identity,
+            tool_identity: resolved_identity,
         };
         emit(ctx, completed);
-        debug!(capability = %model_primitive_name, duration_ms, "model tool invocation completed");
+        debug!(tool = %tool_name, duration_ms, "model tool invocation completed");
     }
 
-    CapabilityInvocationExecutionResult {
-        result: capability_result,
+    ToolInvocationExecutionResult {
+        result: tool_result,
         duration_ms,
     }
 }
@@ -407,7 +390,7 @@ fn with_agent_working_directory(context: CausalContext, working_directory: &str)
 async fn execute_tool_via_engine(
     engine_host: &EngineHostHandle,
     target: &PrimitiveExecutionTarget,
-    model_primitive_name: &str,
+    tool_name: &str,
     invocation_id: &str,
     session_id: &str,
     working_directory: &str,
@@ -420,7 +403,7 @@ async fn execute_tool_via_engine(
     origin_worker_id: Option<&str>,
     effective_args: Value,
     cancellation: &CancellationToken,
-) -> crate::shared::protocol::model_capabilities::CapabilityResult {
+) -> crate::shared::protocol::model_tools::ToolResult {
     let working_directory =
         match crate::shared::foundation::paths::normalize_working_directory(working_directory) {
             Ok(path) => path.display().to_string(),
@@ -428,14 +411,14 @@ async fn execute_tool_via_engine(
                 let failure = FailureEnvelope::new(
                     ENGINE_POLICY_VIOLATION,
                     FailureCategory::Engine,
-                    format!("Capability runtime working directory is not trusted: {error}"),
+                    format!("Tool runtime working directory is not trusted: {error}"),
                     false,
                     false,
                     FailureOrigin::Engine,
                 );
                 return tool_failure_result(
                     failure,
-                    model_primitive_name,
+                    tool_name,
                     invocation_id,
                     session_id,
                     inherited_trace_id,
@@ -449,7 +432,7 @@ async fn execute_tool_via_engine(
         session_id,
         turn,
         invocation_id,
-        model_primitive_name,
+        tool_name,
         workspace_id,
         &effective_args,
     );
@@ -462,7 +445,7 @@ async fn execute_tool_via_engine(
         Err(error) => {
             return tool_failure_result(
                 engine_error_to_failure(&error),
-                model_primitive_name,
+                tool_name,
                 invocation_id,
                 session_id,
                 inherited_trace_id,
@@ -502,7 +485,7 @@ async fn execute_tool_via_engine(
         Err(error) => {
             return tool_failure_result(
                 engine_error_to_failure(&error),
-                model_primitive_name,
+                tool_name,
                 invocation_id,
                 session_id,
                 Some(&trace_id),
@@ -523,7 +506,7 @@ async fn execute_tool_via_engine(
             .map(|id| id.as_str().to_owned());
         return tool_failure_result(
             failure,
-            model_primitive_name,
+            tool_name,
             invocation_id,
             session_id,
             result_trace_id.as_ref(),
@@ -533,12 +516,12 @@ async fn execute_tool_via_engine(
     }
     let Some(value) = result.value else {
         let mut failure = FailureEnvelope::new(
-            CAPABILITY_ENGINE_RESULT_MISSING,
-            FailureCategory::Capability,
+            TOOL_ENGINE_RESULT_MISSING,
+            FailureCategory::Tool,
             format!("Engine tool invocation returned no result for {function_id}"),
             false,
             false,
-            FailureOrigin::Capability,
+            FailureOrigin::Tool,
         );
         failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
         failure.references.invocation_id = result_invocation_id
@@ -546,7 +529,7 @@ async fn execute_tool_via_engine(
             .map(|id| id.as_str().to_owned());
         return tool_failure_result(
             failure,
-            model_primitive_name,
+            tool_name,
             invocation_id,
             session_id,
             result_trace_id.as_ref(),
@@ -558,18 +541,18 @@ async fn execute_tool_via_engine(
     // envelope. Always preserve the exact value as details and serialize it for
     // the provider result channel; otherwise a worker whose schema happens to
     // contain `content` or `details` would be misinterpreted by the engine.
-    let mut capability_result = CapabilityResult {
-        content: crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(
+    let mut tool_result = ToolResult {
+        content: crate::shared::protocol::model_tools::ToolResultBody::Text(
             serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
         ),
         details: Some(value),
         is_error: None,
     };
-    attach_engine_outcome(&mut capability_result, replayed_from.as_ref());
-    capability_result
+    attach_engine_outcome(&mut tool_result, replayed_from.as_ref());
+    tool_result
 }
 
-fn attach_engine_outcome(result: &mut CapabilityResult, replayed_from: Option<&InvocationId>) {
+fn attach_engine_outcome(result: &mut ToolResult, replayed_from: Option<&InvocationId>) {
     let Some(Value::Object(details)) = result.details.as_mut() else {
         return;
     };

@@ -195,7 +195,7 @@ extension EventStoreManager {
         session.lastUserPrompt = info.lastUserPrompt
         session.lastAssistantResponse = info.lastAssistantResponse
         if let serverLines = info.activityLines {
-            session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+            session.lastActivityLines = serverLines.compactMap { $0.toActivityLine() }
         }
         return session
     }
@@ -237,7 +237,7 @@ extension EventStoreManager {
         session.lastUserPrompt = serverInfo.lastUserPrompt ?? existing.lastUserPrompt
         session.lastAssistantResponse = serverInfo.lastAssistantResponse ?? existing.lastAssistantResponse
         if let serverLines = serverInfo.activityLines {
-            session.lastActivityLines = serverLines.map { $0.toActivityLine() }
+            session.lastActivityLines = serverLines.compactMap { $0.toActivityLine() }
         } else {
             session.lastActivityLines = existing.lastActivityLines
         }

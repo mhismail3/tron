@@ -58,7 +58,7 @@ struct SessionEvent: Identifiable, Codable, EventTransformable, Sendable {
     /// Whether this event is a safe fork point for session branching.
     ///
     /// Only events where the message reconstruction state is consistent
-    /// (no pending capability results, no unmatched capability_invocation blocks) are forkable.
+    /// (no pending tool results, no unmatched tool_invocation blocks) are forkable.
     /// Mirrors the invariants in the Rust `build_messages` function in reconstruct.rs.
     var isForkable: Bool {
         switch eventType {
@@ -84,8 +84,8 @@ enum SessionEventType: String, Codable, Sendable, CaseIterable {
 
     case modelProviderRequest = "model.provider_request"
 
-    case capabilityInvocationStarted = "capability.invocation.started"
-    case capabilityInvocationCompleted = "capability.invocation.completed"
+    case toolInvocationStarted = "tool.invocation.started"
+    case toolInvocationCompleted = "tool.invocation.completed"
 
     /// Client-local completed-thinking cache row.
     case streamThinkingComplete = "stream.thinking_complete"
@@ -106,8 +106,8 @@ enum SessionEventType: String, Codable, Sendable, CaseIterable {
         .messageAssistant,
         .modelProviderRequest,
         .messageDeleted,
-        .capabilityInvocationStarted,
-        .capabilityInvocationCompleted,
+        .toolInvocationStarted,
+        .toolInvocationCompleted,
         .streamTurnStart,
         .streamTurnEnd,
         .compactBoundary,

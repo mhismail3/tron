@@ -1,6 +1,6 @@
 use super::support::*;
 use crate::domains::session::event_store::{AppendOptions, EventType};
-use crate::shared::server::errors::{CapabilityError, SESSION_NOT_FOUND};
+use crate::shared::server::errors::{SESSION_NOT_FOUND, ToolError};
 
 #[tokio::test]
 async fn fork_defaults_to_head_and_initializes_runtime_sequence() {
@@ -87,7 +87,7 @@ async fn fork_uses_explicit_event_and_rejects_missing_event() {
     .await
     .unwrap_err();
     match error {
-        CapabilityError::NotFound { code, message } => {
+        ToolError::NotFound { code, message } => {
             assert_eq!(code, SESSION_NOT_FOUND);
             assert!(message.starts_with("Persistence error: "));
         }

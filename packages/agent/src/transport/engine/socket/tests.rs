@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::engine::{EngineError, PublishStreamEvent, StreamVisibility};
-use crate::shared::server::error_mapping::engine_error_to_capability_error;
+use crate::shared::server::error_mapping::engine_error_to_tool_error;
 use crate::shared::server::events::ServerEventPayload;
 use crate::shared::server::failure::ENGINE_SCHEMA_VIOLATION;
 use crate::shared::server::test_support::make_test_context;
@@ -98,7 +98,7 @@ async fn oversized_frame_returns_a_correlated_error() {
 }
 
 #[tokio::test]
-async fn configured_budget_accepts_frames_above_the_removed_fixed_limit() {
+async fn configured_budget_accepts_frames_within_its_limit() {
     let (mut session, mut rx) = test_session_with_frame_limit(2 * 1024 * 1024);
     let message = json!({
         "type": "hello",
@@ -439,7 +439,7 @@ async fn topic_poll_requires_explicit_cursor() {
 #[tokio::test]
 async fn send_error_with_trace_preserves_embedded_engine_failure_on_outer_error() {
     let (session, mut rx) = test_session();
-    let error = engine_error_to_capability_error(EngineError::SchemaViolation {
+    let error = engine_error_to_tool_error(EngineError::SchemaViolation {
         function_id: "system::ping".to_owned(),
         direction: "request",
         path: "$.protocolVersion".to_owned(),

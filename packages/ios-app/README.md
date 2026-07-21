@@ -34,7 +34,7 @@ open TronMobile.xcodeproj
 
 1. Select the TronMobile project in the navigator
 2. Select the TronMobile target
-3. Go to "Signing & Capabilities"
+3. Go to "Signing & Tools"
 4. Enable "Automatically manage signing"
 5. Select your Personal Team (your Apple ID)
 
@@ -150,7 +150,7 @@ xcodegen generate
 ## Features
 
 - Real-time streaming responses
-- Capability invocation visualization
+- Tool invocation visualization
 - Session management
 - Image attachments
 - Thinking indicator

@@ -18,7 +18,7 @@ fn get_claude_model_opus_46() {
     assert!(!info.supports_thinking_beta_headers);
     assert!(info.supports_adaptive_thinking);
     assert!(info.supports_effort);
-    assert!(info.supports_capabilities);
+    assert!(info.supports_tools);
     // 4.6 is no longer the recommended Opus (4.7 took the spot).
     assert!(!info.recommended);
     assert!(!info.retired_generation);
@@ -33,7 +33,7 @@ fn get_claude_model_sonnet_46() {
     assert!(!info.supports_thinking_beta_headers);
     assert!(info.supports_adaptive_thinking);
     assert!(info.supports_effort);
-    assert!(info.supports_capabilities);
+    assert!(info.supports_tools);
     assert_float_eq(info.input_cost_per_million, 3.0);
     assert_float_eq(info.output_cost_per_million, 15.0);
     assert_float_eq(info.cache_read_cost_per_million, 0.3);
@@ -206,16 +206,16 @@ fn sse_content_block_start_tool_use() {
     let json = r#"{
             "type": "content_block_start",
             "index": 1,
-            "content_block": {"type": "tool_use", "id": "toolu_01abc", "name": "execute", "input": {}}
+            "content_block": {"type": "tool_use", "id": "toolu_01abc", "name": "test_tool", "input": {}}
         }"#;
     let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
     match event {
         AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
-            SseContentBlock::CapabilityInvocation { id, name } => {
+            SseContentBlock::ToolInvocation { id, name } => {
                 assert_eq!(id, "toolu_01abc");
-                assert_eq!(name, "execute");
+                assert_eq!(name, "test_tool");
             }
-            _ => panic!("expected CapabilityInvocation"),
+            _ => panic!("expected ToolInvocation"),
         },
         _ => panic!("expected ContentBlockStart"),
     }
@@ -347,20 +347,20 @@ fn sse_error() {
 #[test]
 fn anthropic_tool_serde() {
     let tool = AnthropicTool {
-        name: "execute".into(),
+        name: "test_tool".into(),
         description: "Run commands".into(),
         input_schema: serde_json::json!({"type": "object"}),
         cache_control: None,
     };
     let json = serde_json::to_value(&tool).unwrap();
-    assert_eq!(json["name"], "execute");
+    assert_eq!(json["name"], "test_tool");
     assert!(json.get("cache_control").is_none());
 }
 
 #[test]
 fn anthropic_tool_with_cache_control() {
     let tool = AnthropicTool {
-        name: "execute".into(),
+        name: "test_tool".into(),
         description: "Run commands".into(),
         input_schema: serde_json::json!({"type": "object"}),
         cache_control: Some(CacheControl {
@@ -401,7 +401,7 @@ fn to_api_json_opus_46() {
     assert!(j["reasoningLevels"].is_array());
     assert_eq!(j["defaultReasoningLevel"], "high");
     assert_eq!(j["recommended"], false);
-    assert_eq!(j["isLegacy"], false);
+    assert_eq!(j["isRetiredGeneration"], false);
     assert!(j["releaseDate"].is_string());
     assert!(j["sortOrder"].is_number());
 }
@@ -421,7 +421,7 @@ fn to_api_json_retired() {
     let j = m.to_api_json("claude-3-7-sonnet-20250219");
     assert_eq!(j["isDeprecated"], true);
     assert_eq!(j["deprecationDate"], "2025-10-01");
-    assert_eq!(j["isLegacy"], true);
+    assert_eq!(j["isRetiredGeneration"], true);
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn to_api_json_haiku_recommended() {
 // ── Opus 4.7 ──────────────────────────────────────────────────────
 
 #[test]
-fn get_claude_model_opus_4_7_capabilities() {
+fn get_claude_model_opus_4_7_tools() {
     let info = get_claude_model("claude-opus-4-7").unwrap();
     assert_eq!(info.short_name, "Opus 4.7");
     assert_eq!(info.family, "Claude 4.7");

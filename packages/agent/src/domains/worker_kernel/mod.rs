@@ -14,10 +14,10 @@
 //! | `contract` | Primitive identity plus request, response, and worker-bundle schemas |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
-//! | `persistence` | Canonical bundles, snapshot-first legacy-state retirement, index reconstruction, and durable operational ledgers |
+//! | `persistence` | Canonical bundles, index reconstruction, and durable operational ledgers |
 //! | `core_proposals` | Isolated Git worktree proposals, bounded test evidence, and recorded conversational approval |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
-//! | `retrieval` | Shared deterministic worker ranking and semantic-router fallback |
+//! | `retrieval` | Shared deterministic worker ranking and semantic-router recovery |
 //! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, supervision, and primitive session-metadata actuation |
 //! | `surface` | Canonical fixed/dynamic model-tool selection and provider-neutral introspection evidence |
 //! | `types` | Worker bundle and durable runtime DTOs |
@@ -106,7 +106,7 @@
 //! from disposable copies under `internal/run/`; worker writes therefore never
 //! mutate the canonical version, and an out-of-band mutation disables routing
 //! as an integrity failure before code executes.
-//! Local worker execution is deliberately not capability-authorized. Named
+//! Local worker execution is deliberately not tool-authorized. Named
 //! secret values are injected only at runtime; known vault values are rejected
 //! from candidate bundles and invocation inputs, then redacted from outputs and
 //! errors so they never enter manifests, operational records, events, or logs.
@@ -165,7 +165,7 @@
 //!
 //! ## Test Ownership
 //!
-//! Unit tests live beside each concern; cross-domain replay, migration,
+//! Unit tests live beside each concern; cross-domain replay,
 //! provider-tool, transport, and client proofs live under `packages/agent/tests`.
 
 use std::sync::Arc;
@@ -189,10 +189,6 @@ mod types;
 
 pub(crate) use contract::{CONTEXT_SUMMARY_FUNCTION, WORKER_RELEVANCE_FUNCTION};
 
-pub(crate) use persistence::{
-    ensure_state_snapshot, list_state_snapshots, prepare_worker_state_retirement,
-    restore_state_snapshot,
-};
 pub(crate) use runtime::WorkerRuntime;
 #[cfg(test)]
 pub(crate) use surface::{AvailableWorkerToolSnapshot, SurfaceToolSnapshot};

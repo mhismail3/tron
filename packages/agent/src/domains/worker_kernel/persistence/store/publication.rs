@@ -277,8 +277,8 @@ impl WorkerStore {
         // INVARIANT: the filesystem pointer is the publication linearization
         // point. Commit the rebuildable indexes first so a crash can leave the
         // database ahead of the canonical pointer, never the pointer ahead of
-        // its durable indexes. Startup reconstruction resolves the former back
-        // to the prior pointer.
+        // its durable indexes. Startup reconstruction makes indexes match the
+        // canonical pointer.
         transaction
             .commit()
             .map_err(|error| format!("commit worker publish: {error}"))?;

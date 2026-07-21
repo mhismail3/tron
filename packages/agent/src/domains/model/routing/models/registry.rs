@@ -1,7 +1,7 @@
 //! # Model Registry
 //!
-//! Unified model registry for provider detection, model lookup, and capability queries.
-//! Each provider maintains its own detailed model registry (pricing, capabilities, etc.)
+//! Unified model registry for provider detection, model lookup, and tool queries.
+//! Each provider maintains its own detailed model registry (pricing, tools, etc.)
 //! in its respective module. This module provides cross-provider utilities.
 //!
 //! **Single source of truth**: provider type files (`anthropic/types.rs`, etc.) own all

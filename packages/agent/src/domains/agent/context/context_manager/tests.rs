@@ -40,30 +40,28 @@ fn build_base_context_contains_product_intent_and_environment_only() {
     assert_eq!(context.system_prompt.as_deref(), Some("product intent"));
     assert_eq!(context.working_directory.as_deref(), Some("/tmp"));
     assert!(context.messages.is_empty());
-    assert!(context.capabilities.is_none());
+    assert!(context.tools.is_none());
     assert!(context.server_origin.is_none());
 }
 
 #[test]
-fn live_capability_surface_participates_in_token_accounting() {
+fn live_tool_surface_participates_in_token_accounting() {
     let mut manager = manager();
     manager.set_api_context_tokens(1234);
-    manager.set_capabilities(vec![
-        crate::shared::protocol::model_capabilities::ModelCapability {
-            name: "worker_recent_research".to_owned(),
-            description: "Research recent changes".to_owned(),
-            parameters: crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                schema_type: "object".to_owned(),
-                properties: None,
-                required: None,
-                description: None,
-                extra: Default::default(),
-            },
+    manager.set_tools(vec![crate::shared::protocol::model_tools::ModelTool {
+        name: "worker_recent_research".to_owned(),
+        description: "Research recent changes".to_owned(),
+        parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+            schema_type: "object".to_owned(),
+            properties: None,
+            required: None,
+            description: None,
+            extra: Default::default(),
         },
-    ]);
+    }]);
 
     assert!(manager.get_api_context_tokens().is_none());
-    assert!(manager.estimate_capabilities_tokens() > 0);
+    assert!(manager.estimate_tools_tokens() > 0);
 }
 
 #[test]

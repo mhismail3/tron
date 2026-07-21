@@ -232,7 +232,7 @@ fn to_api_json_has_required_fields() {
     assert!(j["reasoningLevels"].is_array());
     assert!(j["defaultReasoningLevel"].is_string());
     assert_eq!(j["recommended"], false);
-    assert_eq!(j["isLegacy"], false);
+    assert_eq!(j["isRetiredGeneration"], false);
     assert!(j["sortOrder"].is_number());
     assert_eq!(j["apiEndpoint"], "codex");
     assert_eq!(j["authPaths"], json!(["chatgpt-codex"]));
@@ -344,7 +344,7 @@ fn platform_model_list_uses_platform_profile() {
 fn to_api_json_retired_generation_model() {
     let m = get_openai_model("gpt-5.3-codex").unwrap();
     let j = m.to_api_json(m.default_profile());
-    assert_eq!(j["isLegacy"], true);
+    assert_eq!(j["isRetiredGeneration"], true);
 }
 
 #[test]
@@ -548,13 +548,13 @@ fn responses_function_call_serde() {
     let item = ResponsesInputItem::FunctionCall {
         id: None,
         call_id: "call_abc".into(),
-        name: "execute".into(),
+        name: "test_tool".into(),
         arguments: r#"{"cmd":"ls"}"#.into(),
     };
     let json = serde_json::to_value(&item).unwrap();
     assert_eq!(json["type"], "function_call");
     assert_eq!(json["call_id"], "call_abc");
-    assert_eq!(json["name"], "execute");
+    assert_eq!(json["name"], "test_tool");
 }
 
 #[test]
@@ -574,13 +574,13 @@ fn responses_function_call_output_serde() {
 #[test]
 fn tool_entry_function_serde() {
     let entry = ResponsesToolEntry::Function {
-        name: "execute".into(),
+        name: "test_tool".into(),
         description: "Run commands".into(),
         parameters: json!({"type": "object"}),
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["type"], "function");
-    assert_eq!(json["name"], "execute");
+    assert_eq!(json["name"], "test_tool");
 
     let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
     assert!(matches!(back, ResponsesToolEntry::Function { .. }));
@@ -589,7 +589,7 @@ fn tool_entry_function_serde() {
 #[test]
 fn tool_entry_serde_roundtrip_all_variants() {
     let entries = vec![ResponsesToolEntry::Function {
-        name: "execute".into(),
+        name: "test_tool".into(),
         description: "Run".into(),
         parameters: json!({}),
     }];
@@ -610,7 +610,7 @@ fn responses_request_serde() {
         stream: true,
         store: false,
         temperature: None,
-        capabilities: None,
+        tools: None,
         max_output_tokens: Some(16384),
         reasoning: Some(ReasoningConfig {
             effort: "medium".into(),
@@ -652,7 +652,7 @@ fn sse_output_item_added_function_call() {
         "item": {
             "type": "function_call",
             "call_id": "call_abc",
-            "name": "execute",
+            "name": "test_tool",
         },
     });
     let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
@@ -660,7 +660,7 @@ fn sse_output_item_added_function_call() {
     let item = event.item.unwrap();
     assert_eq!(item.item_type, OutputItemType::FunctionCall);
     assert_eq!(item.call_id.as_deref(), Some("call_abc"));
-    assert_eq!(item.name.as_deref(), Some("execute"));
+    assert_eq!(item.name.as_deref(), Some("test_tool"));
 }
 
 #[test]
@@ -821,7 +821,7 @@ fn output_item_function_call() {
     let item = ResponsesOutputItem {
         item_type: OutputItemType::FunctionCall,
         call_id: Some("call_abc".into()),
-        name: Some("execute".into()),
+        name: Some("test_tool".into()),
         arguments: Some(r#"{"cmd":"ls"}"#.into()),
         ..Default::default()
     };

@@ -21,6 +21,6 @@
     "title": "Proposal-only module lifecycle introduced",
     "url": "https://example.test/tron/old-proposals",
     "publishedAt": "2026-05-01",
-    "summary": "Historical proposal machinery required a later authority-mediated transition."
+    "summary": "The request stopped after recording a proposal instead of activating executable behavior."
   }
 ]

@@ -136,11 +136,11 @@ extension EventStoreManager {
                 sessionActivityStreamManager.handleEvent(.thinkingDelta, sessionId: sessionId)
             }
 
-        case CapabilityInvocationStartedPlugin.eventType:
+        case ToolInvocationStartedPlugin.eventType:
             if let sessionId = event.sessionId,
-               let result = event.getResult() as? CapabilityInvocationStartedPlugin.Result {
+               let result = event.getResult() as? ToolInvocationStartedPlugin.Result {
                 sessionActivityStreamManager.handleEvent(
-                    .capabilityInvocationStarted(
+                    .toolInvocationStarted(
                         identity: result.identity,
                         invocationId: result.invocationId,
                         arguments: result.arguments
@@ -149,11 +149,11 @@ extension EventStoreManager {
                 )
             }
 
-        case CapabilityInvocationCompletedPlugin.eventType:
+        case ToolInvocationCompletedPlugin.eventType:
             if let sessionId = event.sessionId,
-               let result = event.getResult() as? CapabilityInvocationCompletedPlugin.Result {
+               let result = event.getResult() as? ToolInvocationCompletedPlugin.Result {
                 sessionActivityStreamManager.handleEvent(
-                    .capabilityInvocationCompleted(
+                    .toolInvocationCompleted(
                         identity: result.identity,
                         invocationId: result.invocationId,
                         success: result.success,
@@ -219,7 +219,7 @@ extension EventStoreManager {
             if let prompt = result.lastUserPrompt { session.lastUserPrompt = prompt }
             if let response = result.lastAssistantResponse { session.lastAssistantResponse = response }
             if let lines = result.activityLines {
-                session.lastActivityLines = lines.map { $0.toActivityLine() }
+                session.lastActivityLines = lines.compactMap { $0.toActivityLine() }
             }
         }
         guard let session = sessions.first(where: { $0.id == sessionId }) else { return }

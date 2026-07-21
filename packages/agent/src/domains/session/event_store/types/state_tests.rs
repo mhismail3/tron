@@ -17,9 +17,9 @@ fn message_serde_roundtrip() {
 }
 
 #[test]
-fn capability_result_message_carries_invocation_identity() {
+fn tool_result_message_carries_invocation_identity() {
     let message = Message {
-        role: "capabilityResult".into(),
+        role: "toolResult".into(),
         content: json!("ls output"),
         invocation_id: Some("tc-1".into()),
         is_error: Some(false),

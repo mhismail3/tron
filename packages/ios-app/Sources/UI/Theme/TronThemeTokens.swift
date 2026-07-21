@@ -125,11 +125,11 @@ enum TronAnimationTiming {
     /// Maximum messages to cascade (cap at 1 second)
     static let cascadeMaxMessages = 50
 
-    // MARK: - Capability Call Stagger
-    /// Interval between capability appearances (80ms)
-    static let capabilityStaggerNanos: UInt64 = 80_000_000
-    /// Maximum capability stagger delay (200ms)
-    static let capabilityStaggerCapNanos: UInt64 = 200_000_000
+    // MARK: - Tool Call Stagger
+    /// Interval between tool appearances (80ms)
+    static let toolStaggerNanos: UInt64 = 80_000_000
+    /// Maximum tool stagger delay (200ms)
+    static let toolStaggerCapNanos: UInt64 = 200_000_000
 
     // MARK: - Text Streaming
     /// Batch interval for text updates (100ms)
@@ -194,7 +194,7 @@ extension ShapeStyle where Self == Color {
     static var userBubble: Color { .userBubble }
     static var assistantBubble: Color { .assistantBubble }
     static var systemBubble: Color { .systemBubble }
-    static var capabilityBubble: Color { .capabilityBubble }
+    static var toolBubble: Color { .toolBubble }
     static var errorBubble: Color { .errorBubble }
 
     // Special Colors

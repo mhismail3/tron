@@ -25,7 +25,7 @@ use tracing::{debug, info};
 
 use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::StreamEvent;
-use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
+use crate::shared::protocol::messages::{Provider, TokenUsage, ToolInvocationDraft};
 
 // ─── Native API chunk types ─────────────────────────────────────────────
 
@@ -58,21 +58,21 @@ pub struct OllamaMessage {
     pub thinking: Option<String>,
     /// Tool calls (arrive complete in a single chunk).
     #[serde(default)]
-    pub tool_calls: Option<Vec<OllamaCapabilityInvocationDraft>>,
+    pub tool_calls: Option<Vec<OllamaToolInvocationDraft>>,
 }
 
 /// A tool call from the native API (arrives complete, not streamed).
 #[derive(Debug, Deserialize)]
-pub struct OllamaCapabilityInvocationDraft {
+pub struct OllamaToolInvocationDraft {
     /// Tool call ID.
     pub id: Option<String>,
     /// Function details.
-    pub function: OllamaCapabilityInvocationDraftFunction,
+    pub function: OllamaToolInvocationDraftFunction,
 }
 
 /// Function details within a native API tool call.
 #[derive(Debug, Deserialize)]
-pub struct OllamaCapabilityInvocationDraftFunction {
+pub struct OllamaToolInvocationDraftFunction {
     /// Function name.
     pub name: String,
     /// Arguments as a parsed JSON object (NOT a string like OpenAI).
@@ -213,25 +213,23 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             let arguments = tc.function.arguments.clone();
             let args_str = serde_json::to_string(&arguments).unwrap_or_default();
 
-            events.push(StreamEvent::CapabilityInvocationDraftStart {
+            events.push(StreamEvent::ToolInvocationDraftStart {
                 invocation_id: id.clone(),
                 name: name.clone(),
             });
-            events.push(StreamEvent::CapabilityInvocationDraftDelta {
+            events.push(StreamEvent::ToolInvocationDraftDelta {
                 invocation_id: id.clone(),
                 arguments_delta: args_str,
             });
 
-            state
-                .content_blocks
-                .push(AssistantContent::CapabilityInvocation {
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments: arguments.clone(),
-                    thought_signature: None,
-                });
-            events.push(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation: CapabilityInvocationDraft::new(id, name, arguments),
+            state.content_blocks.push(AssistantContent::ToolInvocation {
+                id: id.clone(),
+                name: name.clone(),
+                arguments: arguments.clone(),
+                thought_signature: None,
+            });
+            events.push(StreamEvent::ToolInvocationDraftEnd {
+                tool_invocation: ToolInvocationDraft::new(id, name, arguments),
             });
         }
     }
@@ -254,9 +252,9 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         let has_tools = state
             .content_blocks
             .iter()
-            .any(|c| matches!(c, AssistantContent::CapabilityInvocation { .. }));
+            .any(|c| matches!(c, AssistantContent::ToolInvocation { .. }));
         let stop_reason = if has_tools {
-            "capability_invocation".into()
+            "tool_invocation".into()
         } else {
             stop_reason
         };

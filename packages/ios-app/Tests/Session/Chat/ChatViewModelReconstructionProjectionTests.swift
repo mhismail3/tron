@@ -13,7 +13,7 @@ extension ChatViewModelPaginationTests {
                 hasMoreEvents: false,
                 oldestEventId: nil,
                 inFlight: InFlightState(
-                    capabilityInvocations: [],
+                    toolInvocations: [],
                     contentSequence: [],
                     streaming: nil
                 )
@@ -23,7 +23,7 @@ extension ChatViewModelPaginationTests {
         XCTAssertEqual(viewModel.agentPhase, .stopping)
     }
 
-    func testReconnectReconstructionPreservesGeneratingCapabilityChip() async {
+    func testReconnectReconstructionPreservesGeneratingToolChip() async {
         let (viewModel, _) = makeViewModel()
 
         await viewModel.processReconstructionResult(
@@ -32,9 +32,9 @@ extension ChatViewModelPaginationTests {
                 hasMoreEvents: false,
                 oldestEventId: nil,
                 inFlight: InFlightState(
-                    capabilityInvocations: [
-                        CurrentTurnCapabilityInvocation(
-                            invocationId: "capability-generating-1",
+                    toolInvocations: [
+                        CurrentTurnToolInvocation(
+                            invocationId: "tool-generating-1",
                             arguments: nil,
                             status: "generating",
                             result: nil,
@@ -44,52 +44,49 @@ extension ChatViewModelPaginationTests {
                             streamingOutput: nil,
                             progressMessage: nil,
                             progressPercent: nil,
-                            modelPrimitiveName: "execute",
-                            operationName: "process_run",
-                            operation: nil,
+                            toolName: "process_run",
                             traceId: nil,
                             rootInvocationId: nil,
                             themeColor: nil,
                             presentationHints: nil
                         )
                     ],
-                    contentSequence: [.capabilityRef(invocationId: "capability-generating-1")],
+                    contentSequence: [.toolRef(invocationId: "tool-generating-1")],
                     streaming: nil
                 )
             )
         )
 
         XCTAssertEqual(viewModel.messages.count, 1)
-        guard case .capabilityInvocation(let invocation) = viewModel.messages[0].content else {
-            return XCTFail("Expected visible in-flight capability chip")
+        guard case .toolInvocation(let invocation) = viewModel.messages[0].content else {
+            return XCTFail("Expected visible in-flight tool chip")
         }
-        XCTAssertEqual(invocation.id, "capability-generating-1")
+        XCTAssertEqual(invocation.id, "tool-generating-1")
         XCTAssertEqual(invocation.status, .generating)
-        XCTAssertEqual(invocation.identity.operationName, "process_run")
-        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("capability-generating-1"))
+        XCTAssertTrue(viewModel.animationCoordinator.isToolInvocationVisible("tool-generating-1"))
     }
 
-    func testReconnectInFlightProjectionDoesNotRegressPersistedCapabilitySuccess() async {
+    func testReconnectInFlightProjectionDoesNotRegressPersistedToolSuccess() async {
         let (viewModel, _) = makeViewModel()
-        let invocationId = "capability-terminal-success"
+        let invocationId = "tool-terminal-success"
 
         await viewModel.processReconstructionResult(
             reconstructResult(
                 events: [
-                    rawCapabilityStarted(id: "success-started", invocationId: invocationId, sequence: 1),
-                    rawAssistantWithCapability(id: "success-assistant", invocationId: invocationId, sequence: 2),
-                    rawCapabilityCompleted(id: "success-completed", invocationId: invocationId, sequence: 3)
+                    rawToolStarted(id: "success-started", invocationId: invocationId, sequence: 1),
+                    rawAssistantWithTool(id: "success-assistant", invocationId: invocationId, sequence: 2),
+                    rawToolCompleted(id: "success-completed", invocationId: invocationId, sequence: 3)
                 ],
                 hasMoreEvents: false,
                 oldestEventId: nil,
                 inFlight: inFlightState(
-                    currentTurnCapability(invocationId: invocationId, status: "running")
+                    currentTurnTool(invocationId: invocationId, status: "running")
                 )
             )
         )
 
-        let invocations = viewModel.messages.compactMap { message -> CapabilityInvocationData? in
-            guard case .capabilityInvocation(let invocation) = message.content else { return nil }
+        let invocations = viewModel.messages.compactMap { message -> ToolInvocationData? in
+            guard case .toolInvocation(let invocation) = message.content else { return nil }
             return invocation
         }
         XCTAssertEqual(invocations.count, 1)
@@ -97,16 +94,16 @@ extension ChatViewModelPaginationTests {
         XCTAssertEqual(invocations.first?.result, "done")
     }
 
-    func testReconnectInFlightProjectionDoesNotRegressPersistedCapabilityError() async {
+    func testReconnectInFlightProjectionDoesNotRegressPersistedToolError() async {
         let (viewModel, _) = makeViewModel()
-        let invocationId = "capability-terminal-error"
+        let invocationId = "tool-terminal-error"
 
         await viewModel.processReconstructionResult(
             reconstructResult(
                 events: [
-                    rawCapabilityStarted(id: "error-started", invocationId: invocationId, sequence: 1),
-                    rawAssistantWithCapability(id: "error-assistant", invocationId: invocationId, sequence: 2),
-                    rawCapabilityCompleted(
+                    rawToolStarted(id: "error-started", invocationId: invocationId, sequence: 1),
+                    rawAssistantWithTool(id: "error-assistant", invocationId: invocationId, sequence: 2),
+                    rawToolCompleted(
                         id: "error-completed",
                         invocationId: invocationId,
                         sequence: 3,
@@ -117,13 +114,13 @@ extension ChatViewModelPaginationTests {
                 hasMoreEvents: false,
                 oldestEventId: nil,
                 inFlight: inFlightState(
-                    currentTurnCapability(invocationId: invocationId, status: "running")
+                    currentTurnTool(invocationId: invocationId, status: "running")
                 )
             )
         )
 
-        let invocations = viewModel.messages.compactMap { message -> CapabilityInvocationData? in
-            guard case .capabilityInvocation(let invocation) = message.content else { return nil }
+        let invocations = viewModel.messages.compactMap { message -> ToolInvocationData? in
+            guard case .toolInvocation(let invocation) = message.content else { return nil }
             return invocation
         }
         XCTAssertEqual(invocations.count, 1)
@@ -131,7 +128,7 @@ extension ChatViewModelPaginationTests {
         XCTAssertEqual(invocations.first?.result, "failed")
     }
 
-    func testReconnectReconstructionRestoresCapabilityProgressProjection() async {
+    func testReconnectReconstructionRestoresToolProgressProjection() async {
         let (viewModel, _) = makeViewModel()
 
         await viewModel.processReconstructionResult(
@@ -140,9 +137,9 @@ extension ChatViewModelPaginationTests {
                 hasMoreEvents: false,
                 oldestEventId: nil,
                 inFlight: InFlightState(
-                    capabilityInvocations: [
-                        CurrentTurnCapabilityInvocation(
-                            invocationId: "capability-progress-1",
+                    toolInvocations: [
+                        CurrentTurnToolInvocation(
+                            invocationId: "tool-progress-1",
                             arguments: nil,
                             status: "running",
                             result: nil,
@@ -152,23 +149,21 @@ extension ChatViewModelPaginationTests {
                             streamingOutput: "partial output",
                             progressMessage: "Halfway",
                             progressPercent: 0.5,
-                            modelPrimitiveName: "execute",
-                            operationName: "process_run",
-                            operation: nil,
+                            toolName: "process_run",
                             traceId: nil,
                             rootInvocationId: nil,
                             themeColor: nil,
                             presentationHints: nil
                         )
                     ],
-                    contentSequence: [.capabilityRef(invocationId: "capability-progress-1")],
+                    contentSequence: [.toolRef(invocationId: "tool-progress-1")],
                     streaming: nil
                 )
             )
         )
 
-        guard case .capabilityInvocation(let invocation) = viewModel.messages.first?.content else {
-            return XCTFail("Expected reconstructed capability progress chip")
+        guard case .toolInvocation(let invocation) = viewModel.messages.first?.content else {
+            return XCTFail("Expected reconstructed tool progress chip")
         }
         XCTAssertEqual(invocation.status, .running)
         XCTAssertEqual(invocation.progressMessage, "Halfway")
@@ -339,25 +334,25 @@ extension ChatViewModelPaginationTests {
         )
     }
 
-    func rawCapabilityStarted(id: String, invocationId: String, sequence: Int) -> RawEvent {
+    func rawToolStarted(id: String, invocationId: String, sequence: Int) -> RawEvent {
         RawEvent(
             id: id,
             parentId: nil,
             sessionId: "test-session",
             workspaceId: "/test/workspace",
-            type: "capability.invocation.started",
+            type: "tool.invocation.started",
             timestamp: "2026-01-01T00:00:00Z",
             sequence: sequence,
             payload: [
                 "invocationId": AnyCodable(invocationId),
-                "modelPrimitiveName": AnyCodable("execute"),
+                "toolName": AnyCodable("process_run"),
                 "arguments": AnyCodable(["command": "true"]),
                 "turn": AnyCodable(1)
             ]
         )
     }
 
-    func rawCapabilityCompleted(
+    func rawToolCompleted(
         id: String,
         invocationId: String,
         sequence: Int,
@@ -369,12 +364,12 @@ extension ChatViewModelPaginationTests {
             parentId: nil,
             sessionId: "test-session",
             workspaceId: "/test/workspace",
-            type: "capability.invocation.completed",
+            type: "tool.invocation.completed",
             timestamp: "2026-01-01T00:00:01Z",
             sequence: sequence,
             payload: [
                 "invocationId": AnyCodable(invocationId),
-                "modelPrimitiveName": AnyCodable("execute"),
+                "toolName": AnyCodable("process_run"),
                 "content": AnyCodable(content),
                 "isError": AnyCodable(isError),
                 "duration": AnyCodable(20)
@@ -382,7 +377,7 @@ extension ChatViewModelPaginationTests {
         )
     }
 
-    func rawAssistantWithCapability(id: String, invocationId: String, sequence: Int) -> RawEvent {
+    func rawAssistantWithTool(id: String, invocationId: String, sequence: Int) -> RawEvent {
         RawEvent(
             id: id,
             parentId: nil,
@@ -394,9 +389,9 @@ extension ChatViewModelPaginationTests {
             payload: [
                 "content": AnyCodable([
                     [
-                        "type": "capability_invocation",
+                        "type": "tool_invocation",
                         "id": invocationId,
-                        "name": "execute",
+                        "name": "process_run",
                         "input": ["command": "true"]
                     ] as [String: Any]
                 ]),
@@ -407,11 +402,11 @@ extension ChatViewModelPaginationTests {
         )
     }
 
-    func currentTurnCapability(
+    func currentTurnTool(
         invocationId: String,
         status: String
-    ) -> CurrentTurnCapabilityInvocation {
-        CurrentTurnCapabilityInvocation(
+    ) -> CurrentTurnToolInvocation {
+        CurrentTurnToolInvocation(
             invocationId: invocationId,
             arguments: nil,
             status: status,
@@ -422,9 +417,7 @@ extension ChatViewModelPaginationTests {
             streamingOutput: nil,
             progressMessage: nil,
             progressPercent: nil,
-            modelPrimitiveName: "execute",
-            operationName: "process_run",
-            operation: nil,
+            toolName: "process_run",
             traceId: nil,
             rootInvocationId: nil,
             themeColor: nil,
@@ -433,11 +426,11 @@ extension ChatViewModelPaginationTests {
     }
 
     func inFlightState(
-        _ capabilityInvocation: CurrentTurnCapabilityInvocation
+        _ toolInvocation: CurrentTurnToolInvocation
     ) -> InFlightState {
         InFlightState(
-            capabilityInvocations: [capabilityInvocation],
-            contentSequence: [.capabilityRef(invocationId: capabilityInvocation.invocationId)],
+            toolInvocations: [toolInvocation],
+            contentSequence: [.toolRef(invocationId: toolInvocation.invocationId)],
             streaming: nil
         )
     }

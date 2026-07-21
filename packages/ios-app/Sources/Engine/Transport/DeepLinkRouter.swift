@@ -4,8 +4,8 @@ import Foundation
 
 /// Represents a scroll target within a session
 enum ScrollTarget: Equatable {
-    /// Scroll to a specific capability invocation by ID
-    case capabilityInvocation(id: String)
+    /// Scroll to a specific tool invocation by ID
+    case toolInvocation(id: String)
     /// Scroll to a specific event by ID
     case event(id: String)
     /// Scroll to bottom (default behavior)
@@ -54,7 +54,7 @@ final class DeepLinkRouter {
         }
 
         let scrollTarget = (notificationPayload["invocationId"] as? String)
-            .map { ScrollTarget.capabilityInvocation(id: $0) }
+            .map { ScrollTarget.toolInvocation(id: $0) }
         pendingIntent = .session(id: sessionId, scrollTo: scrollTarget)
         TronLogger.shared.info("Deep link intent set: session=\(sessionId), scrollTo=\(String(describing: scrollTarget))", category: .notification)
     }
@@ -127,8 +127,8 @@ final class DeepLinkRouter {
               let queryItems = components.queryItems
         else { return nil }
 
-        if let capabilityId = nonEmptyQueryValue("capability", in: queryItems) {
-            return .capabilityInvocation(id: capabilityId)
+        if let toolId = nonEmptyQueryValue("tool", in: queryItems) {
+            return .toolInvocation(id: toolId)
         }
         if let eventId = nonEmptyQueryValue("event", in: queryItems) {
             return .event(id: eventId)

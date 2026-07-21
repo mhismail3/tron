@@ -79,14 +79,14 @@ extension MessageMutating {
 
 // MARK: - MessageIndex
 
-/// O(1) lookup index for messages by UUID and capability invocation id.
+/// O(1) lookup index for messages by UUID and tool invocation id.
 /// Maintains dictionaries that stay in sync with the messages array.
 /// All mutations to the message array should go through `MessageMutating` protocol methods.
 @MainActor
 final class MessageIndex {
 
     private var idToIndex: [UUID: Int] = [:]
-    private var capabilityInvocationIdToIndex: [String: Int] = [:]
+    private var toolInvocationIdToIndex: [String: Int] = [:]
 
     // MARK: - Lookup
 
@@ -95,9 +95,9 @@ final class MessageIndex {
         idToIndex[id]
     }
 
-    /// O(1) lookup by transport capability invocation id / capability invocation id.
-    func index(forCapabilityInvocationId invocationId: String) -> Int? {
-        capabilityInvocationIdToIndex[invocationId]
+    /// O(1) lookup by transport tool invocation id / tool invocation id.
+    func index(forToolInvocationId invocationId: String) -> Int? {
+        toolInvocationIdToIndex[invocationId]
     }
 
     // MARK: - Rebuild
@@ -106,12 +106,12 @@ final class MessageIndex {
     /// Call after bulk operations (pagination load, clear + reload).
     func rebuild(from messages: [ChatMessage]) {
         idToIndex.removeAll(keepingCapacity: true)
-        capabilityInvocationIdToIndex.removeAll(keepingCapacity: true)
+        toolInvocationIdToIndex.removeAll(keepingCapacity: true)
 
         for (i, message) in messages.enumerated() {
             idToIndex[message.id] = i
-            if let invocationId = extractCapabilityInvocationId(from: message) {
-                capabilityInvocationIdToIndex[invocationId] = i
+            if let invocationId = extractToolInvocationId(from: message) {
+                toolInvocationIdToIndex[invocationId] = i
             }
         }
     }
@@ -119,8 +119,8 @@ final class MessageIndex {
     /// Notify the index that a message was appended at the end.
     func didAppend(_ message: ChatMessage, at index: Int) {
         idToIndex[message.id] = index
-        if let invocationId = extractCapabilityInvocationId(from: message) {
-            capabilityInvocationIdToIndex[invocationId] = index
+        if let invocationId = extractToolInvocationId(from: message) {
+            toolInvocationIdToIndex[invocationId] = index
         }
     }
 
@@ -131,8 +131,8 @@ final class MessageIndex {
         shiftIndices(from: position, by: 1, totalCount: totalCount)
 
         idToIndex[message.id] = position
-        if let invocationId = extractCapabilityInvocationId(from: message) {
-            capabilityInvocationIdToIndex[invocationId] = position
+        if let invocationId = extractToolInvocationId(from: message) {
+            toolInvocationIdToIndex[invocationId] = position
         }
     }
 
@@ -144,8 +144,8 @@ final class MessageIndex {
 
         for (i, message) in messages.enumerated() {
             idToIndex[message.id] = i
-            if let invocationId = extractCapabilityInvocationId(from: message) {
-                capabilityInvocationIdToIndex[invocationId] = i
+            if let invocationId = extractToolInvocationId(from: message) {
+                toolInvocationIdToIndex[invocationId] = i
             }
         }
     }
@@ -154,8 +154,8 @@ final class MessageIndex {
     /// All indices > position shift left by 1.
     func didRemove(_ message: ChatMessage, at position: Int, newTotalCount: Int) {
         idToIndex.removeValue(forKey: message.id)
-        if let invocationId = extractCapabilityInvocationId(from: message) {
-            capabilityInvocationIdToIndex.removeValue(forKey: invocationId)
+        if let invocationId = extractToolInvocationId(from: message) {
+            toolInvocationIdToIndex.removeValue(forKey: invocationId)
         }
 
         // Shift entries after the removed position
@@ -167,18 +167,18 @@ final class MessageIndex {
     func didUpdate(_ message: ChatMessage, at position: Int) {
         // Re-register invocation id in case content changed.
         idToIndex[message.id] = position
-        if let invocationId = extractCapabilityInvocationId(from: message) {
-            capabilityInvocationIdToIndex[invocationId] = position
+        if let invocationId = extractToolInvocationId(from: message) {
+            toolInvocationIdToIndex[invocationId] = position
         }
     }
 
     /// Notify the index that a message's content was updated in place.
-    /// Removes stale capability mappings if the message changed from one
-    /// invocation identity to another or stopped being a capability row.
+    /// Removes stale tool mappings if the message changed from one
+    /// invocation identity to another or stopped being a tool row.
     func didUpdate(from oldMessage: ChatMessage, to newMessage: ChatMessage, at position: Int) {
-        if let oldInvocationId = extractCapabilityInvocationId(from: oldMessage),
-           oldInvocationId != extractCapabilityInvocationId(from: newMessage) {
-            capabilityInvocationIdToIndex.removeValue(forKey: oldInvocationId)
+        if let oldInvocationId = extractToolInvocationId(from: oldMessage),
+           oldInvocationId != extractToolInvocationId(from: newMessage) {
+            toolInvocationIdToIndex.removeValue(forKey: oldInvocationId)
         }
         didUpdate(newMessage, at: position)
     }
@@ -186,7 +186,7 @@ final class MessageIndex {
     /// Clear the entire index.
     func clear() {
         idToIndex.removeAll()
-        capabilityInvocationIdToIndex.removeAll()
+        toolInvocationIdToIndex.removeAll()
     }
 
     // MARK: - Private
@@ -195,16 +195,16 @@ final class MessageIndex {
         for (id, idx) in idToIndex where idx >= startPosition {
             idToIndex[id] = idx + delta
         }
-        for (invocationId, idx) in capabilityInvocationIdToIndex where idx >= startPosition {
-            capabilityInvocationIdToIndex[invocationId] = idx + delta
+        for (invocationId, idx) in toolInvocationIdToIndex where idx >= startPosition {
+            toolInvocationIdToIndex[invocationId] = idx + delta
         }
     }
 
-    private func extractCapabilityInvocationId(from message: ChatMessage) -> String? {
+    private func extractToolInvocationId(from message: ChatMessage) -> String? {
         switch message.content {
-        case .capabilityInvocation(let data):
+        case .toolInvocation(let data):
             return data.id
-        case .capabilityResult(let data):
+        case .toolResult(let data):
             return data.id
         default:
             return nil

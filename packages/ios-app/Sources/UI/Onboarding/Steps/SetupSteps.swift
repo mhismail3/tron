@@ -224,7 +224,7 @@ struct ServicesSetupOnboardingPage: View {
 
     var body: some View {
         OnboardingPage(
-            subtitle: "Add search service keys so Tron can use web search capabilities."
+            subtitle: "Add search service keys so Tron can use web search tools."
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 ForEach(ProviderInfo.services) { service in

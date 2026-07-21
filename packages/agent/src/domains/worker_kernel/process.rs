@@ -29,7 +29,7 @@ pub(super) const MAX_PROCESS_CAPTURE_BYTES: usize = 4 * 1_048_576;
 /// makes host-installed package managers and language tools disappear when the
 /// same operation moves from an interactive shell into the durable server.
 /// Preserve the inherited order, then add conventional user/package-manager
-/// locations and system fallbacks. A worker-owned runtime bin, when supplied,
+/// locations and system locations. A worker-owned runtime bin, when supplied,
 /// stays first so isolated dependencies take precedence.
 pub(super) fn trusted_local_command_path(
     worker_runtime_bin: Option<&Path>,

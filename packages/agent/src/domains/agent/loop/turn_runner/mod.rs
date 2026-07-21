@@ -2,9 +2,9 @@
 //!
 //! Tool-result content is the only provider-portable channel back into
 //! the model. Engine/UI/audit metadata stays in `details`, but model-facing
-//! `execute` observations are projected into result text by
-//! `tool_phase::projection` so every provider can reason about
-//! direct primitive results without gaining a second tool API. Every
+//! execution evidence is projected into result text by `tool_phase::projection`
+//! so every provider can reason about direct tool results without gaining a
+//! second tool API. Every
 //! provider turn resolves its tool surface from a bounded evolving intent query
 //! containing the current user request, visible assistant plan, tool names and
 //! arguments, and text results; binary data and hidden thinking are excluded.
@@ -46,7 +46,7 @@ use tracing::{error, info, instrument, trace, warn};
 
 use self::failure::{emit_turn_failure, terminalize_interrupted_turn};
 pub use self::params::TurnParams;
-pub(crate) use self::persistence::emit_persisted_capability_invocation_completed;
+pub(crate) use self::persistence::emit_persisted_tool_invocation_completed;
 use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload, build_token_record_json,
     emit_response_complete, emit_turn_end, emit_turn_start, persist_completed_assistant_message,
@@ -72,14 +72,14 @@ fn cancellation_failure(session_id: &str) -> FailureEnvelope {
 }
 
 fn determine_turn_stop_reason(
-    capability_invocation_count: usize,
+    tool_invocation_count: usize,
     llm_stop_reason: &str,
 ) -> Option<StopReason> {
-    if capability_invocation_count == 0 {
+    if tool_invocation_count == 0 {
         if llm_stop_reason == "end_turn" {
             Some(StopReason::EndTurn)
         } else {
-            Some(StopReason::NoCapabilityInvocationDrafts)
+            Some(StopReason::NoToolInvocationDrafts)
         }
     } else {
         None
@@ -488,7 +488,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     .await;
 
     if let Some(error) = invocation_phase.error {
-        let error_msg = format!("failed to persist capability lifecycle: {error}");
+        let error_msg = format!("failed to persist tool lifecycle: {error}");
         let failure = FailureEnvelope::new(
             RUNTIME_PERSISTENCE_ERROR,
             FailureCategory::Persistence,
@@ -531,7 +531,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             && let Some(j) = journal.take()
             && let Err(error) = j.finalize_and_delete()
         {
-            warn!(session_id, turn, error = %error, "failed to finalize streaming journal after capability cancellation");
+            warn!(session_id, turn, error = %error, "failed to finalize streaming journal after tool cancellation");
         }
         return match terminalized {
             Ok(()) => interrupted_turn_result(None, stream_result.token_usage),
@@ -591,7 +591,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 
     // The journal remains authoritative until the complete turn lifecycle,
-    // including capability results and turn end, is durably committed.
+    // including tool results and turn end, is durably committed.
     if let Some(j) = journal.take()
         && let Err(error) = j.finalize_and_delete()
     {
@@ -609,7 +609,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         duration_ms = duration,
         model = %model_name,
         stop_reason = %stream_result.stop_reason,
-        capabilities = invocation_phase.capability_invocations_executed,
+        tools = invocation_phase.tool_invocations_executed,
         has_thinking,
         "turn completed"
     );
@@ -621,7 +621,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // Determine stop reason for this turn
     let stop_reason = determine_turn_stop_reason(
-        stream_result.capability_invocations.len(),
+        stream_result.tool_invocations.len(),
         &stream_result.stop_reason,
     );
 
@@ -631,7 +631,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     TurnResult {
         success: true,
-        capability_invocations_executed: invocation_phase.capability_invocations_executed,
+        tool_invocations_executed: invocation_phase.tool_invocations_executed,
         token_usage: stream_result.token_usage,
         stop_reason,
         model: Some(model_name),

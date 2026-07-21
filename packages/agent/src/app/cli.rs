@@ -53,19 +53,6 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: AuthAction,
     },
-    /// Offline worker-state snapshot inspection and recovery.
-    State {
-        #[command(subcommand)]
-        action: StateAction,
-    },
-}
-
-#[derive(clap::Subcommand, Debug)]
-pub(crate) enum StateAction {
-    /// List verified worker-first migration snapshots.
-    Snapshots,
-    /// Restore one verified snapshot. Tron must be stopped.
-    Restore { snapshot: PathBuf },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -112,33 +99,7 @@ pub(crate) async fn run_subcommand(cmd: &Command) -> Result<()> {
             AuthAction::BeginOauth { provider } => begin_oauth_cli(provider),
             AuthAction::CompleteOauth => complete_oauth_cli().await,
         },
-        Command::State { action } => match action {
-            StateAction::Snapshots => list_state_snapshots_cli(),
-            StateAction::Restore { snapshot } => restore_state_snapshot_cli(snapshot),
-        },
     }
-}
-
-fn list_state_snapshots_cli() -> Result<()> {
-    for snapshot in
-        crate::domains::worker_kernel::list_state_snapshots().map_err(anyhow::Error::msg)?
-    {
-        println!("{}", snapshot.display());
-    }
-    Ok(())
-}
-
-fn restore_state_snapshot_cli(snapshot: &Path) -> Result<()> {
-    let database = crate::shared::foundation::paths::db_dir().join("tron.sqlite");
-    let _offline_lock = crate::domains::session::event_store::acquire_database_lock(&database)
-        .map_err(|error| anyhow::anyhow!("Tron must be stopped before state restore: {error}"))?;
-    let recovery = crate::domains::worker_kernel::restore_state_snapshot(snapshot)
-        .map_err(anyhow::Error::msg)?;
-    eprintln!(
-        "Worker state restored. The replaced state is recoverable at {}.",
-        recovery.display()
-    );
-    Ok(())
 }
 
 fn rotate_bearer_token_cli() -> Result<()> {

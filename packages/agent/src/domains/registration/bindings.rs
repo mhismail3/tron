@@ -12,10 +12,10 @@ use serde_json::Value;
 
 use crate::domains::registration::composition::DomainFunctionRegistration;
 use crate::engine::{EngineError, FunctionDefinition, InProcessFunctionHandler, Invocation};
-use crate::shared::server::error_mapping::capability_error_to_engine;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::error_mapping::tool_error_to_engine;
+use crate::shared::server::errors::ToolError;
 
-pub(crate) type OperationFuture<'a> = BoxFuture<'a, Result<Value, CapabilityError>>;
+pub(crate) type OperationFuture<'a> = BoxFuture<'a, Result<Value, ToolError>>;
 
 type OperationHandler<D> =
     Arc<dyn for<'a> Fn(&'a Invocation, &'a D) -> OperationFuture<'a> + Send + Sync>;
@@ -149,7 +149,7 @@ where
     async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
         (self.binding.handler)(&invocation, &self.deps)
             .await
-            .map_err(capability_error_to_engine)
+            .map_err(tool_error_to_engine)
     }
 }
 
@@ -215,7 +215,7 @@ mod tests {
             RiskLevel::Low,
         )
         .build()
-        .expect("valid test capability")
+        .expect("valid test tool")
     }
 
     fn binding(operation_key: &'static str) -> OperationBinding<DummyDeps> {

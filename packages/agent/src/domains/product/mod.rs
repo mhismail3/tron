@@ -9,7 +9,7 @@
 //! | `blob` | Read event-store attachments |
 //! | `logs` | Ingest and inspect bounded client diagnostics |
 //! | `message` | Delete a durable conversation message |
-//! | `system` | Pairing compatibility and server status |
+//! | `system` | Pairing and server status |
 
 pub(crate) mod blob;
 pub(crate) mod logs;

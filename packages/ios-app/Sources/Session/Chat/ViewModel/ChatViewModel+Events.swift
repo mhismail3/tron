@@ -105,47 +105,47 @@ extension ChatViewModel {
         logger.verbose("Thinking end: final total \(thinking.count) chars", category: .events)
     }
 
-    func handleCapabilityInvocationGenerating(_ pluginResult: CapabilityInvocationGeneratingPlugin.Result) {
-        capabilityInvocationCoordinator.handleCapabilityInvocationGenerating(pluginResult, context: self)
+    func handleToolInvocationGenerating(_ pluginResult: ToolInvocationGeneratingPlugin.Result) {
+        toolInvocationCoordinator.handleToolInvocationGenerating(pluginResult, context: self)
     }
 
-    func handleCapabilityInvocationStarted(_ pluginResult: CapabilityInvocationStartedPlugin.Result) {
-        // Delegate directly to coordinator (capability classification absorbed)
-        capabilityInvocationCoordinator.handleCapabilityInvocationStarted(pluginResult, context: self)
+    func handleToolInvocationStarted(_ pluginResult: ToolInvocationStartedPlugin.Result) {
+        // Delegate directly to coordinator (tool classification absorbed)
+        toolInvocationCoordinator.handleToolInvocationStarted(pluginResult, context: self)
     }
 
-    func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result) {
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+    func handleToolInvocationOutput(_ result: ToolInvocationOutputPlugin.Result) {
+        guard let index = messageIndex.index(forToolInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfToolInvocation(id: result.invocationId, in: messages) else { return }
 
-        if case .capabilityInvocation(var invocation) = messages[index].content {
+        if case .toolInvocation(var invocation) = messages[index].content {
             let accumulated = (invocation.logs.last ?? "") + result.output
             invocation.logs = [String(accumulated.prefix(24_000))]
             updateMessage(at: index) { message in
-                message.content = .capabilityInvocation(invocation)
+                message.content = .toolInvocation(invocation)
             }
         }
     }
 
-    func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result) {
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
+    func handleToolInvocationProgress(_ result: ToolInvocationProgressPlugin.Result) {
+        guard let index = messageIndex.index(forToolInvocationId: result.invocationId)
+            ?? MessageFinder.lastIndexOfToolInvocation(id: result.invocationId, in: messages) else { return }
 
-        if case .capabilityInvocation(var invocation) = messages[index].content {
+        if case .toolInvocation(var invocation) = messages[index].content {
             if let msg = result.message { invocation.progressMessage = msg }
             if let pct = result.percent { invocation.progressPercent = pct }
-            if result.identity.stableCapabilityId != "capability" {
+            if !result.identity.isEmpty {
                 invocation.identity = result.identity
             }
             updateMessage(at: index) { message in
-                message.content = .capabilityInvocation(invocation)
+                message.content = .toolInvocation(invocation)
             }
         }
     }
 
-    func handleCapabilityInvocationCompleted(_ pluginResult: CapabilityInvocationCompletedPlugin.Result) {
+    func handleToolInvocationCompleted(_ pluginResult: ToolInvocationCompletedPlugin.Result) {
         // Delegate directly to coordinator
-        capabilityInvocationCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
+        toolInvocationCoordinator.handleToolInvocationCompleted(pluginResult, context: self)
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
@@ -153,7 +153,7 @@ extension ChatViewModel {
         if agentPhase != .stopping {
             agentPhase = .processing
         }
-        runningCapabilityInvocationCount = 0
+        runningToolInvocationCount = 0
 
         if isCompacting {
             if let inProgressId = compactionInProgressMessageId,
@@ -270,7 +270,7 @@ extension ChatViewModel {
     private func resetToIdleState(errorPreview: String) {
         uiUpdateQueue.flush()
         uiUpdateQueue.reset()
-        animationCoordinator.resetCapabilityState()
+        animationCoordinator.resetToolState()
         streamingManager.reset()
 
         agentPhase = .idle

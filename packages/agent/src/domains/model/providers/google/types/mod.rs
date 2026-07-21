@@ -243,7 +243,7 @@ pub enum GeminiPart {
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
-    /// Function response (capability result).
+    /// Function response (tool result).
     FunctionResponse {
         /// The function response details.
         #[serde(rename = "functionResponse")]
@@ -285,7 +285,7 @@ pub struct InlineDataContent {
     pub data: String,
 }
 
-/// ModelCapability definition for the Gemini API.
+/// ModelTool definition for the Gemini API.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiTool {

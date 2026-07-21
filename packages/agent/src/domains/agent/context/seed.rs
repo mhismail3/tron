@@ -1,6 +1,6 @@
 //! Minimal behavioral seed for the primary agent loop.
 //!
-//! Exact capabilities, schemas, lifecycle operations, and approval boundaries
+//! Exact tools, schemas, lifecycle operations, and approval boundaries
 //! belong to the live typed tool surface. This seed carries only the durable
 //! product intent that cannot be inferred from an individual tool contract.
 

@@ -3,9 +3,8 @@
 //! Runtime state has three roots: `internal/`, `profiles/`, and `workspace/`.
 //! `profiles/` now contains protected `auth.json` only; named configuration
 //! profiles, inheritance, active pointers, and source-owned prompt assets are
-//! not initialized. Sparse user settings live directly
-//! at `~/.tron/settings.toml` and are created only by an explicit mutation or
-//! snapshot-first legacy migration.
+//! not initialized. Sparse user settings live directly at
+//! `~/.tron/settings.toml` and are created only by an explicit mutation.
 
 use std::fs;
 use std::io;

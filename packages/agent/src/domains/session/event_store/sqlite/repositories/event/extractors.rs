@@ -6,13 +6,13 @@ pub(crate) fn extract_role(event: &SessionEvent) -> Option<String> {
     match event.event_type {
         EventType::MessageUser => Some("user".to_string()),
         EventType::MessageAssistant => Some("assistant".to_string()),
-        EventType::CapabilityInvocationCompleted => Some("capability".to_string()),
+        EventType::ToolInvocationCompleted => Some("tool".to_string()),
         _ => None,
     }
 }
 
-pub(crate) fn extract_model_primitive_name(event: &SessionEvent) -> Option<String> {
-    extract_str(&event.payload, "modelPrimitiveName")
+pub(crate) fn extract_tool_name(event: &SessionEvent) -> Option<String> {
+    extract_str(&event.payload, "toolName")
 }
 
 pub(crate) fn extract_str(val: &Value, key: &str) -> Option<String> {

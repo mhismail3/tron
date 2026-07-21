@@ -87,7 +87,7 @@ pub(super) fn event_rows_to_session_events(
                         row.id
                     ))
                 })?;
-            if event_type == EventType::CapabilityInvocationCompleted {
+            if event_type == EventType::ToolInvocationCompleted {
                 validate_provider_history_payload(&row.id, event_type, &payload)?;
             }
             Ok(SessionEvent {
@@ -112,7 +112,7 @@ pub(super) fn event_rows_to_session_events(
 /// message rows intentionally non-contributing. Message structural validation
 /// therefore runs after reconstruction identifies surviving source event IDs,
 /// but still validates every source row independently so same-role merging
-/// cannot hide a malformed contributor. Capability completions retain their
+/// cannot hide a malformed contributor. Tool completions retain their
 /// unconditional row-conversion guard because malformed identity can itself
 /// make a result appear unmatched and disappear from reconstruction.
 fn validated_reconstruction(events: &[SessionEvent]) -> Result<ReconstructionResult> {
@@ -140,7 +140,7 @@ fn validated_reconstruction(events: &[SessionEvent]) -> Result<ReconstructionRes
 /// Reject malformed payloads that can contribute to a future provider request.
 ///
 /// Full runtime-message decoding remains owned by the agent projection after
-/// reconstruction has applied compaction and message merging. Capability
+/// reconstruction has applied compaction and message merging. Tool
 /// completions need a minimal check here because reconstruction can legitimately
 /// discard an unmatched result; without it, a malformed completion could vanish
 /// before the runtime projection sees it.
@@ -156,7 +156,7 @@ fn validate_provider_history_payload(
         EventType::MessageAssistant => {
             return validate_message_payload(event_id, "assistant", payload);
         }
-        EventType::CapabilityInvocationCompleted => {}
+        EventType::ToolInvocationCompleted => {}
         _ => return Ok(()),
     }
 
@@ -167,7 +167,7 @@ fn validate_provider_history_payload(
         .is_none()
     {
         return Err(EventStoreError::InvalidOperation(format!(
-            "event {event_id} has invalid capability completion payload: \
+            "event {event_id} has invalid tool completion payload: \
              invocationId must be a non-empty string"
         )));
     }
@@ -175,7 +175,7 @@ fn validate_provider_history_payload(
     match payload.get("modelContextContent") {
         Some(value) if !value.is_string() => {
             return Err(EventStoreError::InvalidOperation(format!(
-                "event {event_id} has invalid capability completion payload: \
+                "event {event_id} has invalid tool completion payload: \
                  modelContextContent must be a string when present"
             )));
         }
@@ -185,7 +185,7 @@ fn validate_provider_history_payload(
             .is_some_and(serde_json::Value::is_string) =>
         {
             return Err(EventStoreError::InvalidOperation(format!(
-                "event {event_id} has invalid capability completion payload: \
+                "event {event_id} has invalid tool completion payload: \
                  content must be a string"
             )));
         }
@@ -197,7 +197,7 @@ fn validate_provider_history_payload(
         .is_some_and(serde_json::Value::is_boolean)
     {
         return Err(EventStoreError::InvalidOperation(format!(
-            "event {event_id} has invalid capability completion payload: \
+            "event {event_id} has invalid tool completion payload: \
              isError must be a boolean"
         )));
     }

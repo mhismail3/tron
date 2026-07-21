@@ -7,7 +7,7 @@ fn make_manager() -> SessionManager {
     .unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     SessionManager::new(Arc::new(EventStore::new(pool)))
 }

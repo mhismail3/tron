@@ -59,9 +59,9 @@ struct AgentClientTests {
             idempotencyKey: .userAction("agent.prompt.test")
         )
         let aborted = try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
-        _ = try await client.abortCapabilityInvocation(
-            invocationId: "capability-1",
-            idempotencyKey: .userAction("agent.abortCapabilityInvocation.test")
+        _ = try await client.abortToolInvocation(
+            invocationId: "tool-1",
+            idempotencyKey: .userAction("agent.abortToolInvocation.test")
         )
 
         #expect(transport.ensureSessionEventSubscriptionCallCount >= 1)

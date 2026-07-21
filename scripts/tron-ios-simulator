@@ -28,7 +28,7 @@ Commands:
 
 Environment overrides:
   TRON_IOS_SIMULATOR_ID            Simulator UUID to use and remember
-  TRON_IOS_SIMULATOR_NAME          Fallback device name (default: iPhone 17 Pro)
+  TRON_IOS_SIMULATOR_NAME          Default device name (iPhone 17 Pro)
   TRON_IOS_SIMULATOR_STATE_DIR     Local state directory
   TRON_IOS_SIMULATOR_DERIVED_DATA  Stable DerivedData path
 

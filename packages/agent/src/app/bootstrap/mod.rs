@@ -1,9 +1,9 @@
 //! Server startup/runtime wiring for the `tron` binary.
 //!
 //! The thin `main.rs` entry point handles process-level dispatch. This module
-//! owns long-running server initialization so bootstrap, snapshot-first legacy
-//! settings/database retirement, service construction, shutdown registration,
-//! and background task wiring stay below one audited boundary.
+//! owns long-running server initialization so bootstrap, service construction,
+//! shutdown registration, and background task wiring stay below one audited
+//! boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -110,27 +110,11 @@ pub(crate) fn init_directories() -> Result<()> {
 }
 
 fn init_directories_at(home: &Path) -> Result<()> {
-    if let Some(retirement) = crate::domains::settings::LegacyProfileRetirement::plan(home)
-        .map_err(anyhow::Error::msg)
-        .context("Failed to inspect legacy profile settings")?
-    {
-        crate::domains::worker_kernel::ensure_state_snapshot(
-            home,
-            retirement.source_label(),
-            retirement.fingerprint(),
-        )
-        .map_err(anyhow::Error::msg)
-        .context("Failed to snapshot legacy profile settings")?;
-        retirement
-            .apply()
-            .map_err(anyhow::Error::msg)
-            .context("Failed to retire legacy profile settings")?;
-    }
     crate::shared::foundation::home::ensure_tron_home_at(&home)
         .context("Failed to initialize primitive Tron Home")
 }
 
-/// Open the SQLite database, run migrations, and return the pool + resolved path.
+/// Open the SQLite database, install the current schema, and return the pool + resolved path.
 pub(crate) fn init_database(
     db_path_override: Option<PathBuf>,
 ) -> Result<(
@@ -163,33 +147,6 @@ pub(crate) fn init_database(
         },
     )?;
 
-    let tron_home = crate::shared::foundation::paths::tron_home();
-    let canonical_database = tron_home
-        .join(crate::shared::foundation::paths::dirs::INTERNAL)
-        .join(crate::shared::foundation::paths::dirs::DB)
-        .join(crate::shared::storage::UNIFIED_DB_FILENAME);
-    if db_path == canonical_database && db_path.is_file() {
-        crate::domains::worker_kernel::prepare_worker_state_retirement(
-            &tron_home, "engine", &db_path,
-        )
-        .map_err(anyhow::Error::msg)
-        .context("Failed to snapshot and retire legacy worker state")?;
-    }
-    let archive_report =
-        crate::shared::storage::prepare_active_database(&db_path).with_context(|| {
-            format!(
-                "Failed to prepare unified database files for {}",
-                db_path.display()
-            )
-        })?;
-    if archive_report.moved_any() {
-        tracing::info!(
-            archive_dir = ?archive_report.archive_dir,
-            files = archive_report.files.len(),
-            "archived non-current database files before unified storage startup"
-        );
-    }
-
     let db_str = db_path.to_string_lossy();
     let pool =
         crate::domains::session::event_store::new_file(&db_str, &ConnectionConfig::default())
@@ -205,8 +162,8 @@ pub(crate) fn init_database(
             "Database integrity check failed. The unified engine store may be corrupt; \
              restore from a backup or investigate ~/.tron/internal/database/tron.sqlite.",
         )?;
-        let _ = crate::domains::session::event_store::run_migrations(&conn)
-            .context("Failed to run migrations")?;
+        let _ = crate::domains::session::event_store::ensure_schema(&conn)
+            .context("Failed to install current schema")?;
         crate::shared::storage::ensure_storage_schema(&conn)
             .context("Failed to initialize storage metadata schema")?;
     }
@@ -252,7 +209,7 @@ struct ServiceState {
     responder_factory: Arc<dyn ModelResponderFactory>,
 }
 
-/// Build core services: orchestrator, session manager, providers, and capabilities.
+/// Build core services: orchestrator, session manager, providers, and tools.
 async fn init_services(
     event_store: Arc<EventStore>,
     settings: &crate::domains::settings::TronSettings,
@@ -333,7 +290,7 @@ fn build_server_runtime_context(
 /// Attach agent-runtime cleanup to the process shutdown path.
 ///
 /// INVARIANT: accepted runs and durable session projections are ended before
-/// capability and storage drains begin. Process signals are the lifecycle
+/// tool and storage drains begin. Process signals are the lifecycle
 /// authority; no externally invokable shutdown function is required.
 fn register_agent_shutdown(shutdown: &Arc<ShutdownCoordinator>, orchestrator: Arc<Orchestrator>) {
     shutdown.register_phase_callback(

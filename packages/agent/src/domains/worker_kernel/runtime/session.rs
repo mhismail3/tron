@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::WorkerRuntime;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::{CapabilityError, SESSION_NOT_FOUND};
+use crate::shared::server::errors::{SESSION_NOT_FOUND, ToolError};
 
 const MAX_SESSION_TITLE_CHARS: usize = 160;
 
@@ -26,20 +26,21 @@ impl WorkerRuntime {
         let update_session_id = session_id.clone();
         let update_title = title.clone();
         let (updated, session) = run_blocking_task("worker_kernel.session_set_title", move || {
-            let Some(mut session) = store.get_session(&update_session_id).map_err(|error| {
-                CapabilityError::Internal {
-                    message: error.to_string(),
-                }
-            })?
+            let Some(mut session) =
+                store
+                    .get_session(&update_session_id)
+                    .map_err(|error| ToolError::Internal {
+                        message: error.to_string(),
+                    })?
             else {
-                return Err(CapabilityError::NotFound {
+                return Err(ToolError::NotFound {
                     code: SESSION_NOT_FOUND.to_owned(),
                     message: format!("session not found: {update_session_id}"),
                 });
             };
             let updated = store
                 .update_session_title(&update_session_id, Some(&update_title))
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
             session.title = Some(update_title);

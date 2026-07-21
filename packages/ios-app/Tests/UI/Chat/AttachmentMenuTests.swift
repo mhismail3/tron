@@ -4,8 +4,8 @@ import XCTest
 
 @MainActor
 final class AttachmentMenuTests: XCTestCase {
-    private var noImageCapability: AttachmentCapability {
-        AttachmentCapability(
+    private var noImageTool: AttachmentSupport {
+        AttachmentSupport(
             supportsImages: false,
             supportsPdfContent: false,
             supportsTextFiles: true,
@@ -28,7 +28,7 @@ final class AttachmentMenuTests: XCTestCase {
 
     func testAttachmentMenuHidesImageActionsWhenModelDoesNotSupportImages() {
         XCTAssertEqual(
-            AttachmentMenuAction.availableActions(for: noImageCapability),
+            AttachmentMenuAction.availableActions(for: noImageTool),
             [.files]
         )
     }
@@ -39,7 +39,7 @@ final class AttachmentMenuTests: XCTestCase {
             [.camera, .photoLibrary, .files, .recentInputs]
         )
         XCTAssertEqual(
-            AttachmentMenuAction.availableActions(for: noImageCapability, includeRecentInputs: true),
+            AttachmentMenuAction.availableActions(for: noImageTool, includeRecentInputs: true),
             [.files, .recentInputs]
         )
     }
@@ -57,7 +57,7 @@ final class AttachmentMenuTests: XCTestCase {
         render(
             ComposerAttachmentButton(
                 isDisabled: false,
-                attachmentCapability: .default,
+                attachmentSupport: .default,
                 includeRecentInputs: true,
                 onSelect: { _ in },
                 buttonSize: 40
@@ -66,7 +66,7 @@ final class AttachmentMenuTests: XCTestCase {
         render(
             ComposerAttachmentButton(
                 isDisabled: true,
-                attachmentCapability: noImageCapability,
+                attachmentSupport: noImageTool,
                 includeRecentInputs: false,
                 onSelect: { _ in },
                 buttonSize: 40

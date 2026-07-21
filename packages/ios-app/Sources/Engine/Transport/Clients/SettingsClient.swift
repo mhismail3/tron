@@ -1,6 +1,6 @@
 import Foundation
 
-/// Client for settings engine capabilities.
+/// Client for settings engine tools.
 /// Reads and writes server-authoritative settings for model/workspace defaults,
 /// context compaction, and autonomous-worker policy.
 final class SettingsClient: EngineDomainClient {

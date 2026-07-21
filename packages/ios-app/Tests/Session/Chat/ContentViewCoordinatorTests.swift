@@ -54,11 +54,11 @@ final class PendingSessionDeepLinkTests: XCTestCase {
         XCTAssertEqual(
             pendingSessionDeepLink(
                 sessionId: "sess_pending",
-                scrollTarget: .capabilityInvocation(id: "cap_123")
+                scrollTarget: .toolInvocation(id: "cap_123")
             ),
             PendingSessionDeepLink(
                 sessionId: "sess_pending",
-                scrollTarget: .capabilityInvocation(id: "cap_123")
+                scrollTarget: .toolInvocation(id: "cap_123")
             )
         )
     }
@@ -126,7 +126,7 @@ final class ResolveQuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, "/session/dir")
     }
 
-    // MARK: - Current Session Fallback
+    // MARK: - Current Session Selection
 
     func testCurrentSessionWorkspace() {
         let sessions = [
@@ -158,7 +158,7 @@ final class ResolveQuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, "/recent")
     }
 
-    // MARK: - Most Recent Session Fallback
+    // MARK: - Most Recent Session Selection
 
     func testMostRecentSessionWorkspace() {
         let sorted = [makeSession(id: "sess-recent", workingDirectory: "/recent")]
@@ -184,7 +184,7 @@ final class ResolveQuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, defaultWorkspace)
     }
 
-    // MARK: - Final Default Fallback
+    // MARK: - Final Default Selection
 
     func testNoSessionsFallsToDefault() {
         let result = resolveQuickSessionWorkspace(

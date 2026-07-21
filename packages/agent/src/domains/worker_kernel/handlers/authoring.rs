@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 use super::super::host;
 use super::super::types::WorkerBundle;
@@ -34,7 +34,7 @@ pub(super) async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value
         let (imported_bundle, summary) =
             run_blocking_task("worker_kernel::import_source_directory", move || {
                 let summary = import_source_directory(&source_directory, &mut bundle)
-                    .map_err(|message| CapabilityError::Internal { message })?;
+                    .map_err(|message| ToolError::Internal { message })?;
                 Ok((bundle, summary))
             })
             .await

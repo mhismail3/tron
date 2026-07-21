@@ -168,20 +168,20 @@ final class LiveSessionPruningTests: XCTestCase {
     }
 
     func test_pruneKeepsMessageIndexValid_byInvocationId() {
-        // Given: populate and add a capability message in the kept range
+        // Given: populate and add a tool message in the kept range
         populateMessages(count: 200)
-        let capabilityMessage = ChatMessage(
+        let toolMessage = ChatMessage(
             role: .assistant,
-            content: .capabilityInvocation(testCapabilityInvocation(id: "capability_keep_me", status: .success, result: "ok"))
+            content: .toolInvocation(testToolInvocation(id: "tool_keep_me", status: .success, result: "ok"))
         )
-        viewModel.appendToMessages(capabilityMessage)
+        viewModel.appendToMessages(toolMessage)
 
         // When (201 messages, triggers prune)
         viewModel.pruneOldMessagesIfNeeded()
 
-        // Then: invocationId lookup works for kept capability message
-        let capabilityIndex = viewModel.messageIndex.index(forCapabilityInvocationId: "capability_keep_me")
-        XCTAssertNotNil(capabilityIndex)
+        // Then: invocationId lookup works for kept tool message
+        let toolIndex = viewModel.messageIndex.index(forToolInvocationId: "tool_keep_me")
+        XCTAssertNotNil(toolIndex)
     }
 
     func test_pruneIncrementsPrunedVersion() {

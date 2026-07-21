@@ -1,6 +1,6 @@
 //! # Transport
 //!
-//! Thin client-facing transports over the canonical engine capability fabric.
+//! Thin client-facing transports over the canonical engine tool fabric.
 //!
 //! Transports own protocol framing, method existence, depth limits, timeout
 //! policy, metrics, subscription cursor state, and wire error sanitization.

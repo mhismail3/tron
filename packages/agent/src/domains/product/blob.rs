@@ -14,7 +14,7 @@ use crate::domains::registration::contract::FunctionContract;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EffectClass, FunctionDefinition, Result as EngineResult, RiskLevel};
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
@@ -51,11 +51,11 @@ operation_bindings! {
 async fn blob_get_value(
     payload: &Value,
     event_store: &Arc<EventStore>,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let blob_id = payload
         .get("blobId")
         .and_then(Value::as_str)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "missing 'blobId' parameter".into(),
         })?
         .to_owned();
@@ -63,10 +63,10 @@ async fn blob_get_value(
     run_blocking_task("blob::get", move || {
         let blob = event_store
             .get_blob(&blob_id)
-            .map_err(|error| CapabilityError::Internal {
+            .map_err(|error| ToolError::Internal {
                 message: format!("blob lookup error: {error}"),
             })?
-            .ok_or_else(|| CapabilityError::NotFound {
+            .ok_or_else(|| ToolError::NotFound {
                 code: "BLOB_NOT_FOUND".into(),
                 message: format!("blob not found: {blob_id}"),
             })?;

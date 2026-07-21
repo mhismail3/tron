@@ -63,12 +63,12 @@ extension ChatView {
                 preservedTurns: preservedTurns,
                 summarizedTurns: summarizedTurns
             )
-        case .capabilityInvocation(let data):
-            sheetCoordinator.showCapabilityInvocationDetail(data)
-        case .capabilityInvocationGroup(let data):
-            sheetCoordinator.showCapabilityInvocationGroupDetail(data)
-        case .cancelCapabilityInvocation(let id):
-            viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
+        case .toolInvocation(let data):
+            sheetCoordinator.showToolInvocationDetail(data)
+        case .toolInvocationGroup(let data):
+            sheetCoordinator.showToolInvocationGroupDetail(data)
+        case .cancelToolInvocation(let id):
+            viewModel.abortToolInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortToolInvocation"))
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
         case .localErrorDetail(let title, let message, let suggestion):
@@ -93,7 +93,7 @@ extension ChatView {
                                 .id("topAutoloadSentinel")
                         }
 
-                        let renderItems = CapabilityInvocationGrouping.renderItems(from: viewModel.messages)
+                        let renderItems = ToolInvocationGrouping.renderItems(from: viewModel.messages)
                         ForEach(Array(renderItems.enumerated()), id: \.element.id) { index, item in
                             messageRenderItemView(
                                 item,
@@ -404,10 +404,10 @@ extension ChatView {
                     : "chat-message-row"
             )
 
-        case .capabilityGroup(let group):
-            CapabilityInvocationGroupChip(
+        case .toolGroup(let group):
+            ToolInvocationGroupChip(
                 data: group.data,
-                onTap: { handleBubbleTap(.capabilityInvocationGroup(group.data)) }
+                onTap: { handleBubbleTap(.toolInvocationGroup(group.data)) }
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(group.id)

@@ -3,17 +3,9 @@
 //! Tron stores active server data in one engine-owned SQLite database:
 //! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
 //! safe concurrent reads/writes; checkpoints and exports create compact
-//! single-file artifacts when the operator needs one. The `modular-engine-v4`
-//! generation is a clean break for the collapsed substrate: startup accepts only
-//! the canonical active DB path and moves a non-current `tron.sqlite` generation
-//! aside before creating the ledger, stream, state, storage, and
-//! session-harness tables from the current
-//! schema only. Generation inspection errors fail closed, archived DB/WAL/SHM
-//! files carry an `archive-manifest.json`, and shared storage schema setup runs
-//! behind a savepoint with drift and payload-reference integrity checks.
-//! A one-time worker-first retirement imports complete legacy proposals as
-//! inactive worker candidates, reports incomplete records, and transactionally
-//! removes the superseded authority/resource schema after a verified snapshot.
+//! single-file artifacts when the operator needs one. Shared storage schema
+//! setup runs behind a savepoint with drift and payload-reference integrity
+//! checks.
 //! Startup and manual cleanup share one managed diagnostic horizon and active
 //! database budget. Those bounds prune only low-signal diagnostic data and
 //! unowned blobs; they are not chat, session, or memory retention policy.
@@ -26,7 +18,6 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-mod archive;
 mod maintenance;
 mod payloads;
 mod schema;
@@ -35,25 +26,17 @@ mod stats;
 #[cfg(test)]
 mod tests;
 
-pub use archive::{archive_non_current_active_database, prepare_active_database};
 pub use maintenance::{checkpoint_database, export_snapshot};
 pub use payloads::{
-    PayloadRefCleanup, decode_blob_content, encode_blob_content, register_existing_blob_owner,
-    resolve_stored_json_string, resolve_stored_json_value, retire_payload_refs_by_owner_kind,
-    store_content_blob, store_json_bytes, store_json_value, store_owned_payload_ref,
+    decode_blob_content, encode_blob_content, register_existing_blob_owner,
+    resolve_stored_json_string, resolve_stored_json_value, store_content_blob, store_json_bytes,
+    store_json_value, store_owned_payload_ref,
 };
 pub use schema::{apply_runtime_pragmas, ensure_storage_schema};
 pub use stats::storage_stats;
 
 /// Canonical active database filename.
 pub const UNIFIED_DB_FILENAME: &str = "tron.sqlite";
-
-/// Current storage generation. A live DB without this marker is archived and
-/// reset before startup continues.
-pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v4";
-
-/// Metadata key storing the active storage generation.
-pub const STORAGE_GENERATION_KEY: &str = "storage_generation";
 
 /// Default inline payload threshold. Larger payloads should store compact
 /// previews and blob refs instead of duplicating full JSON in primary rows.
@@ -67,41 +50,8 @@ pub const DATABASE_STORAGE_BUDGET_MB: u64 = 512;
 
 const ZSTD_COMPRESSION_THRESHOLD_BYTES: usize = 1024;
 
-/// Name of the archive directory under `internal/database`.
-pub const ARCHIVE_DIR: &str = "archive";
-
 /// Internal storage envelope key for payload-ref-backed JSON columns.
 pub const PAYLOAD_REF_ENVELOPE_KEY: &str = "__tronPayloadRef";
-
-/// Summary of one archived database file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchivedDatabaseFile {
-    /// Archived filename.
-    pub filename: String,
-    /// Final archived path.
-    pub archived_path: PathBuf,
-    /// File size in bytes at archive time.
-    pub size_bytes: u64,
-}
-
-/// Archive report emitted on startup.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArchiveReport {
-    /// Archive directory used for this startup, if any files moved.
-    pub archive_dir: Option<PathBuf>,
-    /// Non-current files moved out of active storage.
-    pub files: Vec<ArchivedDatabaseFile>,
-}
-
-impl ArchiveReport {
-    /// Whether startup moved any non-current database artifacts.
-    #[must_use]
-    pub fn moved_any(&self) -> bool {
-        !self.files.is_empty()
-    }
-}
 
 /// Result of a WAL checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,11 +343,6 @@ impl StorageRuntime {
         apply_runtime_pragmas(&conn)?;
         ensure_storage_schema(&conn)?;
         Ok(conn)
-    }
-
-    /// Move a non-current `tron.sqlite` generation aside before startup.
-    pub fn prepare_for_startup(&self) -> Result<ArchiveReport> {
-        prepare_active_database(&self.path)
     }
 
     /// Run a truncating WAL checkpoint and record it in storage metadata.

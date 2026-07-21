@@ -132,7 +132,7 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
 
-    /// Blob storage client (for Display capability image loading).
+    /// Blob storage client (for Display tool image loading).
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 

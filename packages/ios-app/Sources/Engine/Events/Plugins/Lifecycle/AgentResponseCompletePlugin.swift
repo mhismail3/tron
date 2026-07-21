@@ -2,8 +2,8 @@ import Foundation
 
 /// Plugin for the server's response-complete lifecycle event.
 ///
-/// When text exists, a completed response with zero capability invocations is
-/// guaranteed to be the final textual response. Capability-bearing responses
+/// When text exists, a completed response with zero tool invocations is
+/// guaranteed to be the final textual response. Tool-bearing responses
 /// are deliberately ineligible for a footer whether execution continues or
 /// explicitly stops.
 /// `agent.turn_end` supplies token/latency metadata after this plugin marks the
@@ -19,30 +19,30 @@ enum AgentResponseCompletePlugin: DispatchableEventPlugin {
 
         struct DataPayload: Decodable, Sendable {
             let turn: Int
-            let hasCapabilityInvocations: Bool
-            let capabilityInvocationCount: Int
+            let hasToolInvocations: Bool
+            let toolInvocationCount: Int
         }
     }
 
     struct Result: EventResult {
         let turnNumber: Int
-        let hasCapabilityInvocations: Bool
-        let capabilityInvocationCount: Int
+        let hasToolInvocations: Bool
+        let toolInvocationCount: Int
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         guard let data = event.data,
               data.turn > 0,
-              data.capabilityInvocationCount >= 0,
-              data.hasCapabilityInvocations == (data.capabilityInvocationCount > 0)
+              data.toolInvocationCount >= 0,
+              data.hasToolInvocations == (data.toolInvocationCount > 0)
         else {
             return nil
         }
 
         return Result(
             turnNumber: data.turn,
-            hasCapabilityInvocations: data.hasCapabilityInvocations,
-            capabilityInvocationCount: data.capabilityInvocationCount
+            hasToolInvocations: data.hasToolInvocations,
+            toolInvocationCount: data.toolInvocationCount
         )
     }
 

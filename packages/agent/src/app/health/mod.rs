@@ -383,7 +383,7 @@ mod tests {
         .unwrap();
         {
             let conn = pool.get().unwrap();
-            crate::domains::session::event_store::run_migrations(&conn).unwrap();
+            crate::domains::session::event_store::ensure_schema(&conn).unwrap();
         }
         let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
@@ -413,7 +413,7 @@ mod tests {
         .unwrap();
         {
             let conn = pool.get().unwrap();
-            crate::domains::session::event_store::run_migrations(&conn).unwrap();
+            crate::domains::session::event_store::ensure_schema(&conn).unwrap();
         }
         let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();

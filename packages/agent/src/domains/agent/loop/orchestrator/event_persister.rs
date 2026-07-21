@@ -217,7 +217,7 @@ mod tests {
         .expect("Failed to create in-memory pool");
         {
             let conn = pool.get().unwrap();
-            let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+            let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
         }
         Arc::new(EventStore::new(pool))
     }
@@ -312,7 +312,7 @@ mod tests {
         .unwrap();
         {
             let conn = pool.get().unwrap();
-            crate::domains::session::event_store::run_migrations(&conn).unwrap();
+            crate::domains::session::event_store::ensure_schema(&conn).unwrap();
             conn.execute_batch(
                 "CREATE TRIGGER fail_turn_failure
                  BEFORE INSERT ON events

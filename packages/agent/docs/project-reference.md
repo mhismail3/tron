@@ -34,12 +34,10 @@ The source-owned kernel retains only:
   by current clients.
 
 The authenticated `filesystem` product domain contains only the three iOS
-workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Its old
-parallel agent read/search/diff/write toolbox and resource-backed patch-preview
-workflow were deleted; model filesystem work has one owner in the seven direct
-worker-kernel filesystem/process/network primitives. Session title mutation is
-the eighth host primitive and owns durable session metadata rather than host
-I/O.
+workspace-picker operations (`get_home`, `list_dir`, and `create_dir`). Model
+filesystem work has one owner in the seven direct worker-kernel
+filesystem/process/network primitives. Session title mutation is the eighth
+host primitive and owns durable session metadata rather than host I/O.
 
 Higher-level behavior belongs in worker bundles. The fixed tree owns the model
 loop, authenticated product transport, durable custody, direct host actuators,
@@ -47,9 +45,13 @@ worker execution, and isolated core-change approval. New product behaviors,
 including speech-to-text, are authored and validated as workers through real
 use.
 
-The engine still uses generic words such as “capability invocation” in provider
-tool-call events and client rendering. Those names are provider-protocol
-vocabulary for typed tool calls.
+Provider tool calls have a durable `tool.invocation.*` lifecycle. A started row
+records the invocation id, tool name, and redacted arguments; output and
+completion rows record bounded output, terminal status, error, and duration.
+That lifecycle powers live running state, post-restart reconstruction,
+interrupted-turn recovery, session summaries, and operator diagnostics. It is
+execution evidence for an actual model tool call. It neither grants authority
+nor participates in worker discovery, activation, or permission decisions.
 
 The model-facing fixed surface currently has 28 direct primitives grouped as
 eight host operations, sixteen worker-control operations, and four core-change
@@ -67,7 +69,7 @@ stream topics: durable stream publication is owned directly by the emitters
 that perform it. Startup composes one flat executable function set; there is no
 parallel domain-module owner record. Each source contract builds the exact
 engine function definition once; handler binding derives the local operation
-key from that canonical identity. There is no intermediate capability catalog
+key from that canonical identity. There is no intermediate tool catalog
 or unused transport-policy declaration. This removes magic-key discovery and
 prevents unproduced flags or test fixtures from changing production routing.
 Calls emitted together by a provider execute concurrently. The dispatcher and
@@ -147,8 +149,8 @@ provider turn. The kernel validates that every id is unique and came from the
 supplied candidate set, atomically claims the complete selection so concurrent
 sessions cannot split it, and injects only a bounded narrative. The policy may
 consume irrelevant observations without narrating them. Without a healthy
-owner—or while the owner resolves its own agent-runner turn—the prior exact
-error/relevance selector and JSON projection remain deterministic recovery.
+owner—or while the owner resolves its own agent-runner turn—the exact
+error/relevance selector and JSON projection provide deterministic recovery.
 Candidate reads never mark observations seen, invalid selections disable the
 hook owner, and a lost concurrent claim injects no stale narrative.
 
@@ -342,7 +344,7 @@ Secret bindings resolve logical names from:
 ```
 
 Required bindings fail execution when absent; optional bindings permit graceful
-fallback. Values are injected as normalized `TRON_SECRET_*` environment
+operation without a value. Values are injected as normalized `TRON_SECRET_*` environment
 variables. Upsert scans against every readable vault value, including undeclared
 ones, and rejects a candidate containing one. Invocation input containing a
 known vault value is rejected before it is persisted. Known values are redacted
@@ -553,7 +555,7 @@ promotion and relevance ranking.
 
 Each model-originated invocation carries the function revision and immutable
 worker version that were advertised. Catalog preparation rejects any changed
-contract with `ENGINE_STALE_FUNCTION_SURFACE`; it never sends old provider
+contract with `ENGINE_STALE_FUNCTION_SURFACE`; it never sends stale provider
 arguments through a newer schema. Catalog revision and surface hash remain in
 the provider-surface snapshot instead of being copied into an ephemeral
 invocation metadata bag. The resulting recoverable tool error advances the
@@ -611,25 +613,6 @@ not justify a field. Authentication protocol URLs, redirect URIs, and scopes
 remain owned by the auth implementation rather than appearing as duplicate
 settings the runtime never reads.
 
-Before bootstrap retires legacy named-profile files, it creates and verifies a
-versioned whole-state snapshot using a stable inventory hash. Known legacy user
-settings are projected into the current typed schema and written to the flat
-file; removed or unknown fields are reported rather than fabricated. The
-original profile documents remain recoverable from the snapshot and are then
-deleted from the live home. Database retirement separately imports only
-complete executable legacy bundles as inactive candidates, reports incomplete
-proposals, and removes the old grant/resource/lease/compensation tables and
-invocation columns in one transaction. Neither path retains a synthetic grant,
-compatibility adapter, nullable permission observation, or permissive legacy
-parser in steady-state execution. The same transaction removes legacy catalog
-rows owned by the deleted generic trigger and catalog-worker registries.
-Engine-ledger startup imports the last retained revision into one monotonic
-scalar and drops the append-only history table; it does not keep an unconsumed
-self-description plane. It also drops the former durable WebSocket
-subscription table. Durable stream events remain, while current sockets keep
-subscription identity and cursors in authenticated connection-local state and
-explicit replay callers own their cursors.
-
 There are no local operation claims, resource selectors, synthetic
 grants, or agent-kind rejections. Executable workers can change local files and
 make consequential external requests without fresh confirmation. This is the
@@ -650,7 +633,7 @@ surface. Session promotions remain version-bound and outrank both paths, so
 routing never depends exclusively on another worker being healthy.
 
 Three unrelated runtime boundaries use three deliberately separate closed
-types instead of the former generic visibility scope:
+types:
 
 - function admission is either public to authenticated Agent, Worker, Client,
   and System callers, or internal to the engine-owned System actor;
@@ -698,7 +681,7 @@ under `~/.tron/workspace/vault/` and enter a worker only through declared
 logical bindings. Bundle validation rejects likely secret material; runtime
 injection uses environment variables, and redaction covers persisted inputs,
 outputs, events, logs, and diagnostics. Redaction is field-aware for JSON and
-also recognizes worker webhook credential shapes. Capability start, batch, and
+also recognizes worker webhook credential shapes. Tool start, batch, and
 completion broadcasts use the same redacted copies as durable rows. A one-time
 credential remains raw only in the current caller/provider result needed to
 hand it off; reconstruction receives the redacted result. The generic engine
@@ -737,36 +720,139 @@ conflicting cherry-pick is aborted and the original live-tree commit is
 verified before the proposal remains `tested`. The approval message is recorded
 directly with the proposal evidence.
 
-## State Snapshot and Legacy Import
+## Worker Restoration Backlog
 
-Before the engine first opens the worker schema, Tron creates a verified snapshot
-under `~/.tron/internal/snapshots/`. The manifest records format/schema,
-source home/label, creation time, every relative path, byte count, SHA-256,
-and restoration instructions. It captures root settings, protected credentials,
-prior worker files, and a
-consistent `VACUUM INTO` copy of the primary SQLite database. Symlink targets
-are checksum-covered snapshot entries and are restored as symlinks rather than
-silently omitted. Legacy settings retirement runs before current settings load;
-database-table retirement runs before current engine/session schemas open.
-Both use this snapshot boundary, and unique snapshot directory ids prevent two
-valid retirement checkpoints in the same second from colliding.
+The clean cut intentionally removed higher-level source-owned behavior so it
+can be rebuilt from observed tasks as executable workers. This backlog is the
+complete restoration map. An item is complete only when a real worker performs
+the useful action; recreating a record-only request, proposal, or decision API
+does not count.
 
-Offline commands:
+### User-workflow workers
 
-```bash
-scripts/tron state snapshots
-scripts/tron state restore /absolute/path/to/snapshot
-```
+- **Session organization:** derive useful session titles and any later grouping,
+  labeling, or archival policy from real conversation context. The kernel
+  retains only the narrow durable `session_set_title` actuator.
+- **Goals:** create, list, inspect, update, complete, and cancel durable goals;
+  connect goal state to real worker runs and session outcomes.
+- **Questions:** create, list, inspect, answer, and resolve durable questions;
+  attach answers to the initiating task rather than maintaining an inert queue.
+- **Memory:** status, list, inspect, semantic query, retained facts, decisions,
+  policies, edit, tombstone, export, import, and query/decision recording. The
+  resulting worker must own useful retrieval and maintenance policy while the
+  kernel supplies only durable files, execution, and session context.
+- **Context policy:** snapshots, compaction requests, clear actions, survivor
+  and exclusion policy, and policy inspection. Token-window selection,
+  cancellation, checkpoints, and durable compact-boundary proof remain kernel
+  custody; semantic summarization is already available through the
+  `context_summary` worker hook.
+- **Media:** create, list, inspect, archive, transform, and analyze media
+  artifacts using workers built for actual media tasks.
+- **Prompt and template artifacts:** author, version, list, inspect, select,
+  and apply reusable prompts or templates as working behavior.
+- **Repository understanding:** tree snapshots, list/inspect, import previews,
+  import lineage, import history, and update diagnostics. These should become
+  real repository-ingestion and change-analysis workers, not detached metadata.
+- **Text and content analysis:** deduplication, statistics, audits, structured
+  extraction, summarization, recent-research synthesis, and other repeatable
+  transforms developed from concrete sessions.
 
-Restore verifies every checksum, requires the primary database lock (Tron must
-be stopped), moves current state into a timestamped recovery directory, restores
-the snapshot, and removes the disposable worker index so it rebuilds.
+### Agent and automation workers
 
-The explicit legacy importer reads the pre-migration SQLite database without
-mutating it. Complete executable bundles become inactive candidates. Metadata-
-only proposals—including the recorded `last30days` proposal—are reported as
-unconvertible rather than fabricated into executable behavior. Import and
-rebuild reports are written beside canonical worker state.
+- **Delegated agents:** launch, status, result, cancel, task list, and task
+  inspect. The agent runner is the execution substrate; delegation policy,
+  specialization, fan-out, synthesis, and reusable subagent roles belong in
+  workers.
+- **Procedures, skills, and hooks:** author definitions, inspect active state,
+  activate, deactivate, and revise reusable procedures. Use direct worker
+  versions and engine hooks; do not recreate a separate definition/request/
+  decision plane.
+- **Schedules and reminders:** create, list, inspect, update, cancel, and fire
+  meaningful scheduled work. Schedule triggers are already executable kernel
+  substrate; reminder semantics, calendar reasoning, notification policy, and
+  recurrence UX belong in workers.
+- **Event automations:** filter engine events, correlate state, invoke follow-up
+  work, and report results. Engine-event triggers and causal loop suppression
+  are already substrate.
+- **Background jobs and programs:** start, status, list, logs, cancel, cleanup,
+  and multi-step orchestration. Command, agent, and resident-service runners
+  plus the durable dispatcher replace separate job and program ledgers;
+  task-specific orchestration belongs in workers.
+- **Tool-source scouting:** list, inspect, research, compare, adapt, and update
+  external tools, repositories, skills, or APIs into locked worker versions.
+  The motivating `last30days` adaptation is the first concrete example.
+
+### External-world workers
+
+- **Web research:** robots-policy handling, search, crawl, source discovery,
+  source review, source archive, freshness checks, citation extraction, and
+  synthesis. `web_fetch` is only the bounded HTTP actuator; provider search,
+  browser control, authenticated sites, crawling policy, and research strategy
+  must be real workers.
+- **Transcription and speech:** transcribe, status, model preload, language
+  detection, diarization, and audio preprocessing. If mobile audio cannot be
+  reached through existing authenticated transport, add one narrow typed media
+  actuator and keep transcription policy in workers.
+- **Devices and notifications:** device list/inspect, send, list, inspect, mark
+  read, and mark all read. Delivery scheduling and message policy belong in
+  workers. A concrete mobile-delivery use case may justify a narrow
+  authenticated client actuator; it does not justify restoring a general
+  device domain.
+- **External services:** email, calendars, issue trackers, source control
+  hosting, messaging, databases, and home or business systems should enter as
+  named-secret-bound workers authored when their first real workflow appears.
+
+### Developer and engine-maintenance workers
+
+- **Git workflows:** status, diff, branch inventory, stage, unstage, commit,
+  branch creation, review preparation, test selection, and repository cleanup.
+  Filesystem and process primitives are sufficient substrate; reusable safe Git
+  behavior should be worker-authored.
+- **Trace, log, and replay analysis:** trace list/get, recent-log analysis,
+  replay-manifest generation, failure clustering, and regression-fixture
+  creation. Raw durable evidence remains kernel-owned; interpretation and
+  remediation workflows belong in workers.
+- **Catalog and conformance analysis:** search/inspect the live engine surface,
+  compare worker contracts, validate scenario coverage, and recommend worker
+  consolidation. `engine::surface_snapshot` supplies the operator truth; higher
+  level analysis should be a worker.
+- **Core maintenance:** investigate a source change, author a patch, choose and
+  run tests, and prepare a core proposal. The fixed proposal operations retain
+  isolated worktree custody and approval enforcement; diagnosis and patch
+  authoring can be workers.
+
+### Kernel substrate already replacing separate behavior
+
+- Filesystem read/list/search/write/edit, process execution, bounded HTTP fetch,
+  and durable session-title mutation are direct host tools.
+- Command, agent, and resident-service execution; dependency locking; named
+  secrets; manual, schedule, event, and webhook triggers; queueing; retries;
+  timeouts; causal traces; inbox; health; disable; rollback; retirement; purge;
+  stop; and stop-all are worker-kernel custody.
+- Worker discovery, semantic relevance hooks, live provider projection,
+  version-bound promotion, dynamic surface revisions, and stale-contract
+  rejection provide same-session adaptation without a separate catalog plane.
+- Durable sessions, provider/model turns, `tool.invocation.*` evidence,
+  compaction mechanics, authenticated transport, settings, credentials, blobs,
+  and source-proposal approval remain fixed because they custody the runtime
+  that workers depend on.
+
+### Administrative planes that must not be recreated
+
+Do not rebuild package proposals, validation records, installation requests,
+activation decisions, dependency approvals, binding requests, grants, resource
+selectors, leases, compensation records, shadow trials, replacement-candidate
+records, route-binding records, lifecycle request/decision ledgers, or generic
+operation catalogs. `worker_upsert` already validates, tests, atomically
+publishes, activates, versions, routes, and registers triggers and tools. Source
+identity, dependency locks, content hashes, traces, health, runs, inbox results,
+and audit records remain observations, never permission gates.
+
+Several removed domains only recorded intended activity: import/update,
+notification delivery, procedural activation, scheduling, and web research did
+not themselves perform the useful external action. Their record shells are not
+missing functionality. Only the executable behaviors listed above should be
+restored, one proven worker at a time.
 
 ## Storage
 
@@ -787,11 +873,9 @@ indexes and durable operational history.
 | `engine_stream_events` | durable engine stream records |
 | `events` | session event log |
 | `logs` | structured session logs |
-| `schema_version` | primary schema version |
 | `sessions` | session metadata |
 | `storage_checkpoints` | storage maintenance checkpoints |
 | `storage_exports` | storage export evidence |
-| `storage_metadata` | storage subsystem metadata |
 | `storage_payload_refs` | payload ownership references |
 | `storage_retention_runs` | retention-run evidence |
 | `workspaces` | workspace metadata |
@@ -869,11 +953,11 @@ unwritten storage contracts:
 | session | `session.start`, `session.end`, `session.fork` |
 | messages | `message.user`, `message.assistant`, `message.deleted` |
 | model | `model.provider_request` |
-| provider tools | `capability.invocation.started`, `capability.invocation.completed` |
+| provider tools | `tool.invocation.started`, `tool.invocation.completed` |
 | turns | `stream.turn_start`, `stream.turn_end`, `turn.failed` |
 | context | `compact.boundary` |
 
-The `capability.invocation.*` names describe generic provider tool-call
+The `tool.invocation.*` names describe generic provider tool-call
 conversation evidence.
 
 ## iOS Client
@@ -946,8 +1030,8 @@ Deterministic tests cover:
   schemas, and absence of local grant creation;
 - the real loopback HTTP webhook route, including token success/failure,
   durable dispatch, and remote-peer rejection;
-- remote auth, snapshot/restore, legacy import reporting, and isolated core
-  proposal approval, including negation rejection and cherry-pick cleanup;
+- remote auth and isolated core-proposal approval, including negation rejection
+  and cherry-pick cleanup;
 - canonical tree tamper detection, disposable runner workspaces, bounded
   concurrent process I/O, process-group termination of background descendants,
   bounded resident responses, and symlink-preserving dependency/runtime copies;
@@ -956,7 +1040,7 @@ Deterministic tests cover:
 The motivating replay lives at
 `packages/agent/tests/fixtures/last30days_worker_gap.json`. Its deterministic
 vertical slice authors one command worker with every trigger type, useful
-30-day research output, optional-credential fallback, an immediately callable
+  30-day research output, graceful operation without optional credentials, an immediately callable
 typed tool, immutable bundle evidence, and successful fresh-runtime invocation.
 
 The separate upstream proof is ignored by default:
@@ -999,9 +1083,8 @@ It also requires every Rust source or test file to have an adjacent module
 owner, preventing a deleted registration edge from leaving compilationally
 invisible source behind. Generated build trees are deliberately outside this
 source-ownership contract and may be recreated by their toolchains. A focused
-size ratchet keeps each worker-kernel production file under 1,000 lines, allows
-the cohesive versioned migration boundary up to 1,100, and keeps every Engine
-Dashboard Swift file under 600; growth beyond those ceilings requires another
+size ratchet keeps each worker-kernel production file under 1,000 lines and
+every Engine Dashboard Swift file under 600; growth beyond those ceilings requires another
 real ownership split rather than a budget increase.
 
 - Worker kernel: `packages/agent/src/domains/worker_kernel/`

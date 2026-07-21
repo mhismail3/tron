@@ -4,7 +4,7 @@
 //! into unified [`StreamEvent`]s consumed by the agent runtime.
 //!
 //! The handler maintains a [`StreamState`] that accumulates text, thinking, signature,
-//! and capability arguments across delta events, then emits complete blocks on `content_block_stop`.
+//! and tool arguments across delta events, then emits complete blocks on `content_block_stop`.
 //!
 //! Delegates mechanical delta accumulation to [`StreamAccumulator`] from the shared
 //! `stream_common` module, keeping only Anthropic-specific protocol mapping here.
@@ -29,7 +29,7 @@ pub struct StreamState {
     pub current_block_type: Option<BlockType>,
     /// Current provider content block index.
     pub current_block_index: Option<usize>,
-    /// Capability invocation ID for the current Anthropic `tool_use` block.
+    /// Tool invocation ID for the current Anthropic `tool_use` block.
     pub current_invocation_id: Option<String>,
     /// Cache creation tokens.
     pub cache_creation_tokens: u64,
@@ -70,8 +70,8 @@ pub enum BlockType {
     Text,
     /// Extended thinking.
     Thinking,
-    /// ModelCapability use (function call).
-    CapabilityInvocation,
+    /// ModelTool use (function call).
+    ToolInvocation,
 }
 
 /// Create a new stream state for a specific provider.
@@ -168,13 +168,11 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                 }
                 events
             }
-            SseContentBlock::CapabilityInvocation { id, name } => {
-                state.current_block_type = Some(BlockType::CapabilityInvocation);
+            SseContentBlock::ToolInvocation { id, name } => {
+                state.current_block_type = Some(BlockType::ToolInvocation);
                 state.current_block_index = Some(*index);
                 state.current_invocation_id = Some(id.clone());
-                state
-                    .acc
-                    .start_capability_invocation(id.clone(), name.clone())
+                state.acc.start_tool_invocation(id.clone(), name.clone())
             }
         },
 
@@ -273,25 +271,19 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
                 signature,
             }]
         }
-        Some(BlockType::CapabilityInvocation) => {
+        Some(BlockType::ToolInvocation) => {
             let id = state.current_invocation_id.take().unwrap_or_default();
-            let events = state.acc.finish_capability_invocation_with_provider(
-                &id,
-                Some(state.provider_type.as_str()),
-            );
-            // Extract the CapabilityInvocationDraft from the event to build the content block.
-            if let Some(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation,
-            }) = events.first()
-            {
-                state
-                    .content_blocks
-                    .push(AssistantContent::CapabilityInvocation {
-                        id: capability_invocation.id.clone(),
-                        name: capability_invocation.name.clone(),
-                        arguments: capability_invocation.arguments.clone(),
-                        thought_signature: None,
-                    });
+            let events = state
+                .acc
+                .finish_tool_invocation_with_provider(&id, Some(state.provider_type.as_str()));
+            // Extract the ToolInvocationDraft from the event to build the content block.
+            if let Some(StreamEvent::ToolInvocationDraftEnd { tool_invocation }) = events.first() {
+                state.content_blocks.push(AssistantContent::ToolInvocation {
+                    id: tool_invocation.id.clone(),
+                    name: tool_invocation.name.clone(),
+                    arguments: tool_invocation.arguments.clone(),
+                    thought_signature: None,
+                });
             }
             events
         }

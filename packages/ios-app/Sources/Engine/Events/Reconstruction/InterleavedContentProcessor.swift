@@ -3,23 +3,23 @@ import Foundation
 /// Processor for transforming interleaved content blocks in assistant messages.
 ///
 /// This handles the critical path of converting message.assistant events with
-/// mixed content blocks (text, thinking, provider capability_invocation) into properly ordered
+/// mixed content blocks (text, thinking, provider tool_invocation) into properly ordered
 /// ChatMessage arrays while preserving streaming order.
 ///
 /// ## Streaming Order Preservation
 /// Server sends content blocks in streaming order:
 /// ```
-/// [thinking, text, capability_invocation, text, capability_invocation]
+/// [thinking, text, tool_invocation, text, tool_invocation]
 /// ```
 /// This processor preserves that order exactly, producing:
 /// ```
-/// [ThinkingMsg, TextMsg, CapabilityInvocationMsg, TextMsg, CapabilityInvocationMsg]
+/// [ThinkingMsg, TextMsg, ToolInvocationMsg, TextMsg, ToolInvocationMsg]
 /// ```
 ///
 /// ## Content Block Types
 /// - `thinking`: Extended thinking content (rendered in ThinkingContentView)
 /// - `text`: Regular text response
-/// - `capability_invocation`: Provider content block for a capability invocation (combined with capability.invocation.started/completed data)
+/// - `tool_invocation`: Provider content block for a tool invocation (combined with tool.invocation.started/completed data)
 ///
 enum InterleavedContentProcessor {
 
@@ -34,8 +34,8 @@ enum InterleavedContentProcessor {
     static func transform(
         payload: [String: AnyCodable],
         timestamp: Date,
-        startedInvocations: [String: CapabilityInvocationStartedPayload],
-        completedInvocations: [String: CapabilityInvocationCompletedPayload]
+        startedInvocations: [String: ToolInvocationStartedPayload],
+        completedInvocations: [String: ToolInvocationCompletedPayload]
     ) -> [ChatMessage] {
         guard let parsed = AssistantMessagePayload(from: payload) else {
             return []
@@ -65,7 +65,6 @@ enum InterleavedContentProcessor {
                 if let message = processThinkingBlock(
                     block,
                     timestamp: timestamp,
-                    parsed: parsed,
                     emittedSnapshots: &emittedThinkingSnapshots
                 ) {
                     messages.append(message)
@@ -78,17 +77,17 @@ enum InterleavedContentProcessor {
                 ) {
                     messages.append(message)
                 }
-            } else if blockType == ContentBlockType.capabilityInvocation.rawValue, let invocationId = block["id"] as? String {
+            } else if blockType == ContentBlockType.toolInvocation.rawValue, let invocationId = block["id"] as? String {
                 let started = startedInvocations[invocationId]
                 let result = completedInvocations[invocationId]
-                let modelPrimitiveName = started?.name ?? (block["name"] as? String) ?? "Unknown"
+                let toolName = started?.name ?? (block["name"] as? String) ?? "Unknown"
 
-                if let message = processCapabilityInvocationBlock(
+                if let message = processToolInvocationBlock(
                     block,
                     invocationId: invocationId,
                     invocationStart: started,
                     result: result,
-                    modelPrimitiveName: modelPrimitiveName,
+                    toolName: toolName,
                     timestamp: timestamp,
                     parsed: parsed
                 ) {
@@ -99,7 +98,7 @@ enum InterleavedContentProcessor {
         }
 
         // Provider stop reasons do not identify finality: `end_turn` can arrive
-        // with capability drafts. Only completed no-capability text is
+        // with tool drafts. Only completed no-tool text is
         // guaranteed to be the final response and eligible for a stats row.
         if parsed.isFinalAssistantResponse,
            let responseIndex = messages.lastIndex(where: { $0.content.isAssistantResponseText }) {
@@ -120,7 +119,6 @@ enum InterleavedContentProcessor {
     private static func processThinkingBlock(
         _ block: [String: Any],
         timestamp: Date,
-        parsed: AssistantMessagePayload,
         emittedSnapshots: inout Set<String>
     ) -> ChatMessage? {
         guard let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty else {
@@ -130,16 +128,7 @@ enum InterleavedContentProcessor {
         guard !normalized.isEmpty, emittedSnapshots.insert(normalized).inserted else {
             return nil
         }
-        let kind: ThinkingDisplayKind
-        if let serverKind = block["kind"] as? String {
-            kind = ThinkingDisplayKind(serverValue: serverKind)
-        } else if parsed.providerType == "openai" {
-            // OpenAI blocks without an explicit kind are provider-authored
-            // reasoning summaries, not raw append-only thinking.
-            kind = .reasoningSummary
-        } else {
-            kind = .thinking
-        }
+        let kind = ThinkingDisplayKind(serverValue: block["kind"] as? String)
 
         return ChatMessage(
             role: .assistant,
@@ -156,7 +145,7 @@ enum InterleavedContentProcessor {
     /// Process a text content block.
     ///
     /// Metadata is attached after all blocks are processed, and only when the
-    /// payload is the final no-capability response for the prompt cycle.
+    /// payload is the final no-tool response for the prompt cycle.
     private static func processTextBlock(
         _ block: [String: Any],
         timestamp: Date,
@@ -177,24 +166,24 @@ enum InterleavedContentProcessor {
         )
     }
 
-    /// Process a capability_invocation content block.
-    private static func processCapabilityInvocationBlock(
+    /// Process a tool_invocation content block.
+    private static func processToolInvocationBlock(
         _ block: [String: Any],
         invocationId: String,
-        invocationStart: CapabilityInvocationStartedPayload?,
-        result: CapabilityInvocationCompletedPayload?,
-        modelPrimitiveName: String,
+        invocationStart: ToolInvocationStartedPayload?,
+        result: ToolInvocationCompletedPayload?,
+        toolName: String,
         timestamp: Date,
         parsed: AssistantMessagePayload
     ) -> ChatMessage? {
         let turn = invocationStart?.turn ?? parsed.turn
 
         // Determine status based on result
-        let status: CapabilityInvocationStatus
+        let status: ToolInvocationStatus
         if let result = result {
             status = result.isError ? .error : .success
         } else {
-            TronLogger.shared.warning("[RECONSTRUCT] capability_invocation \(modelPrimitiveName) id=\(invocationId) has no matching capability.invocation.completed — will show as running", category: .session)
+            TronLogger.shared.warning("[RECONSTRUCT] tool_invocation \(toolName) id=\(invocationId) has no matching tool.invocation.completed — will show as running", category: .session)
             status = .running
         }
 
@@ -206,8 +195,8 @@ enum InterleavedContentProcessor {
             resultContent = nil
         }
 
-        // Arguments: use capability.invocation.started string if available, else serialize content block input
-        let arguments = CapabilityArgumentExtractor.extractArguments(
+        // Arguments: use tool.invocation.started string if available, else serialize content block input
+        let arguments = ToolArgumentExtractor.extractArguments(
             invocationStart: invocationStart,
             contentBlock: block
         ) ?? "{}"
@@ -215,11 +204,11 @@ enum InterleavedContentProcessor {
         let identity = [result?.identity, invocationStart?.identity]
             .compactMap { $0 }
             .first { !$0.isEmpty }
-            ?? CapabilityIdentity()
+            ?? ToolIdentity()
 
         return ChatMessage(
             role: .assistant,
-            content: .capabilityInvocation(CapabilityInvocationData(
+            content: .toolInvocation(ToolInvocationData(
                 id: invocationId,
                 status: status,
                 arguments: arguments,
@@ -227,7 +216,7 @@ enum InterleavedContentProcessor {
                 details: result?.details,
                 durationMs: result?.durationMs,
                 identity: identity,
-                errorClassification: result?.failure.map(CapabilityErrorClassification.init(failure:))
+                errorClassification: result?.failure.map(ToolErrorClassification.init(failure:))
             )),
             timestamp: timestamp,
             tokenRecord: nil,

@@ -551,14 +551,13 @@ final class EventDatabaseTests: XCTestCase {
         ])
         XCTAssertTrue(assistantEvent.summary.contains("Response text"))
 
-        // Test capability-backed capability.invocation.started transport summary
-        let capabilityEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
-            "modelPrimitiveName": AnyCodable("execute"),
-            "operationName": AnyCodable("file_read"),
-            "arguments": AnyCodable(["file_path": "/src/main.ts"])
+        // Test tool-backed tool.invocation.started transport summary
+        let toolEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "tool.invocation.started", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
+            "toolName": AnyCodable("filesystem_read"),
+            "arguments": AnyCodable(["path": "/src/main.ts"])
         ])
-        XCTAssertTrue(capabilityEvent.summary.contains("File Read"))
-        XCTAssertTrue(capabilityEvent.summary.contains("main.ts"))
+        XCTAssertTrue(toolEvent.summary.contains("Filesystem Read"))
+        XCTAssertTrue(toolEvent.summary.contains("main.ts"))
 
         // Test session.start summary (shortModelName returns "Opus 4" for "claude-opus-4")
         let startEvent = SessionEvent(id: "e4", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 4, payload: [

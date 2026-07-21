@@ -54,7 +54,7 @@ struct CompactBoundaryPayload {
         // Summary is optional (may not be present in auto-compaction events)
         self.summary = payload.string("summary")
 
-        // Estimated total context tokens after compaction (system + capabilities + environment + messages)
+        // Estimated total context tokens after compaction (system + tools + environment + messages)
         self.estimatedContextTokens = payload.int("estimatedContextTokens")
 
         // Turn counts from turn-based compaction

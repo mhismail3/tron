@@ -62,8 +62,8 @@ struct AgentAbortInvocationResult: Decodable {
     let aborted: Bool
 }
 
-/// Capability invocation info for in-progress turn (used by session::reconstruct inFlight state)
-struct CurrentTurnCapabilityInvocation: Decodable {
+/// Tool invocation info for in-progress turn (used by session::reconstruct inFlight state)
+struct CurrentTurnToolInvocation: Decodable {
     let invocationId: String
     let arguments: [String: AnyCodable]?
     let status: String  // "generating" | "running" | "completed" | "error"
@@ -77,20 +77,18 @@ struct CurrentTurnCapabilityInvocation: Decodable {
     let progressMessage: String?
     /// Latest 0.0–1.0 progress fraction.
     let progressPercent: Double?
-    let modelPrimitiveName: String?
-    let operationName: String?
-    let operation: String?
+    let toolName: String?
     let traceId: String?
     let rootInvocationId: String?
     let themeColor: String?
     let presentationHints: [String: AnyCodable]?
 }
 
-/// Structured content sequence item (interleaved text/thinking/capability_ref)
+/// Structured content sequence item (interleaved text/thinking/tool_ref)
 enum ContentSequenceItem: Decodable {
     case text(String)
     case thinking(String, kind: ThinkingDisplayKind)
-    case capabilityRef(invocationId: String)
+    case toolRef(invocationId: String)
 
     private enum CodingKeys: String, CodingKey {
         case type, text, thinking, kind, invocationId
@@ -108,8 +106,8 @@ enum ContentSequenceItem: Decodable {
                 serverValue: try container.decodeIfPresent(String.self, forKey: .kind)
             )
             self = .thinking(thinking, kind: kind)
-        case "capability_ref":
-            self = .capabilityRef(invocationId: try container.decode(String.self, forKey: .invocationId))
+        case "tool_ref":
+            self = .toolRef(invocationId: try container.decode(String.self, forKey: .invocationId))
         default:
             self = .text("")
         }

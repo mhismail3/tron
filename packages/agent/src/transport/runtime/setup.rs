@@ -2,7 +2,7 @@
 //!
 //! Transport setup delegates to `domains::registration` so the client
 //! protocol layer does not know individual domain workers, hidden apply
-//! functions, or capability worker internals. Domain lifecycle tasks activate
+//! functions, or tool worker internals. Domain lifecycle tasks activate
 //! only after canonical domain registration succeeds.
 
 use crate::engine::Result as EngineResult;

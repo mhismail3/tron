@@ -87,43 +87,15 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         }
     }
 
-    func testKindlessOpenAIThinkingBlocksRenderAsReasoningSummary() {
-        let events: [RawEvent] = [
-            rawEvent(type: "message.assistant", payload: [
-                "content": AnyCodable([
-                    [
-                        "type": "thinking",
-                        "thinking": "Provider-authored summary from an event without a kind field."
-                    ],
-                    ["type": "text", "text": "Done"]
-                ]),
-                "providerType": AnyCodable("openai"),
-                "model": AnyCodable("gpt-5.5"),
-                "turn": AnyCodable(1)
-            ], timestamp: timestamp(0), sequence: 1)
-        ]
-
-        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
-
-        XCTAssertEqual(messages.count, 2)
-        if case .thinking(let visible, _, let isStreaming, let kind) = messages[0].content {
-            XCTAssertEqual(visible, "Provider-authored summary from an event without a kind field.")
-            XCTAssertFalse(isStreaming)
-            XCTAssertEqual(kind, .reasoningSummary)
-        } else {
-            XCTFail("Expected OpenAI reasoning summary content")
-        }
-    }
-
     func testDuplicateThinkingSnapshotsInOneAssistantMessageAreSkipped() {
         let events: [RawEvent] = [
-            rawEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("process_run"),
+            rawEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["command": "sleep 15"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(0), sequence: 1),
-            rawEvent(type: "capability.invocation.completed", payload: [
+            rawEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("done"),
                 "isError": AnyCodable(false),
@@ -132,7 +104,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "thinking", "thinking": "Planning a short task"],
-                    ["type": "capability_invocation", "id": "tc_1", "name": "process_run", "input": ["command": "sleep 15"]],
+                    ["type": "tool_invocation", "id": "tc_1", "name": "process_run", "input": ["command": "sleep 15"]],
                     ["type": "thinking", "thinking": " Planning a short task\n"],
                     ["type": "text", "text": "Done"]
                 ]),
@@ -148,10 +120,10 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         } else {
             XCTFail("Expected one thinking block")
         }
-        if case .capabilityInvocation(let invocation) = messages[1].content {
+        if case .toolInvocation(let invocation) = messages[1].content {
             XCTAssertEqual(invocation.id, "tc_1")
         } else {
-            XCTFail("Expected capability invocation")
+            XCTFail("Expected tool invocation")
         }
         if case .text(let text) = messages[2].content {
             XCTAssertEqual(text, "Done")
@@ -244,19 +216,19 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
     // MARK: - Session Chat Rendering Tests
 
     func testSessionEventsTransformToChat() {
-        // A typical session: user message, assistant reply with capability invocation, final output.
+        // A typical session: user message, assistant reply with tool invocation, final output.
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.user", payload: [
                 "content": AnyCodable("Count files in the current directory")
             ], timestamp: timestamp(1), sequence: 2),
-            rawEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            rawEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["command": "ls -la | wc -l"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3),
-            rawEvent(type: "capability.invocation.completed", payload: [
+            rawEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("9"),
                 "isError": AnyCodable(false),
@@ -264,7 +236,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             ], timestamp: timestamp(3), sequence: 4),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "tc_1", "name": "execute", "input": ["command": "ls -la | wc -l"]],
+                    ["type": "tool_invocation", "id": "tc_1", "name": "process_run", "input": ["command": "ls -la | wc -l"]],
                     ["type": "text", "text": "There are **9 files** in the directory."]
                 ]),
                 "turn": AnyCodable(1)
@@ -273,7 +245,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        // user + capability_invocation + text = 3 messages
+        // user + tool_invocation + text = 3 messages
         XCTAssertEqual(messages.count, 3)
 
         // First message should be the user's task
@@ -284,14 +256,14 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             XCTFail("Expected text content for user message")
         }
 
-        // Second message: capability invocation with result
-        if case .capabilityInvocation(let invocation) = messages[1].content {
-            XCTAssertEqual(invocation.identity.modelPrimitiveName, "execute")
+        // Second message: tool invocation with result
+        if case .toolInvocation(let invocation) = messages[1].content {
+            XCTAssertEqual(invocation.identity.toolName, "process_run")
             XCTAssertEqual(invocation.id, "tc_1")
             XCTAssertEqual(invocation.result, "9")
             XCTAssertEqual(invocation.status, .success)
         } else {
-            XCTFail("Expected capability invocation content")
+            XCTFail("Expected tool invocation content")
         }
 
         // Third message: assistant text with markdown
@@ -318,20 +290,20 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
     }
 
     func testSessionMultiTurnConversation() {
-        // Multiple turns with capability calls.
+        // Multiple turns with tool calls.
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.user", payload: [
                 "content": AnyCodable("Analyze the codebase")
             ], timestamp: timestamp(1), sequence: 2),
             // Turn 1
-            rawEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            rawEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/src/main.ts"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3),
-            rawEvent(type: "capability.invocation.completed", payload: [
+            rawEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("const app = express();"),
                 "isError": AnyCodable(false),
@@ -339,19 +311,19 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             ], timestamp: timestamp(3), sequence: 4),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "tc_1", "name": "execute", "input": ["file_path": "/src/main.ts"]],
+                    ["type": "tool_invocation", "id": "tc_1", "name": "process_run", "input": ["file_path": "/src/main.ts"]],
                     ["type": "text", "text": "Found the entry point. Let me check the config."]
                 ]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(4), sequence: 5),
             // Turn 2
-            rawEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            rawEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_2"),
                 "arguments": AnyCodable(["file_path": "/tsconfig.json"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(5), sequence: 6),
-            rawEvent(type: "capability.invocation.completed", payload: [
+            rawEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_2"),
                 "content": AnyCodable("{\"compilerOptions\": {}}"),
                 "isError": AnyCodable(false),
@@ -359,7 +331,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             ], timestamp: timestamp(6), sequence: 7),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "tc_2", "name": "execute", "input": ["file_path": "/tsconfig.json"]],
+                    ["type": "tool_invocation", "id": "tc_2", "name": "process_run", "input": ["file_path": "/tsconfig.json"]],
                     ["type": "text", "text": "Analysis complete. The codebase uses TypeScript with Express."]
                 ]),
                 "turn": AnyCodable(2)
@@ -368,19 +340,19 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        // user + (capability + text) turn 1 + (capability + text) turn 2 = 5
+        // user + (tool + text) turn 1 + (tool + text) turn 2 = 5
         XCTAssertEqual(messages.count, 5)
 
         // Exactly 1 user message (the task)
         let userMessages = messages.filter { $0.role == .user }
         XCTAssertEqual(userMessages.count, 1)
 
-        // 2 capability invocation messages
-        let capabilityMessages = messages.filter {
-            if case .capabilityInvocation = $0.content { return true }
+        // 2 tool invocation messages
+        let toolMessages = messages.filter {
+            if case .toolInvocation = $0.content { return true }
             return false
         }
-        XCTAssertEqual(capabilityMessages.count, 2)
+        XCTAssertEqual(toolMessages.count, 2)
 
         // 2 assistant text messages
         let textMessages = messages.filter { message in
@@ -418,20 +390,20 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         XCTAssertEqual(assistantTexts.count, 1, "Markdown table text should be preserved")
     }
 
-    func testSessionWithFailedCapability() {
-        // Capability that returns error status
+    func testSessionWithFailedTool() {
+        // Tool that returns error status
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.user", payload: [
                 "content": AnyCodable("execute a nonexistent file")
             ], timestamp: timestamp(1), sequence: 2),
-            rawEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            rawEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/nonexistent"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(2), sequence: 3),
-            rawEvent(type: "capability.invocation.completed", payload: [
+            rawEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("File not found"),
                 "isError": AnyCodable(true),
@@ -439,7 +411,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             ], timestamp: timestamp(3), sequence: 4),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "tc_1", "name": "execute", "input": ["file_path": "/nonexistent"]],
+                    ["type": "tool_invocation", "id": "tc_1", "name": "process_run", "input": ["file_path": "/nonexistent"]],
                     ["type": "text", "text": "The file does not exist."]
                 ]),
                 "turn": AnyCodable(1)
@@ -448,15 +420,15 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        // user + capability + text = 3
+        // user + tool + text = 3
         XCTAssertEqual(messages.count, 3)
 
-        let capabilityMessages = messages.filter {
-            if case .capabilityInvocation(let invocation) = $0.content {
+        let toolMessages = messages.filter {
+            if case .toolInvocation(let invocation) = $0.content {
                 return invocation.status == .error
             }
             return false
         }
-        XCTAssertEqual(capabilityMessages.count, 1, "Failed capability should show error status")
+        XCTAssertEqual(toolMessages.count, 1, "Failed tool should show error status")
     }
 }

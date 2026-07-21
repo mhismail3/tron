@@ -6,11 +6,11 @@
 //! records directly; there is no separate broadcast transport.
 //! Event projection is split by source family under `session/` so the pump stays
 //! a runtime primitive: it owns delivery policy and stream records, while domain
-//! folders own capability behavior.
+//! folders own tool behavior.
 //! Engine trace context carried by the source `TronEvent` is copied into both
 //! the persisted engine stream row and the neutral payload so observability can
-//! follow an agent turn through streamed UI events, capability invocation, queues, and
-//! downstream capabilities.
+//! follow an agent turn through streamed UI events, tool invocation, queues, and
+//! downstream tools.
 //! If the bounded runtime receiver ever lags, the missing records cannot be
 //! inferred from sequence gaps because durable-only events legitimately consume
 //! sequences. The pump therefore publishes a system-scoped
@@ -32,11 +32,11 @@ use tokio_util::sync::CancellationToken;
 use routed::StreamScope;
 use tron::tron_event_to_projected;
 
-mod capability_call;
 mod message;
 mod routed;
 mod session;
 mod streaming;
+mod tool_call;
 mod tron;
 mod turn;
 

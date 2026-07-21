@@ -51,51 +51,6 @@ fn sqlite_engine_ledger_persists_records_across_reopen() {
 }
 
 #[test]
-fn sqlite_migrates_legacy_global_scope_to_profile_scope() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("tron.sqlite");
-    let key = IdempotencyKey {
-        function_id: fid("alpha::write"),
-        scope: IdempotencyScope::Profile,
-        key: "profile-key".to_owned(),
-    };
-    {
-        let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-        store
-            .reserve_idempotency(IdempotencyReservation {
-                key: key.clone(),
-                payload_fingerprint: "profile-fingerprint".to_owned(),
-                function_revision: FunctionRevision(1),
-                invocation_id: InvocationId::new("profile-reservation").unwrap(),
-            })
-            .unwrap();
-    }
-    let connection = rusqlite::Connection::open(&db_path).unwrap();
-    connection
-        .execute(
-            "UPDATE engine_idempotency_entries
-             SET scope_kind='system', scope_value='system'",
-            [],
-        )
-        .unwrap();
-    drop(connection);
-
-    let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-    assert!(matches!(
-        store
-            .reserve_idempotency(IdempotencyReservation {
-                key,
-                payload_fingerprint: "profile-fingerprint".to_owned(),
-                function_revision: FunctionRevision(1),
-                invocation_id: InvocationId::new("profile-replay").unwrap(),
-            })
-            .unwrap(),
-        IdempotencyReservationOutcome::Existing(entry)
-            if entry.key.scope == IdempotencyScope::Profile
-    ));
-}
-
-#[test]
 fn sqlite_rejects_unknown_idempotency_scope_rows() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tron.sqlite");
@@ -138,7 +93,7 @@ fn sqlite_rejects_unknown_idempotency_scope_rows() {
         .connection()
         .execute(
             "UPDATE engine_idempotency_entries
-             SET scope_kind='workspace', scope_value='legacy'",
+             SET scope_kind='workspace', scope_value='invalid'",
             [],
         )
         .unwrap();
@@ -147,63 +102,6 @@ fn sqlite_rejects_unknown_idempotency_scope_rows() {
         .list_idempotency_by_session("scope-audit-session")
         .expect_err("unknown scope must fail closed when decoded");
     assert!(error.to_string().contains("invalid idempotency scope"));
-}
-
-#[test]
-fn sqlite_engine_ledger_removes_superseded_catalog_and_queue_tables() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("tron.sqlite");
-    {
-        let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-        store
-            .connection()
-            .execute_batch(
-                "CREATE TABLE engine_catalog_workers (worker_id TEXT PRIMARY KEY);\
-                 CREATE TABLE engine_catalog_functions (function_id TEXT PRIMARY KEY);\
-                 CREATE TABLE engine_queue_items (queue_item_id TEXT PRIMARY KEY);\
-                 INSERT INTO storage_payload_refs (\
-                   id, owner_kind, owner_id, field_name, payload_hash, payload_preview,\
-                   payload_size_bytes, payload_kind, redaction_level, retention_class, created_at\
-                 ) VALUES (\
-                   'legacy-queue-ref', 'engine_queue_item', 'legacy-queue-item', 'payload',\
-                   'legacy-hash', '{}', 2, 'json', 'none', 'durable',\
-                   '2026-01-01T00:00:00Z'\
-                 );",
-            )
-            .unwrap();
-    }
-
-    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
-    for removed in [
-        "engine_catalog_workers",
-        "engine_catalog_functions",
-        "engine_queue_items",
-    ] {
-        let present = store
-            .connection()
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-                [removed],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap();
-        assert!(
-            !present,
-            "superseded engine table must be dropped: {removed}"
-        );
-    }
-    let queue_refs = store
-        .connection()
-        .query_row(
-            "SELECT COUNT(*) FROM storage_payload_refs WHERE owner_kind = 'engine_queue_item'",
-            [],
-            |row| row.get::<_, usize>(0),
-        )
-        .unwrap();
-    assert_eq!(
-        queue_refs, 0,
-        "superseded queue payload refs must be removed"
-    );
 }
 
 #[test]

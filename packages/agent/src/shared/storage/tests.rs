@@ -1,7 +1,6 @@
 use super::*;
 use chrono::Utc;
 use rusqlite::{Connection, params};
-use std::fs;
 
 #[test]
 fn managed_hygiene_policy_uses_bounded_diagnostic_scope() {
@@ -16,107 +15,6 @@ fn managed_hygiene_policy_uses_bounded_diagnostic_scope() {
     assert_eq!(DIAGNOSTIC_RETENTION_DAYS, 7);
     assert_eq!(DATABASE_STORAGE_BUDGET_MB, 512);
     assert_eq!(budget.max_database_bytes, 512 * 1024 * 1024);
-}
-
-#[test]
-fn non_current_active_database_is_archived_for_modular_engine_generation() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    {
-        let conn = Connection::open(&active).unwrap();
-        conn.execute_batch("CREATE TABLE old_shape (id INTEGER PRIMARY KEY);")
-            .unwrap();
-    }
-    fs::write(wal_path(&active), b"wal").unwrap();
-    fs::write(shm_path(&active), b"shm").unwrap();
-
-    let report = prepare_active_database(&active).unwrap();
-    assert!(report.moved_any());
-    assert!(!active.exists());
-    assert!(!wal_path(&active).exists());
-    assert!(!shm_path(&active).exists());
-    let archive_dir = report.archive_dir.unwrap();
-    let archive_name = archive_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap();
-    assert!(archive_name.starts_with(CURRENT_STORAGE_GENERATION));
-    assert!(archive_dir.join(UNIFIED_DB_FILENAME).exists());
-    let manifest = fs::read_to_string(archive_dir.join("archive-manifest.json")).unwrap();
-    assert!(manifest.contains("active tron.sqlite missing current storage_generation marker"));
-    assert!(manifest.contains(UNIFIED_DB_FILENAME));
-}
-
-#[test]
-fn malformed_generation_marker_fails_closed_without_archiving_active_db() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    {
-        let conn = Connection::open(&active).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE storage_metadata (key TEXT PRIMARY KEY);
-             INSERT INTO storage_metadata (key) VALUES ('storage_generation');",
-        )
-        .unwrap();
-    }
-
-    let error = prepare_active_database(&active).unwrap_err();
-
-    assert!(
-        error
-            .to_string()
-            .contains("failed to inspect active database generation"),
-        "unexpected error: {error:#}"
-    );
-    assert!(
-        active.exists(),
-        "malformed active DB must remain inspectable"
-    );
-    assert!(
-        !dir.path().join(ARCHIVE_DIR).exists(),
-        "malformed active DB must not be moved into an archive"
-    );
-}
-
-#[test]
-fn orphaned_wal_and_shm_sidecars_are_archived_before_fresh_startup() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    fs::write(wal_path(&active), b"wal").unwrap();
-    fs::write(shm_path(&active), b"shm").unwrap();
-
-    let report = prepare_active_database(&active).unwrap();
-
-    assert!(report.moved_any());
-    assert!(!active.exists());
-    assert!(!wal_path(&active).exists());
-    assert!(!shm_path(&active).exists());
-    let archive_dir = report.archive_dir.unwrap();
-    assert!(
-        archive_dir
-            .join(format!("{UNIFIED_DB_FILENAME}-wal"))
-            .exists()
-    );
-    assert!(
-        archive_dir
-            .join(format!("{UNIFIED_DB_FILENAME}-shm"))
-            .exists()
-    );
-    let manifest = fs::read_to_string(archive_dir.join("archive-manifest.json")).unwrap();
-    assert!(manifest.contains("orphaned WAL/SHM sidecars without active tron.sqlite"));
-}
-
-#[test]
-fn current_generation_database_is_not_archived() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    let runtime = StorageRuntime::new(&active);
-    let conn = runtime.open_connection().unwrap();
-    drop(conn);
-
-    let report = prepare_active_database(&active).unwrap();
-    assert!(!report.moved_any());
-    assert!(active.exists());
 }
 
 #[test]
@@ -165,18 +63,18 @@ fn owned_payload_refs_inline_small_and_blob_large_payloads() {
 }
 
 #[test]
-fn storage_schema_drift_fails_closed_before_marker_rewrite() {
+fn storage_schema_drift_fails_closed_without_mutating_the_existing_table() {
     let conn = Connection::open_in_memory().unwrap();
     apply_runtime_pragmas(&conn).unwrap();
-    conn.execute_batch("CREATE TABLE storage_metadata (key TEXT PRIMARY KEY);")
+    conn.execute_batch("CREATE TABLE storage_checkpoints (id INTEGER PRIMARY KEY);")
         .unwrap();
 
     let error = ensure_storage_schema(&conn).unwrap_err();
 
     assert!(
-        error
-            .to_string()
-            .contains("storage schema drift: table storage_metadata missing column value"),
+        error.to_string().contains(
+            "storage schema drift: table storage_checkpoints missing column checkpointed_at"
+        ),
         "unexpected error: {error:#}"
     );
     let checkpoints: i64 = conn
@@ -187,39 +85,9 @@ fn storage_schema_drift_fails_closed_before_marker_rewrite() {
         )
         .unwrap();
     assert_eq!(
-        checkpoints, 0,
-        "savepoint rollback must remove tables created during failed schema setup"
+        checkpoints, 1,
+        "schema verification must preserve the preexisting table"
     );
-}
-
-#[test]
-fn wrong_storage_generation_marker_is_not_silently_rewritten() {
-    let conn = Connection::open_in_memory().unwrap();
-    apply_runtime_pragmas(&conn).unwrap();
-    ensure_storage_schema(&conn).unwrap();
-    conn.execute(
-        "UPDATE storage_metadata SET value = 'older-generation'
-         WHERE key = ?1",
-        params![STORAGE_GENERATION_KEY],
-    )
-    .unwrap();
-
-    let error = ensure_storage_schema(&conn).unwrap_err();
-
-    assert!(
-        error
-            .to_string()
-            .contains("storage generation marker mismatch"),
-        "unexpected error: {error:#}"
-    );
-    let marker: String = conn
-        .query_row(
-            "SELECT value FROM storage_metadata WHERE key = ?1",
-            params![STORAGE_GENERATION_KEY],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(marker, "older-generation");
 }
 
 #[test]

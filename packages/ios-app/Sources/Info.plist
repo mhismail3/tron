@@ -71,7 +71,7 @@
 		<key>UIColorName</key>
 		<string>LaunchScreenBackground</string>
 	</dict>
-	<key>UIRequiredDeviceCapabilities</key>
+	<key>UIRequiredDeviceTools</key>
 	<array>
 		<string>arm64</string>
 	</array>

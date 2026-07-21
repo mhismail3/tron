@@ -1,6 +1,6 @@
 import Foundation
 
-/// Client for session-related engine capabilities.
+/// Client for session-related engine tools.
 /// Handles session creation, listing, resumption, deletion, and forking.
 final class SessionClient: EngineDomainClient {
 

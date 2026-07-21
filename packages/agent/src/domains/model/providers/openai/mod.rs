@@ -9,9 +9,9 @@
 //!
 //! | Module                | Content |
 //! |-----------------------|---------|
-//! | [`provider`]          | [`OpenAIProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`]); stream, retry, capability invocation parsing |
+//! | [`provider`]          | [`OpenAIProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`]); stream, retry, tool invocation parsing |
 //! | [`message_converter`] | `Vec<Message>` → Responses `input` items and direct typed-tool schema conversion |
-//! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::protocol::events`]); handles output deltas, capability invocations, and terminal events |
+//! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::protocol::events`]); handles output deltas, tool invocations, and terminal events |
 //! | [`types`]             | [`OpenAIAuth`], [`OpenAIConfig`], [`ApiEndpoint`], endpoint-aware model profiles, and Responses wire DTOs split by owned surface |
 //!
 //! ## Invariants
@@ -29,19 +29,19 @@
 //!   Non-streaming Pro/preview records stay hidden and are rejected before a
 //!   request is sent.
 //! - Primitive context is compiled into the Responses `instructions` field.
-//!   The `input` array carries conversation items and capability results only;
+//!   The `input` array carries conversation items and tool results only;
 //!   it must not receive synthetic developer/user messages for the agent seed,
 //!   environment, or tool-use guidance.
-//! - Capability invocations arrive as streaming deltas over multiple SSE events.
+//! - Tool invocations arrive as streaming deltas over multiple SSE events.
 //!   [`stream_handler`] accumulates them until the closing `finish_reason`
-//!   before emitting a single `StreamEvent::CapabilityInvocationDraft` — the orchestrator
-//!   never sees a partial capability invocation.
+//!   before emitting a single `StreamEvent::ToolInvocationDraft` — the orchestrator
+//!   never sees a partial tool invocation.
 //! - Responses terminal events are exhaustive at the provider boundary:
 //!   `response.completed` and `response.incomplete` finalize canonical output,
 //!   while `response.failed` and top-level `error` preserve provider code and
 //!   message as typed provider failures. A trailing terminal frame is processed
 //!   even when the connection closes without a final newline.
-//! - The converter normalises capability results into Responses input items so the
+//! - The converter normalises tool results into Responses input items so the
 //!   provider can resume multi-turn tool loops without leaking provider-specific
 //!   payload details into the runtime.
 

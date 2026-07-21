@@ -159,28 +159,27 @@ impl NestedDepthResponder {
         ]);
         Self::response(vec![
             Ok(StreamEvent::Start),
-            Ok(StreamEvent::CapabilityInvocationDraftStart {
+            Ok(StreamEvent::ToolInvocationDraftStart {
                 invocation_id: "nested-depth-call".to_owned(),
                 name: "worker_invoke".to_owned(),
             }),
-            Ok(StreamEvent::CapabilityInvocationDraftDelta {
+            Ok(StreamEvent::ToolInvocationDraftDelta {
                 invocation_id: "nested-depth-call".to_owned(),
                 arguments_delta: serde_json::to_string(&arguments).unwrap(),
             }),
-            Ok(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation:
-                    crate::shared::protocol::messages::CapabilityInvocationDraft::new(
-                        "nested-depth-call",
-                        "worker_invoke",
-                        arguments,
-                    ),
+            Ok(StreamEvent::ToolInvocationDraftEnd {
+                tool_invocation: crate::shared::protocol::messages::ToolInvocationDraft::new(
+                    "nested-depth-call",
+                    "worker_invoke",
+                    arguments,
+                ),
             }),
             Ok(StreamEvent::Done {
                 message: AssistantMessage {
                     content: Vec::new(),
                     token_usage: None,
                 },
-                stop_reason: "capability_invocation".to_owned(),
+                stop_reason: "tool_invocation".to_owned(),
             }),
         ])
     }
@@ -200,7 +199,7 @@ impl ModelResponder for NestedDepthResponder {
             0 => {
                 let tools = request
                     .context
-                    .capabilities
+                    .tools
                     .as_ref()
                     .expect("agent worker tools")
                     .iter()

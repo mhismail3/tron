@@ -1,10 +1,10 @@
 //! Session lifecycle services and operation wrappers.
 //!
-//! This module owns the capability-facing lifecycle commands for sessions.
+//! This module owns the tool-facing lifecycle commands for sessions.
 //! Durable truth is still the session event store. Commands use
 //! [`SessionManager`] when a mutation must also update reconstructed-session
 //! cache state; durable-only mutations may call the event-store facade directly.
-//! The capability owner retires runtime projections according to mutation
+//! The tool owner retires runtime projections according to mutation
 //! semantics: archive clears active compaction state but preserves live event
 //! sequencing for a reversible unarchive, while delete clears both.
 //!
@@ -16,7 +16,7 @@
 //! | `create` | Normalize working directories, create durable sessions, and initialize runtime sequence counters. |
 //! | `delete` | Delete a session through the session manager and clear session-scoped runtime projections. |
 //! | `fork` | Fork from an explicit event or session head and initialize the child runtime sequence counter. |
-//! | `operations` | JSON parameter parsing for lifecycle capability entry points. |
+//! | `operations` | JSON parameter parsing for lifecycle tool entry points. |
 //!
 //! ## Invariants
 //!

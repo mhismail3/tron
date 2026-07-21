@@ -150,7 +150,7 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case agentNotRunning = "AGENT_NOT_RUNNING"
     case invalidParams = "INVALID_PARAMS"
     case unknownMessageType = "UNKNOWN_MESSAGE_TYPE"
-    case capabilityNotFound = "CAPABILITY_NOT_FOUND"
+    case toolNotFound = "TOOL_NOT_FOUND"
     case invalidFunctionId = "INVALID_FUNCTION_ID"
     case unauthorized = "UNAUTHORIZED"
     case idempotencyConflict = "IDEMPOTENCY_CONFLICT"

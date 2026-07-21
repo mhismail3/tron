@@ -29,7 +29,7 @@
 //! cancellation is terminalized by the active turn runner, which owns the
 //! session-global turn ordinal and any partial content; prompt completion never
 //! manufactures turn lifecycle rows. The streaming journal remains until
-//! capability completions and the turn terminal have committed; journal-write
+//! tool completions and the turn terminal have committed; journal-write
 //! failure stops the stream before broadcasting content that cannot be
 //! recovered. Provider failures atomically retain any already visible partial
 //! assistant content with `turn.failed`. Durable turn entry precedes cancellable

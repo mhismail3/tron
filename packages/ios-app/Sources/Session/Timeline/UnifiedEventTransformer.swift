@@ -31,15 +31,15 @@ struct ReconstructedState {
 ///
 /// The server sends `message.assistant` events with content blocks in exact
 /// streaming order via `currentTurnContentSequence`. This preserves the interleaving
-/// of text and capability invocations as they appeared during streaming:
+/// of text and tool invocations as they appeared during streaming:
 ///
 /// ```
-/// [text: "I'll run sleep 3...", capability_invocation: {id: "t1"}, text: "Done!", ...]
+/// [text: "I'll run sleep 3...", tool_invocation: {id: "t1"}, text: "Done!", ...]
 /// ```
 ///
-/// Capability details come from separate `capability.invocation.started` events (identity, arguments, turn).
-/// Capability results come from `capability.invocation.completed` events. Both are combined when rendering
-/// capability_invocation content blocks from the message.assistant.
+/// Tool details come from separate `tool.invocation.started` events (identity, arguments, turn).
+/// Tool results come from `tool.invocation.completed` events. Both are combined when rendering
+/// tool_invocation content blocks from the message.assistant.
 ///
 /// ## Usage
 /// ```swift
@@ -67,51 +67,51 @@ struct UnifiedEventTransformer {
     /// so sequence numbers can reset and the server's ancestor order is the
     /// chronology contract.
     ///
-    /// **Important**: Capability invocations (`capability.invocation.started`) are combined with their results
-    /// (`capability.invocation.completed`) into a single message. This matches the streaming UI
-    /// behavior where capability invocations show their results inline.
+    /// **Important**: Tool invocations (`tool.invocation.started`) are combined with their results
+    /// (`tool.invocation.completed`) into a single message. This matches the streaming UI
+    /// behavior where tool invocations show their results inline.
     ///
     /// - Parameters:
     ///   - events: Events conforming to EventTransformable
     ///   - presorted: Whether `events` already arrive in chronological chain order.
     /// - Returns: Array of ChatMessages in chronological order
     static func transformPersistedEvents<E: EventTransformable>(_ events: [E], presorted: Bool = false) -> [ChatMessage] {
-        transformPersistedEvents(events, presorted: presorted, capabilityMaps: nil)
+        transformPersistedEvents(events, presorted: presorted, toolMaps: nil)
     }
 
-    /// Transform a page of persisted events with additional capability lifecycle
+    /// Transform a page of persisted events with additional tool lifecycle
     /// context from already-loaded neighboring pages.
     static func transformPersistedEvents<E: EventTransformable, C: EventTransformable>(
         _ events: [E],
         presorted: Bool = false,
-        capabilityContextEvents: [C]
+        toolContextEvents: [C]
     ) -> [ChatMessage] {
-        var maps = buildCapabilityInvocationMaps(from: events)
-        maps.merge(buildCapabilityInvocationMaps(from: capabilityContextEvents))
-        return transformPersistedEvents(events, presorted: presorted, capabilityMaps: maps)
+        var maps = buildToolInvocationMaps(from: events)
+        maps.merge(buildToolInvocationMaps(from: toolContextEvents))
+        return transformPersistedEvents(events, presorted: presorted, toolMaps: maps)
     }
 
     private static func transformPersistedEvents<E: EventTransformable>(
         _ events: [E],
         presorted: Bool,
-        capabilityMaps: CapabilityInvocationMapResult?
+        toolMaps: ToolInvocationMapResult?
     ) -> [ChatMessage] {
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
-        // Build maps for capability invocation rendering.
-        let maps = capabilityMaps ?? buildCapabilityInvocationMaps(from: sorted)
+        // Build maps for tool invocation rendering.
+        let maps = toolMaps ?? buildToolInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
 
-        TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(startedInvocations.count) capability.invocation.started, \(completedInvocations.count) capability.invocation.completed from \(sorted.count) events", category: .session)
+        TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(startedInvocations.count) tool.invocation.started, \(completedInvocations.count) tool.invocation.completed from \(sorted.count) events", category: .session)
 
         // Transform events, processing message.assistant content blocks in order
         var messages: [ChatMessage] = []
         for event in sorted {
-            // Skip capability.invocation.started, capability.invocation.completed, and stream.thinking_complete —
+            // Skip tool.invocation.started, tool.invocation.completed, and stream.thinking_complete —
             // all are processed via message.assistant content blocks
-            if event.type == SessionEventType.capabilityInvocationStarted.rawValue ||
-               event.type == SessionEventType.capabilityInvocationCompleted.rawValue ||
+            if event.type == SessionEventType.toolInvocationStarted.rawValue ||
+               event.type == SessionEventType.toolInvocationCompleted.rawValue ||
                event.type == SessionEventType.streamThinkingComplete.rawValue {
                 continue
             }
@@ -168,10 +168,10 @@ struct UnifiedEventTransformer {
             return MessageEventProjection.transformUserMessage(payload, timestamp: ts)
         case .messageAssistant:
             return MessageEventProjection.transformAssistantMessage(payload, timestamp: ts)
-        case .capabilityInvocationStarted:
-            return CapabilityInvocationEventProjection.transformInvocationStarted(payload, timestamp: ts)
-        case .capabilityInvocationCompleted:
-            return CapabilityInvocationEventProjection.transformInvocationCompleted(payload, timestamp: ts)
+        case .toolInvocationStarted:
+            return ToolInvocationEventProjection.transformInvocationStarted(payload, timestamp: ts)
+        case .toolInvocationCompleted:
+            return ToolInvocationEventProjection.transformInvocationCompleted(payload, timestamp: ts)
         case .turnFailed:
             return ErrorEventProjection.transformTurnFailed(payload, timestamp: ts)
         case .compactBoundary:
@@ -182,32 +182,32 @@ struct UnifiedEventTransformer {
     }
 
     // =========================================================================
-    // MARK: - Capability Invocation Map Collection (shared between transform and reconstruct)
+    // MARK: - Tool Invocation Map Collection (shared between transform and reconstruct)
     // =========================================================================
 
     /// Result of the first-pass collection over events.
     /// Both `transformPersistedEvents` and `reconstructSessionState` need these maps
-    /// to resolve provider `capability_invocation` content blocks.
-    struct CapabilityInvocationMapResult {
-        var startedInvocations: [String: CapabilityInvocationStartedPayload] = [:]
-        var completedInvocations: [String: CapabilityInvocationCompletedPayload] = [:]
+    /// to resolve provider `tool_invocation` content blocks.
+    struct ToolInvocationMapResult {
+        var startedInvocations: [String: ToolInvocationStartedPayload] = [:]
+        var completedInvocations: [String: ToolInvocationCompletedPayload] = [:]
 
-        mutating func merge(_ other: CapabilityInvocationMapResult) {
+        mutating func merge(_ other: ToolInvocationMapResult) {
             startedInvocations.merge(other.startedInvocations) { current, _ in current }
             completedInvocations.merge(other.completedInvocations) { current, _ in current }
         }
     }
 
-    /// Single-pass collection of started/completed capability invocations from a sorted event array.
-    static func buildCapabilityInvocationMaps<E: EventTransformable>(from events: [E]) -> CapabilityInvocationMapResult {
-        var result = CapabilityInvocationMapResult()
+    /// Single-pass collection of started/completed tool invocations from a sorted event array.
+    static func buildToolInvocationMaps<E: EventTransformable>(from events: [E]) -> ToolInvocationMapResult {
+        var result = ToolInvocationMapResult()
         for event in events {
-            if event.type == SessionEventType.capabilityInvocationStarted.rawValue,
-               let payload = CapabilityInvocationStartedPayload(from: event.payload) {
+            if event.type == SessionEventType.toolInvocationStarted.rawValue,
+               let payload = ToolInvocationStartedPayload(from: event.payload) {
                 result.startedInvocations[payload.invocationId] = payload
             }
-            if event.type == SessionEventType.capabilityInvocationCompleted.rawValue,
-               let payload = CapabilityInvocationCompletedPayload(from: event.payload) {
+            if event.type == SessionEventType.toolInvocationCompleted.rawValue,
+               let payload = ToolInvocationCompletedPayload(from: event.payload) {
                 result.completedInvocations[payload.invocationId] = payload
             }
         }
@@ -241,7 +241,7 @@ extension UnifiedEventTransformer {
     /// - The latest server-reported context size
     ///
     /// **Two-Pass Reconstruction**:
-    /// - Pass 1: Collect deleted event IDs, capability invocation maps, and config state
+    /// - Pass 1: Collect deleted event IDs, tool invocation maps, and config state
     /// - Pass 2: Build messages while filtering deleted events
     ///
     /// - Parameters:
@@ -259,8 +259,8 @@ extension UnifiedEventTransformer {
         // would incorrectly interleave parent and forked events
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
-        // PASS 1: Collect capability invocation maps and deleted event IDs.
-        let maps = buildCapabilityInvocationMaps(from: sorted)
+        // PASS 1: Collect tool invocation maps and deleted event IDs.
+        let maps = buildToolInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
 
@@ -280,7 +280,7 @@ extension UnifiedEventTransformer {
             guard let eventType = SessionEventType(rawValue: event.type), eventType != .unknown else { continue }
 
             switch eventType {
-            case .capabilityInvocationCompleted, .capabilityInvocationStarted, .streamThinkingComplete:
+            case .toolInvocationCompleted, .toolInvocationStarted, .streamThinkingComplete:
                 // Skip - processed via message.assistant content blocks
                 break
 

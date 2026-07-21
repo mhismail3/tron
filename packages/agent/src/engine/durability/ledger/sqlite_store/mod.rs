@@ -7,8 +7,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sqlite_codec::{
     INVOCATION_INDEX_SCHEMA, INVOCATION_TABLE_SCHEMA, RawIdempotencyRow, SQLITE_SCHEMA,
-    ensure_column, ledger_failure, optional_stored_error_json, optional_stored_json_string,
-    raw_idempotency_entry, resolve_optional_stored_json_string, sqlite_err, to_json_string,
+    ledger_failure, optional_stored_error_json, optional_stored_json_string, raw_idempotency_entry,
+    resolve_optional_stored_json_string, sqlite_err, to_json_string,
 };
 use super::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
@@ -62,58 +62,12 @@ impl SqliteEngineLedgerStore {
         self.conn
             .execute_batch(SQLITE_SCHEMA)
             .map_err(|err| sqlite_err("initialize_schema", err))?;
-        super::retire_legacy_idempotency_replay_column(&self.conn)
-            .map_err(|err| ledger_failure("ledger.replay_column_retirement", err))?;
-        self.migrate_legacy_catalog_changes()?;
         self.conn
             .execute_batch(INVOCATION_TABLE_SCHEMA)
             .map_err(|err| sqlite_err("initialize_invocation_table", err))?;
         self.conn
             .execute_batch(INVOCATION_INDEX_SCHEMA)
             .map_err(|err| sqlite_err("initialize_invocation_index", err))?;
-        ensure_column(&self.conn, "engine_invocations", "session_id", "TEXT")?;
-        ensure_column(&self.conn, "engine_invocations", "workspace_id", "TEXT")?;
-        super::migrate_profile_idempotency_scope(&self.conn)
-            .map_err(|err| ledger_failure("ledger.profile_scope_migration", err))?;
-        Ok(())
-    }
-
-    fn migrate_legacy_catalog_changes(&mut self) -> Result<()> {
-        let transaction = self
-            .conn
-            .transaction()
-            .map_err(|err| sqlite_err("catalog_revision_migration.begin", err))?;
-        let legacy_table_exists = transaction
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_catalog_changes')",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(|err| sqlite_err("catalog_revision_migration.inspect", err))?;
-        if legacy_table_exists {
-            let legacy_revision = transaction
-                .query_row(
-                    "SELECT COALESCE(MAX(after_revision), 0) FROM engine_catalog_changes",
-                    [],
-                    |row| row.get::<_, u64>(0),
-                )
-                .map_err(|err| sqlite_err("catalog_revision_migration.read", err))?;
-            transaction
-                .execute(
-                    "UPDATE engine_catalog_revision SET revision = MAX(revision, ?1) WHERE singleton = 1",
-                    [legacy_revision],
-                )
-                .map_err(|err| sqlite_err("catalog_revision_migration.update", err))?;
-            transaction
-                .execute_batch(
-                    "DROP INDEX IF EXISTS idx_engine_catalog_changes_after;
-                     DROP TABLE engine_catalog_changes;",
-                )
-                .map_err(|err| sqlite_err("catalog_revision_migration.drop", err))?;
-        }
-        transaction
-            .commit()
-            .map_err(|err| sqlite_err("catalog_revision_migration.commit", err))?;
         Ok(())
     }
 

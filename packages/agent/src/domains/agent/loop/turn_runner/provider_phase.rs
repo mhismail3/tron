@@ -102,7 +102,7 @@ pub(super) async fn open_provider_response(
         run_id,
         trace_id,
         turn = params.turn,
-        tool_count = primitive_surface.capabilities.len(),
+        tool_count = primitive_surface.tools.len(),
         catalog_revision = primitive_surface.snapshot.catalog_revision,
         surface_hash = %primitive_surface.snapshot.surface_hash,
         fixed_tool_count = primitive_surface.snapshot.fixed_tool_count,
@@ -125,7 +125,7 @@ pub(super) async fn open_provider_response(
     let mut context = build_turn_context(
         params.context_manager,
         params.server_origin,
-        primitive_surface.capabilities.clone(),
+        primitive_surface.tools.clone(),
     );
     let surface_context = primitive_surface::surface_context_primer(&primitive_surface.snapshot);
     let system_prompt = context.system_prompt.get_or_insert_with(String::new);

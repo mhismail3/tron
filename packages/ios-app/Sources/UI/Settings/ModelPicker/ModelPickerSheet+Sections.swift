@@ -285,16 +285,16 @@ struct ModelCard: View {
                             .foregroundStyle(.tronTextSecondary)
                     }
 
-                    // Capability badges
+                    // Tool badges
                     HStack(spacing: 6) {
                         if model.supportsThinking {
-                            capabilityBadge("Thinking", icon: "brain", color: providerColor)
+                            toolBadge("Thinking", icon: "brain", color: providerColor)
                         }
                         if model.supportsReasoning == true {
-                            capabilityBadge("Reasoning", icon: "sparkles", color: providerColor)
+                            toolBadge("Reasoning", icon: "sparkles", color: providerColor)
                         }
                         if model.supportsImages {
-                            capabilityBadge("Vision", icon: "photo", color: providerColor)
+                            toolBadge("Vision", icon: "photo", color: providerColor)
                         }
                     }
 
@@ -332,7 +332,7 @@ struct ModelCard: View {
     }
 
     @ViewBuilder
-    private func capabilityBadge(_ label: String, icon: String, color: Color) -> some View {
+    private func toolBadge(_ label: String, icon: String, color: Color) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon)
             Text(label)

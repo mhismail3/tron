@@ -1,6 +1,6 @@
-//! Input validation helpers for capability payloads and transport envelopes.
+//! Input validation helpers for tool payloads and transport envelopes.
 
-use super::errors::CapabilityError;
+use super::errors::ToolError;
 
 /// Maximum prompt length (1 MB).
 pub const MAX_PROMPT_LENGTH: usize = 1_048_576;
@@ -18,7 +18,7 @@ pub const MAX_PARAM_LENGTH: usize = 8_192;
 /// parser error. We re-apply the cap at the engine transport boundary so that:
 ///
 /// 1. **Stable error surface.** Depth-rejected requests produce a
-///    structured [`CapabilityError::InvalidParams`] with a clear message, not a
+///    structured [`ToolError::InvalidParams`] with a clear message, not a
 ///    raw serde parse error that happens to mention "recursion limit".
 ///    Clients can render this as a user-actionable error.
 /// 2. **Protect post-parse traversal.** Several handlers walk the JSON
@@ -38,13 +38,9 @@ pub const MAX_PARAM_LENGTH: usize = 8_192;
 pub const MAX_JSON_DEPTH: usize = 128;
 
 /// Validate that a string parameter does not exceed `max_len` bytes.
-pub fn validate_string_param(
-    value: &str,
-    name: &str,
-    max_len: usize,
-) -> Result<(), CapabilityError> {
+pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<(), ToolError> {
     if value.len() > max_len {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: format!(
                 "Parameter '{name}' exceeds maximum length ({} > {max_len})",
                 value.len()
@@ -59,13 +55,10 @@ pub fn validate_string_param(
 /// See [`MAX_JSON_DEPTH`] for why this exists on top of `serde_json`'s
 /// built-in recursion limit. The short version: we translate the parser's
 /// opaque recursion failure into a structured
-/// [`CapabilityError::InvalidParams`] so the client can render an actionable
+/// [`ToolError::InvalidParams`] so the client can render an actionable
 /// message, and we guarantee a bounded stack for any handler that walks
 /// the parsed tree.
-pub fn validate_json_depth(
-    value: &serde_json::Value,
-    max_depth: usize,
-) -> Result<(), CapabilityError> {
+pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Result<(), ToolError> {
     fn measure_depth(v: &serde_json::Value, current: usize, max: usize) -> Result<(), ()> {
         if current > max {
             return Err(());
@@ -86,7 +79,7 @@ pub fn validate_json_depth(
         Ok(())
     }
 
-    measure_depth(value, 0, max_depth).map_err(|()| CapabilityError::InvalidParams {
+    measure_depth(value, 0, max_depth).map_err(|()| ToolError::InvalidParams {
         message: format!("JSON nesting depth exceeds maximum of {max_depth}"),
     })
 }
@@ -95,11 +88,11 @@ pub fn validate_json_depth(
 pub fn validate_attachment_size_with_limit(
     base64_data: &str,
     max_bytes: usize,
-) -> Result<(), CapabilityError> {
+) -> Result<(), ToolError> {
     // base64 encodes 3 bytes into 4 chars; approximate decoded size.
     let decoded_size = base64_data.len() * 3 / 4;
     if decoded_size > max_bytes {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: format!(
                 "Attachment exceeds maximum size of {}MB (got ~{}MB)",
                 max_bytes / (1024 * 1024),
@@ -115,13 +108,13 @@ pub fn validate_attachment_size_with_limit(
 /// Preserves user-facing messages (invalid params, not found) but strips
 /// internal details (file paths, stack traces) from internal errors.
 #[cfg(test)]
-pub fn sanitize_error_message(err: &CapabilityError) -> String {
+pub fn sanitize_error_message(err: &ToolError) -> String {
     match err {
-        CapabilityError::InvalidParams { message }
-        | CapabilityError::NotFound { message, .. }
-        | CapabilityError::NotAvailable { message }
-        | CapabilityError::Custom { message, .. } => message.clone(),
-        CapabilityError::Internal { .. } => "Internal error".to_string(),
+        ToolError::InvalidParams { message }
+        | ToolError::NotFound { message, .. }
+        | ToolError::NotAvailable { message }
+        | ToolError::Custom { message, .. } => message.clone(),
+        ToolError::Internal { .. } => "Internal error".to_string(),
     }
 }
 
@@ -174,7 +167,7 @@ mod tests {
 
     #[test]
     fn sanitize_internal_error_strips_details() {
-        let err = CapabilityError::Internal {
+        let err = ToolError::Internal {
             message: "failed at /Users/user/.tron/internal/database/events.db: disk full".into(),
         };
         let sanitized = sanitize_error_message(&err);
@@ -184,7 +177,7 @@ mod tests {
 
     #[test]
     fn sanitize_invalid_params_preserves_message() {
-        let err = CapabilityError::InvalidParams {
+        let err = ToolError::InvalidParams {
             message: "Missing required parameter 'sessionId'".into(),
         };
         let sanitized = sanitize_error_message(&err);
@@ -193,7 +186,7 @@ mod tests {
 
     #[test]
     fn sanitize_not_found_preserves_message() {
-        let err = CapabilityError::NotFound {
+        let err = ToolError::NotFound {
             code: "SESSION_NOT_FOUND".into(),
             message: "Session 'abc' not found".into(),
         };

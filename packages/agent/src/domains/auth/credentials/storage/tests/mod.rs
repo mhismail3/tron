@@ -33,39 +33,6 @@ fn load_missing_file_returns_ok_none() {
 }
 
 #[test]
-fn load_empty_json_object_returns_pristine_storage() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-    std::fs::write(&path, "{}").unwrap();
-
-    let storage = load_auth_storage(&path)
-        .expect("empty object sentinel must load")
-        .expect("present sentinel returns pristine storage");
-
-    assert_eq!(storage.version, 1);
-    assert!(storage.bearer_token.is_none());
-    assert!(storage.providers.is_empty());
-    assert!(storage.services.is_none());
-    assert!(storage.extra.is_empty());
-    assert!(
-        !storage.last_updated.trim().is_empty(),
-        "pristine storage must have a materializable lastUpdated"
-    );
-}
-
-#[test]
-fn load_or_init_for_write_accepts_empty_json_object_sentinel() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-    std::fs::write(&path, "{\n}\n").unwrap();
-
-    let storage = load_or_init_for_write(&path).unwrap();
-
-    assert_eq!(storage.version, 1);
-    assert!(storage.providers.is_empty());
-}
-
-#[test]
 fn load_invalid_json_returns_malformed_error() {
     let dir = TempDir::new().unwrap();
     let path = test_path(&dir);
@@ -97,8 +64,7 @@ fn load_partial_non_empty_object_returns_malformed_error() {
     let path = test_path(&dir);
     std::fs::write(&path, r#"{"version":1}"#).unwrap();
 
-    let err =
-        load_auth_storage(&path).expect_err("only the exact empty object is a pristine sentinel");
+    let err = load_auth_storage(&path).expect_err("partial objects must fail strict decoding");
 
     assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
     assert!(
@@ -120,14 +86,8 @@ fn save_and_load_roundtrip() {
     assert_eq!(restored.api_keys.as_ref().unwrap()[0].key, "sk-123");
 }
 
-/// Regression guard: a retired `services.{name}.apiKey` shape (singular
-/// string field) no longer silently wipes all configured providers — it
-/// produces a loud, actionable error naming the bad file. Prior to this
-/// change, R2 removed the singular field from `ServiceAuth` but
-/// `load_auth_storage` kept swallowing parse errors with a `warn!` and
-/// returning `None`, which made every provider appear unconfigured.
 #[test]
-fn load_retired_services_apikey_singular_shape_surfaces_error() {
+fn load_service_with_unknown_field_surfaces_error() {
     let dir = TempDir::new().unwrap();
     let path = test_path(&dir);
     std::fs::write(
@@ -136,21 +96,21 @@ fn load_retired_services_apikey_singular_shape_surfaces_error() {
                 "version": 1,
                 "providers": {},
                 "services": {
-                    "brave": { "apiKey": "retired-key-value" }
+                    "example": { "unexpectedKey": "value" }
                 },
                 "lastUpdated": "2026-04-22T00:00:00Z"
             }"#,
     )
     .unwrap();
 
-    let err = load_auth_storage(&path).expect_err(
-        "retired singular `apiKey` shape must surface as a hard error, \
-             not silently wipe all providers",
-    );
+    let err = load_auth_storage(&path)
+        .expect_err("unknown service-auth fields must surface as a hard error");
     assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("unknown field") || msg.contains("apiKey") || msg.contains("missing field"),
+        msg.contains("unknown field")
+            || msg.contains("unexpectedKey")
+            || msg.contains("missing field"),
         "error must name the offending field. got: {msg}"
     );
 }

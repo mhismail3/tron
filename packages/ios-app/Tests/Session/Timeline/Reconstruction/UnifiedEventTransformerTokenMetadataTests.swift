@@ -58,7 +58,7 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
 
     // MARK: - Intermediate Response Suppression
 
-    func testCapabilityOnlyResponseSuppressesMetadataFromThinkingAndCapabilities() {
+    func testToolOnlyResponseSuppressesMetadataFromThinkingAndTools() {
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 13,
             outputTokens: 216,
@@ -70,25 +70,25 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             previousContextBaseline: 13_059
         )
         let events = [
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_a"),
                 "arguments": AnyCodable(["file_path": "/src/a.ts"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_a"),
                 "content": AnyCodable("file a contents"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(10)
             ], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_b"),
                 "arguments": AnyCodable(["file_path": "/src/b.ts"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(2), sequence: 3),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_b"),
                 "content": AnyCodable("file b contents"),
                 "isError": AnyCodable(false),
@@ -97,13 +97,13 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "thinking", "thinking": "Reading both files..."],
-                    ["type": "capability_invocation", "id": "tc_a", "name": "execute", "input": ["file_path": "/src/a.ts"]],
-                    ["type": "capability_invocation", "id": "tc_b", "name": "execute", "input": ["file_path": "/src/b.ts"]]
+                    ["type": "tool_invocation", "id": "tc_a", "name": "process_run", "input": ["file_path": "/src/a.ts"]],
+                    ["type": "tool_invocation", "id": "tc_b", "name": "process_run", "input": ["file_path": "/src/b.ts"]]
                 ]),
                 "turn": AnyCodable(2),
                 "model": AnyCodable("claude-opus-4-6"),
                 "latency": AnyCodable(1_995),
-                "stopReason": AnyCodable("capability_invocation"),
+                "stopReason": AnyCodable("tool_invocation"),
                 "tokenRecord": AnyCodable(tokenRecordPayload)
             ], timestamp: timestamp(4), sequence: 5)
         ]
@@ -112,15 +112,15 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
 
         XCTAssertEqual(messages.count, 3)
         if case .thinking = messages[0].content,
-           case .capabilityInvocation = messages[1].content,
-           case .capabilityInvocation = messages[2].content {
+           case .toolInvocation = messages[1].content,
+           case .toolInvocation = messages[2].content {
             assertNoResponseMetadata(messages)
         } else {
-            XCTFail("Expected thinking followed by two capability invocations")
+            XCTFail("Expected thinking followed by two tool invocations")
         }
     }
 
-    func testTextBeforeCapabilitySuppressesMetadataEvenWhenStopReasonIsEndTurn() {
+    func testTextBeforeToolSuppressesMetadataEvenWhenStopReasonIsEndTurn() {
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 14,
             outputTokens: 787,
@@ -132,13 +132,13 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             previousContextBaseline: 13_987
         )
         let events = [
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_x"),
                 "arguments": AnyCodable(["command": "echo hello"]),
                 "turn": AnyCodable(3)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_x"),
                 "content": AnyCodable("hello"),
                 "isError": AnyCodable(false),
@@ -148,7 +148,7 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
                 "content": AnyCodable([
                     ["type": "thinking", "thinking": "Running command..."],
                     ["type": "text", "text": "Here's the result"],
-                    ["type": "capability_invocation", "id": "tc_x", "name": "execute", "input": ["command": "echo hello"]]
+                    ["type": "tool_invocation", "id": "tc_x", "name": "process_run", "input": ["command": "echo hello"]]
                 ]),
                 "turn": AnyCodable(3),
                 "model": AnyCodable("claude-opus-4-6"),
@@ -162,14 +162,14 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
 
         XCTAssertEqual(messages.count, 3)
         guard case .text(let text) = messages[1].content,
-              case .capabilityInvocation = messages[2].content else {
-            return XCTFail("Expected text before the capability invocation")
+              case .toolInvocation = messages[2].content else {
+            return XCTFail("Expected text before the tool invocation")
         }
         XCTAssertEqual(text, "Here's the result")
         assertNoResponseMetadata(messages)
     }
 
-    func testCapabilityBeforeTextSuppressesMetadataWithInvocationStopReason() {
+    func testToolBeforeTextSuppressesMetadataWithInvocationStopReason() {
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 20,
             outputTokens: 80,
@@ -179,13 +179,13 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             previousContextBaseline: 180
         )
         let events = [
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_order"),
                 "arguments": AnyCodable(["command": "true"]),
                 "turn": AnyCodable(4)
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_order"),
                 "content": AnyCodable("ok"),
                 "isError": AnyCodable(false),
@@ -193,13 +193,13 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "tc_order", "name": "execute", "input": ["command": "true"]],
-                    ["type": "text", "text": "This text is still part of the capability response."]
+                    ["type": "tool_invocation", "id": "tc_order", "name": "process_run", "input": ["command": "true"]],
+                    ["type": "text", "text": "This text is still part of the tool response."]
                 ]),
                 "turn": AnyCodable(4),
                 "model": AnyCodable("claude-opus-4-6"),
                 "latency": AnyCodable(900),
-                "stopReason": AnyCodable("capability_invocation"),
+                "stopReason": AnyCodable("tool_invocation"),
                 "tokenRecord": AnyCodable(tokenRecordPayload)
             ], timestamp: timestamp(2), sequence: 3)
         ]
@@ -207,11 +207,11 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
         XCTAssertEqual(messages.count, 2)
-        guard case .capabilityInvocation = messages[0].content,
+        guard case .toolInvocation = messages[0].content,
               case .text(let text) = messages[1].content else {
-            return XCTFail("Expected capability invocation before text")
+            return XCTFail("Expected tool invocation before text")
         }
-        XCTAssertEqual(text, "This text is still part of the capability response.")
+        XCTAssertEqual(text, "This text is still part of the tool response.")
         assertNoResponseMetadata(messages)
     }
 
@@ -283,13 +283,13 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             sessionEvent(type: "message.user", payload: [
                 "content": AnyCodable("Do something")
             ], timestamp: timestamp(0), sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/a.ts"]),
                 "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_1"),
                 "content": AnyCodable("contents"),
                 "isError": AnyCodable(false),
@@ -298,7 +298,7 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "text", "text": "Let me read that file."],
-                    ["type": "capability_invocation", "id": "tc_1", "name": "execute", "input": ["file_path": "/a.ts"]]
+                    ["type": "tool_invocation", "id": "tc_1", "name": "process_run", "input": ["file_path": "/a.ts"]]
                 ]),
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-opus-4-6"),
@@ -306,13 +306,13 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
                 "stopReason": AnyCodable("end_turn"),
                 "tokenRecord": AnyCodable(tokenRecord1)
             ], timestamp: timestamp(3), sequence: 4),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"),
+            sessionEvent(type: "tool.invocation.started", payload: [
+                "toolName": AnyCodable("process_run"),
                 "invocationId": AnyCodable("tc_2"),
                 "arguments": AnyCodable(["file_path": "/a.ts"]),
                 "turn": AnyCodable(2)
             ], timestamp: timestamp(4), sequence: 5),
-            sessionEvent(type: "capability.invocation.completed", payload: [
+            sessionEvent(type: "tool.invocation.completed", payload: [
                 "invocationId": AnyCodable("tc_2"),
                 "content": AnyCodable("edited"),
                 "isError": AnyCodable(false),
@@ -320,12 +320,12 @@ final class UnifiedEventTransformerTokenMetadataTests: UnifiedEventTransformerTe
             ], timestamp: timestamp(5), sequence: 6),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
-                    ["type": "capability_invocation", "id": "tc_2", "name": "execute", "input": ["file_path": "/a.ts"]]
+                    ["type": "tool_invocation", "id": "tc_2", "name": "process_run", "input": ["file_path": "/a.ts"]]
                 ]),
                 "turn": AnyCodable(2),
                 "model": AnyCodable("claude-opus-4-6"),
                 "latency": AnyCodable(2_000),
-                "stopReason": AnyCodable("capability_invocation"),
+                "stopReason": AnyCodable("tool_invocation"),
                 "tokenRecord": AnyCodable(tokenRecord2)
             ], timestamp: timestamp(6), sequence: 7),
             sessionEvent(type: "message.assistant", payload: [

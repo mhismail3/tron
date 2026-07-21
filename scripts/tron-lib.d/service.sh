@@ -619,7 +619,7 @@ print_installed_service_restart_diagnostic() {
     echo "  The installed helper was not reported as restarted because no healthy listener was observed."
     if [ -x "$RELEASE_APP_BINARY" ]; then
         echo "  /Applications/Tron.app may be stale relative to the current engine/settings contract."
-        echo "  Stale helpers can fail while parsing capability schema providerSurface values."
+        echo "  Stale helpers can fail while parsing tool schema providerSurface values."
         echo "  Reinstall or update /Applications/Tron.app, then run: tron start"
     else
         echo "  /Applications/Tron.app is missing or not executable; install it before relying on production restore."

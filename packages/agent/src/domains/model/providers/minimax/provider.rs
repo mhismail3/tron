@@ -109,12 +109,12 @@ impl MiniMaxProvider {
 
     /// Build tool definitions with a 5-minute cache breakpoint on the last tool.
     fn build_tools(context: &Context) -> Option<Vec<AnthropicTool>> {
-        let capabilities = context.capabilities.as_ref()?;
-        if capabilities.is_empty() {
+        let tools = context.tools.as_ref()?;
+        if tools.is_empty() {
             return None;
         }
 
-        let mut anthropic_capabilities: Vec<AnthropicTool> = capabilities
+        let mut anthropic_tools: Vec<AnthropicTool> = tools
             .iter()
             .map(|t| AnthropicTool {
                 name: t.name.clone(),
@@ -124,14 +124,14 @@ impl MiniMaxProvider {
             })
             .collect();
 
-        if let Some(last) = anthropic_capabilities.last_mut() {
+        if let Some(last) = anthropic_tools.last_mut() {
             last.cache_control = Some(CacheControl {
                 cache_type: "ephemeral".into(),
                 ttl: None,
             });
         }
 
-        Some(anthropic_capabilities)
+        Some(anthropic_tools)
     }
 
     /// Build thinking configuration — enabled only, never adaptive.
@@ -203,7 +203,7 @@ impl MiniMaxProvider {
             max_tokens: self.calculate_max_tokens(options),
             messages,
             system: Self::build_system_param(context),
-            capabilities: Self::build_tools(context),
+            tools: Self::build_tools(context),
             stream: true,
             thinking: Self::build_thinking_config(options),
             output_config: None,
@@ -237,7 +237,7 @@ impl MiniMaxProvider {
             model = %request.model,
             max_tokens = request.max_tokens,
             message_count = request.messages.len(),
-            has_tools = request.capabilities.is_some(),
+            has_tools = request.tools.is_some(),
             has_thinking = request.thinking.is_some(),
             "Sending MiniMax request"
         );
@@ -345,7 +345,7 @@ impl Provider for MiniMaxProvider {
 mod tests {
     use super::*;
     use crate::domains::model::providers::anthropic::types::AnthropicMessageParam;
-    use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
+    use crate::shared::protocol::messages::{Message, ToolResultMessageContent};
     use serde_json::json;
 
     fn test_config() -> MiniMaxConfig {
@@ -367,14 +367,14 @@ mod tests {
     }
 
     #[test]
-    fn capability_result_text_is_transport_exact_through_shared_converter() {
+    fn tool_result_text_is_transport_exact_through_shared_converter() {
         let output_envelope = format!(
             "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
             "safe-evidence-".repeat(1_400)
         );
-        let messages = vec![Message::CapabilityResult {
+        let messages = vec![Message::ToolResult {
             invocation_id: "toolu_01minimax".into(),
-            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+            content: ToolResultMessageContent::Text(output_envelope.clone()),
             is_error: None,
         }];
 
@@ -477,42 +477,32 @@ mod tests {
     #[test]
     fn build_tools_marks_last_tool_cacheable() {
         let ctx = Context {
-            capabilities: Some(vec![
-                crate::shared::protocol::model_capabilities::ModelCapability {
-                    name: "execute".into(),
-                    description: "Run commands".into(),
-                    parameters:
-                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
-                            schema_type: "object".into(),
-                            properties: None,
-                            required: None,
-                            description: None,
-                            extra: serde_json::Map::default(),
-                        },
+            tools: Some(vec![crate::shared::protocol::model_tools::ModelTool {
+                name: "test_tool".into(),
+                description: "Run commands".into(),
+                parameters: crate::shared::protocol::model_tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::default(),
                 },
-            ]),
+            }]),
             ..Context::default()
         };
-        let capabilities = MiniMaxProvider::build_tools(&ctx).unwrap();
-        assert_eq!(capabilities.len(), 1);
+        let tools = MiniMaxProvider::build_tools(&ctx).unwrap();
+        assert_eq!(tools.len(), 1);
         assert_eq!(
-            capabilities[0].cache_control.as_ref().unwrap().cache_type,
+            tools[0].cache_control.as_ref().unwrap().cache_type,
             "ephemeral"
         );
-        assert!(
-            capabilities[0]
-                .cache_control
-                .as_ref()
-                .unwrap()
-                .ttl
-                .is_none()
-        );
+        assert!(tools[0].cache_control.as_ref().unwrap().ttl.is_none());
     }
 
     #[test]
     fn build_tools_empty_returns_none() {
         let ctx = Context {
-            capabilities: Some(vec![]),
+            tools: Some(vec![]),
             ..Context::default()
         };
         assert!(MiniMaxProvider::build_tools(&ctx).is_none());

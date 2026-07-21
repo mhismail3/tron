@@ -1,7 +1,6 @@
 //! SQLite schema, row codecs, and stored JSON helpers for the engine ledger.
 
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
 use serde::{Serialize, de::DeserializeOwned};
 
 use super::{IdempotencyEntry, IdempotencyKey, StoredEngineError, StoredInvocationOutcome};
@@ -13,14 +12,6 @@ use crate::engine::kernel::types::{CatalogRevision, FunctionRevision, Idempotenc
 
 pub(super) const SQLITE_SCHEMA: &str = r#"
 PRAGMA foreign_keys = ON;
-
--- Clean-cut migration: the removed external-worker and generic queue planes
--- formerly owned these tables. Canonical fixed contracts and worker bundles
--- rebuild the live catalog, while worker dispatch owns its own durable queue.
-DROP TABLE IF EXISTS engine_catalog_functions;
-DROP TABLE IF EXISTS engine_catalog_workers;
-DELETE FROM storage_payload_refs WHERE owner_kind = 'engine_queue_item';
-DROP TABLE IF EXISTS engine_queue_items;
 
 CREATE TABLE IF NOT EXISTS engine_catalog_revision (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -296,37 +287,6 @@ pub(super) fn from_json_string<T: DeserializeOwned>(
         operation,
         message: err.to_string(),
     })
-}
-
-pub(super) fn ensure_column(
-    conn: &Connection,
-    table: &'static str,
-    column: &'static str,
-    declaration: &'static str,
-) -> Result<()> {
-    let mut stmt = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|err| sqlite_err("ensure_column.prepare", err))?;
-    let mut rows = stmt
-        .query([])
-        .map_err(|err| sqlite_err("ensure_column.query", err))?;
-    while let Some(row) = rows
-        .next()
-        .map_err(|err| sqlite_err("ensure_column.next", err))?
-    {
-        let name: String = row
-            .get(1)
-            .map_err(|err| sqlite_err("ensure_column.name", err))?;
-        if name == column {
-            return Ok(());
-        }
-    }
-    conn.execute(
-        &format!("ALTER TABLE {table} ADD COLUMN {column} {declaration}"),
-        [],
-    )
-    .map_err(|err| sqlite_err("ensure_column.alter", err))?;
-    Ok(())
 }
 
 fn parse_time(operation: &'static str, value: &str) -> Result<DateTime<Utc>> {

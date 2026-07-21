@@ -59,9 +59,9 @@ final class ChatViewModel {
     let modelPickerState: ModelPickerState
     // MARK: - Protocol Conformance (Context Protocols)
 
-    /// Make a capability visible for rendering (CapabilityInvocationContext)
-    func makeCapabilityInvocationVisible(_ invocationId: String) {
-        animationCoordinator.makeCapabilityInvocationVisible(invocationId)
+    /// Make a tool visible for rendering (ToolInvocationContext)
+    func makeToolInvocationVisible(_ invocationId: String) {
+        animationCoordinator.makeToolInvocationVisible(invocationId)
     }
 
     /// Logging methods (ChatCoordinatorContext)
@@ -127,7 +127,7 @@ final class ChatViewModel {
     /// Raw reconstruction events already loaded into the timeline window.
     ///
     /// Older pages are transformed with this newer context so an assistant
-    /// content block split from its capability completion still renders the
+    /// content block split from its tool completion still renders the
     /// completed chip instead of degrading to a running placeholder.
     @ObservationIgnored
     var loadedReconstructionEvents: [RawEvent] = []
@@ -148,14 +148,14 @@ final class ChatViewModel {
     var localNotificationIdsByDedupKey: [String: UUID] = [:]
     // MARK: - Coordinators
 
-    /// Coordinates pill morph animations, message cascade timing, and capability staggering
+    /// Coordinates pill morph animations, message cascade timing, and tool staggering
     let animationCoordinator = AnimationCoordinator()
-    /// Ensures capability invocations appear in order and batches UI updates for 60fps
+    /// Ensures tool invocations appear in order and batches UI updates for 60fps
     let uiUpdateQueue = UIUpdateQueue()
     /// Manages text delta batching, thinking content, and backpressure
     let streamingManager = StreamingManager()
-    /// Coordinates capability invocation event handling (start/end) for capability invocation messages and UI updates
-    let capabilityInvocationCoordinator = CapabilityInvocationCoordinator()
+    /// Coordinates tool invocation event handling (start/end) for tool invocation messages and UI updates
+    let toolInvocationCoordinator = ToolInvocationCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates message sending, abort, and attachments
@@ -166,8 +166,8 @@ final class ChatViewModel {
     let compactionCoordinator = CompactionCoordinator()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
-    /// Message identities for capability invocations in the live current turn.
-    var currentTurnCapabilityMessageIds: Set<UUID> = []
+    /// Message identities for tool invocations in the live current turn.
+    var currentTurnToolMessageIds: Set<UUID> = []
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end
@@ -269,7 +269,7 @@ final class ChatViewModel {
                 }
                 isCompacting = false
                 compactionInProgressMessageId = nil
-                runningCapabilityInvocationCount = 0
+                runningToolInvocationCount = 0
                 prunedLiveMessages.removeAll()
             }
         })
@@ -486,7 +486,7 @@ final class ChatViewModel {
     }
 
     /// Show "Processing..." only when the model is thinking and no other
-    /// visual feedback is active (streaming text, thinking block, or capability
+    /// visual feedback is active (streaming text, thinking block, or tool
     /// spinner).
     ///
     /// Every property read here must be on an @Observable object so SwiftUI
@@ -496,7 +496,7 @@ final class ChatViewModel {
         guard agentPhase == .processing else { return false }
         if messages.last?.isStreaming == true { return false }
         if isThinkingActivelyStreaming { return false }
-        if hasRunningCapabilityInvocations { return false }
+        if hasRunningToolInvocations { return false }
         return true
     }
 
@@ -509,13 +509,13 @@ final class ChatViewModel {
         return isStreaming
     }
 
-    /// Counter-based running capability detection — O(1) instead of O(n*m) scan.
-    /// Incremented in capability start handler, decremented in processOrderedCapabilityInvocationCompleted and capability end handler.
+    /// Counter-based running tool detection — O(1) instead of O(n*m) scan.
+    /// Incremented in tool start handler, decremented in processOrderedToolInvocationCompleted and tool end handler.
     /// Reset on turn start and disconnect.
-    var runningCapabilityInvocationCount: Int = 0
+    var runningToolInvocationCount: Int = 0
 
-    private var hasRunningCapabilityInvocations: Bool {
-        runningCapabilityInvocationCount > 0
+    private var hasRunningToolInvocations: Bool {
+        runningToolInvocationCount > 0
     }
 
     var currentModel: String {

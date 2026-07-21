@@ -2,9 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
 
+use crate::engine::durability::ledger::sqlite_codec::ledger_failure;
 use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
-    IdempotencyReservationOutcome, IdempotencyStatus, StoredInvocationOutcome, ledger_failure,
+    IdempotencyReservationOutcome, IdempotencyStatus, StoredInvocationOutcome,
 };
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;

@@ -1,25 +1,25 @@
 use super::*;
 
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 
 use crate::engine::durability::state::SqliteEngineStateStore;
 
-fn assert_storage_generation(path: &std::path::Path) {
+fn assert_shared_storage_schema(path: &std::path::Path) {
     let conn = Connection::open(path).unwrap();
-    let marker: String = conn
+    let table_exists: bool = conn
         .query_row(
-            "SELECT value FROM storage_metadata WHERE key = ?1",
-            params![crate::shared::storage::STORAGE_GENERATION_KEY],
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_checkpoints')",
+            [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(marker, crate::shared::storage::CURRENT_STORAGE_GENERATION);
+    assert!(table_exists);
 }
 
 fn drifted_storage_path(dir: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
     let path = dir.path().join(name);
     let conn = Connection::open(&path).unwrap();
-    conn.execute_batch("CREATE TABLE storage_metadata (key TEXT PRIMARY KEY);")
+    conn.execute_batch("CREATE TABLE storage_checkpoints (id INTEGER PRIMARY KEY);")
         .unwrap();
     path
 }
@@ -46,26 +46,26 @@ fn state_error(path: std::path::PathBuf) -> EngineError {
 }
 
 #[test]
-fn sqlite_durability_constructors_create_shared_storage_metadata_first() {
+fn sqlite_durability_constructors_create_shared_storage_schema_first() {
     let dir = tempfile::tempdir().unwrap();
 
     let ledger_path = dir.path().join("ledger.sqlite");
     {
         let _store = SqliteEngineLedgerStore::open(&ledger_path).unwrap();
     }
-    assert_storage_generation(&ledger_path);
+    assert_shared_storage_schema(&ledger_path);
 
     let stream_path = dir.path().join("stream.sqlite");
     {
         let _store = SqliteEngineStreamStore::open(&stream_path).unwrap();
     }
-    assert_storage_generation(&stream_path);
+    assert_shared_storage_schema(&stream_path);
 
     let state_path = dir.path().join("state.sqlite");
     {
         let _store = SqliteEngineStateStore::open(&state_path).unwrap();
     }
-    assert_storage_generation(&state_path);
+    assert_shared_storage_schema(&state_path);
 }
 
 #[test]

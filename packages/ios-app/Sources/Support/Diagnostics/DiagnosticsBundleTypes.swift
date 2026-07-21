@@ -171,7 +171,7 @@ enum DiagnosticsEventSanitizer {
         "source",
         "status",
         "stopReason",
-        "modelPrimitiveName",
+        "toolName",
         "totalCost",
         "turn",
     ]

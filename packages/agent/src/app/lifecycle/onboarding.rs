@@ -99,7 +99,7 @@ pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
 
 /// Replace the stored bearer token with a fresh one. Returns the new
 /// token so the caller can display it (CLI) or push a notification
-/// (engine capability).
+/// (engine tool).
 ///
 /// Serialized through a process-wide mutex and the canonical auth-file lock so
 /// rotations cannot lose concurrent provider updates from another process. The
@@ -265,33 +265,6 @@ mod tests {
         assert!(
             parsed.get("providers").is_some(),
             "existing auth.json keys must be preserved"
-        );
-    }
-
-    #[test]
-    fn load_or_create_materializes_empty_auth_sentinel() {
-        let (_dir, path) = temp_token_path();
-        std::fs::write(&path, "{}").expect("seed fresh install sentinel");
-
-        let token = load_or_create_bearer_token(&path).expect("sentinel materializes");
-
-        assert_eq!(token.len(), ENCODED_TOKEN_LEN);
-        let raw = std::fs::read_to_string(&path).expect("read materialized auth.json");
-        assert_ne!(raw.trim(), "{}", "sentinel must be rewritten");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("auth json");
-        assert_eq!(parsed["version"], 1);
-        assert_eq!(parsed["bearerToken"], token);
-        assert!(
-            parsed["providers"]
-                .as_object()
-                .is_some_and(|o| o.is_empty()),
-            "fresh install must preserve empty provider state"
-        );
-        assert!(
-            parsed["lastUpdated"]
-                .as_str()
-                .is_some_and(|s| !s.is_empty()),
-            "materialized auth.json must include lastUpdated"
         );
     }
 

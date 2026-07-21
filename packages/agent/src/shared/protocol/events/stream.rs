@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::shared::protocol::content::ThinkingContentKind;
-use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::protocol::messages::{TokenUsage, ToolInvocationDraft};
 
 /// Events emitted during LLM response streaming.
 ///
@@ -64,20 +64,20 @@ pub enum StreamEvent {
         signature: Option<String>,
     },
 
-    /// Capability invocation started.
-    #[serde(rename = "capability_invocation_start")]
-    CapabilityInvocationDraftStart {
-        /// Capability invocation ID.
+    /// Tool invocation started.
+    #[serde(rename = "tool_invocation_start")]
+    ToolInvocationDraftStart {
+        /// Tool invocation ID.
         #[serde(rename = "invocationId")]
         invocation_id: String,
-        /// Capability name.
+        /// Tool name.
         name: String,
     },
 
-    /// Incremental capability invocation argument JSON.
-    #[serde(rename = "capability_invocation_delta")]
-    CapabilityInvocationDraftDelta {
-        /// Capability invocation ID.
+    /// Incremental tool invocation argument JSON.
+    #[serde(rename = "tool_invocation_delta")]
+    ToolInvocationDraftDelta {
+        /// Tool invocation ID.
         #[serde(rename = "invocationId")]
         invocation_id: String,
         /// Partial JSON arguments.
@@ -85,12 +85,12 @@ pub enum StreamEvent {
         arguments_delta: String,
     },
 
-    /// Capability invocation fully constructed.
-    #[serde(rename = "capability_invocation_end")]
-    CapabilityInvocationDraftEnd {
-        /// Complete capability invocation.
-        #[serde(rename = "capabilityInvocation")]
-        capability_invocation: CapabilityInvocationDraft,
+    /// Tool invocation fully constructed.
+    #[serde(rename = "tool_invocation_end")]
+    ToolInvocationDraftEnd {
+        /// Complete tool invocation.
+        #[serde(rename = "toolInvocation")]
+        tool_invocation: ToolInvocationDraft,
     },
 
     /// Stream completed successfully.

@@ -36,13 +36,13 @@ struct TurnGroupingTests {
 
     // MARK: - Boundary-Based Grouping
 
-    @Test("User message + assistant + capabilities grouped into same turn")
+    @Test("User message + assistant + tools grouped into same turn")
     func userAndAssistantGroupedTogether() {
         let events = [
             makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("Hello")]),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.completed", sequence: 4, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.completed", sequence: 4, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
         #expect(groups.count == 1)
@@ -56,7 +56,7 @@ struct TurnGroupingTests {
         let events = [
             makeEvent(type: "message.user", sequence: 1, payload: ["content": AnyCodable("First")]),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
             makeEvent(type: "message.user", sequence: 4, payload: ["content": AnyCodable("Second")]),
             makeEvent(type: "message.assistant", sequence: 5, payload: makePayload(turn: 2)),
         ]
@@ -112,7 +112,7 @@ struct TurnGroupingTests {
         let events = [
             makeEvent(id: "a", type: "message.user", sequence: 1),
             makeEvent(id: "b", type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
-            makeEvent(id: "c", type: "capability.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
+            makeEvent(id: "c", type: "tool.invocation.started", sequence: 3, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
         #expect(groups[0].events.map(\.id) == ["a", "b", "c"])
@@ -220,7 +220,7 @@ struct TurnGroupingTests {
 
     // MARK: - Realistic Scenario
 
-    @Test("Full session with setup, multiple turns, capabilities, and lifecycle events")
+    @Test("Full session with setup, multiple turns, tools, and lifecycle events")
     func realisticSession() {
         let events = [
             // Session setup
@@ -229,18 +229,18 @@ struct TurnGroupingTests {
             // Turn 1
             makeEvent(type: "message.user", sequence: 3, payload: ["content": AnyCodable("Create test files")]),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.started", sequence: 5, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.completed", sequence: 6, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.started", sequence: 7, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.completed", sequence: 8, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.started", sequence: 5, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.completed", sequence: 6, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.started", sequence: 7, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.completed", sequence: 8, payload: makePayload(turn: 1)),
             // Lifecycle event between turns (no turn in payload)
             makeEvent(type: "compact.boundary", sequence: 9),
             makeEvent(type: "compact.boundary", sequence: 10),
             // Turn 2
             makeEvent(type: "message.user", sequence: 11, payload: ["content": AnyCodable("Now edit them")]),
             makeEvent(type: "message.assistant", sequence: 12, payload: makePayload(turn: 2)),
-            makeEvent(type: "capability.invocation.started", sequence: 13, payload: makePayload(turn: 2)),
-            makeEvent(type: "capability.invocation.completed", sequence: 14, payload: makePayload(turn: 2)),
+            makeEvent(type: "tool.invocation.started", sequence: 13, payload: makePayload(turn: 2)),
+            makeEvent(type: "tool.invocation.completed", sequence: 14, payload: makePayload(turn: 2)),
         ]
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
 
@@ -250,12 +250,12 @@ struct TurnGroupingTests {
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2)
 
-        // Turn 1: user + assistant + 2 capability invocations + 2 capability results + lifecycle events
+        // Turn 1: user + assistant + 2 tool invocations + 2 tool results + lifecycle events
         #expect(groups[1].turnNumber == 1)
         #expect(groups[1].events.count == 8)
         #expect(groups[1].userMessagePreview == "Create test files")
 
-        // Turn 2: user + assistant + capability invocation + capability result
+        // Turn 2: user + assistant + tool invocation + tool result
         #expect(groups[2].turnNumber == 2)
         #expect(groups[2].events.count == 4)
         #expect(groups[2].userMessagePreview == "Now edit them")
@@ -547,29 +547,29 @@ struct TurnGroupingTests {
 
     // MARK: - Realistic Multi-Prompt Session
 
-    @Test("Realistic session matching actual database patterns with capabilities and inter-prompt events")
+    @Test("Realistic session matching actual database patterns with tools and inter-prompt events")
     func realisticMultiPromptSession() {
         let events = [
             // Session setup
             makeEvent(type: "session.start", sequence: 0),
             makeEvent(type: "model.provider_request", sequence: 1),
-            // Prompt 1: 3 turns with capability invocations
+            // Prompt 1: 3 turns with tool invocations
             makeEvent(type: "message.user", sequence: 2, payload: ["content": AnyCodable("Ingest all of them into the knowledge base")]),
             makeEvent(type: "compact.boundary", sequence: 3),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.started", sequence: 5, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.completed", sequence: 6),
+            makeEvent(type: "tool.invocation.started", sequence: 5, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.completed", sequence: 6),
             makeEvent(type: "message.assistant", sequence: 7, payload: makePayload(turn: 2)),
-            makeEvent(type: "capability.invocation.started", sequence: 8, payload: makePayload(turn: 2)),
-            makeEvent(type: "capability.invocation.completed", sequence: 9),
+            makeEvent(type: "tool.invocation.started", sequence: 8, payload: makePayload(turn: 2)),
+            makeEvent(type: "tool.invocation.completed", sequence: 9),
             makeEvent(type: "message.assistant", sequence: 10, payload: makePayload(turn: 3)),
             // Inter-prompt events
             makeEvent(type: "compact.boundary", sequence: 11),
             // Prompt 2: 2 turns, turn numbers reset
             makeEvent(type: "message.user", sequence: 13, payload: ["content": AnyCodable("Now tag all bookmarks")]),
             makeEvent(type: "message.assistant", sequence: 14, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.started", sequence: 15, payload: makePayload(turn: 1)),
-            makeEvent(type: "capability.invocation.completed", sequence: 17),
+            makeEvent(type: "tool.invocation.started", sequence: 15, payload: makePayload(turn: 1)),
+            makeEvent(type: "tool.invocation.completed", sequence: 17),
             makeEvent(type: "message.assistant", sequence: 18, payload: makePayload(turn: 2)),
             // Inter-prompt events
             makeEvent(type: "compact.boundary", sequence: 19),
@@ -580,8 +580,8 @@ struct TurnGroupingTests {
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
 
         // Turn 0: setup (2 events)
-        // Turn 1-3: prompt 1 (user + lifecycle events + 3 assistants + 2 capabilities + 2 results + inter-prompt event)
-        // Turn 4-5: prompt 2 (user + 2 assistants + capability + result + lifecycle event)
+        // Turn 1-3: prompt 1 (user + lifecycle events + 3 assistants + 2 tools + 2 results + inter-prompt event)
+        // Turn 4-5: prompt 2 (user + 2 assistants + tool + result + lifecycle event)
         // Turn 6: prompt 3 (user + assistant)
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2) // session.start + provider audit

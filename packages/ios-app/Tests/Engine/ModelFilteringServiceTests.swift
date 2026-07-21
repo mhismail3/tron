@@ -83,7 +83,7 @@ final class ModelFilteringServiceTests: XCTestCase {
             "contextWindow": contextWindow,
             "maxOutputTokens": maxOutputTokens as Any,
             "tier": tier,
-            "isLegacy": isRetiredGeneration,
+            "isRetiredGeneration": isRetiredGeneration,
             "supportsThinking": supportsThinking,
             "supportsImages": supportsImages,
             "supportsDocuments": supportsDocuments,

@@ -2,44 +2,44 @@ use super::*;
 use serde_json::json;
 use std::sync::Arc;
 
-// -- CapabilityInvocationDraft --
+// -- ToolInvocationDraft --
 
 #[test]
-fn capability_invocation_default() {
-    let tc = CapabilityInvocationDraft::default();
+fn tool_invocation_default() {
+    let tc = ToolInvocationDraft::default();
     assert!(tc.id.is_empty());
 }
 
 #[test]
-fn capability_invocation_serializes_type_field() {
-    let tc = CapabilityInvocationDraft {
+fn tool_invocation_serializes_type_field() {
+    let tc = ToolInvocationDraft {
         id: "tc_1".into(),
         name: "test".into(),
-        ..CapabilityInvocationDraft::default()
+        ..ToolInvocationDraft::default()
     };
     let json = serde_json::to_value(&tc).unwrap();
-    assert_eq!(json["type"], "capability_invocation");
+    assert_eq!(json["type"], "tool_invocation");
 }
 
 #[test]
-fn capability_invocation_deserializes_type_field() {
-    let json = r#"{"type":"capability_invocation","id":"tc_1","name":"test","arguments":{}}"#;
-    let tc: CapabilityInvocationDraft = serde_json::from_str(json).unwrap();
+fn tool_invocation_deserializes_type_field() {
+    let json = r#"{"type":"tool_invocation","id":"tc_1","name":"test","arguments":{}}"#;
+    let tc: ToolInvocationDraft = serde_json::from_str(json).unwrap();
     assert_eq!(tc.id, "tc_1");
 }
 
 #[test]
-fn capability_invocation_serde_roundtrip() {
+fn tool_invocation_serde_roundtrip() {
     let mut args = Map::new();
     let _ = args.insert("cmd".into(), json!("ls"));
-    let tc = CapabilityInvocationDraft {
+    let tc = ToolInvocationDraft {
         id: "call-1".into(),
-        name: "execute".into(),
+        name: "test_tool".into(),
         arguments: args,
-        ..CapabilityInvocationDraft::default()
+        ..ToolInvocationDraft::default()
     };
     let json = serde_json::to_value(&tc).unwrap();
-    let back: CapabilityInvocationDraft = serde_json::from_value(json).unwrap();
+    let back: ToolInvocationDraft = serde_json::from_value(json).unwrap();
     assert_eq!(tc, back);
 }
 
@@ -117,8 +117,8 @@ fn stop_reason_serde() {
         "\"end_turn\""
     );
     assert_eq!(
-        serde_json::to_string(&StopReason::CapabilityInvocation).unwrap(),
-        "\"capability_invocation\""
+        serde_json::to_string(&StopReason::ToolInvocation).unwrap(),
+        "\"tool_invocation\""
     );
     assert_eq!(
         serde_json::to_string(&StopReason::ModelContextWindowExceeded).unwrap(),
@@ -133,7 +133,7 @@ fn message_user_text() {
     let msg = Message::user("hello");
     assert!(msg.is_user());
     assert!(!msg.is_assistant());
-    assert!(!msg.is_capability_result());
+    assert!(!msg.is_tool_result());
 
     let json = serde_json::to_value(&msg).unwrap();
     assert_eq!(json["role"], "user");
@@ -162,15 +162,15 @@ fn message_assistant_with_stop_reason() {
 }
 
 #[test]
-fn message_capability_result() {
-    let msg = Message::CapabilityResult {
+fn message_tool_result() {
+    let msg = Message::ToolResult {
         invocation_id: "tc-1".into(),
-        content: CapabilityResultMessageContent::Text("done".into()),
+        content: ToolResultMessageContent::Text("done".into()),
         is_error: None,
     };
-    assert!(msg.is_capability_result());
+    assert!(msg.is_tool_result());
     let json = serde_json::to_value(&msg).unwrap();
-    assert_eq!(json["role"], "capabilityResult");
+    assert_eq!(json["role"], "toolResult");
     assert_eq!(json["invocationId"], "tc-1");
 }
 
@@ -188,9 +188,9 @@ fn message_serde_roundtrip() {
 fn extract_assistant_text_from_content() {
     let content = vec![
         AssistantContent::text("first"),
-        AssistantContent::CapabilityInvocation {
+        AssistantContent::ToolInvocation {
             id: "tc-1".into(),
-            name: "execute".into(),
+            name: "test_tool".into(),
             arguments: Map::new(),
             thought_signature: None,
         },
@@ -206,7 +206,7 @@ fn context_default_is_empty() {
     let ctx = Context::default();
     assert!(ctx.system_prompt.is_none());
     assert!(ctx.messages.is_empty());
-    assert!(ctx.capabilities.is_none());
+    assert!(ctx.tools.is_none());
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn context_serde_roundtrip() {
     let ctx = Context {
         system_prompt: Some("You are a helpful assistant.".into()),
         messages: vec![Message::user("hi")].into(),
-        capabilities: None,
+        tools: None,
         working_directory: Some("/tmp".into()),
         server_origin: None,
     };
@@ -343,10 +343,10 @@ fn is_compaction_summary_false_assistant() {
 }
 
 #[test]
-fn is_compaction_summary_false_capability_result() {
-    let msg = Message::CapabilityResult {
+fn is_compaction_summary_false_tool_result() {
+    let msg = Message::ToolResult {
         invocation_id: "tc-1".into(),
-        content: CapabilityResultMessageContent::Text(
+        content: ToolResultMessageContent::Text(
             "[Context from earlier in this conversation]".into(),
         ),
         is_error: None,

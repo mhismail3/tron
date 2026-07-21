@@ -1,11 +1,9 @@
 //! Provider turn-context construction from the already resolved primitive surface.
 
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::protocol::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::shared::protocol::messages::Context;
-use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Message, UserMessageContent,
-};
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use tracing::debug;
 
 const MAX_RELEVANCE_QUERY_CHARS: usize = 12_000;
@@ -15,18 +13,18 @@ const MAX_EVOLVING_MESSAGES: usize = 8;
 pub(super) fn build_turn_context(
     context_manager: &mut ContextManager,
     server_origin: Option<&str>,
-    primitive_surface: Vec<crate::shared::protocol::model_capabilities::ModelCapability>,
+    primitive_surface: Vec<crate::shared::protocol::model_tools::ModelTool>,
 ) -> Context {
     context_manager.set_server_origin(server_origin.map(String::from));
-    context_manager.set_capabilities(primitive_surface.clone());
+    context_manager.set_tools(primitive_surface.clone());
 
     let mut context = context_manager.build_base_context();
     context.messages = context_manager.get_messages_arc();
-    context.capabilities = Some(primitive_surface);
+    context.tools = Some(primitive_surface);
     context.server_origin = server_origin.map(String::from);
 
     debug!(
-        capability_count = context.capabilities.as_ref().map_or(0, Vec::len),
+        tool_count = context.tools.as_ref().map_or(0, Vec::len),
         "primitive turn context"
     );
 
@@ -76,7 +74,7 @@ fn relevance_segment(message: &Message) -> (&'static str, String) {
                 .iter()
                 .filter_map(|part| match part {
                     AssistantContent::Text { text } => Some(text.clone()),
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         name, arguments, ..
                     } => Some(format!(
                         "tool {name} {}",
@@ -88,9 +86,7 @@ fn relevance_segment(message: &Message) -> (&'static str, String) {
                 .join("\n");
             ("assistant", text)
         }
-        Message::CapabilityResult { content, .. } => {
-            ("tool_result", capability_result_relevance_text(content))
-        }
+        Message::ToolResult { content, .. } => ("tool_result", tool_result_relevance_text(content)),
     }
 }
 
@@ -113,14 +109,14 @@ fn user_relevance_text(content: &UserMessageContent) -> String {
     }
 }
 
-fn capability_result_relevance_text(content: &CapabilityResultMessageContent) -> String {
+fn tool_result_relevance_text(content: &ToolResultMessageContent) -> String {
     match content {
-        CapabilityResultMessageContent::Text(text) => text.clone(),
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
+        ToolResultMessageContent::Text(text) => text.clone(),
+        ToolResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text.clone()),
-                CapabilityResultContent::Image { .. } => None,
+                ToolResultContent::Text { text } => Some(text.clone()),
+                ToolResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -141,7 +137,7 @@ mod tests {
             Message::user("research current compiler changes"),
             Message::assistant("I will use recent repository research."),
             Message::Assistant {
-                content: vec![AssistantContent::CapabilityInvocation {
+                content: vec![AssistantContent::ToolInvocation {
                     id: "call-1".to_owned(),
                     name: "worker_discover".to_owned(),
                     arguments: Map::from_iter([(
@@ -155,9 +151,9 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: "call-1".to_owned(),
-                content: CapabilityResultMessageContent::Text(
+                content: ToolResultMessageContent::Text(
                     "Promoted last30days-research at version v2".to_owned(),
                 ),
                 is_error: None,

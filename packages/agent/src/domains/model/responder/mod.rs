@@ -522,7 +522,7 @@ fn build_request_audit(
         .as_ref()
         .map(ModelReasoningLevel::as_canonical_str)
         .map(str::to_owned);
-    let capability_count = request.context.capabilities.as_ref().map_or(0, Vec::len);
+    let tool_count = request.context.tools.as_ref().map_or(0, Vec::len);
     let provider_request = provider_request.redacted_and_bounded().map_err(|error| {
         ModelResponseError::audit(format!("provider request audit payload invalid: {error}"))
     })?;
@@ -534,7 +534,7 @@ fn build_request_audit(
         request.session_id.clone(),
         reasoning_level,
         request.context.messages.len(),
-        capability_count,
+        tool_count,
         stream_options,
         provider_request,
     ))

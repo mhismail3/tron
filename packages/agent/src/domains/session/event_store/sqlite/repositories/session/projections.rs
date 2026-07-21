@@ -49,11 +49,10 @@ const MAX_ASSISTANT_TEXT_LEN: usize = 200;
 const MAX_ACTIVITY_LINES: usize = 5;
 
 #[derive(Clone, Debug, Default)]
-struct CapabilityCompletionSummary {
+struct ToolCompletionSummary {
     is_error: bool,
     duration_ms: Option<i64>,
-    model_primitive_name: Option<String>,
-    operation_name: Option<String>,
+    tool_name: Option<String>,
     trace_id: Option<String>,
     root_invocation_id: Option<String>,
     theme_color: Option<String>,
@@ -61,7 +60,7 @@ struct CapabilityCompletionSummary {
     summary: Option<String>,
 }
 
-impl CapabilityCompletionSummary {
+impl ToolCompletionSummary {
     fn from_payload(payload: &Value) -> Self {
         let details = payload.get("details");
         let presentation_hints = payload
@@ -80,10 +79,7 @@ impl CapabilityCompletionSummary {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             duration_ms: payload.get("duration").and_then(Value::as_i64),
-            model_primitive_name: string_field(payload, "modelPrimitiveName"),
-            operation_name: string_field(payload, "operationName")
-                .or_else(|| string_field_opt(details, "operationName"))
-                .or_else(|| string_field_opt(details, "operation")),
+            tool_name: string_field(payload, "toolName"),
             trace_id: string_field(payload, "traceId")
                 .or_else(|| string_field_opt(details, "traceId")),
             root_invocation_id: string_field(payload, "rootInvocationId")
@@ -128,7 +124,7 @@ fn string_field_opt(value: Option<&Value>, key: &str) -> Option<String> {
     value.and_then(|value| string_field(value, key))
 }
 
-fn display_capability_args(input: Option<Value>) -> Option<Value> {
+fn display_tool_args(input: Option<Value>) -> Option<Value> {
     let input = input?;
     input
         .get("arguments")
@@ -137,29 +133,18 @@ fn display_capability_args(input: Option<Value>) -> Option<Value> {
         .or(Some(input))
 }
 
-fn operation_name_from_value(value: &Value) -> Option<String> {
-    ["operationName", "operation"].iter().find_map(|key| {
-        value
-            .get(*key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|operation| !operation.is_empty())
-            .map(ToOwned::to_owned)
-    })
-}
-
 type ActivityEventRow = (String, String, Option<String>);
 
 fn build_activity_summaries(rows: &[ActivityEventRow]) -> Vec<ActivitySummaryLine> {
-    let mut capability_results: HashMap<String, CapabilityCompletionSummary> = HashMap::new();
+    let mut tool_results: HashMap<String, ToolCompletionSummary> = HashMap::new();
     for (event_type, payload_str, _) in rows {
-        if event_type == "capability.invocation.completed"
+        if event_type == "tool.invocation.completed"
             && let Ok(payload) = serde_json::from_str::<Value>(payload_str)
             && let Some(invocation_id) = payload.get("invocationId").and_then(Value::as_str)
         {
-            let _ = capability_results.insert(
+            let _ = tool_results.insert(
                 invocation_id.to_string(),
-                CapabilityCompletionSummary::from_payload(&payload),
+                ToolCompletionSummary::from_payload(&payload),
             );
         }
     }
@@ -197,7 +182,7 @@ fn build_activity_summaries(rows: &[ActivityEventRow]) -> Vec<ActivitySummaryLin
                                     }
                                 }
                             }
-                            Some("capability_invocation") => {
+                            Some("tool_invocation") => {
                                 let name = block
                                     .get("name")
                                     .and_then(Value::as_str)
@@ -205,24 +190,18 @@ fn build_activity_summaries(rows: &[ActivityEventRow]) -> Vec<ActivitySummaryLin
                                 let completion = block
                                     .get("id")
                                     .and_then(Value::as_str)
-                                    .and_then(|id| capability_results.get(id));
-                                let display_args = display_capability_args(
+                                    .and_then(|id| tool_results.get(id));
+                                let display_args = display_tool_args(
                                     block
                                         .get("input")
                                         .cloned()
                                         .or_else(|| block.get("arguments").cloned()),
                                 );
-                                let operation_name = completion
-                                    .and_then(|summary| summary.operation_name.clone())
-                                    .or_else(|| {
-                                        display_args.as_ref().and_then(operation_name_from_value)
-                                    });
                                 lines.push(ActivitySummaryLine {
-                                    kind: "capability".into(),
-                                    model_primitive_name: completion
-                                        .and_then(|summary| summary.model_primitive_name.clone())
+                                    kind: "tool".into(),
+                                    tool_name: completion
+                                        .and_then(|summary| summary.tool_name.clone())
                                         .or_else(|| Some(name.to_string())),
-                                    operation_name,
                                     trace_id: completion
                                         .and_then(|summary| summary.trace_id.clone()),
                                     root_invocation_id: completion
@@ -232,7 +211,7 @@ fn build_activity_summaries(rows: &[ActivityEventRow]) -> Vec<ActivitySummaryLin
                                     presentation_hints: completion
                                         .and_then(|summary| summary.presentation_hints.clone()),
                                     summary: completion.and_then(|summary| summary.summary.clone()),
-                                    capability_args: display_args,
+                                    tool_args: display_args,
                                     duration_ms: completion.and_then(|summary| summary.duration_ms),
                                     is_error: completion.map(|summary| summary.is_error),
                                     ..Default::default()
@@ -331,7 +310,7 @@ impl SessionRepo {
         let mut stmt = conn.prepare(
             "SELECT type, payload, invocation_id FROM events
                WHERE session_id = ?1
-                 AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed')
+                 AND type IN ('message.user', 'message.assistant', 'tool.invocation.completed')
              ORDER BY sequence ASC",
         )?;
 
@@ -365,7 +344,7 @@ impl SessionRepo {
         let mut stmt = conn.prepare(
             "SELECT session_id, type, payload, invocation_id FROM events
              WHERE session_id IN (SELECT value FROM json_each(?1))
-               AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed')
+               AND type IN ('message.user', 'message.assistant', 'tool.invocation.completed')
              ORDER BY session_id ASC, sequence ASC",
         )?;
         let rows = stmt

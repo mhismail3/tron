@@ -193,8 +193,8 @@ pub async fn load_server_auth_with_client(
     credential_override: Option<&super::types::ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    // Strict parse: a retired `endpoint` field or any other unknown key
-    // surfaces as `AuthError::MalformedProviderAuth` with re-auth guidance.
+    // Strict parsing surfaces every unknown key as
+    // `AuthError::MalformedProviderAuth` with re-auth guidance.
     let gpa = super::storage::try_get_google_provider_auth(auth_path)?;
     let Some(ref gpa) = gpa else {
         return Ok(None);
@@ -533,30 +533,21 @@ mod tests {
         );
     }
 
-    /// R3: retired auth.json files with `endpoint: "antigravity"` (from the
-    /// pre-CCA era) must fail to load. The strict `GoogleProviderAuth`
-    /// deserializer rejects unknown fields, and `load_server_auth`
-    /// surfaces that as `AuthError::MalformedProviderAuth` with re-auth
-    /// guidance. The old "silently ignores endpoint and uses CCA anyway"
-    /// behavior is gone.
     #[tokio::test]
-    async fn load_server_auth_rejects_retired_antigravity_auth_json() {
+    async fn load_server_auth_rejects_unknown_provider_field() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Write a raw auth.json with the retired antigravity shape. We
-        // can't go through `save_google_provider_auth` because that type
-        // no longer serializes `endpoint`.
         let raw = serde_json::json!({
             "version": 1,
             "providers": {
                 "google": {
-                    "clientId": "retired-client",
-                    "endpoint": "antigravity",
+                    "clientId": "client-id",
+                    "unexpectedField": "value",
                     "accounts": [{
                         "label": "(test)",
                         "oauth": {
-                            "accessToken": "ya29.retired",
+                            "accessToken": "ya29.test",
                             "refreshToken": "ref",
                             "expiresAt": now_ms() + 3_600_000,
                         }
@@ -570,8 +561,8 @@ mod tests {
         let err = load_server_auth(&path).await.unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("endpoint"),
-            "error must name the retired `endpoint` field, got: {msg}"
+            msg.contains("unexpectedField"),
+            "error must name the unknown field, got: {msg}"
         );
         assert!(
             msg.contains("tron auth google"),

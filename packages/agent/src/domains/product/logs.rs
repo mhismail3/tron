@@ -23,7 +23,7 @@ use crate::engine::{
 };
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::map_event_store_error;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use crate::shared::server::errors::to_json_value;
 use serde::Deserialize;
 use serde::Serialize;
@@ -128,15 +128,13 @@ struct RecentLogEntry {
 async fn ingest_logs_value(
     params: Option<&Value>,
     event_store: &Arc<EventStore>,
-) -> Result<Value, CapabilityError> {
-    let params_value = params.ok_or_else(|| CapabilityError::InvalidParams {
+) -> Result<Value, ToolError> {
+    let params_value = params.ok_or_else(|| ToolError::InvalidParams {
         message: "Missing required parameter: entries".to_owned(),
     })?;
     let mut params: IngestLogsParams =
-        serde_json::from_value(params_value.clone()).map_err(|error| {
-            CapabilityError::InvalidParams {
-                message: format!("Invalid params: {error}"),
-            }
+        serde_json::from_value(params_value.clone()).map_err(|error| ToolError::InvalidParams {
+            message: format!("Invalid params: {error}"),
         })?;
 
     for entry in &mut params.entries {
@@ -165,13 +163,11 @@ async fn ingest_logs_value(
 async fn recent_logs_value(
     params: Option<Value>,
     event_store: &Arc<EventStore>,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let params: RecentLogsParams = match params {
-        Some(value) => {
-            serde_json::from_value(value).map_err(|error| CapabilityError::InvalidParams {
-                message: format!("Invalid params: {error}"),
-            })?
-        }
+        Some(value) => serde_json::from_value(value).map_err(|error| ToolError::InvalidParams {
+            message: format!("Invalid params: {error}"),
+        })?,
         None => RecentLogsParams {
             limit: DEFAULT_RECENT_LIMIT,
             session_id: None,
@@ -181,7 +177,7 @@ async fn recent_logs_value(
     };
 
     if params.limit > MAX_RECENT_LIMIT {
-        return Err(CapabilityError::InvalidParams {
+        return Err(ToolError::InvalidParams {
             message: format!("limit must be <= {MAX_RECENT_LIMIT}"),
         });
     }
@@ -214,7 +210,7 @@ async fn recent_logs_value(
         })
     })
     .await?;
-    serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
+    serde_json::to_value(result).map_err(|error| ToolError::Internal {
         message: error.to_string(),
     })
 }
@@ -241,14 +237,14 @@ mod tests {
 
     use super::*;
     use crate::domains::session::event_store::{
-        ConnectionConfig, EventStore, new_in_memory, run_migrations,
+        ConnectionConfig, EventStore, ensure_schema, new_in_memory,
     };
 
     fn make_event_store() -> Arc<EventStore> {
         let pool = new_in_memory(&ConnectionConfig::default()).expect("pool");
         {
             let conn = pool.get().expect("conn");
-            run_migrations(&conn).expect("migrate");
+            ensure_schema(&conn).expect("schema");
         }
         Arc::new(EventStore::new(pool))
     }

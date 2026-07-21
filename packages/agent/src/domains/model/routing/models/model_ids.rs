@@ -3,8 +3,8 @@
 //! Centralized string constants for all supported model IDs across all providers.
 //! Using constants prevents typos and enables compile-time verification.
 //!
-//! **Note**: Model ID *arrays* are no longer defined here. The provider registries
-//! (e.g., `OPENAI_MODELS` in `openai/types.rs`) are the single source of truth.
+//! Provider registries such as `OPENAI_MODELS` in `openai/types.rs` are the
+//! single source of truth for model ID arrays.
 //! Use `all_openai_model_ids()`, `all_claude_model_ids()`, etc. for runtime lookups.
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ pub const GPT_5_5_2026_04_23: &str = "gpt-5.5-2026-04-23";
 /// GPT 5.4 — previous `OpenAI` flagship.
 pub const GPT_5_4: &str = "gpt-5.4";
 
-/// GPT 5.4 Pro — highest capability tier on the Platform API.
+/// GPT 5.4 Pro — highest tool tier on the Platform API.
 pub const GPT_5_4_PRO: &str = "gpt-5.4-pro";
 
 /// GPT 5.4 Mini — smaller, faster variant of GPT-5.4 for high-volume agentic workloads.

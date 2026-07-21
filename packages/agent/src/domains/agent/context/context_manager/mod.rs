@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::shared::protocol::messages::Message;
-use crate::shared::protocol::model_capabilities::ModelCapability;
+use crate::shared::protocol::model_tools::ModelTool;
 
 use super::compaction_engine::{CompactionDeps, CompactionEngine};
 use super::constants::CHARS_PER_TOKEN;
@@ -26,7 +26,7 @@ pub struct ContextManager {
     api_context_tokens: Option<u64>,
     system_prompt: String,
     server_origin: Option<String>,
-    capabilities: Vec<ModelCapability>,
+    tools: Vec<ModelTool>,
 }
 
 pub(crate) struct CompactionCheckpoint {
@@ -51,7 +51,7 @@ impl ContextManager {
             api_context_tokens: None,
             system_prompt,
             server_origin: None,
-            capabilities: Vec::new(),
+            tools: Vec::new(),
         }
     }
 
@@ -89,7 +89,7 @@ impl ContextManager {
             return api_tokens;
         }
         self.estimate_system_prompt_tokens()
-            + self.estimate_capabilities_tokens()
+            + self.estimate_tools_tokens()
             + self.estimate_environment_tokens()
             + self.get_messages_tokens()
     }
@@ -122,10 +122,8 @@ impl ContextManager {
     }
 
     #[must_use]
-    pub fn estimate_capabilities_tokens(&self) -> u64 {
-        u64::from(token_estimator::estimate_capabilities_tokens(
-            &self.capabilities,
-        ))
+    pub fn estimate_tools_tokens(&self) -> u64 {
+        u64::from(token_estimator::estimate_tools_tokens(&self.tools))
     }
 
     #[must_use]
@@ -156,9 +154,9 @@ impl ContextManager {
     }
 
     /// Replace the live provider tool surface used for token accounting.
-    pub fn set_capabilities(&mut self, capabilities: Vec<ModelCapability>) {
-        if self.capabilities != capabilities {
-            self.capabilities = capabilities;
+    pub fn set_tools(&mut self, tools: Vec<ModelTool>) {
+        if self.tools != tools {
+            self.tools = tools;
             self.api_context_tokens = None;
         }
     }
@@ -222,7 +220,7 @@ impl ContextManager {
         crate::shared::protocol::messages::Context {
             system_prompt: Some(self.get_system_prompt().to_owned()),
             messages: Arc::default(),
-            capabilities: None,
+            tools: None,
             working_directory: Some(self.get_working_directory().to_owned()),
             server_origin: None,
         }

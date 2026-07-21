@@ -159,12 +159,11 @@ final class SessionTypesTests: XCTestCase {
             "role": "assistant",
             "content": "Hello, how can I help?",
             "timestamp": "2026-01-26T00:00:00.000Z",
-            "capabilityInvocations": [
+            "toolInvocations": [
                 {
                     "id": "toolu_123",
                     "identity": {
-                        "modelPrimitiveName": "execute",
-                        "operationName": "file_read",
+                        "toolName": "process_run",
                         "traceId": "trace-file"
                     },
                     "input": {"file_path": "/test.txt"},
@@ -179,10 +178,9 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(message.id, "msg_123")
         XCTAssertEqual(message.role, "assistant")
-        XCTAssertEqual(message.capabilityInvocations?.count, 1)
-        XCTAssertEqual(message.capabilityInvocations?[0].id, "toolu_123")
-        XCTAssertEqual(message.capabilityInvocations?[0].identity?.operationName, "file_read")
-        XCTAssertEqual(message.capabilityInvocations?[0].identity?.traceId, "trace-file")
+        XCTAssertEqual(message.toolInvocations?.count, 1)
+        XCTAssertEqual(message.toolInvocations?[0].id, "toolu_123")
+        XCTAssertEqual(message.toolInvocations?[0].identity?.traceId, "trace-file")
     }
 }
 
@@ -357,7 +355,7 @@ final class ModelTypesExtendedTests: XCTestCase {
     func testModelInfoSortOrderDecoding() throws {
         // I8: the five required fields must be present on the wire.
         let json = """
-        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "attachmentPolicy": {"supportsPdfContent": true, "supportsTextFiles": true, "maxImageDimension": 1568, "maxImageBytes": 1400000, "maxDocumentBytes": 20971520, "supportedImageMimeTypes": ["image/jpeg", "image/png"]}, "tier": "opus", "isLegacy": false, "sortOrder": 0}
+        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "attachmentPolicy": {"supportsPdfContent": true, "supportsTextFiles": true, "maxImageDimension": 1568, "maxImageBytes": 1400000, "maxDocumentBytes": 20971520, "supportedImageMimeTypes": ["image/jpeg", "image/png"]}, "tier": "opus", "isRetiredGeneration": false, "sortOrder": 0}
         """.data(using: .utf8)!
         let model = try JSONDecoder().decode(ModelInfo.self, from: json)
         XCTAssertEqual(model.sortOrder, 0)
@@ -540,7 +538,7 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
             "ok":false,
             "result":null,
             "error":{
-                "code":"CAPABILITY_NOT_FOUND",
+                "code":"TOOL_NOT_FOUND",
                 "category":"not_found",
                 "message":"function not found: worker_missing",
                 "retryable":false,
@@ -555,7 +553,7 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
 
         XCTAssertFalse(response.ok)
         XCTAssertNil(response.result)
-        XCTAssertEqual(response.error?.errorCode, .capabilityNotFound)
+        XCTAssertEqual(response.error?.errorCode, .toolNotFound)
         XCTAssertEqual(response.error?.message, "function not found: worker_missing")
         XCTAssertEqual(response.error?.details?["id"]?.stringValue, "worker_missing")
     }

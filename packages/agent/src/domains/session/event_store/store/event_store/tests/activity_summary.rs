@@ -137,7 +137,7 @@ fn get_activity_summary_thinking_block() {
 }
 
 #[test]
-fn get_activity_summary_capability_invocation_with_result() {
+fn get_activity_summary_tool_invocation_with_result() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/a", None, None)
@@ -147,7 +147,7 @@ fn get_activity_summary_capability_invocation_with_result() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "capability_invocation", "id": "call_1", "name": "execute", "input": {"operation": "file_read", "path": "/foo.rs"}}
+                {"type": "tool_invocation", "id": "call_1", "name": "test_tool", "input": {"operation": "file_read", "path": "/foo.rs"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -156,7 +156,7 @@ fn get_activity_summary_capability_invocation_with_result() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({"invocationId": "call_1", "isError": false, "duration": 150}),
             parent_id: None,
             sequence: None,
@@ -167,18 +167,18 @@ fn get_activity_summary_capability_invocation_with_result() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].kind, "capability");
-    assert_eq!(lines[0].model_primitive_name.as_deref(), Some("execute"));
+    assert_eq!(lines[0].kind, "tool");
+    assert_eq!(lines[0].tool_name.as_deref(), Some("test_tool"));
     assert_eq!(lines[0].duration_ms, Some(150));
     assert_eq!(lines[0].is_error, Some(false));
-    assert!(lines[0].capability_args.is_some());
-    let args = lines[0].capability_args.as_ref().unwrap();
+    assert!(lines[0].tool_args.is_some());
+    let args = lines[0].tool_args.as_ref().unwrap();
     assert_eq!(args["operation"], "file_read");
     assert_eq!(args["path"], "/foo.rs");
 }
 
 #[test]
-fn get_activity_summary_capability_invocation_uses_execute_identity() {
+fn get_activity_summary_tool_invocation_uses_direct_tool_identity() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/a", None, None)
@@ -189,11 +189,10 @@ fn get_activity_summary_capability_invocation_uses_execute_identity() {
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
                 {
-                    "type": "capability_invocation",
+                    "type": "tool_invocation",
                     "id": "call_1",
-                    "name": "execute",
+                    "name": "process_run",
                     "input": {
-                        "operation": "process_run",
                         "command": "printf hello"
                     }
                 }
@@ -205,17 +204,16 @@ fn get_activity_summary_capability_invocation_uses_execute_identity() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({
                 "invocationId": "call_1",
-                "modelPrimitiveName": "execute",
-                "operationName": "process_run",
-                "traceId": "trace-execute",
-                "rootInvocationId": "root-execute",
+                "toolName": "process_run",
+                "traceId": "trace-process",
+                "rootInvocationId": "root-process",
                 "themeColor": "#10B981",
                 "presentationHints": {
-                    "displayName": "Execute",
-                    "summary": "Primitive process operation",
+                    "displayName": "Run Process",
+                    "summary": "Run the requested process",
                     "icon": "terminal"
                 },
                 "isError": false,
@@ -230,27 +228,25 @@ fn get_activity_summary_capability_invocation_uses_execute_identity() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].kind, "capability");
-    assert_eq!(lines[0].model_primitive_name.as_deref(), Some("execute"));
-    assert_eq!(lines[0].operation_name.as_deref(), Some("process_run"));
-    assert_eq!(lines[0].trace_id.as_deref(), Some("trace-execute"));
-    assert_eq!(lines[0].root_invocation_id.as_deref(), Some("root-execute"));
+    assert_eq!(lines[0].kind, "tool");
+    assert_eq!(lines[0].tool_name.as_deref(), Some("process_run"));
+    assert_eq!(lines[0].trace_id.as_deref(), Some("trace-process"));
+    assert_eq!(lines[0].root_invocation_id.as_deref(), Some("root-process"));
     assert_eq!(lines[0].theme_color.as_deref(), Some("#10B981"));
     assert_eq!(
         lines[0].summary.as_deref(),
-        Some("Primitive process operation")
+        Some("Run the requested process")
     );
     assert_eq!(
-        lines[0].capability_args.as_ref().unwrap(),
+        lines[0].tool_args.as_ref().unwrap(),
         &serde_json::json!({
-            "operation": "process_run",
             "command": "printf hello"
         })
     );
 }
 
 #[test]
-fn get_activity_summary_capability_invocation_no_result() {
+fn get_activity_summary_tool_invocation_no_result() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/a", None, None)
@@ -260,7 +256,7 @@ fn get_activity_summary_capability_invocation_no_result() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
-                {"type": "capability_invocation", "id": "call_99", "name": "execute", "input": {"operation": "process_run", "command": "ls"}}
+                {"type": "tool_invocation", "id": "call_99", "name": "test_tool", "input": {"operation": "process_run", "command": "ls"}}
             ]}),
             parent_id: None,
             sequence: None,
@@ -271,8 +267,8 @@ fn get_activity_summary_capability_invocation_no_result() {
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].kind, "capability");
-    assert_eq!(lines[0].model_primitive_name.as_deref(), Some("execute"));
+    assert_eq!(lines[0].kind, "tool");
+    assert_eq!(lines[0].tool_name.as_deref(), Some("test_tool"));
     assert!(lines[0].duration_ms.is_none());
     assert!(lines[0].is_error.is_none());
 }
@@ -317,7 +313,7 @@ fn get_activity_summary_interleaved_content() {
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({"content": [
                 {"type": "text", "text": "Let me read the file"},
-                {"type": "capability_invocation", "id": "c1", "name": "execute", "input": {"operation": "file_read", "path": "a.rs"}},
+                {"type": "tool_invocation", "id": "c1", "name": "test_tool", "input": {"operation": "file_read", "path": "a.rs"}},
                 {"type": "text", "text": "Now I see the issue"}
             ]}),
             parent_id: None,
@@ -331,8 +327,8 @@ fn get_activity_summary_interleaved_content() {
     assert_eq!(lines.len(), 3);
     assert_eq!(lines[0].kind, "text");
     assert_eq!(lines[0].text.as_deref(), Some("Let me read the file"));
-    assert_eq!(lines[1].kind, "capability");
-    assert_eq!(lines[1].model_primitive_name.as_deref(), Some("execute"));
+    assert_eq!(lines[1].kind, "tool");
+    assert_eq!(lines[1].tool_name.as_deref(), Some("test_tool"));
     assert_eq!(lines[2].kind, "text");
     assert_eq!(lines[2].text.as_deref(), Some("Now I see the issue"));
 }

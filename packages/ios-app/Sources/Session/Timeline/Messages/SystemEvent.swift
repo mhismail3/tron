@@ -62,7 +62,7 @@ enum SystemEvent: Equatable, Hashable {
         case .messageDeleted(let targetType):
             let typeLabel = targetType == "message.user" ? "user message" :
                            targetType == "message.assistant" ? "assistant message" :
-                           targetType == "capability.invocation.completed" ? "capability result" : "message"
+                           targetType == "tool.invocation.completed" ? "tool result" : "message"
             return "Deleted \(typeLabel) from context"
         case .catchingUp:
             return "Loading latest messages..."

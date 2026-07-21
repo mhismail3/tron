@@ -138,14 +138,14 @@ fn from_session_state(state: &SessionState) -> Result<ReconstructedState, Runtim
 mod tests {
     use super::*;
     use crate::domains::session::event_store::{
-        AppendOptions, ConnectionConfig, EventType, new_in_memory, run_migrations,
+        AppendOptions, ConnectionConfig, EventType, ensure_schema, new_in_memory,
     };
 
     fn make_store() -> EventStore {
         let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            let _ = run_migrations(&conn).unwrap();
+            let _ = ensure_schema(&conn).unwrap();
         }
         EventStore::new(pool)
     }
@@ -350,7 +350,7 @@ mod tests {
             .append(&AppendOptions {
                 session_id: &session.session.id,
                 event_type: EventType::MessageAssistant,
-                payload: serde_json::json!({"content": "legacy malformed content", "turn": 1}),
+                payload: serde_json::json!({"content": "invalid content shape", "turn": 1}),
                 parent_id: None,
                 sequence: None,
             })
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn reconstruct_rejects_malformed_persisted_capability_completion() {
+    fn reconstruct_rejects_malformed_persisted_tool_completion() {
         let store = make_store();
         let session = store
             .create_session("test-model", "/tmp", Some("test"), None)
@@ -397,9 +397,9 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({
                     "content": [{
-                        "type": "capability_invocation",
+                        "type": "tool_invocation",
                         "id": "call_bad_completion",
-                        "name": "execute",
+                        "name": "test_tool",
                         "arguments": {}
                     }],
                     "turn": 1
@@ -411,7 +411,7 @@ mod tests {
         let malformed = store
             .append(&AppendOptions {
                 session_id: &session.session.id,
-                event_type: EventType::CapabilityInvocationCompleted,
+                event_type: EventType::ToolInvocationCompleted,
                 payload: serde_json::json!({
                     "invocationId": "call_bad_completion",
                     "content": "output"
@@ -422,7 +422,7 @@ mod tests {
             .unwrap();
 
         let error = reconstruct(&store, &session.session.id)
-            .expect_err("malformed durable capability history must fail closed");
+            .expect_err("malformed durable tool history must fail closed");
         let message = error.to_string();
         assert!(message.contains(&malformed.id));
         assert!(message.contains("isError"));
@@ -440,7 +440,7 @@ mod tests {
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({
                     "role": "assistant",
-                    "content": [{"type": "text", "text": "legacy overflow"}],
+                    "content": [{"type": "text", "text": "invalid ordinal"}],
                     "turn": i64::from(u32::MAX) + 1,
                     "model": "test-model",
                     "stopReason": "end_turn"
@@ -459,10 +459,10 @@ mod tests {
         );
     }
 
-    /// Verify that provider-native capability invocation blocks survive the
+    /// Verify that provider-native tool invocation blocks survive the
     /// serde roundtrip used to resume sessions across model providers.
     #[test]
-    fn reconstruct_provider_capability_invocation_survives_serde_roundtrip() {
+    fn reconstruct_provider_tool_invocation_survives_serde_roundtrip() {
         let store = make_store();
         let session = store
             .create_session("test-model", "/tmp", Some("test"), None)
@@ -479,14 +479,14 @@ mod tests {
             })
             .unwrap();
 
-        // Assistant message with capability_invocation using "input" (API wire format, as persistence stores it)
+        // Assistant message with tool_invocation using "input" (API wire format, as persistence stores it)
         let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
                     "content": [
                         {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
-                    {"type": "capability_invocation", "id": "toolu_01abc", "name": "execute", "arguments": {"operation": "file_write", "path": "/tmp/test.txt", "content": "hello"}}
+                    {"type": "tool_invocation", "id": "toolu_01abc", "name": "test_tool", "arguments": {"operation": "file_write", "path": "/tmp/test.txt", "content": "hello"}}
                 ],
                 "turn": 1
             }),
@@ -496,7 +496,7 @@ mod tests {
 
         let _ = store.append(&AppendOptions {
             session_id: sid,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({"invocationId": "toolu_01abc", "content": "File written", "isError": false}),
             parent_id: None,
             sequence: None,
@@ -516,7 +516,7 @@ mod tests {
             .unwrap();
 
         let state = reconstruct(&store, sid).unwrap();
-        // All 4 messages must survive: user, assistant(capability_invocation), capabilityResult, assistant(text)
+        // All 4 messages must survive: user, assistant(tool_invocation), toolResult, assistant(text)
         assert_eq!(
             state.messages.len(),
             4,
@@ -529,24 +529,24 @@ mod tests {
         );
         assert!(state.messages[0].is_user());
         assert!(state.messages[1].is_assistant());
-        assert!(state.messages[2].is_capability_result());
+        assert!(state.messages[2].is_tool_result());
         assert!(state.messages[3].is_assistant());
 
-        // Verify the capability_invocation arguments are preserved
+        // Verify the tool_invocation arguments are preserved
         if let Message::Assistant { content, .. } = &state.messages[1] {
-            let capability_invocation = content
+            let tool_invocation = content
                 .iter()
-                .find(|c| c.is_capability_invocation())
-                .expect("should have capability_invocation");
-            if let crate::shared::protocol::content::AssistantContent::CapabilityInvocation {
+                .find(|c| c.is_tool_invocation())
+                .expect("should have tool_invocation");
+            if let crate::shared::protocol::content::AssistantContent::ToolInvocation {
                 id,
                 name,
                 arguments,
                 ..
-            } = capability_invocation
+            } = tool_invocation
             {
                 assert_eq!(id, "toolu_01abc");
-                assert_eq!(name, "execute");
+                assert_eq!(name, "test_tool");
                 assert_eq!(arguments["operation"], "file_write");
                 assert_eq!(arguments["path"], "/tmp/test.txt");
             }

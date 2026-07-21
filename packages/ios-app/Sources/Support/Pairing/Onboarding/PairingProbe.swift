@@ -190,8 +190,8 @@ final class URLSessionPairingProbe: PairingProbing {
     }
 
     /// Engine protocol frame invoking the canonical `system::ping`
-    /// capability. Mirrors the shape iOS sends from the live engine client
-    /// so onboarding probes the production capability path.
+    /// tool. Mirrors the shape iOS sends from the live engine client
+    /// so onboarding probes the production tool path.
     ///
     /// `nonisolated` so tests can call without crossing an actor.
     nonisolated static func pingRequestData(

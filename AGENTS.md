@@ -101,7 +101,7 @@ Documentation follows progressive disclosure:
 1. `README.md` is the short GitHub front door: product purpose, system shape,
    quick start, primary validation, and links onward. Keep it under 250 lines.
 2. `packages/agent/docs/project-reference.md` is the detailed cross-cutting
-   reference for CLI, capabilities, protocol, events, settings, auth, storage,
+   reference for CLI, tools, protocol, events, settings, auth, storage,
    installation, and release behavior.
 3. Rust `mod.rs` docs, iOS/Mac architecture docs, source contracts, migrations,
    and tests are the implementation-level truth.
@@ -116,7 +116,7 @@ commit:
 | Product purpose, supported clients, setup, or primary developer workflow | `README.md` |
 | Rust module ownership | the nearest `mod.rs`; update `project-reference.md` only if the cross-cutting architecture changed |
 | CLI commands | `scripts/tron --help`, command-owning docs/comments, `CONTRIBUTING.md` when contributor workflow changes, and `project-reference.md` |
-| Capability contracts or provider-visible operations | domain contract docs and tests, plus `project-reference.md` when the public model surface changes |
+| Tool contracts or provider-visible operations | domain contract docs and tests, plus `project-reference.md` when the public model surface changes |
 | Events, settings, auth, database schema, paths, installation, or release behavior | the source-owning docs/tests and the matching `project-reference.md` section |
 | iOS or Mac top-level architecture | the package architecture docs; update the root README only when the product-level map changes |
 

@@ -347,7 +347,7 @@ fn agentic_loop() {
         .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
-    // Turn 1: user → assistant(capability_invocation) → turn_end → capability.invocation.completed → assistant(end_turn) → turn_end
+    // Turn 1: user → assistant(tool_invocation) → turn_end → tool.invocation.completed → assistant(end_turn) → turn_end
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -363,7 +363,7 @@ fn agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "capability_invocation", "id": "capability_1", "name": "execute", "arguments": {"operation": "process_run", "command": "ls"}}],
+                "content": [{"type": "tool_invocation", "id": "tool_1", "name": "test_tool", "arguments": {"operation": "process_run", "command": "ls"}}],
                 "turn": 1,
                 "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
             }),
@@ -387,9 +387,9 @@ fn agentic_loop() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({
-                "invocationId": "capability_1",
+                "invocationId": "tool_1",
                 "content": "file1.txt\nfile2.txt",
                 "turn": 1
             }),

@@ -138,13 +138,13 @@ class UnifiedEventTransformerTestCase: XCTestCase {
             if augmented["turn"] == nil { augmented["turn"] = AnyCodable(1) }
             if augmented["model"] == nil { augmented["model"] = AnyCodable("claude-sonnet-4") }
             if augmented["stopReason"] == nil { augmented["stopReason"] = AnyCodable("end_turn") }
-        case SessionEventType.capabilityInvocationStarted.rawValue:
-            if augmented["modelPrimitiveName"] == nil {
-                augmented["modelPrimitiveName"] = AnyCodable("execute")
+        case SessionEventType.toolInvocationStarted.rawValue:
+            if augmented["toolName"] == nil {
+                augmented["toolName"] = AnyCodable("process_run")
             }
-        case SessionEventType.capabilityInvocationCompleted.rawValue:
-            if augmented["modelPrimitiveName"] == nil {
-                augmented["modelPrimitiveName"] = AnyCodable("execute")
+        case SessionEventType.toolInvocationCompleted.rawValue:
+            if augmented["toolName"] == nil {
+                augmented["toolName"] = AnyCodable("process_run")
             }
         case "session.start":
             if augmented["workingDirectory"] == nil { augmented["workingDirectory"] = AnyCodable("/test/workspace") }
@@ -169,15 +169,15 @@ class UnifiedEventTransformerTestCase: XCTestCase {
                 "model": AnyCodable("claude-sonnet-4"),
                 "stopReason": AnyCodable("end_turn")
             ],
-            .capabilityInvocationStarted: [
-                "invocationId": AnyCodable("capability-fixture"),
-                "modelPrimitiveName": AnyCodable("execute"),
+            .toolInvocationStarted: [
+                "invocationId": AnyCodable("tool-fixture"),
+                "toolName": AnyCodable("process_run"),
                 "arguments": AnyCodable(["command": "true"]),
                 "turn": AnyCodable(1)
             ],
-            .capabilityInvocationCompleted: [
-                "invocationId": AnyCodable("capability-fixture"),
-                "modelPrimitiveName": AnyCodable("execute"),
+            .toolInvocationCompleted: [
+                "invocationId": AnyCodable("tool-fixture"),
+                "toolName": AnyCodable("process_run"),
                 "content": AnyCodable("ok"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(25)

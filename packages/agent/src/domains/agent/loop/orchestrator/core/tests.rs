@@ -10,7 +10,7 @@ fn make_orchestrator() -> Orchestrator {
     .unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let store = Arc::new(EventStore::new(pool));
     let mgr = Arc::new(SessionManager::new(store));
@@ -165,29 +165,23 @@ fn status_snapshot_never_pairs_registry_run_with_replacement_projection() {
         base: BaseEvent::now("s1"),
         turn: 1,
     });
-    let _ = orch
-        .broadcast()
-        .emit(TronEvent::CapabilityInvocationGenerating {
-            base: BaseEvent::now("s1"),
-            invocation_id: "cap-2".into(),
-            model_primitive_name: "execute".into(),
-            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
-            ),
-        });
-    let _ = orch
-        .broadcast()
-        .emit(TronEvent::CapabilityInvocationStarted {
-            base: BaseEvent::now("s1"),
-            invocation_id: "cap-2".into(),
-            model_primitive_name: "execute".into(),
-            arguments: None,
-            capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(
-            ),
-        });
+    let _ = orch.broadcast().emit(TronEvent::ToolInvocationGenerating {
+        base: BaseEvent::now("s1"),
+        invocation_id: "cap-2".into(),
+        tool_name: "test_tool".into(),
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
+    });
+    let _ = orch.broadcast().emit(TronEvent::ToolInvocationStarted {
+        base: BaseEvent::now("s1"),
+        invocation_id: "cap-2".into(),
+        tool_name: "test_tool".into(),
+        arguments: None,
+        tool_identity: crate::shared::protocol::events::ToolEventIdentity::default(),
+    });
 
-    let (run_id, capability) = orch.agent_status_snapshot("s1");
+    let (run_id, tool) = orch.agent_status_snapshot("s1");
     assert_eq!(run_id.as_deref(), Some("run-1"));
-    assert!(capability.is_none());
+    assert!(tool.is_none());
 }
 
 // --- Abort tests ---
@@ -248,16 +242,16 @@ fn abort_one_doesnt_affect_other() {
     assert!(!t2_token.is_cancelled());
 }
 
-// --- Capability invocation tracker tests ---
+// --- Tool invocation tracker tests ---
 
 #[tokio::test]
 async fn invocation_register_and_resolve() {
     let orch = make_orchestrator();
-    let rx = orch.register_capability_invocation("tc_1");
+    let rx = orch.register_tool_invocation("tc_1");
 
-    assert!(orch.has_pending_capability_invocation("tc_1"));
-    assert!(orch.resolve_capability_invocation("tc_1", json!({"result": "ok"})));
-    assert!(!orch.has_pending_capability_invocation("tc_1"));
+    assert!(orch.has_pending_tool_invocation("tc_1"));
+    assert!(orch.resolve_tool_invocation("tc_1", json!({"result": "ok"})));
+    assert!(!orch.has_pending_tool_invocation("tc_1"));
 
     let val = rx.await.unwrap();
     assert_eq!(val["result"], "ok");
@@ -266,7 +260,7 @@ async fn invocation_register_and_resolve() {
 #[test]
 fn invocation_resolve_unknown_returns_false() {
     let orch = make_orchestrator();
-    assert!(!orch.resolve_capability_invocation("unknown", json!(null)));
+    assert!(!orch.resolve_tool_invocation("unknown", json!(null)));
 }
 
 // --- Concurrency limit tests ---
@@ -349,7 +343,7 @@ async fn shutdown_cancels_all_runs() {
 #[tokio::test]
 async fn shutdown_clears_invocations() {
     let orch = make_orchestrator();
-    let rx = orch.register_capability_invocation("tc_1");
+    let rx = orch.register_tool_invocation("tc_1");
 
     orch.shutdown().await.unwrap();
     assert!(rx.await.is_err()); // sender was dropped

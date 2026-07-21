@@ -41,7 +41,7 @@ struct ChatSheetTests {
     @Test("All sheet cases have unique base ids")
     func testAllCasesHaveUniqueBaseIds() {
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let capabilityData = testCapabilityInvocation(id: "capability_call", status: .success)
+        let toolData = testToolInvocation(id: "tool_call", status: .success)
         let providerErrorData = ProviderErrorDetailData(
             provider: "test",
             category: "rate_limit",
@@ -57,7 +57,7 @@ struct ChatSheetTests {
             .settings,
             .compactionDetail(compactionData),
             .thinkingDetail("content"),
-            .capabilityInvocationDetail(capabilityData),
+            .toolInvocationDetail(toolData),
             .providerErrorDetail(providerErrorData)
         ]
 

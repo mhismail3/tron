@@ -1,6 +1,6 @@
 //! Anthropic-specific types: configuration, model registry, and SSE event structures.
 //!
-//! The model registry uses flag-based capability detection — new models need
+//! The model registry uses flag-based tool detection — new models need
 //! only one registry entry. The SSE event types mirror the raw JSON format
 //! from the Anthropic Messages API streaming responses.
 
@@ -118,12 +118,12 @@ pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
 // Anthropic API request types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// ModelCapability definition for Anthropic API.
+/// ModelTool definition for Anthropic API.
 #[derive(Clone, Debug, Serialize)]
 pub struct AnthropicTool {
-    /// Capability name.
+    /// Tool name.
     pub name: String,
-    /// ModelCapability description.
+    /// ModelTool description.
     pub description: String,
     /// JSON Schema for input parameters.
     pub input_schema: Value,
@@ -144,10 +144,10 @@ pub struct AnthropicRequest {
     /// System prompt (string or array of blocks).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<Value>,
-    /// Provider-wire tools generated from Tron capability primitives.
+    /// Provider-wire tools generated from Tron's resolved tool surface.
     #[serde(rename = "tools")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<Vec<AnthropicTool>>,
+    pub tools: Option<Vec<AnthropicTool>>,
     /// Stream mode.
     pub stream: bool,
     /// Thinking configuration.

@@ -46,11 +46,11 @@ struct ChatSheetContent: View {
                 )
             )
 
-        case .capabilityInvocationDetail(let data):
-            capabilityInvocationDetailSheet(snapshot: data)
+        case .toolInvocationDetail(let data):
+            toolInvocationDetailSheet(snapshot: data)
 
-        case .capabilityInvocationGroupDetail(let data):
-            capabilityInvocationGroupDetailSheet(snapshot: data)
+        case .toolInvocationGroupDetail(let data):
+            toolInvocationGroupDetailSheet(snapshot: data)
 
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
@@ -64,27 +64,27 @@ struct ChatSheetContent: View {
     // MARK: - Sheet Builders
 
     @ViewBuilder
-    private func capabilityInvocationDetailSheet(snapshot: CapabilityInvocationData) -> some View {
-        let liveData: CapabilityInvocationData = {
-            if let index = MessageFinder.lastIndexOfCapabilityInvocation(id: snapshot.id, in: viewModel.messages),
-               case .capabilityInvocation(let invocation) = viewModel.messages[index].content {
+    private func toolInvocationDetailSheet(snapshot: ToolInvocationData) -> some View {
+        let liveData: ToolInvocationData = {
+            if let index = MessageFinder.lastIndexOfToolInvocation(id: snapshot.id, in: viewModel.messages),
+               case .toolInvocation(let invocation) = viewModel.messages[index].content {
                 return invocation
             }
             return snapshot
         }()
-        CapabilityInvocationDetailSheet(data: liveData)
+        ToolInvocationDetailSheet(data: liveData)
     }
 
     @ViewBuilder
-    private func capabilityInvocationGroupDetailSheet(snapshot: CapabilityInvocationGroupData) -> some View {
-        let liveInvocations = snapshot.invocations.map { invocation -> CapabilityInvocationData in
-            if let index = MessageFinder.lastIndexOfCapabilityInvocation(id: invocation.id, in: viewModel.messages),
-               case .capabilityInvocation(let liveInvocation) = viewModel.messages[index].content {
+    private func toolInvocationGroupDetailSheet(snapshot: ToolInvocationGroupData) -> some View {
+        let liveInvocations = snapshot.invocations.map { invocation -> ToolInvocationData in
+            if let index = MessageFinder.lastIndexOfToolInvocation(id: invocation.id, in: viewModel.messages),
+               case .toolInvocation(let liveInvocation) = viewModel.messages[index].content {
                 return liveInvocation
             }
             return invocation
         }
-        CapabilityInvocationGroupDetailSheet(data: CapabilityInvocationGroupData(invocations: liveInvocations))
+        ToolInvocationGroupDetailSheet(data: ToolInvocationGroupData(invocations: liveInvocations))
     }
 
 }

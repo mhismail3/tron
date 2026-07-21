@@ -327,8 +327,8 @@ pub struct ModelProviderRequestAudit {
     pub reasoning_level: Option<String>,
     /// Number of provider-visible messages in the request context.
     pub message_count: usize,
-    /// Number of provider-visible capabilities in the request context.
-    pub capability_count: usize,
+    /// Number of provider-visible tools in the request context.
+    pub tool_count: usize,
     /// Provider stream options produced by the model responder boundary.
     pub stream_options: Value,
     /// Provider request envelope, bounded envelope projection, or
@@ -494,7 +494,7 @@ impl ModelProviderRequestAudit {
         session_id: impl Into<String>,
         reasoning_level: Option<String>,
         message_count: usize,
-        capability_count: usize,
+        tool_count: usize,
         stream_options: Value,
         provider_request: ProviderAuditPayload,
     ) -> Self {
@@ -510,7 +510,7 @@ impl ModelProviderRequestAudit {
             session_id,
             reasoning_level,
             message_count,
-            capability_count,
+            tool_count,
             stream_options,
             provider_request,
         }

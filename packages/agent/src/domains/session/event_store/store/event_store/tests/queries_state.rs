@@ -223,7 +223,7 @@ fn get_messages_at_head_resolves_blob_backed_event_payloads() {
 }
 
 #[test]
-fn resolve_event_payloads_expands_blob_backed_capability_events() {
+fn resolve_event_payloads_expands_blob_backed_tool_events() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/project", None, None)
@@ -232,10 +232,10 @@ fn resolve_event_payloads_expands_blob_backed_capability_events() {
     let event = store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({
                 "invocationId": "call_inspect",
-                "modelPrimitiveName": "inspect",
+                "toolName": "inspect",
                 "content": large_content,
                 "isError": false,
                 "duration": 33
@@ -253,7 +253,7 @@ fn resolve_event_payloads_expands_blob_backed_capability_events() {
     let payloads = store.resolve_event_payloads(&[event]).unwrap();
 
     assert_eq!(payloads[0]["invocationId"], "call_inspect");
-    assert_eq!(payloads[0]["modelPrimitiveName"], "inspect");
+    assert_eq!(payloads[0]["toolName"], "inspect");
     assert_eq!(payloads[0]["content"], large_content);
     assert!(
         payloads[0]
@@ -383,7 +383,7 @@ fn get_state_at_head_with_agentic_loop() {
         .append(&AppendOptions {
             session_id: &cr.session.id,
             event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "Use a capability"}),
+            payload: serde_json::json!({"content": "Use a tool"}),
             parent_id: None,
             sequence: None,
         })
@@ -393,7 +393,7 @@ fn get_state_at_head_with_agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "capability_invocation", "id": "c1", "name": "execute", "arguments": {"operation": "observe", "input": "ok"}}],
+                "content": [{"type": "tool_invocation", "id": "c1", "name": "test_tool", "arguments": {"operation": "observe", "input": "ok"}}],
                 "turn": 1,
             }),
             parent_id: None,
@@ -403,7 +403,7 @@ fn get_state_at_head_with_agentic_loop() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({"invocationId": "c1", "content": "output", "isError": false}),
             parent_id: None,
             sequence: None,
@@ -423,14 +423,11 @@ fn get_state_at_head_with_agentic_loop() {
         .unwrap();
 
     let state = store.get_state_at_head(&cr.session.id).unwrap();
-    // user, assistant, capabilityResult, assistant
+    // user, assistant, toolResult, assistant
     assert_eq!(state.messages_with_event_ids.len(), 4);
     assert_eq!(state.messages_with_event_ids[0].message.role, "user");
     assert_eq!(state.messages_with_event_ids[1].message.role, "assistant");
-    assert_eq!(
-        state.messages_with_event_ids[2].message.role,
-        "capabilityResult"
-    );
+    assert_eq!(state.messages_with_event_ids[2].message.role, "toolResult");
     assert_eq!(state.messages_with_event_ids[3].message.role, "assistant");
 }
 
@@ -512,7 +509,7 @@ fn event_rows_to_session_events_converts_correctly() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -551,7 +548,7 @@ fn event_rows_to_session_events_rejects_invalid_json() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -593,7 +590,7 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -620,7 +617,7 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,
@@ -646,20 +643,20 @@ fn event_rows_to_session_events_rejects_unknown_event_types() {
 }
 
 #[test]
-fn event_rows_to_session_events_rejects_unmatched_malformed_capability_completion() {
+fn event_rows_to_session_events_rejects_unmatched_malformed_tool_completion() {
     let row = EventRow {
         id: "evt_bad_completion".to_string(),
         session_id: "sess_1".to_string(),
         parent_id: None,
         sequence: 0,
         depth: 0,
-        event_type: "capability.invocation.completed".to_string(),
+        event_type: "tool.invocation.completed".to_string(),
         timestamp: "2025-01-01T00:00:00Z".to_string(),
         payload: r#"{"content":"output","isError":false}"#.to_string(),
         content_blob_id: None,
         workspace_id: "ws_1".to_string(),
         role: None,
-        model_primitive_name: None,
+        tool_name: None,
         invocation_id: None,
         turn: None,
         input_tokens: None,

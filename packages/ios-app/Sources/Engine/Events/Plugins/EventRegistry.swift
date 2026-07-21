@@ -115,14 +115,14 @@ final class EventRegistry: @unchecked Sendable {
         register(TurnStartPlugin.self)
         register(TurnEndPlugin.self)
 
-        // Capability invocation events
-        register(CapabilityInvocationBatchPlugin.self)
-        register(CapabilityInvocationArgumentsDeltaPlugin.self)
-        register(CapabilityInvocationGeneratingPlugin.self)
-        register(CapabilityInvocationStartedPlugin.self)
-        register(CapabilityInvocationOutputPlugin.self)
-        register(CapabilityInvocationProgressPlugin.self)
-        register(CapabilityInvocationCompletedPlugin.self)
+        // Tool invocation events
+        register(ToolInvocationBatchPlugin.self)
+        register(ToolInvocationArgumentsDeltaPlugin.self)
+        register(ToolInvocationGeneratingPlugin.self)
+        register(ToolInvocationStartedPlugin.self)
+        register(ToolInvocationOutputPlugin.self)
+        register(ToolInvocationProgressPlugin.self)
+        register(ToolInvocationCompletedPlugin.self)
 
         // Lifecycle events
         register(AgentStartPlugin.self)

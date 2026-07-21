@@ -19,7 +19,7 @@ async fn server_boots_and_responds() {
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let event_store = Arc::new(EventStore::new(pool));
 
@@ -77,7 +77,7 @@ async fn server_graceful_shutdown() {
     let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::ensure_schema(&conn).unwrap();
     }
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));

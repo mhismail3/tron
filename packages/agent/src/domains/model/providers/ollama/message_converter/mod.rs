@@ -17,10 +17,8 @@ use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
 use crate::shared::protocol::content::{AssistantContent, UserContent};
-use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Message, UserMessageContent,
-};
-use crate::shared::protocol::model_capabilities::ModelCapability;
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
+use crate::shared::protocol::model_tools::ModelTool;
 
 // ─── Wire types ──────────────────────────────────────────────────────────────
 
@@ -37,7 +35,7 @@ pub struct ChatMessage {
     pub images: Option<Vec<String>>,
     /// Tool calls made by the assistant.
     #[serde(rename = "tool_calls", skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatCapabilityInvocationDraft>>,
+    pub tool_calls: Option<Vec<ChatToolInvocationDraft>>,
     /// Tool name (for tool result messages).
     ///
     /// Ollama's native `/api/chat` uses `tool_name` (the function name) to match
@@ -48,7 +46,7 @@ pub struct ChatMessage {
 
 /// A tool call in Ollama's native format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ChatCapabilityInvocationDraft {
+pub struct ChatToolInvocationDraft {
     /// Unique tool call ID.
     pub id: String,
     /// Always `"function"`.
@@ -70,7 +68,7 @@ pub struct ChatFunction {
     pub arguments: Value,
 }
 
-/// ModelCapability definition for Ollama's native API.
+/// ModelTool definition for Ollama's native API.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatToolDef {
     /// Always `"function"`.
@@ -101,12 +99,12 @@ fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
         match msg {
             Message::Assistant { content, .. } => {
                 for block in content {
-                    if let AssistantContent::CapabilityInvocation { id, .. } = block {
+                    if let AssistantContent::ToolInvocation { id, .. } = block {
                         ids.push(id.as_str());
                     }
                 }
             }
-            Message::CapabilityResult { invocation_id, .. } => {
+            Message::ToolResult { invocation_id, .. } => {
                 ids.push(invocation_id.as_str());
             }
             Message::User { .. } => {}
@@ -193,14 +191,14 @@ fn convert_assistant_message(
             AssistantContent::Text { text, .. } => {
                 text_parts.push(text.clone());
             }
-            AssistantContent::CapabilityInvocation {
+            AssistantContent::ToolInvocation {
                 id,
                 name,
                 arguments,
                 ..
             } => {
                 let remapped_id = remap_invocation_id(id, id_mapping).to_string();
-                tool_calls.push(ChatCapabilityInvocationDraft {
+                tool_calls.push(ChatToolInvocationDraft {
                     id: remapped_id,
                     call_type: "function".into(),
                     function: ChatFunction {
@@ -243,18 +241,15 @@ fn convert_assistant_message(
 ///
 /// Ollama's native `/api/chat` matches tool results to calls via `tool_name`
 /// (the function name), not `invocation_id` like OpenAI's API.
-fn convert_capability_result(
-    tool_name: &str,
-    content: &CapabilityResultMessageContent,
-) -> ChatMessage {
+fn convert_tool_result(tool_name: &str, content: &ToolResultMessageContent) -> ChatMessage {
     let text = match content {
-        CapabilityResultMessageContent::Text(t) => t.clone(),
-        CapabilityResultMessageContent::Blocks(blocks) => {
-            use crate::shared::protocol::content::CapabilityResultContent;
+        ToolResultMessageContent::Text(t) => t.clone(),
+        ToolResultMessageContent::Blocks(blocks) => {
+            use crate::shared::protocol::content::ToolResultContent;
             blocks
                 .iter()
                 .filter_map(|b| match b {
-                    CapabilityResultContent::Text { text } => Some(text.clone()),
+                    ToolResultContent::Text { text } => Some(text.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -282,7 +277,7 @@ fn build_tool_name_mapping(
     for msg in messages {
         if let Message::Assistant { content, .. } = msg {
             for block in content {
-                if let AssistantContent::CapabilityInvocation { id, name, .. } = block {
+                if let AssistantContent::ToolInvocation { id, name, .. } = block {
                     let _ = name_map.insert(id.clone(), name.clone());
                     let remapped = remap_invocation_id(id, id_mapping);
                     if remapped != id {
@@ -311,7 +306,7 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
                     result.push(msg);
                 }
             }
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id,
                 content,
                 ..
@@ -320,7 +315,7 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
                     .get(invocation_id.as_str())
                     .cloned()
                     .unwrap_or_else(|| "unknown".to_string());
-                result.push(convert_capability_result(&tool_name, content));
+                result.push(convert_tool_result(&tool_name, content));
             }
         }
     }
@@ -329,8 +324,8 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
 }
 
 /// Convert Tron tool definitions to Ollama native API tool definitions.
-pub fn convert_tools(capabilities: &[ModelCapability]) -> Vec<ChatToolDef> {
-    capabilities
+pub fn convert_tools(tools: &[ModelTool]) -> Vec<ChatToolDef> {
+    tools
         .iter()
         .map(|t| ChatToolDef {
             tool_type: "function".into(),

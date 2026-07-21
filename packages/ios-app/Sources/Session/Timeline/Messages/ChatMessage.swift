@@ -31,7 +31,7 @@ struct ChatMessage: Identifiable, Equatable {
 
     /// Server-backed finality for the textual response that ends a prompt
     /// cycle. Live events set this from `agent.response_complete`; replay sets
-    /// it from the persisted assistant payload's capability blocks.
+    /// it from the persisted assistant payload's tool blocks.
     var isFinalAssistantResponse: Bool
 
     /// Event ID from the server's event store (for deletion, forking, etc.)
@@ -136,7 +136,7 @@ struct ChatMessage: Identifiable, Equatable {
         // Must have an eventId (from server)
         guard eventId != nil else { return false }
 
-        // Must be a user or assistant message (not system, capabilityResult, etc.)
+        // Must be a user or assistant message (not system, toolResult, etc.)
         guard role == .user || role == .assistant else { return false }
 
         // Don't allow deleting streaming messages

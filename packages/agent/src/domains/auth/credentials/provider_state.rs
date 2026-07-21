@@ -11,7 +11,7 @@ use super::{
 use crate::domains::auth::Deps;
 use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 
@@ -20,16 +20,15 @@ pub(crate) async fn write_auth_and_broadcast<F>(
     invocation: &Invocation,
     task_name: &'static str,
     mutate: F,
-) -> Result<Value, CapabilityError>
+) -> Result<Value, ToolError>
 where
-    F: FnOnce(&Path) -> Result<(), CapabilityError> + Send + 'static,
+    F: FnOnce(&Path) -> Result<(), ToolError> + Send + 'static,
 {
     let auth_path = deps.auth_path.clone();
     let masked_state = run_blocking_task(task_name, move || {
-        let _lock =
-            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
+        let _lock = acquire_auth_file_lock(&auth_path).map_err(|error| ToolError::Internal {
+            message: format!("Failed to acquire auth lock: {error}"),
+        })?;
         mutate(&auth_path)?;
         build_masked_state(&auth_path).map_err(map_auth_error)
     })
@@ -42,8 +41,8 @@ pub(crate) fn update_standard_provider(
     auth_path: &Path,
     provider: &str,
     params: Option<&Value>,
-) -> Result<(), CapabilityError> {
-    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
+) -> Result<(), ToolError> {
+    let params = params.ok_or_else(|| ToolError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -93,8 +92,8 @@ pub(crate) fn update_standard_provider(
 pub(crate) fn update_google_provider(
     auth_path: &Path,
     params: Option<&Value>,
-) -> Result<(), CapabilityError> {
-    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
+) -> Result<(), ToolError> {
+    let params = params.ok_or_else(|| ToolError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -140,8 +139,8 @@ pub(crate) fn update_service(
     auth_path: &Path,
     service: &str,
     params: Option<&Value>,
-) -> Result<(), CapabilityError> {
-    let params = params.ok_or_else(|| CapabilityError::InvalidParams {
+) -> Result<(), ToolError> {
+    let params = params.ok_or_else(|| ToolError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
 
@@ -174,25 +173,25 @@ pub(crate) fn clear_service_auth(
     save_auth_storage(auth_path, &mut storage)
 }
 
-pub(crate) fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, CapabilityError> {
+pub(crate) fn parse_oauth_tokens(oauth: &Value) -> Result<OAuthTokens, ToolError> {
     let access_token = oauth
         .get("accessToken")
         .and_then(Value::as_str)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "oauth.accessToken is required".into(),
         })?
         .to_owned();
     let refresh_token = oauth
         .get("refreshToken")
         .and_then(Value::as_str)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "oauth.refreshToken is required".into(),
         })?
         .to_owned();
     let expires_at = oauth
         .get("expiresAt")
         .and_then(Value::as_i64)
-        .ok_or_else(|| CapabilityError::InvalidParams {
+        .ok_or_else(|| ToolError::InvalidParams {
             message: "oauth.expiresAt is required (milliseconds)".into(),
         })?;
 

@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn prune_small_tool_results_not_pruned() {
         let messages = vec![
-            // Turn 1 (old, but small capability result)
+            // Turn 1 (old, but small tool result)
             user_msg(vec![tool_result_block("t1", "small output")]),
             assistant_msg(vec![json!({"type": "text", "text": "r1"})]),
             // Turn 2
@@ -263,7 +263,7 @@ mod tests {
         ];
         let result = prune_tool_results_for_recache(&messages, 3);
 
-        // Turn 1 capability result is small — NOT pruned
+        // Turn 1 tool result is small — NOT pruned
         let content = result[0].content[0]["content"].as_str().unwrap();
         assert_eq!(content, "small output");
     }
@@ -305,7 +305,7 @@ mod tests {
         ];
         let result = prune_tool_results_for_recache(&messages, 3);
 
-        // All capability results preserved (exactly 3 turns, preserve 3)
+        // All tool results preserved (exactly 3 turns, preserve 3)
         let content = result[0].content[0]["content"].to_string();
         assert!(!content.contains("pruned"));
     }

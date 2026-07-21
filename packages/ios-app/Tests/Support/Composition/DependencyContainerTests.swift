@@ -118,7 +118,7 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertEqual(origin, "testhost:9999")
     }
 
-    func test_noPairedServerDoesNotUseLocalhostFallback() async throws {
+    func test_noPairedServerDoesNotUseLocalhostDefault() async throws {
         let container = testState.makeContainer()
 
         XCTAssertEqual(container.currentServerOrigin, "")
@@ -326,7 +326,7 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertFalse(container.isInitialized)
     }
 
-    func test_storageOwnsDefaultsDocumentsDatabaseAndFallback() {
+    func test_storageOwnsDefaultsDocumentsDatabaseAndRecoveryLocation() {
         let container = testState.makeContainer()
         container.workingDirectory = ""
         container.defaultModel = "fixture-model"

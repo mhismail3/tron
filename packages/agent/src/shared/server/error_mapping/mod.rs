@@ -1,12 +1,12 @@
 //! Error mapping for retained primitive engine boundaries.
 //!
 //! Domain helpers here translate engine, event-store, and provider-auth errors
-//! into the JSON-RPC capability error shape used by the server transports.
+//! into the JSON-RPC tool error shape used by the server transports.
 
 use crate::domains::auth::credentials::errors::AuthError;
 use crate::domains::session::event_store::errors::EventStoreError;
 use crate::engine::{EngineError, InvocationResult};
-use crate::shared::server::errors::{self as codes, CapabilityError};
+use crate::shared::server::errors::{self as codes, ToolError};
 use crate::shared::server::failure::{
     ENGINE_DOMAIN_FAILURE, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID, ENGINE_INVALID_ID,
     ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
@@ -15,26 +15,24 @@ use crate::shared::server::failure::{
 };
 use serde_json::Value;
 
-pub(crate) fn capability_error_to_engine(error: CapabilityError) -> EngineError {
+pub(crate) fn tool_error_to_engine(error: ToolError) -> EngineError {
     EngineError::DomainFailure {
-        domain: "server_capability".to_owned(),
+        domain: "server_tool".to_owned(),
         code: error.code().to_owned(),
         message: error.to_string(),
         details: error.details(),
     }
 }
 
-pub(crate) fn result_to_capability_value(
-    result: InvocationResult,
-) -> Result<Value, CapabilityError> {
+pub(crate) fn result_to_tool_value(result: InvocationResult) -> Result<Value, ToolError> {
     if let Some(error) = result.error {
-        return Err(engine_error_to_capability_error(error));
+        return Err(engine_error_to_tool_error(error));
     }
     Ok(result.value.unwrap_or(Value::Null))
 }
 
-pub(crate) fn engine_error_to_capability_error(error: EngineError) -> CapabilityError {
-    CapabilityError::from_failure(engine_error_to_failure(&error))
+pub(crate) fn engine_error_to_tool_error(error: EngineError) -> ToolError {
+    ToolError::from_failure(engine_error_to_failure(&error))
 }
 
 pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
@@ -116,7 +114,7 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
         }))),
         EngineError::StoredInvocationError { kind, message } => FailureEnvelope::new(
             ENGINE_STORED_INVOCATION_ERROR,
-            FailureCategory::Capability,
+            FailureCategory::Tool,
             message.clone(),
             false,
             false,
@@ -198,18 +196,18 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             if let Some(details) = details.clone() {
                 let _ = detail_map.insert("details".to_owned(), details);
             }
-            let capability_failure =
-                capability_error_from_parts(code, message.clone(), Some(Value::Object(detail_map)))
-                    .to_failure(FailureOrigin::Capability);
+            let tool_failure =
+                tool_error_from_parts(code, message.clone(), Some(Value::Object(detail_map)))
+                    .to_failure(FailureOrigin::Tool);
             FailureEnvelope::new(
                 code.clone(),
-                capability_failure.category,
+                tool_failure.category,
                 message.clone(),
-                capability_failure.retryable,
-                capability_failure.recoverable,
-                FailureOrigin::Capability,
+                tool_failure.retryable,
+                tool_failure.recoverable,
+                FailureOrigin::Tool,
             )
-            .with_details(capability_failure.details)
+            .with_details(tool_failure.details)
             .with_error_type(Some(ENGINE_DOMAIN_FAILURE.to_owned()))
         }
         EngineError::InvocationCancelled => FailureEnvelope::new(
@@ -218,33 +216,29 @@ pub(crate) fn engine_error_to_failure(error: &EngineError) -> FailureEnvelope {
             "Operation cancelled",
             false,
             true,
-            FailureOrigin::Capability,
+            FailureOrigin::Tool,
         ),
         EngineError::HandlerFailed(message) => FailureEnvelope::new(
             ENGINE_HANDLER_FAILED,
-            FailureCategory::Capability,
+            FailureCategory::Tool,
             message.clone(),
             false,
             false,
-            FailureOrigin::Capability,
+            FailureOrigin::Tool,
         ),
     }
 }
 
-fn capability_error_from_parts(
-    code: &str,
-    message: String,
-    details: Option<Value>,
-) -> CapabilityError {
+fn tool_error_from_parts(code: &str, message: String, details: Option<Value>) -> ToolError {
     match code {
-        codes::INVALID_PARAMS => CapabilityError::InvalidParams { message },
-        codes::INTERNAL_ERROR => CapabilityError::Internal { message },
-        codes::NOT_AVAILABLE => CapabilityError::NotAvailable { message },
-        codes::NOT_FOUND => CapabilityError::NotFound {
+        codes::INVALID_PARAMS => ToolError::InvalidParams { message },
+        codes::INTERNAL_ERROR => ToolError::Internal { message },
+        codes::NOT_AVAILABLE => ToolError::NotAvailable { message },
+        codes::NOT_FOUND => ToolError::NotFound {
             code: codes::NOT_FOUND.to_owned(),
             message,
         },
-        _ => CapabilityError::Custom {
+        _ => ToolError::Custom {
             code: code.to_owned(),
             message,
             details,
@@ -252,10 +246,10 @@ fn capability_error_from_parts(
     }
 }
 
-pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
+pub(crate) fn map_event_store_error(e: EventStoreError) -> ToolError {
     use EventStoreError as E;
     match e {
-        E::SessionNotFound(id) => CapabilityError::from_failure(
+        E::SessionNotFound(id) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::SESSION_NOT_FOUND,
                 FailureCategory::NotFound,
@@ -266,7 +260,7 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
             )
             .with_details(Some(serde_json::json!({ "sessionId": id }))),
         ),
-        E::EventNotFound(id) => CapabilityError::from_failure(
+        E::EventNotFound(id) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::EVENT_NOT_FOUND,
                 FailureCategory::NotFound,
@@ -277,7 +271,7 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
             )
             .with_details(Some(serde_json::json!({ "eventId": id }))),
         ),
-        E::WorkspaceNotFound(id) => CapabilityError::from_failure(
+        E::WorkspaceNotFound(id) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::WORKSPACE_NOT_FOUND,
                 FailureCategory::NotFound,
@@ -288,7 +282,7 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
             )
             .with_details(Some(serde_json::json!({ "workspaceId": id }))),
         ),
-        E::BlobNotFound(id) => CapabilityError::from_failure(
+        E::BlobNotFound(id) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::BLOB_NOT_FOUND,
                 FailureCategory::NotFound,
@@ -299,7 +293,7 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
             )
             .with_details(Some(serde_json::json!({ "blobId": id }))),
         ),
-        E::InvalidOperation(message) => CapabilityError::from_failure(
+        E::InvalidOperation(message) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::INVALID_PARAMS,
                 FailureCategory::InvalidRequest,
@@ -313,7 +307,7 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
         E::Busy {
             operation,
             attempts,
-        } => CapabilityError::from_failure(
+        } => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::EVENT_STORE_BUSY,
                 FailureCategory::Unavailable,
@@ -330,15 +324,15 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
         E::Sqlite(error) => event_store_internal_failure("sqlite", Some(error.to_string())),
         E::Pool(error) => event_store_internal_failure("pool", Some(error.to_string())),
         E::Serde(error) => event_store_internal_failure("serde", Some(error.to_string())),
-        E::Migration { message } => event_store_internal_failure("migration", Some(message)),
+        E::Schema { message } => event_store_internal_failure("schema", Some(message)),
         E::Internal(message) => event_store_internal_failure("internal", Some(message)),
     }
 }
 
-pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
+pub(crate) fn map_auth_error(e: AuthError) -> ToolError {
     use AuthError as A;
     match e {
-        A::NotConfigured(provider) => CapabilityError::from_failure(
+        A::NotConfigured(provider) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::AUTH_NOT_CONFIGURED,
                 FailureCategory::Auth,
@@ -350,7 +344,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
             .with_details(Some(serde_json::json!({ "provider": provider })))
             .with_suggestion(Some(format!("Run `tron auth {provider}`."))),
         ),
-        A::TokenExpired(message) => CapabilityError::from_failure(
+        A::TokenExpired(message) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::AUTH_TOKEN_EXPIRED,
                 FailureCategory::Auth,
@@ -364,7 +358,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
         ),
         A::OAuth { status, message } => {
             let retryable = matches!(status, 408 | 429 | 502 | 503 | 504);
-            CapabilityError::from_failure(
+            ToolError::from_failure(
                 FailureEnvelope::new(
                     codes::AUTH_OAUTH_ERROR,
                     FailureCategory::Auth,
@@ -380,7 +374,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
                 }))),
             )
         }
-        A::MalformedProviderAuth { provider, details } => CapabilityError::from_failure(
+        A::MalformedProviderAuth { provider, details } => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::AUTH_NOT_CONFIGURED,
                 FailureCategory::Auth,
@@ -395,7 +389,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
             })))
             .with_suggestion(Some(format!("Run `tron auth {provider}`."))),
         ),
-        A::MalformedAuthFile { details, .. } => CapabilityError::from_failure(
+        A::MalformedAuthFile { details, .. } => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::AUTH_STORAGE_ERROR,
                 FailureCategory::Auth,
@@ -425,7 +419,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
             } else {
                 "request"
             };
-            CapabilityError::from_failure(
+            ToolError::from_failure(
                 FailureEnvelope::new(
                     codes::AUTH_TRANSPORT_ERROR,
                     FailureCategory::Network,
@@ -439,7 +433,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
                 .with_details(Some(serde_json::json!({ "kind": error_type }))),
             )
         }
-        A::Json { operation, message } => CapabilityError::from_failure(
+        A::Json { operation, message } => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::AUTH_STORAGE_ERROR,
                 FailureCategory::Auth,
@@ -453,7 +447,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
                 "reason": message,
             }))),
         ),
-        A::Io(error) => CapabilityError::from_failure(
+        A::Io(error) => ToolError::from_failure(
             FailureEnvelope::new(
                 codes::AUTH_STORAGE_ERROR,
                 FailureCategory::Auth,
@@ -470,8 +464,8 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
     }
 }
 
-fn event_store_internal_failure(kind: &'static str, reason: Option<String>) -> CapabilityError {
-    CapabilityError::from_failure(
+fn event_store_internal_failure(kind: &'static str, reason: Option<String>) -> ToolError {
+    ToolError::from_failure(
         FailureEnvelope::new(
             codes::EVENT_STORE_FAILURE,
             FailureCategory::Persistence,

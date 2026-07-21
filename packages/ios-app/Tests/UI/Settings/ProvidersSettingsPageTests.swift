@@ -84,8 +84,8 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderSettingsContainer.containers(for: minimax) == [.status])
     }
 
-    @Test("provider auth actions match OAuth capability")
-    func providerAuthActionsMatchOAuthCapability() {
+    @Test("provider auth actions match OAuth tool")
+    func providerAuthActionsMatchOAuthTool() {
         let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
         let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
 

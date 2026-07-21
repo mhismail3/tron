@@ -7,10 +7,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::engine::{ActorId, ActorKind, CausalContext, FunctionId, Invocation, TraceId};
-use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent};
-use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Message, UserMessageContent,
-};
+use crate::shared::protocol::content::{AssistantContent, ToolResultContent};
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
 
 use super::types::SummaryResult;
 
@@ -43,7 +41,7 @@ pub trait Summarizer: Send + Sync {
 /// exists and recover through [`KeywordSummarizer`] otherwise.
 pub struct WorkerHookSummarizer {
     host: crate::engine::EngineHostHandle,
-    fallback: KeywordSummarizer,
+    recovery: KeywordSummarizer,
 }
 
 impl WorkerHookSummarizer {
@@ -51,7 +49,7 @@ impl WorkerHookSummarizer {
     pub fn new(host: crate::engine::EngineHostHandle) -> Self {
         Self {
             host,
-            fallback: KeywordSummarizer::new(),
+            recovery: KeywordSummarizer::new(),
         }
     }
 }
@@ -69,7 +67,7 @@ impl Summarizer for WorkerHookSummarizer {
             payload["originWorkerId"] = Value::String(worker_id.clone());
         }
         let Ok(actor_id) = ActorId::new("system:context-summary") else {
-            return self.fallback.summarize(messages, context).await;
+            return self.recovery.summarize(messages, context).await;
         };
         let mut causal = CausalContext::new(
             actor_id,
@@ -91,7 +89,7 @@ impl Summarizer for WorkerHookSummarizer {
         let Ok(function_id) =
             FunctionId::new(crate::domains::worker_kernel::CONTEXT_SUMMARY_FUNCTION)
         else {
-            return self.fallback.summarize(messages, context).await;
+            return self.recovery.summarize(messages, context).await;
         };
         // Detach the durable engine invocation from the caller's wait. If a
         // user cancels compaction, the worker delivery and engine ledger still
@@ -103,7 +101,7 @@ impl Summarizer for WorkerHookSummarizer {
                 .await
         });
         let Ok(outcome) = task.await else {
-            return self.fallback.summarize(messages, context).await;
+            return self.recovery.summarize(messages, context).await;
         };
         if outcome.error.is_none() {
             if let Some(narrative) = outcome
@@ -124,7 +122,7 @@ impl Summarizer for WorkerHookSummarizer {
                 "worker context-summary hook failed; using deterministic recovery"
             );
         }
-        self.fallback.summarize(messages, context).await
+        self.recovery.summarize(messages, context).await
     }
 }
 
@@ -136,7 +134,7 @@ impl Summarizer for WorkerHookSummarizer {
 ///
 /// Used when the LLM summarizer fails (timeout, parse error, etc.).
 /// Produces a simple narrative by concatenating user messages and
-/// extracting file paths and capability ids.
+/// extracting file paths and tool ids.
 pub struct KeywordSummarizer;
 
 impl KeywordSummarizer {
@@ -162,7 +160,7 @@ impl Summarizer for KeywordSummarizer {
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut user_messages = Vec::new();
         let mut files_modified = Vec::new();
-        let mut model_capability_names = Vec::new();
+        let mut model_tool_names = Vec::new();
 
         for msg in messages {
             match msg {
@@ -175,11 +173,11 @@ impl Summarizer for KeywordSummarizer {
                 Message::Assistant { content, .. } => {
                     for block in content {
                         match block {
-                            AssistantContent::CapabilityInvocation {
+                            AssistantContent::ToolInvocation {
                                 name, arguments, ..
                             } => {
-                                if !model_capability_names.contains(name) {
-                                    model_capability_names.push(name.clone());
+                                if !model_tool_names.contains(name) {
+                                    model_tool_names.push(name.clone());
                                 }
                                 if let Some(path) = arguments
                                     .get("file_path")
@@ -197,7 +195,7 @@ impl Summarizer for KeywordSummarizer {
                         }
                     }
                 }
-                Message::CapabilityResult { .. } => {}
+                Message::ToolResult { .. } => {}
             }
         }
 
@@ -207,11 +205,8 @@ impl Summarizer for KeywordSummarizer {
             let mut parts = Vec::new();
             parts.push(format!("The user made {} requests.", user_messages.len()));
             parts.push(format!("Key requests: {}", user_messages.join("; ")));
-            if !model_capability_names.is_empty() {
-                parts.push(format!(
-                    "Capabilities used: {}",
-                    model_capability_names.join(", ")
-                ));
+            if !model_tool_names.is_empty() {
+                parts.push(format!("Tools used: {}", model_tool_names.join(", ")));
             }
             if !files_modified.is_empty() {
                 parts.push(format!("Files touched: {}", files_modified.join(", ")));
@@ -239,20 +234,20 @@ fn project_messages(messages: &[Message]) -> Vec<Value> {
                         AssistantContent::Text { text } => {
                             push_projection(&mut projected, "assistant", text);
                         }
-                        AssistantContent::CapabilityInvocation { name, .. } => {
+                        AssistantContent::ToolInvocation { name, .. } => {
                             push_projection(&mut projected, "tool", &format!("{name} invoked"));
                         }
                         AssistantContent::Thinking { .. } => {}
                     }
                 }
             }
-            Message::CapabilityResult { content, .. } => match content {
-                CapabilityResultMessageContent::Text(text) => {
+            Message::ToolResult { content, .. } => match content {
+                ToolResultMessageContent::Text(text) => {
                     push_projection(&mut projected, "tool", text);
                 }
-                CapabilityResultMessageContent::Blocks(blocks) => {
+                ToolResultMessageContent::Blocks(blocks) => {
                     for block in blocks {
-                        if let CapabilityResultContent::Text { text } = block {
+                        if let ToolResultContent::Text { text } = block {
                             push_projection(&mut projected, "tool", text);
                         }
                     }
@@ -305,7 +300,7 @@ fn user_content_text(content: &UserMessageContent) -> String {
 mod tests {
     use super::*;
     use crate::shared::protocol::content::UserContent;
-    use crate::shared::protocol::messages::CapabilityResultMessageContent;
+    use crate::shared::protocol::messages::ToolResultMessageContent;
 
     fn worker_bundle(command: &str, worker_id: &str) -> Value {
         serde_json::json!({
@@ -466,7 +461,7 @@ mod tests {
                         kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                         signature: None,
                     },
-                    AssistantContent::CapabilityInvocation {
+                    AssistantContent::ToolInvocation {
                         id: "call-1".to_owned(),
                         name: "filesystem_read".to_owned(),
                         arguments: serde_json::Map::from_iter([(
@@ -481,13 +476,13 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: "call-1".to_owned(),
-                content: CapabilityResultMessageContent::Blocks(vec![
-                    CapabilityResultContent::Text {
+                content: ToolResultMessageContent::Blocks(vec![
+                    ToolResultContent::Text {
                         text: "visible result".to_owned(),
                     },
-                    CapabilityResultContent::Image {
+                    ToolResultContent::Image {
                         data: "base64-binary".to_owned(),
                         mime_type: "image/png".to_owned(),
                     },

@@ -41,7 +41,7 @@ struct ContentLineParserTests {
         #expect(lines[4].content == "... [Output truncated for performance]")
     }
 
-    // MARK: - No Prefixes (Sequential Fallback)
+    // MARK: - No Prefixes (Sequential Parsing)
 
     @Test func unprefixedContentUsesSequentialNumbers() {
         let input = "line one\nline two\nline three"

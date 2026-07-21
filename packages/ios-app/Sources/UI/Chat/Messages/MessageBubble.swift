@@ -51,15 +51,15 @@ struct MessageBubble: View {
                 onTap?(.thinking(visible))
             }
 
-        case .capabilityInvocation(let invocation):
-            CapabilityInvocationChip(
+        case .toolInvocation(let invocation):
+            ToolInvocationChip(
                 data: invocation,
-                onTap: { onTap?(.capabilityInvocation(invocation)) },
-                onCancel: { onTap?(.cancelCapabilityInvocation(id: invocation.id)) }
+                onTap: { onTap?(.toolInvocation(invocation)) },
+                onCancel: { onTap?(.cancelToolInvocation(id: invocation.id)) }
             )
 
-        case .capabilityResult(let result):
-            CapabilityInvocationResultView(result: result)
+        case .toolResult(let result):
+            ToolInvocationResultView(result: result)
 
         case .error(let errorMessage):
             ErrorContentView(message: errorMessage)
@@ -146,9 +146,9 @@ private struct ErrorContentView: View {
 
             // Test markdown table rendering
             MessageBubble(message: .assistant("""
-            All capabilities working! Here's a summary:
+            All tools working! Here's a summary:
 
-            | Capability | Status | What it did |
+            | Tool | Status | What it did |
             |------|--------|-------------|
             | ls | OK | Listed 8 files/folders |
             | read | OK | Read README.md |

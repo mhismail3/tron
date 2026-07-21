@@ -7,7 +7,7 @@ import Foundation
 ///
 /// NOTE: message.user events can contain:
 /// 1. User text prompts (displayable)
-/// 2. Capability result content blocks (LLM context, not for display - handled by capability.invocation.completed events)
+/// 2. Tool result content blocks (LLM context, not for display - handled by tool.invocation.completed events)
 /// 3. Image/document content blocks (displayable as thumbnails above text)
 struct UserMessagePayload {
     let content: String
@@ -15,9 +15,9 @@ struct UserMessagePayload {
     /// user messages with only `content`; imported sessions may include it.
     let turn: Int?
     let imageCount: Int?
-    /// True if this message contains ONLY capability_result blocks (no text)
+    /// True if this message contains ONLY tool_result blocks (no text)
     /// These are LLM conversation context, not displayable user messages
-    let isCapabilityResultContext: Bool
+    let isToolResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
     init?(from payload: [String: AnyCodable]) {
@@ -26,17 +26,17 @@ struct UserMessagePayload {
         // Content can be a string or array of content blocks
         if let content = payload.string("content") {
             self.content = content
-            self.isCapabilityResultContext = false
+            self.isToolResultContext = false
         } else if let contentBlocks = payload["content"]?.value as? [[String: Any]] {
-            // Check if this is a capability_result context message (no text, only capability_results)
+            // Check if this is a tool_result context message (no text, only tool_results)
             let textBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.text.rawValue }
-            let capabilityResultBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.capabilityResult.rawValue }
+            let toolResultBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.toolResult.rawValue }
 
-            if textBlocks.isEmpty && !capabilityResultBlocks.isEmpty {
-                // This is a capability_result context message - not for display
-                // Capability results are displayed via capability.invocation.completed events
+            if textBlocks.isEmpty && !toolResultBlocks.isEmpty {
+                // This is a tool_result context message - not for display
+                // Tool results are displayed via tool.invocation.completed events
                 self.content = ""
-                self.isCapabilityResultContext = true
+                self.isToolResultContext = true
             } else {
                 // Extract text from content blocks
                 let texts = contentBlocks.compactMap { block -> String? in
@@ -44,7 +44,7 @@ struct UserMessagePayload {
                     return block["text"] as? String
                 }
                 self.content = texts.joined(separator: "\n")
-                self.isCapabilityResultContext = false
+                self.isToolResultContext = false
             }
 
             // Extract attachments from content blocks (images, documents, PDFs)
@@ -94,15 +94,15 @@ struct UserMessagePayload {
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
 
-        // Structured interactive-capability response metadata (server-provided).
+        // Structured interactive-tool response metadata (server-provided).
     }
 }
 
 /// Payload for message.assistant event
 /// Server: `events/types/payloads/message.rs::AssistantMessagePayload`
 ///
-/// IMPORTANT: This payload contains ContentBlocks which may include capability_invocation blocks.
-/// However, capability_invocation blocks should be IGNORED here — they are rendered via capability.invocation.started events.
+/// IMPORTANT: This payload contains ContentBlocks which may include tool_invocation blocks.
+/// However, tool_invocation blocks should be IGNORED here — they are rendered via tool.invocation.started events.
 ///
 /// `content`, `turn`, `model`, and `stopReason` are all non-optional on the
 /// Rust payload. Missing any of them fails decoding (`init?` returns nil)
@@ -116,29 +116,28 @@ struct AssistantMessagePayload {
     let stopReason: StopReason?
     let latencyMs: Int?
     let model: String
-    let providerType: String?
     let hasThinking: Bool?
     let interrupted: Bool?
 
-    /// Whether the provider response contains capability invocations. Their
+    /// Whether the provider response contains tool invocations. Their
     /// presence makes the response ineligible for a final textual-response
-    /// footer whether capability execution continues or explicitly stops.
-    var hasCapabilityInvocations: Bool {
+    /// footer whether tool execution continues or explicitly stops.
+    var hasToolInvocations: Bool {
         contentBlocks.contains {
-            $0["type"] as? String == ContentBlockType.capabilityInvocation.rawValue
+            $0["type"] as? String == ContentBlockType.toolInvocation.rawValue
         }
     }
 
     /// Conservative, server-contract-backed presentation eligibility. A
-    /// completed text response with zero capability drafts is guaranteed to end
-    /// the agent loop; interrupted or capability-bearing responses get no
+    /// completed text response with zero tool drafts is guaranteed to end
+    /// the agent loop; interrupted or tool-bearing responses get no
     /// footer. Rendered position and provider stop-reason spelling are ignored.
     var isFinalAssistantResponse: Bool {
-        textContent != nil && !hasCapabilityInvocations && interrupted != true
+        textContent != nil && !hasToolInvocations && interrupted != true
     }
 
-    /// Extracts ONLY the text content, ignoring capability_invocation blocks.
-    /// Capability invocations are rendered via separate capability.invocation.started events.
+    /// Extracts ONLY the text content, ignoring tool_invocation blocks.
+    /// Tool invocations are rendered via separate tool.invocation.started events.
     ///
     /// INVARIANT: the trimming here (`.whitespacesAndNewlines`) MUST
     /// match `StreamingManager.finalizeStreamingMessage` so the
@@ -189,7 +188,6 @@ struct AssistantMessagePayload {
         self.contentBlocks = blocks
         self.turn = turn
         self.model = model
-        self.providerType = payload.string("providerType")
         self.stopReason = StopReason(rawValue: stopStr)
 
         self.tokenRecord = TokenRecord.from(dict: payload.dict("tokenRecord"))

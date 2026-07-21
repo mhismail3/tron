@@ -3,16 +3,16 @@
 use serde_json::Value;
 
 use crate::engine::Invocation;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 
 use super::Deps;
 
 pub(super) fn response(
     invocation: &Invocation,
     result: Result<Value, String>,
-) -> Result<Value, CapabilityError> {
+) -> Result<Value, ToolError> {
     let _ = invocation;
-    result.map_err(|message| CapabilityError::Internal { message })
+    result.map_err(|message| ToolError::Internal { message })
 }
 
 pub(super) fn required_string(value: &Value, field: &str) -> Result<String, String> {

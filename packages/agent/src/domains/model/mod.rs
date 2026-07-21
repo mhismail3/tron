@@ -6,8 +6,8 @@
 //! live under `routing/`.
 //! Provider-native stream and function-call details are isolated under
 //! `providers/`, `protocol/`, and the `responder/` boundary before being
-//! converted to canonical capability history;
-//! malformed provider capability arguments fail closed at that boundary.
+//! converted to canonical tool history;
+//! malformed provider tool arguments fail closed at that boundary.
 //! Token normalization, pricing, and token record types live under `tokens/`
 //! because they are canonical model-domain accounting, not provider wiring.
 //! Effective attachment limits live under `routing::attachments`; `model.list`

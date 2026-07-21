@@ -90,14 +90,14 @@ mod tests {
     use crate::domains::agent::Orchestrator;
     use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
     use crate::domains::session::event_store::{
-        ConnectionConfig, EventStore, new_in_memory, run_migrations,
+        ConnectionConfig, EventStore, ensure_schema, new_in_memory,
     };
 
     fn make_session_manager() -> Arc<SessionManager> {
         let pool = new_in_memory(&ConnectionConfig::default()).expect("in-memory event store");
         {
             let connection = pool.get().expect("event-store connection");
-            run_migrations(&connection).expect("event-store migrations");
+            ensure_schema(&connection).expect("event-store schema");
         }
         Arc::new(SessionManager::new(Arc::new(EventStore::new(pool))))
     }

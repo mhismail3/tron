@@ -163,7 +163,7 @@ mod tests {
     use super::*;
     use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
     use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use crate::domains::session::event_store::sqlite::schema::ensure_schema;
     use crate::domains::session::event_store::{EventStore, ListEventsOptions};
     use crate::shared::protocol::events::TronEvent;
     use crate::shared::server::failure::{FailureCategory, FailureOrigin, PROVIDER_API_ERROR};
@@ -174,7 +174,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
@@ -243,7 +243,7 @@ mod tests {
         let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            ensure_schema(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let emitter = Arc::new(EventEmitter::new());

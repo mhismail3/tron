@@ -192,19 +192,19 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(localErrorCount, 1)
     }
 
-    func testContextAwareServerPageKeepsCompletedCapabilityChip() async {
+    func testContextAwareServerPageKeepsCompletedToolChip() async {
         let (viewModel, sessions) = makeViewModel()
         viewModel.hasMoreMessages = true
         viewModel.reconstructionOldestEventId = "cursor-1"
         viewModel.loadedReconstructionEvents = [
-            rawCapabilityCompleted(id: "event-completed", invocationId: "capability-1", sequence: 3)
+            rawToolCompleted(id: "event-completed", invocationId: "tool-1", sequence: 3)
         ]
 
         sessions.reconstructHandler = { _, _, _ in
             self.reconstructResult(
                 events: [
-                    self.rawCapabilityStarted(id: "event-started", invocationId: "capability-1", sequence: 1),
-                    self.rawAssistantWithCapability(id: "event-assistant", invocationId: "capability-1", sequence: 2)
+                    self.rawToolStarted(id: "event-started", invocationId: "tool-1", sequence: 1),
+                    self.rawAssistantWithTool(id: "event-assistant", invocationId: "tool-1", sequence: 2)
                 ],
                 hasMoreEvents: false,
                 oldestEventId: "cursor-0"
@@ -214,10 +214,10 @@ final class ChatViewModelPaginationTests: XCTestCase {
         let loaded = await viewModel.loadEarlierMessagesForTopDetent()
 
         XCTAssertEqual(loaded, 1)
-        guard case .capabilityInvocation(let invocation) = viewModel.messages.first?.content else {
-            return XCTFail("Expected reconstructed capability chip")
+        guard case .toolInvocation(let invocation) = viewModel.messages.first?.content else {
+            return XCTFail("Expected reconstructed tool chip")
         }
-        XCTAssertEqual(invocation.id, "capability-1")
+        XCTAssertEqual(invocation.id, "tool-1")
         XCTAssertEqual(invocation.status, .success)
         XCTAssertEqual(invocation.result, "done")
     }

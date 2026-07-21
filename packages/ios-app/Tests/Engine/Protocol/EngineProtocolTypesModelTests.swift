@@ -105,7 +105,7 @@ struct ModelInfoComputedTests {
     }
 
     @Test("maxOutput falls back to maxOutputTokens")
-    func maxOutputFallback() {
+    func maxOutputUsesContextDerivedDefault() {
         let m = makeModel(maxOutputTokens: 64_000)
         #expect(m.formattedMaxOutput == "64K output")
     }
@@ -292,7 +292,7 @@ struct ModelInfoStrictDecodeTests {
                 "supportedImageMimeTypes": ["image/jpeg", "image/png"]
             ],
             "tier": "sonnet",
-            "isLegacy": false
+            "isRetiredGeneration": false
         ]
     }
 
@@ -313,8 +313,8 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.isRetiredGeneration == false)
     }
 
-    @Test("attachment capability derives from server policy")
-    func attachmentCapabilityUsesServerPolicy() throws {
+    @Test("attachment tool derives from server policy")
+    func attachmentSupportUsesServerPolicy() throws {
         var payload = Self.validPayload()
         payload["supportsImages"] = false
         payload["attachmentPolicy"] = [
@@ -327,11 +327,11 @@ struct ModelInfoStrictDecodeTests {
         ]
 
         let model = try decode(payload)
-        let capability = AttachmentCapability.from(model: model)
-        #expect(capability.supportsImages == false)
-        #expect(capability.supportsPdfContent == false)
-        #expect(capability.maxImageBytes == 0)
-        #expect(capability.maxDocumentBytes == 4_096)
+        let tool = AttachmentSupport.from(model: model)
+        #expect(tool.supportsImages == false)
+        #expect(tool.supportsPdfContent == false)
+        #expect(tool.maxImageBytes == 0)
+        #expect(tool.maxDocumentBytes == 4_096)
     }
 
     @Test("OpenAI endpoint-aware optional fields decode")
@@ -351,7 +351,7 @@ struct ModelInfoStrictDecodeTests {
         payload["reasoningLevels"] = ["minimal", "low", "medium", "high", "xhigh"]
         payload["defaultReasoningLevel"] = "medium"
         payload["supportsStreaming"] = true
-        payload["supportsCapabilityPrimitives"] = true
+        payload["supportsTools"] = true
         payload["supportsVerbosity"] = true
         payload["defaultVerbosity"] = "low"
         payload["replacementModel"] = "gpt-5.5"
@@ -366,7 +366,7 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.maxContextWindow == 272_000)
         #expect(m.reasoningLevels == ["minimal", "low", "medium", "high", "xhigh"])
         #expect(m.supportsStreaming == true)
-        #expect(m.supportsCapabilityPrimitives == true)
+        #expect(m.supportsTools == true)
         #expect(m.supportsVerbosity == true)
         #expect(m.defaultVerbosity == "low")
         #expect(m.isHidden == false)
@@ -410,7 +410,7 @@ struct ModelInfoStrictDecodeTests {
     @Test("missing isRetiredGeneration fails decode")
     func missingIsRetired() {
         var payload = Self.validPayload()
-        payload.removeValue(forKey: "isLegacy")
+        payload.removeValue(forKey: "isRetiredGeneration")
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 
@@ -424,7 +424,7 @@ struct ModelInfoStrictDecodeTests {
     @Test("null isRetiredGeneration fails decode")
     func nullIsRetired() {
         var payload = Self.validPayload()
-        payload["isLegacy"] = NSNull()
+        payload["isRetiredGeneration"] = NSNull()
         #expect(throws: DecodingError.self) { try decode(payload) }
     }
 }

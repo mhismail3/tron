@@ -85,13 +85,13 @@ fn initial_state_is_empty() {
     let state = create_stream_state();
     assert!(state.acc.accumulated_text.is_empty());
     assert!(state.acc.accumulated_thinking.is_empty());
-    assert!(state.capability_invocations.is_empty());
-    assert!(state.capability_invocation_order.is_empty());
+    assert!(state.tool_invocations.is_empty());
+    assert!(state.tool_invocation_order.is_empty());
     assert_eq!(state.acc.input_tokens, 0);
     assert_eq!(state.acc.output_tokens, 0);
     assert!(!state.acc.text_started);
     assert!(!state.acc.thinking_started);
-    assert!(!state.capability_argument_failed);
+    assert!(!state.tool_argument_failed);
 }
 
 // ── Text streaming ─────────────────────────────────────────────
@@ -142,7 +142,7 @@ fn ignores_text_delta_without_content() {
     assert!(events.is_empty());
 }
 
-// ── Capability invocation streaming ────────────────────────────────────────
+// ── Tool invocation streaming ────────────────────────────────────────
 
 #[test]
 fn emits_toolcall_start_on_function_call_added() {
@@ -155,20 +155,20 @@ fn emits_toolcall_start_on_function_call_added() {
     assert_eq!(events.len(), 1);
     assert_eq!(
         events[0],
-        StreamEvent::CapabilityInvocationDraftStart {
+        StreamEvent::ToolInvocationDraftStart {
             invocation_id: "call_123".into(),
             name: "read_file".into(),
         }
     );
-    assert!(state.capability_invocations.contains_key("call_123"));
+    assert!(state.tool_invocations.contains_key("call_123"));
 }
 
 #[test]
 fn accumulates_function_call_arguments() {
     let mut state = create_stream_state();
-    state.capability_invocations.insert(
+    state.tool_invocations.insert(
         "call_123".into(),
-        CapabilityInvocationDraftState {
+        ToolInvocationDraftState {
             id: "call_123".into(),
             name: "read_file".into(),
             args: String::new(),
@@ -183,13 +183,13 @@ fn accumulates_function_call_arguments() {
     assert_eq!(events.len(), 1);
     assert_eq!(
         events[0],
-        StreamEvent::CapabilityInvocationDraftDelta {
+        StreamEvent::ToolInvocationDraftDelta {
             invocation_id: "call_123".into(),
             arguments_delta: r#"{"path":"/test.txt"}"#.into(),
         }
     );
     assert_eq!(
-        state.capability_invocations["call_123"].args,
+        state.tool_invocations["call_123"].args,
         r#"{"path":"/test.txt"}"#
     );
 }
@@ -206,21 +206,21 @@ fn accumulates_args_delta_before_added_event() {
     );
     assert_eq!(events.len(), 1);
     assert_eq!(
-        state.capability_invocations["call_late"].args,
+        state.tool_invocations["call_late"].args,
         r#"{"operation":"process_run","command":"date"}"#
     );
 
     let events = process_stream_event(
-        &function_call_added_event("call_late", "execute"),
+        &function_call_added_event("call_late", "test_tool"),
         &mut state,
     );
     assert!(events.is_empty());
-    assert_eq!(state.capability_invocations["call_late"].name, "execute");
+    assert_eq!(state.tool_invocations["call_late"].name, "test_tool");
     assert_eq!(
-        state.capability_invocations["call_late"].args,
+        state.tool_invocations["call_late"].args,
         r#"{"operation":"process_run","command":"date"}"#
     );
-    assert_eq!(state.capability_invocation_order, vec!["call_late"]);
+    assert_eq!(state.tool_invocation_order, vec!["call_late"]);
 }
 
 // ── Reasoning streaming ────────────────────────────────────────
@@ -467,11 +467,11 @@ fn completed_emits_text_end_and_done() {
 }
 
 #[test]
-fn completed_emits_toolcall_end_with_capability_invocation_stop_reason() {
+fn completed_emits_toolcall_end_with_tool_invocation_stop_reason() {
     let mut state = create_stream_state();
-    state.capability_invocations.insert(
+    state.tool_invocations.insert(
         "call_abc".into(),
-        CapabilityInvocationDraftState {
+        ToolInvocationDraftState {
             id: "call_abc".into(),
             name: "read_file".into(),
             args: r#"{"path":"/test.txt"}"#.into(),
@@ -494,16 +494,16 @@ fn completed_emits_toolcall_end_with_capability_invocation_stop_reason() {
     );
 
     let events = process_stream_event(&event, &mut state);
-    let capability_completed = events
+    let tool_completed = events
         .iter()
-        .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
-    assert!(capability_completed.is_some());
+        .find(|e| matches!(e, StreamEvent::ToolInvocationDraftEnd { .. }));
+    assert!(tool_completed.is_some());
 
     let done = events
         .iter()
         .find(|e| matches!(e, StreamEvent::Done { .. }));
     if let Some(StreamEvent::Done { stop_reason, .. }) = done {
-        assert_eq!(stop_reason, "capability_invocation");
+        assert_eq!(stop_reason, "tool_invocation");
     }
 }
 
@@ -511,7 +511,7 @@ fn completed_emits_toolcall_end_with_capability_invocation_stop_reason() {
 fn output_item_done_emits_toolcall_end_with_arguments() {
     let mut state = create_stream_state();
     let _ = process_stream_event(
-        &function_call_added_event("call_abc", "execute"),
+        &function_call_added_event("call_abc", "test_tool"),
         &mut state,
     );
 
@@ -520,7 +520,7 @@ fn output_item_done_emits_toolcall_end_with_arguments() {
         item: Some(ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_abc".into()),
-            name: Some("execute".into()),
+            name: Some("test_tool".into()),
             arguments: Some(r#"{"operation":"process_run","command":"date"}"#.into()),
             ..Default::default()
         }),
@@ -528,24 +528,21 @@ fn output_item_done_emits_toolcall_end_with_arguments() {
     };
 
     let events = process_stream_event(&event, &mut state);
-    let capability_completed = events
+    let tool_completed = events
         .iter()
-        .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
-    assert!(capability_completed.is_some());
-    if let Some(StreamEvent::CapabilityInvocationDraftEnd {
-        capability_invocation,
-    }) = capability_completed
-    {
-        assert_eq!(capability_invocation.name, "execute");
+        .find(|e| matches!(e, StreamEvent::ToolInvocationDraftEnd { .. }));
+    assert!(tool_completed.is_some());
+    if let Some(StreamEvent::ToolInvocationDraftEnd { tool_invocation }) = tool_completed {
+        assert_eq!(tool_invocation.name, "test_tool");
         assert_eq!(
-            capability_invocation
+            tool_invocation
                 .arguments
                 .get("operation")
                 .and_then(|value| value.as_str()),
             Some("process_run")
         );
         assert_eq!(
-            capability_invocation
+            tool_invocation
                 .arguments
                 .get("command")
                 .and_then(|value| value.as_str()),
@@ -558,7 +555,7 @@ fn output_item_done_emits_toolcall_end_with_arguments() {
 fn output_item_done_with_malformed_arguments_fails_closed() {
     let mut state = create_stream_state();
     let _ = process_stream_event(
-        &function_call_added_event("call_bad", "execute"),
+        &function_call_added_event("call_bad", "test_tool"),
         &mut state,
     );
 
@@ -567,7 +564,7 @@ fn output_item_done_with_malformed_arguments_fails_closed() {
         item: Some(ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_bad".into()),
-            name: Some("execute".into()),
+            name: Some("test_tool".into()),
             arguments: Some("not json".into()),
             ..Default::default()
         }),
@@ -583,7 +580,7 @@ fn output_item_done_with_malformed_arguments_fails_closed() {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, StreamEvent::CapabilityInvocationDraftEnd { .. }))
+            .any(|event| matches!(event, StreamEvent::ToolInvocationDraftEnd { .. }))
     );
 }
 
@@ -641,7 +638,7 @@ fn completed_malformed_function_call_arguments_emit_error_without_invocation() {
         vec![ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_bad".into()),
-            name: Some("execute".into()),
+            name: Some("test_tool".into()),
             arguments: Some("not json".into()),
             ..Default::default()
         }],
@@ -656,12 +653,12 @@ fn completed_malformed_function_call_arguments_emit_error_without_invocation() {
     assert!(
             events
                 .iter()
-                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("openai capability invocation arguments") && error.contains("execute") && error.contains("call_bad")))
+                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("openai tool invocation arguments") && error.contains("test_tool") && error.contains("call_bad")))
         );
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, StreamEvent::CapabilityInvocationDraftEnd { .. }))
+            .any(|event| matches!(event, StreamEvent::ToolInvocationDraftEnd { .. }))
     );
     assert!(
         !events
@@ -682,7 +679,7 @@ fn completed_empty_response_is_handled() {
 }
 
 #[test]
-fn completed_discovers_capability_invocations_not_seen_in_deltas() {
+fn completed_discovers_tool_invocations_not_seen_in_deltas() {
     let mut state = create_stream_state();
     let event = completed_event(
         vec![ResponsesOutputItem {
@@ -700,22 +697,19 @@ fn completed_discovers_capability_invocations_not_seen_in_deltas() {
     );
 
     let events = process_stream_event(&event, &mut state);
-    let capability_completed = events
+    let tool_completed = events
         .iter()
-        .find(|e| matches!(e, StreamEvent::CapabilityInvocationDraftEnd { .. }));
-    assert!(capability_completed.is_some());
-    if let Some(StreamEvent::CapabilityInvocationDraftEnd {
-        capability_invocation,
-    }) = capability_completed
-    {
-        assert_eq!(capability_invocation.name, "write_file");
+        .find(|e| matches!(e, StreamEvent::ToolInvocationDraftEnd { .. }));
+    assert!(tool_completed.is_some());
+    if let Some(StreamEvent::ToolInvocationDraftEnd { tool_invocation }) = tool_completed {
+        assert_eq!(tool_invocation.name, "write_file");
     }
 
     let done = events
         .iter()
         .find(|e| matches!(e, StreamEvent::Done { .. }));
     if let Some(StreamEvent::Done { stop_reason, .. }) = done {
-        assert_eq!(stop_reason, "capability_invocation");
+        assert_eq!(stop_reason, "tool_invocation");
     }
 }
 
@@ -735,7 +729,7 @@ fn completed_done_content_follows_response_output_order() {
             ResponsesOutputItem {
                 item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_mid".into()),
-                name: Some("execute".into()),
+                name: Some("test_tool".into()),
                 arguments: Some(r#"{"operation":"inspect"}"#.into()),
                 ..Default::default()
             },
@@ -771,7 +765,7 @@ fn completed_done_content_follows_response_output_order() {
     ));
     assert!(matches!(
         &done.content[1],
-        AssistantContent::CapabilityInvocation { id, .. } if id == "call_mid"
+        AssistantContent::ToolInvocation { id, .. } if id == "call_mid"
     ));
     assert!(matches!(
         &done.content[2],
@@ -798,7 +792,7 @@ fn completed_done_content_dedupes_repeated_thinking_snapshot() {
             ResponsesOutputItem {
                 item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_mid".into()),
-                name: Some("execute".into()),
+                name: Some("test_tool".into()),
                 arguments: Some(r#"{"operation":"process_run","command":"sleep 1"}"#.into()),
                 ..Default::default()
             },
@@ -838,7 +832,7 @@ fn completed_done_content_dedupes_repeated_thinking_snapshot() {
     ));
     assert!(matches!(
         &done.content[1],
-        AssistantContent::CapabilityInvocation { id, .. } if id == "call_mid"
+        AssistantContent::ToolInvocation { id, .. } if id == "call_mid"
     ));
 }
 
@@ -894,7 +888,7 @@ fn thinking_snapshot_dedupe_key_normalizes_whitespace() {
 }
 
 #[test]
-fn completed_toolcall_end_uses_first_seen_capability_order() {
+fn completed_toolcall_end_uses_first_seen_tool_order() {
     let mut state = create_stream_state();
     let _ = process_stream_event(
         &function_args_delta_event("call_b", r#"{"operation":"second"}"#),
@@ -910,14 +904,14 @@ fn completed_toolcall_end_uses_first_seen_capability_order() {
             ResponsesOutputItem {
                 item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_a".into()),
-                name: Some("execute".into()),
+                name: Some("test_tool".into()),
                 arguments: Some(r#"{"operation":"first"}"#.into()),
                 ..Default::default()
             },
             ResponsesOutputItem {
                 item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_b".into()),
-                name: Some("execute".into()),
+                name: Some("test_tool".into()),
                 arguments: Some(r#"{"operation":"second"}"#.into()),
                 ..Default::default()
             },
@@ -929,9 +923,9 @@ fn completed_toolcall_end_uses_first_seen_capability_order() {
     let ended_ids: Vec<&str> = events
         .iter()
         .filter_map(|event| match event {
-            StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation,
-            } => Some(capability_invocation.id.as_str()),
+            StreamEvent::ToolInvocationDraftEnd { tool_invocation } => {
+                Some(tool_invocation.id.as_str())
+            }
             _ => None,
         })
         .collect();
@@ -949,20 +943,20 @@ fn duplicate_output_item_added_emits_toolcall_start_once() {
     assert_eq!(events1.len(), 1);
     assert!(matches!(
         &events1[0],
-        StreamEvent::CapabilityInvocationDraftStart { .. }
+        StreamEvent::ToolInvocationDraftStart { .. }
     ));
 
-    // Second OutputItemAdded for the same call_id should NOT emit CapabilityInvocationDraftStart
+    // Second OutputItemAdded for the same call_id should NOT emit ToolInvocationDraftStart
     let events2 = process_stream_event(
         &function_call_added_event("call_dup", "read_file"),
         &mut state,
     );
     assert!(
         events2.is_empty(),
-        "duplicate OutputItemAdded should not emit CapabilityInvocationDraftStart"
+        "duplicate OutputItemAdded should not emit ToolInvocationDraftStart"
     );
     // State should still have exactly one entry
-    assert_eq!(state.capability_invocations.len(), 1);
+    assert_eq!(state.tool_invocations.len(), 1);
 }
 
 // ── Unknown events ─────────────────────────────────────────────

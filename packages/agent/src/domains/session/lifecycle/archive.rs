@@ -3,18 +3,18 @@ use super::{BaseEvent, TronEvent};
 use crate::domains::session::Deps;
 use crate::domains::session::event_store::ListSessionsOptions;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::ToolError;
 use serde_json::Value;
 use serde_json::json;
 
 impl SessionLifecycleService {
-    pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
+    pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_archive = session_id.clone();
         run_blocking_task("session.archive", move || {
             session_manager
                 .archive_session(&session_id_for_archive)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: error.to_string(),
                 })?;
             Ok(())
@@ -33,16 +33,13 @@ impl SessionLifecycleService {
         Ok(json!({ "archived": true }))
     }
 
-    pub(crate) async fn unarchive(
-        deps: &Deps,
-        session_id: String,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn unarchive(deps: &Deps, session_id: String) -> Result<Value, ToolError> {
         let event_store = deps.event_store.clone();
         let session_id_for_unarchive = session_id.clone();
         run_blocking_task("session.unarchive", move || {
             let _ = event_store
                 .clear_session_ended(&session_id_for_unarchive)
-                .map_err(|error| CapabilityError::Internal {
+                .map_err(|error| ToolError::Internal {
                     message: format!("Persistence error: {error}"),
                 })?;
             Ok(())
@@ -76,10 +73,7 @@ impl SessionLifecycleService {
     /// `skipped` captures any candidates that failed mid-batch so the caller
     /// can surface them to the user and retry — partial success is explicit
     /// rather than rolled back.
-    pub(crate) async fn archive_older_than(
-        deps: &Deps,
-        days: u32,
-    ) -> Result<Value, CapabilityError> {
+    pub(crate) async fn archive_older_than(deps: &Deps, days: u32) -> Result<Value, ToolError> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
         let cutoff_rfc = cutoff.to_rfc3339();
 
@@ -92,11 +86,12 @@ impl SessionLifecycleService {
                     ended: Some(false),
                     ..Default::default()
                 };
-                let sessions = event_store.list_sessions(&options).map_err(|error| {
-                    CapabilityError::Internal {
-                        message: format!("Persistence error: {error}"),
-                    }
-                })?;
+                let sessions =
+                    event_store
+                        .list_sessions(&options)
+                        .map_err(|error| ToolError::Internal {
+                            message: format!("Persistence error: {error}"),
+                        })?;
                 // RFC3339 strings are lexicographically sortable, so a
                 // string comparison correctly implements "older than cutoff".
                 let ids: Vec<String> = sessions

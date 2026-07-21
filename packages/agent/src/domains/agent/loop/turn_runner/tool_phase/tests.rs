@@ -2,20 +2,20 @@ use super::*;
 use crate::domains::agent::context::types::{CompactionConfig, ContextManagerConfig};
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::primitive_surface::PrimitiveExecutionTarget;
-use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
+use crate::domains::agent::r#loop::types::ToolInvocationExecutionResult;
 use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
-use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+use crate::domains::session::event_store::sqlite::schema::ensure_schema;
 use crate::domains::session::event_store::{EventStore, ListEventsOptions};
 use crate::engine::{
     EffectClass, EngineHostHandle, FunctionDefinition, FunctionId, FunctionVisibility, Invocation,
     RiskLevel, WorkerId,
 };
-use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::content::ToolResultContent;
 use crate::shared::protocol::events::{AssistantMessage, TronEvent};
-use crate::shared::protocol::messages::CapabilityInvocationDraft;
-use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
-use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::messages::ToolInvocationDraft;
+use crate::shared::protocol::messages::{Message, ToolResultMessageContent};
+use crate::shared::protocol::model_tools::{ToolResult, ToolResultBody};
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -23,16 +23,16 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use tokio_util::sync::CancellationToken;
 
-fn make_exec_result(content: CapabilityResultBody) -> CapabilityInvocationExecutionResult {
+fn make_exec_result(content: ToolResultBody) -> ToolInvocationExecutionResult {
     make_exec_result_with_details(content, None)
 }
 
 fn make_exec_result_with_details(
-    content: CapabilityResultBody,
+    content: ToolResultBody,
     details: Option<Value>,
-) -> CapabilityInvocationExecutionResult {
-    CapabilityInvocationExecutionResult {
-        result: CapabilityResult {
+) -> ToolInvocationExecutionResult {
+    ToolInvocationExecutionResult {
+        result: ToolResult {
             content,
             details,
             is_error: None,
@@ -42,21 +42,20 @@ fn make_exec_result_with_details(
 }
 
 #[test]
-fn direct_tool_identity_uses_the_tool_name_without_interpreting_payload_fields() {
+fn tool_event_context_contains_only_causal_fields() {
     let args = Map::from_iter([("operation".to_owned(), json!("worker_owned_field"))]);
 
-    let identity = primitive_identity_json("worker_list", &args, None, None);
+    let identity = tool_event_context_json(None, None);
 
-    assert_eq!(identity["modelPrimitiveName"], "worker_list");
-    assert!(identity.get("operationName").is_none());
-    assert!(identity.get("requestedOperationName").is_none());
+    assert!(identity.get("toolName").is_none());
+    assert_eq!(args["operation"], "worker_owned_field");
 }
 
 #[test]
 fn result_identity_keeps_trace_and_presentation_evidence_without_operation_routing() {
-    let base_identity = primitive_identity_json("worker_list", &Map::new(), None, None);
+    let base_identity = tool_event_context_json(None, None);
     let result = make_exec_result_with_details(
-        CapabilityResultBody::Text("complete".into()),
+        ToolResultBody::Text("complete".into()),
         Some(json!({
             "operation": "worker_owned_field",
             "traceId": "trace_1",
@@ -64,19 +63,18 @@ fn result_identity_keeps_trace_and_presentation_evidence_without_operation_routi
         })),
     );
 
-    let identity = result_identity_json("worker_list", base_identity, &result);
+    let identity = result_event_context_json(base_identity, &result);
 
-    assert_eq!(identity["modelPrimitiveName"], "worker_list");
+    assert!(identity.get("toolName").is_none());
     assert_eq!(identity["traceId"], "trace_1");
     assert_eq!(identity["themeColor"], "#10B981");
-    assert!(identity.get("operationName").is_none());
 }
 
 #[test]
 fn extract_result_text_drops_images() {
-    let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
-        CapabilityResultContent::text("captured"),
-        CapabilityResultContent::image("base64data", "image/png"),
+    let exec = make_exec_result(ToolResultBody::Blocks(vec![
+        ToolResultContent::text("captured"),
+        ToolResultContent::image("base64data", "image/png"),
     ]));
     let text = extract_result_text(&exec);
     assert_eq!(text, "captured");
@@ -86,9 +84,9 @@ fn extract_result_text_drops_images() {
 #[test]
 fn durable_completion_redacts_one_time_credentials_but_leaves_live_result_intact() {
     let token = "trwh_0123456789abcdef0123456789abcdef";
-    let invocation = CapabilityInvocationDraft::new("call-secret", "worker_upsert", Map::new());
+    let invocation = ToolInvocationDraft::new("call-secret", "worker_upsert", Map::new());
     let result = make_exec_result_with_details(
-        CapabilityResultBody::Text(format!(r#"{{"token":"{token}"}}"#)),
+        ToolResultBody::Text(format!(r#"{{"token":"{token}"}}"#)),
         Some(json!({
             "webhooks": [{"token": token, "path": "/hooks/research"}],
             "status": "active"
@@ -128,7 +126,7 @@ async fn phase_persistence_harness_with_trigger(trigger: Option<&str>) -> PhaseP
     let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
-        run_migrations(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
         if let Some(trigger) = trigger {
             conn.execute_batch(trigger)
                 .expect("install failure trigger");
@@ -151,10 +149,10 @@ async fn phase_persistence_harness_with_trigger(trigger: Option<&str>) -> PhaseP
 }
 
 #[derive(Clone)]
-struct DelayedCapabilityHandler;
+struct DelayedToolHandler;
 
 #[async_trait]
-impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
+impl crate::engine::InProcessFunctionHandler for DelayedToolHandler {
     async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
         let trace_id = invocation
             .payload
@@ -179,25 +177,25 @@ impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
 
 async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
-    let function_id = FunctionId::new("capability::phase_lifecycle").expect("function id");
+    let function_id = FunctionId::new("tool::phase_lifecycle").expect("function id");
     let function = FunctionDefinition::new(
         function_id.clone(),
-        WorkerId::new("capability").expect("worker id"),
+        WorkerId::new("tool").expect("worker id"),
         "Phase lifecycle test".to_owned(),
         FunctionVisibility::Public,
         EffectClass::PureRead,
     )
     .with_risk(RiskLevel::Low);
     engine_host
-        .register_function(function.clone(), Arc::new(DelayedCapabilityHandler))
+        .register_function(function.clone(), Arc::new(DelayedToolHandler))
         .await
         .expect("register function");
 
     let mut targets_by_name = BTreeMap::new();
     let _ = targets_by_name.insert(
-        "execute".to_owned(),
+        "phase_lifecycle".to_owned(),
         PrimitiveExecutionTarget {
-            model_capability_id: "execute".to_owned(),
+            model_tool_id: "phase_lifecycle".to_owned(),
             function_id,
             function,
         },
@@ -205,7 +203,7 @@ async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) 
     (
         engine_host,
         ResolvedPrimitiveSurface {
-            capabilities: Vec::new(),
+            tools: Vec::new(),
             targets_by_name,
             snapshot: Default::default(),
         },
@@ -220,16 +218,14 @@ fn context_manager_for_workdir(working_directory: &str) -> ContextManager {
     })
 }
 
-fn stream_result_with_invocations(
-    capability_invocations: Vec<CapabilityInvocationDraft>,
-) -> StreamResult {
+fn stream_result_with_invocations(tool_invocations: Vec<ToolInvocationDraft>) -> StreamResult {
     StreamResult {
         message: AssistantMessage {
             content: Vec::new(),
             token_usage: None,
         },
-        capability_invocations,
-        stop_reason: "capability_invocation".to_owned(),
+        tool_invocations,
+        stop_reason: "tool_invocation".to_owned(),
         token_usage: None,
         interrupted: false,
         partial_content: None,
@@ -276,9 +272,9 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
     let cancel = CancellationToken::new();
     let invocation_id = "call-direct-result".to_owned();
     let arguments = Map::from_iter([("filter".to_owned(), json!("recent"))]);
-    let stream_result = stream_result_with_invocations(vec![CapabilityInvocationDraft::new(
+    let stream_result = stream_result_with_invocations(vec![ToolInvocationDraft::new(
         invocation_id.clone(),
-        "execute",
+        "phase_lifecycle",
         arguments.clone(),
     )]);
 
@@ -288,9 +284,9 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
             EventType::MessageAssistant,
             json!({
                 "content": [{
-                    "type": "capability_invocation",
+                    "type": "tool_invocation",
                     "id": invocation_id,
-                    "name": "execute",
+                    "name": "phase_lifecycle",
                     "arguments": arguments,
                 }],
                 "turn": 1,
@@ -319,15 +315,15 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
         origin_worker_id: None,
     })
     .await;
-    assert_eq!(outcome.capability_invocations_executed, 1);
+    assert_eq!(outcome.tool_invocations_executed, 1);
 
     let live_content = context_manager
         .messages_slice()
         .iter()
         .find_map(|message| match message {
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: id,
-                content: CapabilityResultMessageContent::Text(content),
+                content: ToolResultMessageContent::Text(content),
                 ..
             } if id == &invocation_id => Some(content.clone()),
             _ => None,
@@ -338,7 +334,7 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
         "done-unknown"
     );
 
-    let completed = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
+    let completed = persisted_rows(&h.store, &h.session_id, "tool.invocation.completed");
     assert_eq!(completed.len(), 1);
     let completed_payload: Value =
         serde_json::from_str(&completed[0].payload).expect("completed event payload");
@@ -359,9 +355,9 @@ async fn direct_tool_provider_result_is_stable_after_reconstruction() {
         .messages
         .iter()
         .find_map(|message| match message {
-            Message::CapabilityResult {
+            Message::ToolResult {
                 invocation_id: id,
-                content: CapabilityResultMessageContent::Text(content),
+                content: ToolResultMessageContent::Text(content),
                 ..
             } if id == &invocation_id => Some(content),
             _ => None,
@@ -384,15 +380,13 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     let mut context_manager = context_manager_for_workdir(&working_directory);
     let cancel = CancellationToken::new();
     let stream_result = stream_result_with_invocations(vec![
-        CapabilityInvocationDraft::new("call-slow", "execute", {
+        ToolInvocationDraft::new("call-slow", "phase_lifecycle", {
             let mut args = Map::new();
-            args.insert("operation".to_owned(), json!("log_recent"));
             args.insert("traceId".to_owned(), json!("slow"));
             args
         }),
-        CapabilityInvocationDraft::new("call-fast", "execute", {
+        ToolInvocationDraft::new("call-fast", "phase_lifecycle", {
             let mut args = Map::new();
-            args.insert("operation".to_owned(), json!("log_recent"));
             args.insert("traceId".to_owned(), json!("fast"));
             args
         }),
@@ -419,42 +413,41 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     })
     .await;
 
-    assert_eq!(outcome.capability_invocations_executed, 2);
+    assert_eq!(outcome.tool_invocations_executed, 2);
     let events = collect_broadcasts(&mut h.rx, 5).await;
     let lifecycle: Vec<&TronEvent> = events
         .iter()
         .filter(|event| {
             matches!(
                 event,
-                TronEvent::CapabilityInvocationStarted { .. }
-                    | TronEvent::CapabilityInvocationCompleted { .. }
+                TronEvent::ToolInvocationStarted { .. } | TronEvent::ToolInvocationCompleted { .. }
             )
         })
         .collect();
     assert_eq!(lifecycle.len(), 4, "no duplicate lifecycle events");
     assert!(matches!(
         lifecycle[0],
-        TronEvent::CapabilityInvocationStarted { .. }
+        TronEvent::ToolInvocationStarted { .. }
     ));
     assert!(matches!(
         lifecycle[1],
-        TronEvent::CapabilityInvocationStarted { .. }
+        TronEvent::ToolInvocationStarted { .. }
     ));
     assert!(matches!(
         lifecycle[2],
-        TronEvent::CapabilityInvocationCompleted { .. }
+        TronEvent::ToolInvocationCompleted { .. }
     ));
 
-    let persisted_starts = persisted_rows(&h.store, &h.session_id, "capability.invocation.started");
+    let persisted_starts = persisted_rows(&h.store, &h.session_id, "tool.invocation.started");
     let persisted_completions =
-        persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
+        persisted_rows(&h.store, &h.session_id, "tool.invocation.completed");
     assert_eq!(persisted_starts.len(), 2);
     assert_eq!(persisted_completions.len(), 2);
 
     let live_start_sequences: Vec<i64> = lifecycle
         .iter()
         .filter_map(|event| match event {
-            TronEvent::CapabilityInvocationStarted { .. } => event.sequence(),
+            TronEvent::ToolInvocationStarted { .. } => event.sequence(),
             _ => None,
         })
         .collect();
@@ -465,7 +458,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     let live_completion_sequences: Vec<i64> = lifecycle
         .iter()
         .filter_map(|event| match event {
-            TronEvent::CapabilityInvocationCompleted { .. } => event.sequence(),
+            TronEvent::ToolInvocationCompleted { .. } => event.sequence(),
             _ => None,
         })
         .collect();
@@ -483,7 +476,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     let live_completion_ids = lifecycle
         .iter()
         .filter_map(|event| match event {
-            TronEvent::CapabilityInvocationCompleted { invocation_id, .. } => {
+            TronEvent::ToolInvocationCompleted { invocation_id, .. } => {
                 Some(invocation_id.as_str())
             }
             _ => None,
@@ -510,42 +503,38 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     let started = lifecycle
         .iter()
         .find_map(|event| match event {
-            TronEvent::CapabilityInvocationStarted {
+            TronEvent::ToolInvocationStarted {
                 invocation_id,
-                model_primitive_name,
+                tool_name,
                 arguments,
-                capability_identity,
+                tool_identity,
                 ..
-            } if invocation_id == "call-slow" => {
-                Some((model_primitive_name, arguments, capability_identity))
-            }
+            } if invocation_id == "call-slow" => Some((tool_name, arguments, tool_identity)),
             _ => None,
         })
         .expect("slow started event");
-    assert_eq!(started.0, "execute");
+    assert_eq!(started.0, "phase_lifecycle");
     assert_eq!(started.1.as_ref().unwrap()["traceId"], "slow");
-    assert_eq!(started.2.model_primitive_name.as_deref(), Some("execute"));
-    assert_eq!(started.2.operation_name, None);
+    assert_eq!(started.2.trace_id, None);
 
     let completed = lifecycle
         .iter()
         .find_map(|event| match event {
-            TronEvent::CapabilityInvocationCompleted {
+            TronEvent::ToolInvocationCompleted {
                 invocation_id,
                 result,
-                capability_identity,
+                tool_identity,
                 ..
-            } if invocation_id == "call-fast" => Some((result, capability_identity)),
+            } if invocation_id == "call-fast" => Some((result, tool_identity)),
             _ => None,
         })
         .expect("fast completed event");
     assert_eq!(completed.0.as_ref().unwrap().is_error, Some(false));
-    assert_eq!(completed.1.operation_name, None);
     assert_eq!(completed.1.theme_color.as_deref(), Some("#10B981"));
 }
 
 #[tokio::test]
-async fn parent_cancellation_during_parallel_capability_batch_marks_active_turn_interrupted() {
+async fn parent_cancellation_during_parallel_tool_batch_marks_active_turn_interrupted() {
     let h = phase_persistence_harness().await;
     let (engine_host, surface) = phase_engine_surface().await;
     let tempdir = tempfile::tempdir().expect("working directory");
@@ -562,13 +551,10 @@ async fn parent_cancellation_during_parallel_capability_batch_marks_active_turn_
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         cancel_task_token.cancel();
     });
-    let stream_result = stream_result_with_invocations(vec![CapabilityInvocationDraft::new(
+    let stream_result = stream_result_with_invocations(vec![ToolInvocationDraft::new(
         "call-cancelled",
-        "execute",
-        Map::from_iter([
-            ("operation".to_owned(), json!("log_recent")),
-            ("traceId".to_owned(), json!("slow")),
-        ]),
+        "phase_lifecycle",
+        Map::from_iter([("traceId".to_owned(), json!("slow"))]),
     )]);
 
     let outcome = execute_tool_phase(ToolPhaseParams {
@@ -594,12 +580,12 @@ async fn parent_cancellation_during_parallel_capability_batch_marks_active_turn_
     cancel_task.await.unwrap();
 
     assert!(outcome.interrupted);
-    assert_eq!(outcome.capability_invocations_executed, 1);
+    assert_eq!(outcome.tool_invocations_executed, 1);
     assert_eq!(
         persisted_rows(
             &h.store,
             &h.session_id,
-            EventType::CapabilityInvocationCompleted.as_str(),
+            EventType::ToolInvocationCompleted.as_str(),
         )
         .len(),
         1
@@ -614,9 +600,9 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
     let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
     let mut context_manager = context_manager_for_workdir(working_directory);
     let cancel = CancellationToken::new();
-    let stream_result = stream_result_with_invocations(vec![CapabilityInvocationDraft::new(
+    let stream_result = stream_result_with_invocations(vec![ToolInvocationDraft::new(
         "call-1",
-        "execute",
+        "phase_lifecycle",
         Map::new(),
     )]);
 
@@ -641,7 +627,7 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
     })
     .await;
 
-    assert_eq!(outcome.capability_invocations_executed, 0);
+    assert_eq!(outcome.tool_invocations_executed, 0);
     assert!(outcome.error.is_some());
     let result = tokio::time::timeout(std::time::Duration::from_millis(100), h.rx.recv()).await;
     assert!(
@@ -653,13 +639,13 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
 #[tokio::test]
 async fn completion_batch_failure_atomically_terminalizes_every_durable_start() {
     let mut h = phase_persistence_harness_with_trigger(Some(
-        "CREATE TRIGGER fail_second_capability_completion
+        "CREATE TRIGGER fail_second_tool_completion
          BEFORE INSERT ON events
-         WHEN NEW.type = 'capability.invocation.completed'
+         WHEN NEW.type = 'tool.invocation.completed'
           AND NEW.invocation_id = 'call-fast'
           AND json_extract(NEW.payload, '$.details.status') IS NULL
          BEGIN
-           SELECT RAISE(FAIL, 'forced second capability completion failure');
+           SELECT RAISE(FAIL, 'forced second tool completion failure');
          END;",
     ))
     .await;
@@ -669,21 +655,15 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
     let mut context_manager = context_manager_for_workdir(working_directory);
     let cancel = CancellationToken::new();
     let stream_result = stream_result_with_invocations(vec![
-        CapabilityInvocationDraft::new(
+        ToolInvocationDraft::new(
             "call-slow",
-            "execute",
-            Map::from_iter([
-                ("operation".to_owned(), json!("log_recent")),
-                ("traceId".to_owned(), json!("slow")),
-            ]),
+            "phase_lifecycle",
+            Map::from_iter([("traceId".to_owned(), json!("slow"))]),
         ),
-        CapabilityInvocationDraft::new(
+        ToolInvocationDraft::new(
             "call-fast",
-            "execute",
-            Map::from_iter([
-                ("operation".to_owned(), json!("log_recent")),
-                ("traceId".to_owned(), json!("fast")),
-            ]),
+            "phase_lifecycle",
+            Map::from_iter([("traceId".to_owned(), json!("fast"))]),
         ),
     ]);
 
@@ -713,7 +693,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
         persisted_rows(
             &h.store,
             &h.session_id,
-            EventType::CapabilityInvocationStarted.as_str(),
+            EventType::ToolInvocationStarted.as_str(),
         )
         .len(),
         2,
@@ -722,7 +702,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
     let completions = persisted_rows(
         &h.store,
         &h.session_id,
-        EventType::CapabilityInvocationCompleted.as_str(),
+        EventType::ToolInvocationCompleted.as_str(),
     );
     assert_eq!(
         completions.len(),
@@ -744,7 +724,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
     assert!(
         completion_payloads.iter().all(|payload| {
             payload["details"]["status"] == json!("persistence_failed")
-                && payload["details"]["code"] == json!("CAPABILITY_COMPLETION_PERSISTENCE_FAILED")
+                && payload["details"]["code"] == json!("TOOL_COMPLETION_PERSISTENCE_FAILED")
                 && payload["details"]["executed"] == json!(true)
                 && payload["isError"] == json!(true)
                 && !payload["content"]
@@ -756,7 +736,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
     let started_ids = persisted_rows(
         &h.store,
         &h.session_id,
-        EventType::CapabilityInvocationStarted.as_str(),
+        EventType::ToolInvocationStarted.as_str(),
     )
     .into_iter()
     .map(|row| row.invocation_id.expect("start invocation id"))
@@ -772,7 +752,7 @@ async fn completion_batch_failure_atomically_terminalizes_every_durable_start() 
 
     let mut live_completions = Vec::new();
     while let Ok(event) = h.rx.try_recv() {
-        if let TronEvent::CapabilityInvocationCompleted { invocation_id, .. } = event {
+        if let TronEvent::ToolInvocationCompleted { invocation_id, .. } = event {
             live_completions.push(invocation_id);
         }
     }

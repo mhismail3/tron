@@ -20,7 +20,7 @@ final class DeepLinkRouterTests: XCTestCase {
             "invocationId": "cap_abc"
         ])
 
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .toolInvocation(id: "cap_abc")))
     }
 
     func testHandleNotificationWithEventId_IgnoresEventId() {
@@ -56,7 +56,7 @@ final class DeepLinkRouterTests: XCTestCase {
             "eventId": "evt_xyz"
         ])
 
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .toolInvocation(id: "cap_abc")))
     }
 
     // MARK: - URL Scheme Handling
@@ -69,12 +69,12 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleURLWithCapabilityQueryRoutesScrollTarget() {
+    func testHandleURLWithToolQueryRoutesScrollTarget() {
         let router = DeepLinkRouter()
-        let url = URL(string: "tron://session/sess_123?capability=cap_abc")!
+        let url = URL(string: "tron://session/sess_123?tool=cap_abc")!
 
         XCTAssertTrue(router.handle(url: url))
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .toolInvocation(id: "cap_abc")))
     }
 
     func testHandleURLWithEventQueryRoutesScrollTarget() {
@@ -85,17 +85,17 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .event(id: "evt_xyz")))
     }
 
-    func testHandleURLWithCapabilityAndEventQueryUsesCapability() {
+    func testHandleURLWithToolAndEventQueryUsesTool() {
         let router = DeepLinkRouter()
-        let url = URL(string: "tron://session/sess_123?capability=cap_abc&event=evt_xyz")!
+        let url = URL(string: "tron://session/sess_123?tool=cap_abc&event=evt_xyz")!
 
         XCTAssertTrue(router.handle(url: url))
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .toolInvocation(id: "cap_abc")))
     }
 
     func testHandleURLWithEmptyScrollQueryIgnoresTarget() {
         let router = DeepLinkRouter()
-        let url = URL(string: "tron://session/sess_123?capability=&event=")!
+        let url = URL(string: "tron://session/sess_123?tool=&event=")!
 
         XCTAssertTrue(router.handle(url: url))
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
@@ -189,9 +189,9 @@ final class DeepLinkRouterTests: XCTestCase {
     // MARK: - ScrollTarget Equatable
 
     func testScrollTargetEquatable() {
-        XCTAssertEqual(ScrollTarget.capabilityInvocation(id: "abc"), ScrollTarget.capabilityInvocation(id: "abc"))
-        XCTAssertNotEqual(ScrollTarget.capabilityInvocation(id: "abc"), ScrollTarget.capabilityInvocation(id: "xyz"))
-        XCTAssertNotEqual(ScrollTarget.capabilityInvocation(id: "abc"), ScrollTarget.event(id: "abc"))
+        XCTAssertEqual(ScrollTarget.toolInvocation(id: "abc"), ScrollTarget.toolInvocation(id: "abc"))
+        XCTAssertNotEqual(ScrollTarget.toolInvocation(id: "abc"), ScrollTarget.toolInvocation(id: "xyz"))
+        XCTAssertNotEqual(ScrollTarget.toolInvocation(id: "abc"), ScrollTarget.event(id: "abc"))
         XCTAssertEqual(ScrollTarget.bottom, ScrollTarget.bottom)
     }
 
@@ -199,8 +199,8 @@ final class DeepLinkRouterTests: XCTestCase {
 
     func testNavigationIntentEquatable() {
         XCTAssertEqual(
-            NavigationIntent.session(id: "sess_1", scrollTo: .capabilityInvocation(id: "abc")),
-            NavigationIntent.session(id: "sess_1", scrollTo: .capabilityInvocation(id: "abc"))
+            NavigationIntent.session(id: "sess_1", scrollTo: .toolInvocation(id: "abc")),
+            NavigationIntent.session(id: "sess_1", scrollTo: .toolInvocation(id: "abc"))
         )
         XCTAssertNotEqual(
             NavigationIntent.session(id: "sess_1", scrollTo: nil),

@@ -20,15 +20,15 @@ models subscribe through `SessionEventRepository`, so event plugins receive
 parsed event contracts without SwiftUI/session code importing concrete engine
 transport or raw settings/auth protocol DTOs.
 
-Capability execution chips are server-truth-backed. Live
-`capability.invocation.started` and `capability.invocation.completed` events
+Tool execution chips are server-truth-backed. Live
+`tool.invocation.started` and `tool.invocation.completed` events
 come from persisted session rows and carry those row sequences; when the server
 receives several parallel invocation requests, it broadcasts every persisted
 `started` row before execution begins. iOS treats
-`capability.invocation.generating` as pre-execution draft state only, but still
+`tool.invocation.generating` as pre-execution draft state only, but still
 renders it immediately so the user sees pending parallel work before execution
-finishes. `capability.invocation.progress` is the only transient progress
-surface; terminal state comes from `capability.invocation.completed`. There is
+finishes. `tool.invocation.progress` is the only transient progress
+surface; terminal state comes from `tool.invocation.completed`. There is
 no separate async-run lifecycle or paused invocation state. Reconnect
 reconstruction preserves generating, running, completed, and failed invocation
 state directly from the server accumulator.
@@ -89,7 +89,7 @@ Current retained plugin groups:
 | Group | Directory | Purpose |
 |-------|-----------|---------|
 | Streaming | `Sources/Engine/Events/Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
-| Capability invocation | `Sources/Engine/Events/Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
+| Tool invocation | `Sources/Engine/Events/Plugins/ToolInvocation/` | Generic `tool.invocation.*` lifecycle evidence for chat. |
 | Lifecycle | `Sources/Engine/Events/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
 | Session | `Sources/Engine/Events/Plugins/Session/` | Connection and session list/update/archive/delete state. |
 | Server | `Sources/Engine/Events/Plugins/Server/` | Server/auth/restart status messages. |
@@ -102,7 +102,7 @@ Server stream event labels under `packages/agent/src/transport/runtime/streams`
 must have an iOS plugin entry even when they intentionally render no UI. Marker
 plugins such as `agent.start`, `agent.thinking_start`, `agent.interrupted`,
 `agent.retry`, `context.warning`, `session.forked`,
-`capability.invocation.batch`, and `capability.invocation.arguments_delta`
+`tool.invocation.batch`, and `tool.invocation.arguments_delta`
 parse only the routing envelope when their payload can contain partial
 arguments or diagnostic material. A registered plugin returning `nil` after a
 successful parse is a no-op, not a transform warning; malformed payload decode
@@ -118,14 +118,14 @@ notification instead of a retryable failure pill. The later `agent.complete`
 event alone finalizes streaming state and returns the mounted chat to idle.
 
 `agent.response_complete` is dispatched lifecycle evidence rather than a
-marker. Its server-owned capability count identifies the conservative subset
-of responses that are final clean text: zero-capability responses may be
-marked final, while capability-bearing responses never own a metadata footer.
+marker. Its server-owned tool count identifies the conservative subset
+of responses that are final clean text: zero-tool responses may be
+marked final, while tool-bearing responses never own a metadata footer.
 The matching `agent.turn_end` supplies token, model, and latency presentation
 facts, and accounting still updates for every turn. Stored reconstruction
 applies the same policy from `message.assistant`:
 text must exist, the payload must not be interrupted, and no
-capability-invocation block may be present. Neither path treats provider
+tool-invocation block may be present. Neither path treats provider
 stop-reason spelling or rendered item order as finality evidence.
 
 `agent.thinking_end` is not a marker: it carries the server-authoritative final
@@ -135,10 +135,9 @@ non-streaming so live display converges with `message.assistant` replay.
 Providers that expose append-only extended thinking use the default `thinking`
 contract. Provider-authored reasoning summaries use `reasoning_summary`; those
 summaries may be compressed or non-verbatim and must be labeled separately in
-the UI rather than presented as raw chain-of-thought. Legacy OpenAI
-`message.assistant` replay blocks that predate the explicit `kind` field are
-also rendered as reasoning summaries based on their persisted `providerType`
-so old sessions do not overpromise raw thinking.
+the UI rather than presented as raw chain-of-thought. Every persisted thinking
+block carries its explicit `kind`; missing values use the ordinary thinking
+presentation.
 
 ## Replay manifest/event parity
 
@@ -146,7 +145,7 @@ so old sessions do not overpromise raw thinking.
 server replay manifest. It is decoded in the stored event enum and summarized as
 non-chat audit evidence; it does not have a live plugin or render a chat
 message. `replay_manifest` is not an event at all: it is a pure-read
-capability/session result (`format: "tron.replay.v1"`), so no iOS persisted event case or live plugin is required for replay manifest exports.
+tool/session result (`format: "tron.replay.v1"`), so no iOS persisted event case or live plugin is required for replay manifest exports.
 
 ## Failure Envelope Parity
 
@@ -158,9 +157,9 @@ objects.
 The live `error` plugin and `agent.turn_failed` plugin do not synthesize
 placeholder codes, messages, turns, or recoverability. If the current server
 payload omits required failure fields, the plugin transform drops the malformed
-event. `turn.failed` is the durable failed-turn record; individual capability
-failures remain in `capability.invocation.completed`. The client does not retain
-unwritten `error.agent`, `error.capability`, or `error.provider` storage cases.
+event. `turn.failed` is the durable failed-turn record; individual tool
+failures remain in `tool.invocation.completed`. The client does not retain
+unwritten `error.agent`, `error.tool`, or `error.provider` storage cases.
 Cancellation presentation is selected only from the canonical cancellation
 code/category, never from an abort RPC or client-authored error string.
 
@@ -198,7 +197,7 @@ production registry never retains it. `ChatViewModel+Events.swift` owns
 the composed target conformance, while small handler extensions implement its
 requirements. The root state object owns
 orchestration; streaming, UI queue,
-capability-completion, and live event callback installation lives in
+tool-completion, and live event callback installation lives in
 `ChatViewModel+RuntimeCallbacks.swift`. The target exposes chat/session
 primitives, not fixed product session-list APIs.
 
@@ -216,16 +215,15 @@ contains only messages, accumulated token usage, and the last context size.
 `SessionEventType.serverDurableCases` mirrors the server's 13-event storage
 contract. The only additional cached type is the explicitly client-local
 `stream.thinking_complete` row used to retain expanded thinking across app
-restarts. Capability lifecycle rows are joined into their rendered assistant
+restarts. Tool lifecycle rows are joined into their rendered assistant
 content; compact boundaries retain their rendered message and update the
 context size. Session lifecycle, turn boundaries, and provider-request audits
 remain available as durable diagnostics without creating parallel mounted
 client state.
-Capability identity fields stay primitive: model primitive, operation,
+Tool identity fields stay primitive: tool, operation,
 trace/root invocation ids, theme color, and presentation hints. Reconstruction
-must not recover retired contract, implementation, worker, risk, or binding
-metadata from old payloads.
-When persisted capability lifecycle rows already establish success or error,
+projects only those current fields.
+When persisted tool lifecycle rows already establish success or error,
 that terminal chip remains authoritative over any lower-fidelity current-turn
 projection returned in the same reconstruction snapshot.
 
@@ -241,12 +239,7 @@ resulting `CachedSession` and uses it for the session list and active-session
 metadata. The client does not synthesize missing counts from unrelated local
 state and does not reconstruct product panels from session metadata.
 
-## Guardrails
+## Source Guards
 
-PET-8 source guards enforce:
-
-- deleted fixed view roots remain absent;
-- deleted clients/state objects remain absent;
-- primitive shell files remain present;
-- push authorization is gated by active pairing;
-- removed product names do not reappear in ordinary source or tests.
+Source guards enforce agreement between event registration, the primitive
+shell, push authorization, and the current client source tree.

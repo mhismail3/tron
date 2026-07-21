@@ -3,10 +3,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
-use rusqlite::{Connection, OptionalExtension, params};
-
-use super::{CURRENT_STORAGE_GENERATION, STORAGE_GENERATION_KEY};
+use rusqlite::Connection;
 
 /// Apply storage-wide SQLite pragmas to one connection.
 pub fn apply_runtime_pragmas(conn: &Connection) -> Result<()> {
@@ -42,12 +39,7 @@ pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
 
 fn ensure_storage_schema_inner(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS storage_metadata (
-           key TEXT PRIMARY KEY,
-           value TEXT NOT NULL,
-           updated_at TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS storage_checkpoints (
+        "CREATE TABLE IF NOT EXISTS storage_checkpoints (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            checkpointed_at TEXT NOT NULL,
            mode TEXT NOT NULL,
@@ -116,40 +108,11 @@ fn ensure_storage_schema_inner(conn: &Connection) -> Result<()> {
     .context("failed to create blob indexes")?;
     verify_storage_schema(conn)?;
     verify_payload_blob_integrity(conn)?;
-    let current_generation = conn
-        .query_row(
-            "SELECT value FROM storage_metadata WHERE key = ?1",
-            params![STORAGE_GENERATION_KEY],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .context("failed to read storage generation marker")?;
-    match current_generation {
-        Some(generation) if generation == CURRENT_STORAGE_GENERATION => {}
-        Some(generation) => {
-            anyhow::bail!(
-                "storage generation marker mismatch: found {generation}, expected {CURRENT_STORAGE_GENERATION}"
-            );
-        }
-        None => {
-            conn.execute(
-                "INSERT INTO storage_metadata (key, value, updated_at)
-                 VALUES (?1, ?2, ?3)",
-                params![
-                    STORAGE_GENERATION_KEY,
-                    CURRENT_STORAGE_GENERATION,
-                    Utc::now().to_rfc3339()
-                ],
-            )
-            .context("failed to record storage generation marker")?;
-        }
-    }
     Ok(())
 }
 
 fn verify_storage_schema(conn: &Connection) -> Result<()> {
     for (table, columns) in [
-        ("storage_metadata", &["key", "value", "updated_at"][..]),
         (
             "storage_checkpoints",
             &[

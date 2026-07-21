@@ -3,14 +3,14 @@
 //! [`reconstruct_from_events`] implements a two-pass algorithm that rebuilds
 //! the message list from an ordered sequence of [`SessionEvent`]s:
 //!
-//! 1. **First pass**: collect deleted event IDs and capability invocation
+//! 1. **First pass**: collect deleted event IDs and tool invocation
 //!    argument maps.
 //! 2. **Second pass**: build messages while handling deletions, compaction,
-//!    context clears, provider-valid capability result pairing, capability
+//!    context clears, provider-valid tool result pairing, tool
 //!    result injection, and consecutive-role merging.
 //!
 //! Manual compact/clear operations persist their boundary before the outer
-//! capability executor persists its completion. Reconstruction only emits a
+//! tool executor persists its completion. Reconstruction only emits a
 //! result when its invocation remains in the immediately preceding assistant
 //! message, so a boundary cannot leave an orphaned provider function output.
 //!
@@ -19,7 +19,7 @@
 //!
 //! ## Size note
 //!
-//! Both passes share mutable state (deleted IDs, capability invocation maps, message
+//! Both passes share mutable state (deleted IDs, tool invocation maps, message
 //! accumulators). Splitting them across files would require passing 8+
 //! mutable references through function boundaries with no readability gain.
 
@@ -47,8 +47,8 @@ pub struct ReconstructionResult {
     pub turn_count: i64,
 }
 
-/// Pending capability result accumulated between assistant messages.
-struct PendingCapabilityResult {
+/// Pending tool result accumulated between assistant messages.
+struct PendingToolResult {
     invocation_id: String,
     content: String,
     is_error: bool,
@@ -59,8 +59,8 @@ struct PendingCapabilityResult {
 /// Implements the two-pass reconstruction algorithm matching the TypeScript
 /// `reconstructFromEvents` exactly:
 ///
-/// - **Pass 1**: Metadata collection (deletions, capability args, config)
-/// - **Pass 2**: Message building (merging, compaction, capability result injection)
+/// - **Pass 1**: Metadata collection (deletions, tool args, config)
+/// - **Pass 2**: Message building (merging, compaction, tool result injection)
 ///
 /// # Arguments
 ///
@@ -73,13 +73,13 @@ pub fn reconstruct_from_events(ancestors: &[SessionEvent]) -> ReconstructionResu
 /// Pass 1 output: metadata collected from events.
 struct Metadata {
     deleted_event_ids: std::collections::HashSet<String>,
-    capability_invocation_args_map: std::collections::HashMap<String, Value>,
+    tool_invocation_args_map: std::collections::HashMap<String, Value>,
 }
 
-/// Pass 1: Collect deleted event IDs and capability invocation arguments.
+/// Pass 1: Collect deleted event IDs and tool invocation arguments.
 fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     let mut deleted_event_ids = std::collections::HashSet::new();
-    let mut capability_invocation_args_map = std::collections::HashMap::new();
+    let mut tool_invocation_args_map = std::collections::HashMap::new();
 
     for event in ancestors {
         match event.event_type {
@@ -88,11 +88,11 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
                     let _ = deleted_event_ids.insert(target.to_string());
                 }
             }
-            EventType::CapabilityInvocationStarted => {
+            EventType::ToolInvocationStarted => {
                 let tc_id = event.payload.get("invocationId").and_then(Value::as_str);
                 let args = event.payload.get("arguments");
                 if let (Some(id), Some(a)) = (tc_id, args) {
-                    let _ = capability_invocation_args_map.insert(id.to_string(), a.clone());
+                    let _ = tool_invocation_args_map.insert(id.to_string(), a.clone());
                 }
             }
             _ => {}
@@ -101,7 +101,7 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
 
     Metadata {
         deleted_event_ids,
-        capability_invocation_args_map,
+        tool_invocation_args_map,
     }
 }
 
@@ -112,7 +112,7 @@ struct BuildState {
     tokens: TokenTotals,
     turn_count: i64,
     current_turn: i64,
-    pending_capability_results: Vec<PendingCapabilityResult>,
+    pending_tool_results: Vec<PendingToolResult>,
 }
 
 /// Pass 2: Build messages from events using metadata from pass 1.
@@ -122,7 +122,7 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         tokens: TokenTotals::default(),
         turn_count: 0,
         current_turn: 0,
-        pending_capability_results: Vec::new(),
+        pending_tool_results: Vec::new(),
     };
 
     for event in ancestors {
@@ -131,28 +131,28 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         }
         match event.event_type {
             EventType::CompactBoundary => handle_compact_boundary(event, &mut st),
-            EventType::CapabilityInvocationCompleted => handle_capability_result(event, &mut st),
+            EventType::ToolInvocationCompleted => handle_tool_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
             EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
             _ => {}
         }
     }
 
-    // End-of-stream flush: if last message is assistant with capability_invocation
-    if !st.pending_capability_results.is_empty()
+    // End-of-stream flush: if last message is assistant with tool_invocation
+    if !st.pending_tool_results.is_empty()
         && let Some(last) = st.combined.last()
         && last.message.role == "assistant"
-        && content_has_capability_invocation(&last.message.content)
+        && content_has_tool_invocation(&last.message.content)
     {
-        flush_capability_results(&mut st.combined, &mut st.pending_capability_results);
+        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
     }
 
-    // Inject synthetic error results for any unmatched capability invocations.
-    // This happens when: (a) a user interrupt discards pending capability results,
-    // or (b) the session ended mid-capability-execution before results arrived.
+    // Inject synthetic error results for any unmatched tool invocations.
+    // This happens when: (a) a user interrupt discards pending tool results,
+    // or (b) the session ended mid-tool-execution before results arrived.
     // Without this, providers like OpenAI reject the history because every
     // function_call must have a corresponding function_call_output.
-    inject_missing_capability_results(&mut st.combined);
+    inject_missing_tool_results(&mut st.combined);
 
     ReconstructionResult {
         messages_with_event_ids: st.combined,
@@ -171,7 +171,7 @@ fn handle_compact_boundary(event: &SessionEvent, st: &mut BuildState) {
 
 fn inject_compaction_summary_pair(summary: &str, st: &mut BuildState) {
     st.combined.clear();
-    st.pending_capability_results.clear();
+    st.pending_tool_results.clear();
 
     st.combined.push(MessageWithEventId {
         message: Message {
@@ -193,8 +193,8 @@ fn inject_compaction_summary_pair(summary: &str, st: &mut BuildState) {
     });
 }
 
-/// Handle `capability.invocation.completed`: accumulate for later flushing.
-fn handle_capability_result(event: &SessionEvent, st: &mut BuildState) {
+/// Handle `tool.invocation.completed`: accumulate for later flushing.
+fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
     let tc_id = event
         .payload
         .get("invocationId")
@@ -214,16 +214,16 @@ fn handle_capability_result(event: &SessionEvent, st: &mut BuildState) {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    st.pending_capability_results.push(PendingCapabilityResult {
+    st.pending_tool_results.push(PendingToolResult {
         invocation_id: tc_id,
         content,
         is_error,
     });
 }
 
-/// Handle `message.user`: merge consecutive, discard pending capability results.
+/// Handle `message.user`: merge consecutive, discard pending tool results.
 fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
-    st.pending_capability_results.clear();
+    st.pending_tool_results.clear();
 
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
 
@@ -244,22 +244,21 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
     accumulate_tokens(&event.payload, &mut st.tokens);
 }
 
-/// Handle `message.assistant`: restore truncated inputs, flush capability results,
+/// Handle `message.assistant`: restore truncated inputs, flush tool results,
 /// merge consecutive, track turns.
 fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut BuildState) {
     let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
-    let restored_content =
-        restore_truncated_inputs(&content, &metadata.capability_invocation_args_map);
-    let has_capability_invocation = content_has_capability_invocation(&restored_content);
+    let restored_content = restore_truncated_inputs(&content, &metadata.tool_invocation_args_map);
+    let has_tool_invocation = content_has_tool_invocation(&restored_content);
 
-    // CASE 1: Last was assistant with pending capability results → flush first
+    // CASE 1: Last was assistant with pending tool results → flush first
     if st
         .combined
         .last()
         .is_some_and(|e| e.message.role == "assistant")
-        && !st.pending_capability_results.is_empty()
+        && !st.pending_tool_results.is_empty()
     {
-        flush_capability_results(&mut st.combined, &mut st.pending_capability_results);
+        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
     }
 
     // Re-check after potential flush — merge consecutive assistant messages
@@ -283,9 +282,9 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
         });
     }
 
-    // CASE 2: This assistant has capability_invocation and pending results → flush
-    if has_capability_invocation && !st.pending_capability_results.is_empty() {
-        flush_capability_results(&mut st.combined, &mut st.pending_capability_results);
+    // CASE 2: This assistant has tool_invocation and pending results → flush
+    if has_tool_invocation && !st.pending_tool_results.is_empty() {
+        flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
     }
 
     accumulate_tokens(&event.payload, &mut st.tokens);
@@ -302,41 +301,40 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Inject synthetic error `capabilityResult` messages for any assistant `capability_invocation`
-/// blocks that lack a corresponding `capabilityResult` in the following messages.
+/// Inject synthetic error `toolResult` messages for any assistant `tool_invocation`
+/// blocks that lack a corresponding `toolResult` in the following messages.
 ///
 /// Scans through the reconstructed message list and, for each assistant message
-/// containing `capability_invocation` blocks, checks whether matching `capabilityResult` messages
-/// exist before the next non-capabilityResult message. Any unmatched capability invocations get
+/// containing `tool_invocation` blocks, checks whether matching `toolResult` messages
+/// exist before the next non-toolResult message. Any unmatched tool invocations get
 /// a synthetic error result injected immediately after the assistant message.
-fn inject_missing_capability_results(combined: &mut Vec<MessageWithEventId>) {
+fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
     let mut insertions: Vec<(usize, Vec<MessageWithEventId>)> = Vec::new();
 
     let mut i = 0;
     while i < combined.len() {
         if combined[i].message.role == "assistant" {
-            let capability_invocation_ids =
-                extract_capability_invocation_ids(&combined[i].message.content);
-            if !capability_invocation_ids.is_empty() {
-                // Collect invocation_ids from following capabilityResult messages
+            let tool_invocation_ids = extract_tool_invocation_ids(&combined[i].message.content);
+            if !tool_invocation_ids.is_empty() {
+                // Collect invocation_ids from following toolResult messages
                 let mut matched_ids = std::collections::HashSet::new();
                 let mut j = i + 1;
-                while j < combined.len() && combined[j].message.role == "capabilityResult" {
+                while j < combined.len() && combined[j].message.role == "toolResult" {
                     if let Some(ref tc_id) = combined[j].message.invocation_id {
                         let _ = matched_ids.insert(tc_id.clone());
                     }
                     j += 1;
                 }
 
-                // Find unmatched capability invocations
+                // Find unmatched tool invocations
                 let mut synthetic = Vec::new();
-                for tc_id in &capability_invocation_ids {
+                for tc_id in &tool_invocation_ids {
                     if !matched_ids.contains(tc_id.as_str()) {
                         synthetic.push(MessageWithEventId {
                             message: Message {
-                                role: "capabilityResult".to_string(),
+                                role: "toolResult".to_string(),
                                 content: Value::String(
-                                    "Capability invocation was interrupted.".to_string(),
+                                    "Tool invocation was interrupted.".to_string(),
                                 ),
                                 invocation_id: Some(tc_id.clone()),
                                 is_error: Some(true),
@@ -360,30 +358,28 @@ fn inject_missing_capability_results(combined: &mut Vec<MessageWithEventId>) {
     }
 }
 
-/// Extract all `capability_invocation` block IDs from a message's content.
-fn extract_capability_invocation_ids(content: &Value) -> Vec<String> {
+/// Extract all `tool_invocation` block IDs from a message's content.
+fn extract_tool_invocation_ids(content: &Value) -> Vec<String> {
     match content {
         Value::Array(arr) => arr
             .iter()
-            .filter(|block| {
-                block.get("type").and_then(Value::as_str) == Some("capability_invocation")
-            })
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_invocation"))
             .filter_map(|block| block.get("id").and_then(Value::as_str).map(String::from))
             .collect(),
         _ => vec![],
     }
 }
 
-/// Flush pending capability results as `capabilityResult` messages.
-fn flush_capability_results(
+/// Flush pending tool results as `toolResult` messages.
+fn flush_tool_results(
     combined: &mut Vec<MessageWithEventId>,
-    pending: &mut Vec<PendingCapabilityResult>,
+    pending: &mut Vec<PendingToolResult>,
 ) {
     let surviving_invocation_ids = combined
         .last()
         .filter(|message| message.message.role == "assistant")
         .map(|message| {
-            extract_capability_invocation_ids(&message.message.content)
+            extract_tool_invocation_ids(&message.message.content)
                 .into_iter()
                 .collect::<std::collections::HashSet<_>>()
         })
@@ -395,7 +391,7 @@ fn flush_capability_results(
         }
         combined.push(MessageWithEventId {
             message: Message {
-                role: "capabilityResult".to_string(),
+                role: "toolResult".to_string(),
                 content: Value::String(tr.content),
                 invocation_id: Some(tr.invocation_id),
                 is_error: Some(tr.is_error),
@@ -440,28 +436,28 @@ fn normalize_user_content(content: &Value) -> Vec<Value> {
     }
 }
 
-/// Check if content contains any `capability_invocation` blocks.
-fn content_has_capability_invocation(content: &Value) -> bool {
+/// Check if content contains any `tool_invocation` blocks.
+fn content_has_tool_invocation(content: &Value) -> bool {
     match content {
-        Value::Array(arr) => arr.iter().any(|block| {
-            block.get("type").and_then(Value::as_str) == Some("capability_invocation")
-        }),
+        Value::Array(arr) => arr
+            .iter()
+            .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_invocation")),
         _ => false,
     }
 }
 
-/// Restore truncated `capability_invocation` inputs from the capability invocation args map.
+/// Restore truncated `tool_invocation` inputs from the tool invocation args map.
 fn restore_truncated_inputs(
     content: &Value,
-    capability_invocation_args_map: &std::collections::HashMap<String, Value>,
+    tool_invocation_args_map: &std::collections::HashMap<String, Value>,
 ) -> Value {
     match content {
         Value::Array(arr) => {
             let restored: Vec<Value> = arr
                 .iter()
                 .map(|block| {
-                    let is_capability_invocation =
-                        block.get("type").and_then(Value::as_str) == Some("capability_invocation");
+                    let is_tool_invocation =
+                        block.get("type").and_then(Value::as_str) == Some("tool_invocation");
                     let is_truncated = block
                         .get("arguments")
                         .and_then(|i| i.get("_truncated"))
@@ -469,10 +465,10 @@ fn restore_truncated_inputs(
                         .unwrap_or(false);
                     let block_id = block.get("id").and_then(Value::as_str);
 
-                    if is_capability_invocation
+                    if is_tool_invocation
                         && is_truncated
                         && let Some(id) = block_id
-                        && let Some(full_args) = capability_invocation_args_map.get(id)
+                        && let Some(full_args) = tool_invocation_args_map.get(id)
                     {
                         let mut restored_block = block.clone();
                         restored_block["arguments"] = full_args.clone();

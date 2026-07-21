@@ -7,11 +7,11 @@
 //! | [`events`] | Runtime event payloads and stream event DTOs |
 //! | [`messages`] | Chat message DTOs |
 //! | [`model_audit`] | Redacted, bounded provider request audits consumed by replay manifests |
-//! | [`model_capabilities`] | Model-facing capability result DTOs |
+//! | [`model_tools`] | Model-facing tool result DTOs |
 
 pub mod content;
 pub mod document_extractor;
 pub mod events;
 pub mod messages;
 pub mod model_audit;
-pub mod model_capabilities;
+pub mod model_tools;

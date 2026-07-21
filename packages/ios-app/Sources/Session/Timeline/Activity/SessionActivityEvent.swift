@@ -7,8 +7,8 @@ enum SessionActivityEvent {
     case turnStart
     case textDelta(delta: String)
     case thinkingDelta
-    case capabilityInvocationStarted(identity: CapabilityIdentity, invocationId: String?, arguments: [String: AnyCodable]?)
-    case capabilityInvocationCompleted(identity: CapabilityIdentity, invocationId: String?, success: Bool, durationMs: Int?)
+    case toolInvocationStarted(identity: ToolIdentity, invocationId: String?, arguments: [String: AnyCodable]?)
+    case toolInvocationCompleted(identity: ToolIdentity, invocationId: String?, success: Bool, durationMs: Int?)
     case turnFailed(error: String)
     case complete
     case error(message: String)

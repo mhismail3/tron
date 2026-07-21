@@ -35,7 +35,7 @@ mod tests {
         Context {
             system_prompt: Some("Soul seed".into()),
             messages: vec![].into(),
-            capabilities: None,
+            tools: None,
             working_directory: Some("/Users/test/project".into()),
             server_origin: Some("localhost:9847".into()),
         }

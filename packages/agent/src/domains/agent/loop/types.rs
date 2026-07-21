@@ -95,7 +95,7 @@ pub struct RunContext {
     /// Engine trace inherited from the hidden `agent::run_turn` invocation.
     #[serde(skip)]
     pub engine_trace_id: Option<crate::engine::TraceId>,
-    /// Parent engine invocation id for child capability/function invocations.
+    /// Parent engine invocation id for child tool/function invocations.
     #[serde(skip)]
     pub parent_invocation_id: Option<crate::engine::InvocationId>,
     /// Worker-dispatch causal depth inherited by an agent-runner child. This
@@ -130,8 +130,8 @@ pub struct TurnResult {
     /// Error message if turn failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Number of capability invocations executed.
-    pub capability_invocations_executed: usize,
+    /// Number of tool invocations executed.
+    pub tool_invocations_executed: usize,
     /// Token usage for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
@@ -150,7 +150,7 @@ pub struct TurnResult {
     pub latency_ms: u64,
     /// Whether the response contained thinking blocks.
     pub has_thinking: bool,
-    /// Raw LLM stop reason string (e.g. `end_turn`, `capability_invocation`).
+    /// Raw LLM stop reason string (e.g. `end_turn`, `tool_invocation`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_stop_reason: Option<String>,
     /// Context window tokens this turn (for cross-turn baseline tracking).
@@ -163,7 +163,7 @@ impl Default for TurnResult {
         Self {
             success: true,
             error: None,
-            capability_invocations_executed: 0,
+            tool_invocations_executed: 0,
             token_usage: None,
             stop_reason: None,
             interrupted: false,
@@ -210,11 +210,11 @@ impl Default for RunResult {
     }
 }
 
-/// Result of a primitive capability invocation.
+/// Result of a primitive tool invocation.
 #[derive(Clone, Debug)]
-pub struct CapabilityInvocationExecutionResult {
-    /// Capability result.
-    pub result: crate::shared::protocol::model_capabilities::CapabilityResult,
+pub struct ToolInvocationExecutionResult {
+    /// Tool result.
+    pub result: crate::shared::protocol::model_tools::ToolResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
 }
@@ -224,8 +224,8 @@ pub struct CapabilityInvocationExecutionResult {
 pub struct StreamResult {
     /// Full assistant message.
     pub message: crate::shared::protocol::events::AssistantMessage,
-    /// Extracted capability invocations.
-    pub capability_invocations: Vec<crate::shared::protocol::messages::CapabilityInvocationDraft>,
+    /// Extracted tool invocations.
+    pub tool_invocations: Vec<crate::shared::protocol::messages::ToolInvocationDraft>,
     /// Stop reason string from LLM.
     pub stop_reason: String,
     /// Token usage.
@@ -304,7 +304,7 @@ mod tests {
         let tr = TurnResult::default();
         assert!(tr.success);
         assert!(tr.error.is_none());
-        assert_eq!(tr.capability_invocations_executed, 0);
+        assert_eq!(tr.tool_invocations_executed, 0);
         assert!(!tr.interrupted);
         assert!(tr.model.is_none());
         assert_eq!(tr.latency_ms, 0);
@@ -333,7 +333,7 @@ mod tests {
         let tr = TurnResult {
             success: false,
             error: Some("provider timeout".into()),
-            capability_invocations_executed: 3,
+            tool_invocations_executed: 3,
             token_usage: Some(TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
@@ -349,7 +349,7 @@ mod tests {
         let json = serde_json::to_string(&tr).unwrap();
         let back: TurnResult = serde_json::from_str(&json).unwrap();
         assert!(!back.success);
-        assert_eq!(back.capability_invocations_executed, 3);
+        assert_eq!(back.tool_invocations_executed, 3);
         assert_eq!(back.stop_reason, Some(StopReason::Error));
         assert_eq!(back.model.as_deref(), Some("claude-opus-4-6"));
         assert_eq!(back.latency_ms, 2000);

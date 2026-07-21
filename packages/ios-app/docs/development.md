@@ -222,7 +222,7 @@ OAuth owner in a hosted unit-test path.
 Named-suite cleanup is semantic and test-only. `IsolatedTestState` emits a
 versioned registration record before exposure, removes the exact persistent
 domain during cleanup, proves that the domain is nil or an empty dictionary,
-and emits one matching cleanup record. Repeated and process-fallback cleanup use
+and emits one matching cleanup record. Repeated and process-exit cleanup use
 the same idempotent owner and cannot duplicate the cleanup event. Tests must
 not discover, unlink, or synchronize CoreSimulator preference backing files;
 `cfprefsd` may materialize an empty plist after the process exits.
@@ -231,7 +231,7 @@ Token identities use a separate, complete
 records; registration and cleanup must be unique and set-equal by namespace,
 service, and account, and lifecycle JSON must never contain token material.
 Cleanup order is manager shutdown, token clear/proof/ledger emission, database
-close, fixture-root removal, defaults cleanup, then process-fallback
+close, fixture-root removal, defaults cleanup, then process-exit
 deregistration. Repeated cleanup must await the same drain and emit no duplicate
 record.
 
@@ -304,7 +304,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/TextStreamConvergenceTests \
   -only-testing:TronMobileTests/UnifiedEventTransformerTokenMetadataTests \
   -only-testing:TronMobileTests/ChatMessagePresentationTests \
-  -only-testing:TronMobileTests/CapabilityInvocationGroupingTests \
+  -only-testing:TronMobileTests/ToolInvocationGroupingTests \
   -only-testing:TronMobileTests/EventDatabaseTests/testEnrichedAssistantMessageMetadata
 
 xcodebuild test -scheme Tron \
@@ -388,7 +388,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/PairingURLParserTests \
   -only-testing:TronMobileTests/SessionEventTypeTests \
   -only-testing:TronMobileTests/ErrorEventProjectionTests \
-  -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
+  -only-testing:TronMobileTests/ToolInvocationDisplayModelTests \
   -only-testing:TronMobileTests/WorkerConsoleVisualContractTests
 ```
 
@@ -398,7 +398,7 @@ xcodebuild test -scheme Tron \
 `DeepLinkRouter` owns the routes they accept:
 
 - `tron://session/<session-id>`
-- `tron://session/<session-id>?capability=<invocation-id>`
+- `tron://session/<session-id>?tool=<invocation-id>`
 - `tron://session/<session-id>?event=<event-id>`
 - `tron://settings`
 - `tron://share`
@@ -660,8 +660,8 @@ and move straight to group assignment.
 ### Adding Runtime Presentation
 
 1. Emit operation, trace ids, and runtime-owned presentation hints from the server.
-2. Reuse the generic capability chip, detail sheet, and result renderer.
-3. Add a reusable renderer under `UI/Capabilities/` only when primitive trace/result rendering is not expressive enough.
+2. Reuse the generic tool chip, detail sheet, and result renderer.
+3. Add a reusable renderer under `UI/Tools/` only when primitive trace/result rendering is not expressive enough.
 4. Add focused tests for the primitive payload/result shape and its generic sheet route. Do not recreate the retired resource-backed generated-UI plane.
 
 ### Updating Event Handling

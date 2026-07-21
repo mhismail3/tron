@@ -56,7 +56,7 @@ final class QuickSessionWorkspaceTests: XCTestCase {
         XCTAssertEqual(result, "/tmp/tron-fixtures/me/ProjectA")
     }
 
-    // MARK: - Fallback chain (no explicit setting)
+    // MARK: - Default selection (no explicit setting)
 
     func testFallsBackToCurrentSessionWhenNoSetting() {
         let current = makeCachedSession(id: "s1", workingDirectory: "/tmp/tron-fixtures/me/ProjectA")

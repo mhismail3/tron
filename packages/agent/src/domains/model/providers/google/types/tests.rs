@@ -158,13 +158,13 @@ fn gemini_part_text_with_thinking() {
 fn gemini_part_function_call_serde() {
     let part = GeminiPart::FunctionCall {
         function_call: FunctionCallData {
-            name: "execute".into(),
+            name: "test_tool".into(),
             args: serde_json::json!({"command": "ls"}),
         },
         thought_signature: Some("sig-123".into()),
     };
     let json = serde_json::to_value(&part).unwrap();
-    assert_eq!(json["functionCall"]["name"], "execute");
+    assert_eq!(json["functionCall"]["name"], "test_tool");
     assert_eq!(json["thoughtSignature"], "sig-123");
 }
 
@@ -172,12 +172,12 @@ fn gemini_part_function_call_serde() {
 fn gemini_part_function_response_serde() {
     let part = GeminiPart::FunctionResponse {
         function_response: FunctionResponseData {
-            name: "capability_result".into(),
+            name: "tool_result".into(),
             response: serde_json::json!({"result": "ok"}),
         },
     };
     let json = serde_json::to_value(&part).unwrap();
-    assert_eq!(json["functionResponse"]["name"], "capability_result");
+    assert_eq!(json["functionResponse"]["name"], "tool_result");
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn gemini_part_inline_data_serde() {
 fn gemini_tool_serde() {
     let tool = GeminiTool {
         function_declarations: vec![FunctionDeclaration {
-            name: "execute".into(),
+            name: "test_tool".into(),
             description: "Run a command".into(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -205,7 +205,7 @@ fn gemini_tool_serde() {
         }],
     };
     let json = serde_json::to_value(&tool).unwrap();
-    assert_eq!(json["functionDeclarations"][0]["name"], "execute");
+    assert_eq!(json["functionDeclarations"][0]["name"], "test_tool");
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn to_api_json_gemini_31_pro() {
     assert_eq!(j["thinkingLevel"], "high");
     assert!(j["supportedThinkingLevels"].is_array());
     assert_eq!(j["recommended"], true);
-    assert_eq!(j["isLegacy"], false);
+    assert_eq!(j["isRetiredGeneration"], false);
     assert!(j.get("isDeprecated").is_none());
 }
 

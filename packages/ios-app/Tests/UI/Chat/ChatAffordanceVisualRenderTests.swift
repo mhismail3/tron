@@ -22,7 +22,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ("chat-response-presentation.png", AnyView(Self.responsePresentationView), CGSize(width: 430, height: 620)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
-            ("chat-capability-chip.png", AnyView(Self.capabilityChipView), CGSize(width: 430, height: 180)),
+            ("chat-tool-chip.png", AnyView(Self.toolChipView), CGSize(width: 430, height: 180)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
             ("chat-composer-idle.png", AnyView(ComposerFixture()), CGSize(width: 430, height: 180)),
         ]
@@ -75,7 +75,7 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                 latencyMs: 900
             ))
 
-            CapabilityInvocationChip(data: fixtureInvocation, onTap: {}, onCancel: nil)
+            ToolInvocationChip(data: fixtureInvocation, onTap: {}, onCancel: nil)
 
             MessageBubble(message: ChatMessage(
                 role: .assistant,
@@ -98,8 +98,8 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private static var capabilityChipView: some View {
-        CapabilityInvocationChip(data: fixtureInvocation, onTap: {}, onCancel: nil)
+    private static var toolChipView: some View {
+        ToolInvocationChip(data: fixtureInvocation, onTap: {}, onCancel: nil)
             .padding(20)
             .background(Color(uiColor: .systemBackground))
     }
@@ -117,15 +117,14 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             .background(Color(uiColor: .systemBackground))
     }
 
-    private static var fixtureInvocation: CapabilityInvocationData {
-        CapabilityInvocationData(
-            id: "visual-capability",
+    private static var fixtureInvocation: ToolInvocationData {
+        ToolInvocationData(
+            id: "visual-tool",
             status: .running,
             arguments: #"{"file":"README.md","intent":"Read project overview"}"#,
             progressMessage: "Reading",
-            identity: CapabilityIdentity(
-                modelPrimitiveName: "file_read",
-                operationName: "file_read",
+            identity: ToolIdentity(
+                toolName: "file_read",
                 traceId: "trace-visual"
             )
         )

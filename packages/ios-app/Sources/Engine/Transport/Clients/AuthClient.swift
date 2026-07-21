@@ -1,6 +1,6 @@
 import Foundation
 
-/// Client for auth engine capabilities.
+/// Client for auth engine tools.
 /// Reads and writes provider API keys and OAuth tokens stored in auth.json.
 final class AuthClient: EngineDomainClient {
 

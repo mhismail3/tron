@@ -11,8 +11,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
         content: AnyCodable,
         turn: Int = 1,
         model: String = "claude-sonnet-4",
-        stopReason: String = "end_turn",
-        providerType: String? = nil
+        stopReason: String = "end_turn"
     ) -> [String: AnyCodable] {
         var payload: [String: AnyCodable] = [
             "content": content,
@@ -20,9 +19,6 @@ final class AssistantMessagePayloadTests: XCTestCase {
             "model": AnyCodable(model),
             "stopReason": AnyCodable(stopReason)
         ]
-        if let providerType {
-            payload["providerType"] = AnyCodable(providerType)
-        }
         return payload
     }
 
@@ -38,31 +34,31 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.contentBlocks[0]["text"] as? String, "Hello world")
     }
 
-    func testTextWithoutCapabilitiesIsEligibleForFinalResponsePresentation() {
+    func testTextWithoutToolsIsEligibleForFinalResponsePresentation() {
         let payload = validPayload(content: AnyCodable([
             ["type": "text", "text": "Final response"] as [String: Any]
         ] as [[String: Any]]), stopReason: "provider_specific_reason")
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertEqual(parsed?.hasCapabilityInvocations, false)
+        XCTAssertEqual(parsed?.hasToolInvocations, false)
         XCTAssertEqual(parsed?.isFinalAssistantResponse, true)
     }
 
-    func testCapabilityBearingTextIsIneligibleRegardlessOfStopReason() {
+    func testToolBearingTextIsIneligibleRegardlessOfStopReason() {
         let payload = validPayload(content: AnyCodable([
             ["type": "text", "text": "I will inspect that"] as [String: Any],
             [
-                "type": "capability_invocation",
+                "type": "tool_invocation",
                 "id": "call-1",
-                "name": "execute",
+                "name": "process_run",
                 "input": ["command": "true"]
             ] as [String: Any]
         ] as [[String: Any]]), stopReason: "end_turn")
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertEqual(parsed?.hasCapabilityInvocations, true)
+        XCTAssertEqual(parsed?.hasToolInvocations, true)
         XCTAssertEqual(parsed?.isFinalAssistantResponse, false)
     }
 
@@ -117,17 +113,6 @@ final class AssistantMessagePayloadTests: XCTestCase {
         let parsed = AssistantMessagePayload(from: payload)
 
         XCTAssertEqual(parsed?.turn, 3)
-    }
-
-    func testParsesProviderTypeWhenPresent() {
-        let payload = validPayload(
-            content: AnyCodable([[String: Any]]()),
-            providerType: "openai"
-        )
-
-        let parsed = AssistantMessagePayload(from: payload)
-
-        XCTAssertEqual(parsed?.providerType, "openai")
     }
 
     func testMissingTurnFailsDecode() {

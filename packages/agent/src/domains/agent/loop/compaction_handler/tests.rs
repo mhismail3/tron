@@ -52,7 +52,7 @@ fn make_event_store() -> Arc<EventStore> {
     .expect("in-memory event store pool");
     {
         let conn = pool.get().expect("event store connection");
-        crate::domains::session::event_store::run_migrations(&conn).expect("migrations");
+        crate::domains::session::event_store::ensure_schema(&conn).expect("schema");
     }
     Arc::new(EventStore::new(pool))
 }

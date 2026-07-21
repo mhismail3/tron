@@ -402,7 +402,7 @@ fn stream_turn_end_without_token_usage_no_counter_change() {
         .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
-    // stream.turn_end with no tokenUsage (e.g. capability-only turn)
+    // stream.turn_end with no tokenUsage (e.g. tool-only turn)
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -441,7 +441,7 @@ fn events_without_token_usage_dont_affect_counters() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CapabilityInvocationCompleted,
+            event_type: EventType::ToolInvocationCompleted,
             payload: serde_json::json!({"invocationId": "t1", "content": "ok"}),
             parent_id: None,
             sequence: None,

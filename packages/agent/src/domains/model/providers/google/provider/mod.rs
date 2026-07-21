@@ -341,7 +341,7 @@ impl GoogleProvider {
         gen_config: &GenerationConfig,
     ) -> serde_json::Value {
         let contents = convert_messages(context);
-        let capabilities = context.capabilities.as_ref().map(|t| convert_tools(t));
+        let tools = context.tools.as_ref().map(|t| convert_tools(t));
         let safety_settings = self
             .config
             .safety_settings
@@ -356,8 +356,8 @@ impl GoogleProvider {
             "safetySettings": safety_settings,
         });
 
-        if let Some(capabilities) = capabilities {
-            body["tools"] = serde_json::to_value(capabilities).unwrap_or_default();
+        if let Some(tools) = tools {
+            body["tools"] = serde_json::to_value(tools).unwrap_or_default();
         }
 
         if let Some(si) = system_instruction {
@@ -393,7 +393,7 @@ impl GoogleProvider {
         debug!(
             model = %self.config.model,
             message_count = context.messages.len(),
-            tool_count = context.capabilities.as_ref().map_or(0, Vec::len),
+            tool_count = context.tools.as_ref().map_or(0, Vec::len),
             max_tokens = ?gen_config.max_output_tokens,
             "Starting Gemini stream"
         );

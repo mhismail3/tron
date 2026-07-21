@@ -1,6 +1,6 @@
 //! Blob repository — content-addressable storage with SHA-256 dedup.
 //!
-//! Blobs store large content (capability outputs, file contents) separately from events.
+//! Blobs store large content (tool outputs, file contents) separately from events.
 //! Content is hashed with SHA-256 for deduplication — storing the same content twice
 //! increments the reference count instead of creating a duplicate row.
 
@@ -228,14 +228,14 @@ fn decode_content_for_row(
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use crate::domains::session::event_store::sqlite::schema::ensure_schema;
     use sha2::{Digest, Sha256};
 
     fn setup() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
             .unwrap();
-        run_migrations(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
         conn
     }
 

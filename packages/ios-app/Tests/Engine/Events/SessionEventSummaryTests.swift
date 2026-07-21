@@ -39,7 +39,7 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.count <= "Turn failed: ".count + 30)
     }
 
-    func testTurnFailed_withoutError_showsFallback() {
+    func testTurnFailed_withoutError_showsDefaultMessage() {
         let event = makeEvent(type: "turn.failed")
         XCTAssertEqual(event.summary, "Turn failed")
     }
@@ -75,24 +75,24 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.contains("unknown"))
     }
 
-    func testCapabilityInvocation_showsModelPrimitiveName() {
-        let event = makeEvent(type: "capability.invocation.started", payload: [
-            "modelPrimitiveName": AnyCodable("execute"),
+    func testToolInvocation_showsToolName() {
+        let event = makeEvent(type: "tool.invocation.started", payload: [
+            "toolName": AnyCodable("process_run"),
             "arguments": AnyCodable(["file_path": "/foo/bar.swift"]),
         ])
-        XCTAssertTrue(event.summary.contains("Execute"))
+        XCTAssertTrue(event.summary.contains("Process Run"))
     }
 
-    func testCapabilityInvocationResult_success_showsDuration() {
-        let event = makeEvent(type: "capability.invocation.completed", payload: [
+    func testToolInvocationResult_success_showsDuration() {
+        let event = makeEvent(type: "tool.invocation.completed", payload: [
             "isError": AnyCodable(false),
             "duration": AnyCodable(522),
         ])
         XCTAssertEqual(event.summary, "522ms • success")
     }
 
-    func testCapabilityInvocationResult_error_showsError() {
-        let event = makeEvent(type: "capability.invocation.completed", payload: [
+    func testToolInvocationResult_error_showsError() {
+        let event = makeEvent(type: "tool.invocation.completed", payload: [
             "isError": AnyCodable(true),
         ])
         XCTAssertEqual(event.summary, "error")

@@ -348,7 +348,7 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     assert_eq!(audit.session_id, "sess-1");
     assert_eq!(audit.reasoning_level.as_deref(), Some("x_high"));
     assert_eq!(audit.message_count, 1);
-    assert_eq!(audit.capability_count, 0);
+    assert_eq!(audit.tool_count, 0);
     assert!(audit.stream_options.get("promptCacheKey").is_none());
     assert_eq!(
         audit.stream_options["reasoningEffort"],
