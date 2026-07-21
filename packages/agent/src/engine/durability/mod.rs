@@ -6,7 +6,7 @@
 //! |--------|----------------|
 //! | `ledger` | Invocation/idempotency truth and the catalog revision scalar. |
 //! | `replay` | Read-only session replay snapshot DTOs for engine-owned rows. |
-//! | `state` | Scoped kernel key-value state for runtime overlays. |
+//! | `state` | Profile-global and session-scoped key-value runtime overlays. |
 //! | `streams` | Durable stream events read through caller-owned cursors. |
 //!
 //! ## Entry Points
@@ -27,6 +27,8 @@
 //! - Invocation and idempotency result records are credential-redacted copies;
 //!   the live caller result is not the durable audit representation.
 //! - SQLite codecs stay inside the store owner that persists the row shape.
+//! - Runtime state has exactly two scopes: profile-global and session. Unknown
+//!   persisted scope kinds fail closed instead of becoming global state.
 //! - SQLite-backed durability constructors apply shared storage pragmas and
 //!   validate the shared storage schema before owner-specific tables are used.
 //! - Large JSON payloads are stored through shared storage payload refs with an

@@ -108,7 +108,7 @@ pub(super) async fn publish_worker_surface_evidence(
     evidence: Value,
 ) -> Result<(), String> {
     host.write_engine_state(
-        EngineStateScope::System,
+        EngineStateScope::Profile,
         EVIDENCE_NAMESPACE,
         worker_id,
         evidence,
@@ -132,7 +132,7 @@ async fn worker_surface_evidence(
             continue;
         }
         if let Some(entry) = host
-            .read_engine_state(EngineStateScope::System, EVIDENCE_NAMESPACE, worker_id)
+            .read_engine_state(EngineStateScope::Profile, EVIDENCE_NAMESPACE, worker_id)
             .await
             .map_err(|error| error.to_string())?
         {

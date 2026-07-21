@@ -460,7 +460,10 @@ surface hash. The model receives a compact revision/count/projected-worker
 primer in addition to native direct tool schemas. A `worker_discover` result
 promotes matching workers into that session's next internal turn without a
 restart; promotions are session-scoped durable engine state and survive server
-restarts. A newly upserted worker registers immediately.
+restarts. Recent worker success evidence uses the other supported state extent,
+profile-global state. There is no generic workspace state scope. Unknown stored
+scope kinds fail closed rather than being interpreted as global state. A newly
+upserted worker registers immediately.
 
 Workers and the callable catalog are profile-global. Workspace remains useful
 invocation and event metadata, but it neither partitions worker availability nor
