@@ -8,7 +8,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`cli`] | Terminal argument parsing and auth subcommand dispatch |
+//! | [`cli`] | Terminal argument parsing, current OAuth bridges, and auth subcommand dispatch |
 //! | [`bootstrap`] | Runtime assembly, service initialization, database open, and server bind |
 //! | [`health`] | Health/metrics endpoints and disk checks |
 //! | [`lifecycle`] | Onboarding, bearer-token state, and shutdown coordination |

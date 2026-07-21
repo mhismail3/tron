@@ -85,9 +85,6 @@ pub(crate) enum AuthAction {
     /// Internal stdin-only exchange bridge for the contributor OAuth shell.
     #[command(name = "complete-oauth", hide = true)]
     CompleteOauth,
-    /// Compatibility completion for a login begun by the pre-transaction CLI.
-    #[command(name = "store-oauth", hide = true)]
-    StoreOauth,
 }
 
 #[derive(Debug)]
@@ -99,15 +96,6 @@ struct OAuthCompletionInput {
     expected_state: String,
     completion_kind: String,
     returned_state: String,
-}
-
-#[derive(Debug)]
-struct LegacyOAuthCredentialInput {
-    provider: String,
-    label: String,
-    access_token: String,
-    refresh_token: String,
-    expires_at: i64,
 }
 
 /// Dispatch a CLI subcommand without starting the server.
@@ -123,7 +111,6 @@ pub(crate) async fn run_subcommand(cmd: &Command) -> Result<()> {
             AuthAction::Rotate => rotate_bearer_token_cli(),
             AuthAction::BeginOauth { provider } => begin_oauth_cli(provider),
             AuthAction::CompleteOauth => complete_oauth_cli().await,
-            AuthAction::StoreOauth => store_legacy_oauth_cli(),
         },
         Command::State { action } => match action {
             StateAction::Snapshots => list_state_snapshots_cli(),
@@ -265,52 +252,6 @@ fn save_oauth_tokens_at(
     Ok(())
 }
 
-fn store_legacy_oauth_cli() -> Result<()> {
-    let stdin = std::io::stdin();
-    store_legacy_oauth_from_reader_at(
-        &crate::app::lifecycle::onboarding::bearer_token_path(),
-        stdin.lock(),
-    )
-}
-
-fn store_legacy_oauth_from_reader_at(path: &Path, reader: impl Read) -> Result<()> {
-    let [provider, label, access_token, refresh_token, expires_at] =
-        read_nul_fields(reader, "Legacy OAuth credential")?;
-    let input = LegacyOAuthCredentialInput {
-        provider,
-        label,
-        access_token,
-        refresh_token,
-        expires_at: expires_at
-            .parse()
-            .context("Legacy OAuth expiry must be a signed integer")?,
-    };
-    ensure!(
-        matches!(input.provider.as_str(), "anthropic" | "openai-codex"),
-        "Unsupported legacy OAuth provider: {}",
-        input.provider
-    );
-    ensure!(
-        !input.label.trim().is_empty(),
-        "Legacy OAuth label must not be empty"
-    );
-    ensure!(
-        !input.access_token.trim().is_empty(),
-        "Legacy OAuth access token must not be empty"
-    );
-    ensure!(input.expires_at > 0, "Legacy OAuth expiry must be positive");
-    save_oauth_tokens_at(
-        path,
-        &input.provider,
-        &input.label,
-        &crate::domains::auth::credentials::OAuthTokens {
-            access_token: input.access_token,
-            refresh_token: input.refresh_token,
-            expires_at: input.expires_at,
-        },
-    )
-}
-
 async fn complete_oauth_from_reader_at(path: &Path, reader: impl Read) -> Result<()> {
     let input = read_oauth_completion(reader)?;
     validate_oauth_completion(&input)?;
@@ -409,21 +350,6 @@ mod tests {
         input
     }
 
-    fn legacy_oauth_input() -> Vec<u8> {
-        let mut input = Vec::new();
-        for field in [
-            "anthropic",
-            "pre-upgrade-login",
-            "legacy-access-token",
-            "legacy-refresh-token",
-            "4102444800000",
-        ] {
-            input.extend_from_slice(field.as_bytes());
-            input.push(0);
-        }
-        input
-    }
-
     #[test]
     fn hidden_oauth_actions_are_wired() {
         let cli = Cli::parse_from(["tron", "auth", "begin-oauth", "anthropic"]);
@@ -440,28 +366,6 @@ mod tests {
                 action: AuthAction::CompleteOauth
             })
         ));
-        let cli = Cli::parse_from(["tron", "auth", "store-oauth"]);
-        assert!(matches!(
-            cli.command,
-            Some(Command::Auth {
-                action: AuthAction::StoreOauth
-            })
-        ));
-    }
-
-    #[test]
-    fn pre_transaction_oauth_completion_remains_stdin_compatible() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
-        initialized_auth(&path);
-
-        store_legacy_oauth_from_reader_at(&path, Cursor::new(legacy_oauth_input())).unwrap();
-
-        let stored = load_auth_storage(&path).unwrap().unwrap();
-        let provider = stored.get_provider_auth("anthropic").unwrap();
-        let account = &provider.accounts.as_ref().unwrap()[0];
-        assert_eq!(account.label, "pre-upgrade-login");
-        assert_eq!(account.oauth.access_token, "legacy-access-token");
     }
 
     #[test]
