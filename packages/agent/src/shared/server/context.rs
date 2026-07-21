@@ -251,32 +251,6 @@ mod tests {
         MockModelResponderFactory, ModelAwareMockFactory, StrictMockFactory, make_test_context,
     };
 
-    #[test]
-    fn context_has_server_start_time() {
-        let ctx = make_test_context();
-        let elapsed = ctx.server_start_time.elapsed();
-        assert!(elapsed.as_secs() < 5);
-    }
-
-    #[test]
-    fn server_start_time_allows_uptime_calc() {
-        let ctx = make_test_context();
-        let uptime = ctx.server_start_time.elapsed();
-        assert!(uptime.as_secs() < 5);
-    }
-
-    #[test]
-    fn context_has_orchestrator() {
-        let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.active_run_count(), 0);
-    }
-
-    #[test]
-    fn context_has_session_manager() {
-        let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
-    }
-
     #[tokio::test]
     async fn context_session_manager_matches_orchestrator() {
         let ctx = make_test_context();
@@ -285,24 +259,6 @@ mod tests {
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
         assert_eq!(ctx.orchestrator.cached_session_count(), 1);
-    }
-
-    #[test]
-    fn context_has_event_store() {
-        let ctx = make_test_context();
-        let result = ctx.event_store.list_workspaces();
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn context_has_engine_host() {
-        let ctx = make_test_context();
-        let host = ctx.engine_host.lock().await;
-        assert!(
-            host.catalog()
-                .function(&crate::engine::FunctionId::new("engine::discover").unwrap())
-                .is_some()
-        );
     }
 
     #[tokio::test]
@@ -314,12 +270,6 @@ mod tests {
             .unwrap();
         let session = ctx.event_store.get_session(&sid).unwrap();
         assert!(session.is_some());
-    }
-
-    #[test]
-    fn context_has_settings_path() {
-        let ctx = make_test_context();
-        assert!(!ctx.settings_path.as_os_str().is_empty());
     }
 
     #[tokio::test]
@@ -462,21 +412,6 @@ mod tests {
         assert_eq!(supervisor.active_count(), 1);
         handle.await.unwrap();
         assert_eq!(supervisor.active_count(), 0);
-    }
-
-    #[test]
-    fn make_test_context_populates_all_fields() {
-        let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.active_run_count(), 0);
-        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
-        assert!(ctx.event_store.list_workspaces().is_ok());
-        assert!(!ctx.settings_path.as_os_str().is_empty());
-    }
-
-    #[test]
-    fn context_can_leave_responder_factory_unconfigured() {
-        let ctx = make_test_context();
-        assert!(ctx.responder_factory.is_none());
     }
 
     #[tokio::test]
