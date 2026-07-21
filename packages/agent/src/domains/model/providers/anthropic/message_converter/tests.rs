@@ -141,7 +141,7 @@ fn convert_assistant_capability_invocation_remaps_openai_id() {
 #[test]
 fn convert_capability_result_text() {
     let output_envelope = format!(
-        "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+        "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
         "safe-évidence-".repeat(1_400)
     );
     let content = CapabilityResultMessageContent::Text(output_envelope.clone());

@@ -44,7 +44,6 @@ extension ChatViewModelPaginationTests {
                             streamingOutput: nil,
                             progressMessage: nil,
                             progressPercent: nil,
-                            details: nil,
                             modelPrimitiveName: "execute",
                             operationName: "process_run",
                             operation: nil,
@@ -145,15 +144,14 @@ extension ChatViewModelPaginationTests {
                         CurrentTurnCapabilityInvocation(
                             invocationId: "capability-progress-1",
                             arguments: nil,
-                            status: "paused",
+                            status: "running",
                             result: nil,
                             isError: false,
                             startedAt: nil,
                             completedAt: nil,
                             streamingOutput: "partial output",
-                            progressMessage: "Run paused",
+                            progressMessage: "Halfway",
                             progressPercent: 0.5,
-                            details: ["runStatus": AnyCodable("paused")],
                             modelPrimitiveName: "execute",
                             operationName: "process_run",
                             operation: nil,
@@ -172,10 +170,9 @@ extension ChatViewModelPaginationTests {
         guard case .capabilityInvocation(let invocation) = viewModel.messages.first?.content else {
             return XCTFail("Expected reconstructed capability progress chip")
         }
-        XCTAssertEqual(invocation.status, .paused)
-        XCTAssertEqual(invocation.progressMessage, "Run paused")
+        XCTAssertEqual(invocation.status, .running)
+        XCTAssertEqual(invocation.progressMessage, "Halfway")
         XCTAssertEqual(invocation.progressPercent, 0.5)
-        XCTAssertEqual(invocation.details?["runStatus"]?.value as? String, "paused")
     }
 
     func testReconnectReconstructionRestoresCompactionGateAndPill() async {
@@ -425,7 +422,6 @@ extension ChatViewModelPaginationTests {
             streamingOutput: nil,
             progressMessage: nil,
             progressPercent: nil,
-            details: nil,
             modelPrimitiveName: "execute",
             operationName: "process_run",
             operation: nil,

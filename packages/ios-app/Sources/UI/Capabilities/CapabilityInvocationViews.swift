@@ -109,8 +109,6 @@ struct CapabilityInvocationChip: View {
             return "failed"
         case .unavailable:
             return "unavailable"
-        case .paused:
-            return "paused"
         case .generating, .running, .success:
             return nil
         }

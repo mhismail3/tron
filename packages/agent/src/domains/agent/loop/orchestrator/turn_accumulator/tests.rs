@@ -705,7 +705,7 @@ fn terminal_markers_clear_state_until_matching_run_release() {
 }
 
 #[test]
-fn capability_progress_and_run_status_are_reconstructed() {
+fn capability_progress_is_reconstructed() {
     let map = TurnAccumulatorMap::new();
     map.begin_run("s1", "run-1");
     map.handle_turn_start("s1", Some(1));
@@ -718,62 +718,33 @@ fn capability_progress_and_run_status_are_reconstructed() {
         presentation_hints: Some(serde_json::json!({"chipTitle": "Process"})),
     };
     map.handle_capability_generating("s1", "cap-1", "execute", &identity, Some(2));
-    map.update_from_event(&TronEvent::CapabilityInvocationProgress {
+    map.update_from_event(&TronEvent::CapabilityInvocationStarted {
         base: BaseEvent::now("s1").with_sequence(3),
+        invocation_id: "cap-1".into(),
+        model_primitive_name: "execute".into(),
+        arguments: None,
+        capability_identity: CapabilityEventIdentity::default(),
+    });
+    map.update_from_event(&TronEvent::CapabilityInvocationProgress {
+        base: BaseEvent::now("s1").with_sequence(4),
         invocation_id: "cap-1".into(),
         message: Some("Halfway".into()),
         percent: Some(0.5),
         capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
-    map.update_from_event(&TronEvent::CapabilityRunStatus {
-        base: BaseEvent::now("s1").with_sequence(4),
-        run_id: "async-1".into(),
-        invocation_id: "cap-1".into(),
-        status: "paused".into(),
-        stream_topic: Some("topic-1".into()),
-        child_invocations: vec!["child-1".into()],
-        details: Some(serde_json::json!({ "reason": "approval" })),
-        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
-    });
-
     let (_, capabilities, _, _) = map
         .reconstruction_snapshot("s1", "run-1")
         .unwrap()
         .state
         .unwrap();
-    assert_eq!(capabilities[0]["status"], "paused");
-    assert_eq!(capabilities[0]["progressMessage"], "Run paused");
+    assert_eq!(capabilities[0]["status"], "running");
+    assert_eq!(capabilities[0]["progressMessage"], "Halfway");
     assert_eq!(capabilities[0]["progressPercent"], 0.5);
     assert_eq!(capabilities[0]["operationName"], "process_run");
     assert_eq!(capabilities[0]["traceId"], "trace-1");
     assert_eq!(capabilities[0]["rootInvocationId"], "root-1");
     assert_eq!(capabilities[0]["themeColor"], "#00ffff");
     assert_eq!(capabilities[0]["presentationHints"]["chipTitle"], "Process");
-    assert_eq!(capabilities[0]["details"]["runId"], "async-1");
-    assert_eq!(
-        capabilities[0]["details"]["runDetails"]["reason"],
-        "approval"
-    );
-
-    map.update_from_event(&TronEvent::CapabilityRunStatus {
-        base: BaseEvent::now("s1").with_sequence(5),
-        run_id: "async-1".into(),
-        invocation_id: "cap-1".into(),
-        status: "failed".into(),
-        stream_topic: Some("topic-1".into()),
-        child_invocations: vec![],
-        details: Some(serde_json::json!({ "reason": "exit" })),
-        capability_identity: identity,
-    });
-    let (_, failed, _, _) = map
-        .reconstruction_snapshot("s1", "run-1")
-        .unwrap()
-        .state
-        .unwrap();
-    assert_eq!(failed[0]["status"], "error");
-    assert_eq!(failed[0]["isError"], true);
-    assert!(failed[0].get("progressMessage").is_none());
-    assert!(failed[0].get("progressPercent").is_none());
 }
 
 #[test]

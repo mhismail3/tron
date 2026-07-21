@@ -85,16 +85,6 @@ fn tron_event_all_event_types() {
             percent: Some(0.5),
             capability_identity: CapabilityEventIdentity::default(),
         },
-        TronEvent::CapabilityRunStatus {
-            base: base.clone(),
-            run_id: "run-1".into(),
-            invocation_id: "id".into(),
-            status: "running".into(),
-            stream_topic: Some("capability.run.run-1".into()),
-            child_invocations: vec![],
-            details: None,
-            capability_identity: CapabilityEventIdentity::default(),
-        },
         TronEvent::CapabilityInvocationCompleted {
             base: base.clone(),
             invocation_id: "id".into(),
@@ -115,15 +105,6 @@ fn tron_event_all_event_types() {
             invocation_id: "id".into(),
             model_primitive_name: "n".into(),
             capability_identity: CapabilityEventIdentity::default(),
-        },
-        TronEvent::SessionSaved {
-            base: base.clone(),
-            file_path: "p".into(),
-        },
-        TronEvent::SessionLoaded {
-            base: base.clone(),
-            file_path: "p".into(),
-            message_count: 0,
         },
         TronEvent::ContextWarning {
             base: base.clone(),

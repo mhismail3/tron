@@ -14,7 +14,6 @@ enum ContentBlockType: String {
 enum CapabilityInvocationStatusDTO: String {
     case generating
     case running
-    case paused
     case completed
     case error
 }

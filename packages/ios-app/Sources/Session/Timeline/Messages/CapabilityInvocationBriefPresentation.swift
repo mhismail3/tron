@@ -1,13 +1,6 @@
 import Foundation
 
 struct CapabilityInvocationBriefPresentation: Equatable {
-    enum Tone: Equatable {
-        case active
-        case success
-        case attention
-        case neutral
-    }
-
     struct Issue: Equatable {
         let title: String
         let message: String
@@ -17,7 +10,6 @@ struct CapabilityInvocationBriefPresentation: Equatable {
 
     let title: String
     let subtitle: String?
-    let tone: Tone
     let headline: String
     let narrative: String
     let factRows: [CapabilityDisplayRow]
@@ -38,12 +30,10 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         let requestRows = Self.requestRows(from: data, display: display)
         let resultRows = Self.resultRows(from: display)
         let evidenceRows = Self.evidenceRows(from: data, display: display)
-        let tone = Self.tone(for: data.status)
         let subtitle = Self.subtitle(from: evidence, issue: issue, resultBody: resultBody)
 
         self.title = title
         self.subtitle = subtitle
-        self.tone = tone
         self.headline = Self.headline(for: data.status, title: title, issue: issue)
         self.narrative = Self.narrative(for: data, title: title, issue: issue, resultBody: resultBody)
         self.factRows = Self.factRows(from: data, display: display)
@@ -87,19 +77,6 @@ struct CapabilityInvocationBriefPresentation: Equatable {
             .truncated(to: limit)
     }
 
-    private static func tone(for status: CapabilityInvocationStatus) -> Tone {
-        switch status {
-        case .generating, .running:
-            return .active
-        case .success:
-            return .success
-        case .error, .unavailable:
-            return .attention
-        case .paused:
-            return .neutral
-        }
-    }
-
     private static func subtitle(
         from evidence: CapabilityEvidencePresentation,
         issue: Issue?,
@@ -122,8 +99,6 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         switch status {
         case .generating, .running:
             return "\(title) is running"
-        case .paused:
-            return "\(title) is paused"
         case .success:
             return "\(title) completed"
         case .error, .unavailable:
@@ -146,8 +121,6 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         switch data.status {
         case .generating, .running:
             return "Tron is using \(title) and will attach the result when the engine finishes."
-        case .paused:
-            return "Tron paused \(title). Open evidence for the latest recorded state."
         case .success:
             if let result = resultBody?.lines.first?.trimmed.nilIfEmpty {
                 return "Tron completed \(title) and returned: \(safeTopLevelText(result, limit: 180))"
@@ -250,7 +223,6 @@ struct CapabilityInvocationBriefPresentation: Equatable {
     }
 
     private static func nextStep(error: CapabilityErrorClassification?, message: String) -> String? {
-        let lowered = message.lowercased()
         if let selector = explicitSelector(from: message) {
             return "Retry with the explicit \(selector) selector."
         }

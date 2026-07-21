@@ -143,30 +143,6 @@ extension ChatViewModel {
         }
     }
 
-    func handleCapabilityRunStatus(_ result: CapabilityRunStatusPlugin.Result) {
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
-
-        if case .capabilityInvocation(var invocation) = messages[index].content {
-            invocation.status = capabilityStatus(forRunStatus: result.status, current: invocation.status)
-            invocation.progressMessage = "Run \(result.status)"
-            invocation.details = mergeCapabilityDetails(
-                invocation.details,
-                [
-                    "runId": AnyCodable(result.runId),
-                    "runStatus": AnyCodable(result.status),
-                    "streamTopic": AnyCodable(result.streamTopic as Any),
-                    "childInvocations": AnyCodable(result.childInvocations),
-                    "runDetails": AnyCodable(result.details as Any)
-                ]
-            )
-            if !result.identity.isEmpty { invocation.identity = result.identity }
-            updateMessage(at: index) { message in
-                message.content = .capabilityInvocation(invocation)
-            }
-        }
-    }
-
     func handleCapabilityInvocationCompleted(_ pluginResult: CapabilityInvocationCompletedPlugin.Result) {
         // Delegate directly to coordinator
         capabilityInvocationCoordinator.handleCapabilityInvocationCompleted(pluginResult, context: self)
@@ -251,30 +227,6 @@ extension ChatViewModel {
             category: .events
         )
         advanceStreamRecoveryRequest()
-    }
-
-    private func capabilityStatus(
-        forRunStatus status: String,
-        current: CapabilityInvocationStatus
-    ) -> CapabilityInvocationStatus {
-        switch status {
-        case "pending", "running": return .running
-        case "paused": return .paused
-        case "completed", "ok": return .success
-        case "cancelled", "timeout", "failed", "worker_disconnected", "policy_denied": return .error
-        default: return current
-        }
-    }
-
-    private func mergeCapabilityDetails(
-        _ existing: [String: AnyCodable]?,
-        _ updates: [String: AnyCodable]
-    ) -> [String: AnyCodable] {
-        var merged = existing ?? [:]
-        for (key, value) in updates {
-            merged[key] = value
-        }
-        return merged
     }
 
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {

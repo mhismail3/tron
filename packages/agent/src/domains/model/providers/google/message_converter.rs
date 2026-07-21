@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn converts_capability_result() {
         let output_envelope = format!(
-            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
             "safe-évidence-".repeat(1_400)
         );
         let context = ctx(vec![Message::CapabilityResult {

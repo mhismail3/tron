@@ -1,6 +1,6 @@
-//! Generated `TronEvent` catalog and accessors.
+//! Outbound `TronEvent` catalog and accessors.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 use super::super::{ActivitySummaryLine, CapabilityEventIdentity, CapabilityInvocationSummary};
@@ -31,7 +31,7 @@ macro_rules! tron_events {
         ///
         /// These events are published through engine streams and may be persisted as
         /// session events. iOS relies on exact type strings and field names.
-        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Serialize)]
         #[serde(tag = "type")]
         #[allow(missing_docs)]
         pub enum TronEvent {
@@ -225,23 +225,6 @@ tron_events! {
         capability_identity: CapabilityEventIdentity,
     } => "capability.invocation.progress",
 
-    /// Capability async run status update.
-    CapabilityRunStatus {
-        #[serde(rename = "runId")]
-        run_id: String,
-        #[serde(rename = "invocationId")]
-        invocation_id: String,
-        status: String,
-        #[serde(rename = "streamTopic", skip_serializing_if = "Option::is_none")]
-        stream_topic: Option<String>,
-        #[serde(rename = "childInvocations")]
-        child_invocations: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        details: Option<Value>,
-        #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.run.status",
-
     /// Capability invocation completed.
     CapabilityInvocationCompleted {
         #[serde(rename = "invocationId")]
@@ -276,22 +259,6 @@ tron_events! {
         #[serde(flatten)]
         capability_identity: CapabilityEventIdentity,
     } => "capability.invocation.generating",
-
-    // -- Session --
-
-    /// Session saved.
-    SessionSaved {
-        #[serde(rename = "filePath")]
-        file_path: String,
-    } => "session_saved",
-
-    /// Session loaded.
-    SessionLoaded {
-        #[serde(rename = "filePath")]
-        file_path: String,
-        #[serde(rename = "messageCount")]
-        message_count: u32,
-    } => "session_loaded",
 
     // -- Context --
 
@@ -524,7 +491,6 @@ impl TronEvent {
             Self::CapabilityInvocationStarted { .. }
                 | Self::CapabilityInvocationOutput { .. }
                 | Self::CapabilityInvocationProgress { .. }
-                | Self::CapabilityRunStatus { .. }
                 | Self::CapabilityInvocationCompleted { .. }
         )
     }

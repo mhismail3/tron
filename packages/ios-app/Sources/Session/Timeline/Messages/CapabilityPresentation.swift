@@ -45,8 +45,6 @@ enum CapabilityPresentation {
         targetId: String? = nil
     ) -> Color {
         switch status {
-        case .paused:
-            return .tronAmber
         case .error, .unavailable:
             return .tronError
         case .generating, .running, .success:

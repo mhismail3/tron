@@ -14,7 +14,6 @@ import Foundation
     func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result)
     func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result)
     func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result)
-    func handleCapabilityRunStatus(_ result: CapabilityRunStatusPlugin.Result)
 }
 
 @MainActor protocol TurnLifecycleEventHandler: AnyObject {

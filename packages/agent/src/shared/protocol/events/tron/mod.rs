@@ -1,9 +1,9 @@
-//! High-level Tron agent event support types and macro.
+//! High-level outbound Tron agent event support types and macro.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Common fields for all agent events.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseEvent {
     /// Session this event belongs to.
@@ -55,7 +55,7 @@ impl BaseEvent {
 }
 
 /// Compaction trigger reason.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionReason {
     /// Token threshold exceeded.

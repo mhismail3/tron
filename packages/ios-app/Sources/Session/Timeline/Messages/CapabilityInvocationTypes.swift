@@ -121,7 +121,6 @@ struct CapabilityInvocationData: Equatable, Identifiable {
 enum CapabilityInvocationStatus: Equatable, Sendable {
     case generating
     case running
-    case paused
     case success
     case error
     case unavailable
@@ -130,8 +129,6 @@ enum CapabilityInvocationStatus: Equatable, Sendable {
         switch self {
         case .generating, .running:
             return "arrow.triangle.2.circlepath"
-        case .paused:
-            return "pause.circle.fill"
         case .success:
             return "checkmark.circle.fill"
         case .error:

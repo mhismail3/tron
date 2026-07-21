@@ -18,7 +18,6 @@ final class CapabilityInvocationBriefPresentationTests: XCTestCase {
         let brief = CapabilityInvocationBriefPresentation(data: invocation)
 
         XCTAssertEqual(brief.title, "Worker List")
-        XCTAssertEqual(brief.tone, .success)
         XCTAssertTrue(brief.narrative.contains("completed"))
         XCTAssertTrue(brief.narrative.contains("returned"))
         XCTAssertTrue(brief.resultBody?.contains("Listed 0 persistent workers") == true)
@@ -49,7 +48,6 @@ final class CapabilityInvocationBriefPresentationTests: XCTestCase {
 
         let brief = CapabilityInvocationBriefPresentation(data: invocation)
 
-        XCTAssertEqual(brief.tone, .attention)
         XCTAssertEqual(brief.issue?.title, "Request shape needs correction")
         XCTAssertTrue(brief.issue?.message.contains("[id]") == true)
         XCTAssertFalse(brief.issue?.message.contains("019f3b30") == true)

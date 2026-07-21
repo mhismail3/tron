@@ -487,8 +487,6 @@ extension ChatViewModel {
                 .generating
             case CapabilityInvocationStatusDTO.running.rawValue:
                 .running
-            case CapabilityInvocationStatusDTO.paused.rawValue:
-                .paused
             case CapabilityInvocationStatusDTO.error.rawValue:
                 .error
             default:
@@ -511,7 +509,6 @@ extension ChatViewModel {
             status: status,
             arguments: argsString,
             result: capabilityInvocation.result,
-            details: capabilityInvocation.details,
             progressMessage: capabilityInvocation.progressMessage,
             progressPercent: capabilityInvocation.progressPercent,
             durationMs: durationMs,

@@ -179,7 +179,7 @@ fn convert_capability_result_message() {
 #[test]
 fn capability_result_text_is_transport_exact() {
     let output_envelope = format!(
-        "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+        "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
         "safe-évidence-".repeat(1_400)
     );
     let messages = vec![Message::CapabilityResult {

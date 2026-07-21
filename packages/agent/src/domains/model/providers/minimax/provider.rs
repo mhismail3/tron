@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn capability_result_text_is_transport_exact_through_shared_converter() {
         let output_envelope = format!(
-            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
             "safe-evidence-".repeat(1_400)
         );
         let messages = vec![Message::CapabilityResult {

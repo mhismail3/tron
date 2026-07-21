@@ -46,8 +46,6 @@ extension CapabilityInvocationDisplayModel {
             return "Preparing"
         case .running:
             return data.progressMessage?.nilIfEmpty?.truncated(to: 160) ?? "In progress"
-        case .paused:
-            return "Paused"
         case .unavailable:
             return "Unavailable"
         case .error:

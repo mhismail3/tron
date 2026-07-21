@@ -27,8 +27,11 @@ receives several parallel invocation requests, it broadcasts every persisted
 `started` row before execution begins. iOS treats
 `capability.invocation.generating` as pre-execution draft state only, but still
 renders it immediately so the user sees pending parallel work before execution
-finishes. Reconnect reconstruction preserves that `generating` state when the
-server reports an in-flight invocation.
+finishes. `capability.invocation.progress` is the only transient progress
+surface; terminal state comes from `capability.invocation.completed`. There is
+no separate async-run lifecycle or paused invocation state. Reconnect
+reconstruction preserves generating, running, completed, and failed invocation
+state directly from the server accumulator.
 
 ## Stream Ownership and Terminal Drain
 

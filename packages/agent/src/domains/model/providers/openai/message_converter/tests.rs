@@ -212,7 +212,7 @@ fn converts_capability_result_content_blocks() {
 #[test]
 fn preserves_capability_result_bytes_exactly() {
     let output_envelope = format!(
-        "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+        "{{\"summary\":\"{}\",\"kind\":\"test\"}}",
         "safe-évidence-".repeat(1_400)
     );
     let messages = vec![Message::CapabilityResult {

@@ -59,7 +59,7 @@ extension CapabilityInvocationDisplayModel {
             return .completed
         case .error, .unavailable:
             return .attention
-        case .running, .paused:
+        case .running:
             return .current
         case .generating:
             return .pending
@@ -76,7 +76,7 @@ extension CapabilityInvocationDisplayModel {
             return ("Needs attention", "exclamationmark.triangle", .attention)
         case .unavailable:
             return ("Unavailable", "exclamationmark.triangle", .attention)
-        case .generating, .running, .paused:
+        case .generating, .running:
             return nil
         }
     }

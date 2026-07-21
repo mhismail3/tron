@@ -77,9 +77,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             "session.processing_changed",
             Some(json!({ "isProcessing": is_processing })),
         )),
-        TronEvent::SessionSaved { .. } | TronEvent::SessionLoaded { .. } => {
-            Some(session_scoped(event, event.event_type(), Some(json!({}))))
-        }
         TronEvent::SessionArchived { .. }
         | TronEvent::SessionUnarchived { .. }
         | TronEvent::SessionDeleted { .. } => {

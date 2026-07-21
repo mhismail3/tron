@@ -8,7 +8,7 @@ struct CapabilityStatusBadge: View {
 
     private var statusColor: Color {
         switch status {
-        case .generating, .running, .paused: return .tronAmber
+        case .generating, .running: return .tronAmber
         case .success: return .tronSuccess
         case .error, .unavailable: return .tronError
         }
@@ -18,7 +18,6 @@ struct CapabilityStatusBadge: View {
         switch status {
         case .generating: return "Resolving"
         case .running: return "Running"
-        case .paused: return "Paused"
         case .success: return "Completed"
         case .error: return "Failed"
         case .unavailable: return "Unavailable"

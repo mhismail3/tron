@@ -66,7 +66,7 @@ struct AgentAbortInvocationResult: Decodable {
 struct CurrentTurnCapabilityInvocation: Decodable {
     let invocationId: String
     let arguments: [String: AnyCodable]?
-    let status: String  // "generating" | "running" | "paused" | "completed" | "error"
+    let status: String  // "generating" | "running" | "completed" | "error"
     let result: String?
     let isError: Bool?
     let startedAt: String?
@@ -77,8 +77,6 @@ struct CurrentTurnCapabilityInvocation: Decodable {
     let progressMessage: String?
     /// Latest 0.0–1.0 progress fraction.
     let progressPercent: Double?
-    /// Latest async-run detail projection.
-    let details: [String: AnyCodable]?
     let modelPrimitiveName: String?
     let operationName: String?
     let operation: String?

@@ -164,7 +164,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         switch status {
         case .generating: return "Preparing"
         case .running: return "Running"
-        case .paused: return "Paused"
         case .success: return "Completed"
         case .error: return "Failed"
         case .unavailable: return "Unavailable"
@@ -177,8 +176,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
             return ["generatingLabel", "progressLabel", "statusLabel"]
         case .running:
             return ["runningLabel", "progressLabel", "statusLabel"]
-        case .paused:
-            return ["pausedLabel", "statusLabel"]
         case .success:
             return ["successLabel", "statusLabel"]
         case .error:

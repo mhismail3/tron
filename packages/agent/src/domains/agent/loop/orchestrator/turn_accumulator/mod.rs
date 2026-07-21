@@ -84,7 +84,7 @@ pub struct AccumulatedCapabilityInvocation {
     pub model_primitive_name: String,
     /// Parsed arguments, populated when execution starts.
     pub arguments: Option<Value>,
-    /// Lifecycle status: "generating", "running", "paused", "completed", or "error".
+    /// Lifecycle status: "generating", "running", "completed", or "error".
     pub status: String,
     /// Capability output text, populated on completion.
     pub result: Option<String>,
@@ -100,8 +100,6 @@ pub struct AccumulatedCapabilityInvocation {
     pub progress_message: Option<String>,
     /// Latest 0.0–1.0 progress fraction.
     pub progress_percent: Option<f64>,
-    /// Latest async-run detail projection.
-    pub details: Option<Value>,
     /// Provider-visible operation and presentation identity.
     pub capability_identity: CapabilityEventIdentity,
 }
@@ -134,9 +132,6 @@ impl AccumulatedCapabilityInvocation {
         }
         if let Some(percent) = self.progress_percent {
             obj["progressPercent"] = serde_json::json!(percent);
-        }
-        if let Some(ref details) = self.details {
-            obj["details"] = details.clone();
         }
         if let Ok(Value::Object(identity)) = serde_json::to_value(&self.capability_identity) {
             for (key, value) in identity {
@@ -307,7 +302,6 @@ impl TurnAccumulator {
                 streaming_output: None,
                 progress_message: None,
                 progress_percent: None,
-                details: None,
                 capability_identity: capability_identity.clone(),
             });
         self.content_sequence
@@ -381,42 +375,6 @@ impl TurnAccumulator {
             if let Some(percent) = percent {
                 capability.progress_percent = Some(percent);
             }
-            capability.merge_identity(capability_identity);
-        }
-    }
-
-    /// Update the reconnect-visible state of an asynchronous capability run.
-    pub fn update_capability_run_status(
-        &mut self,
-        invocation_id: &str,
-        status: &str,
-        details: Value,
-        capability_identity: &CapabilityEventIdentity,
-    ) {
-        if let Some(capability) = self
-            .capability_invocations
-            .iter_mut()
-            .find(|capability| capability.invocation_id == invocation_id)
-        {
-            let (projected_status, is_terminal, is_error) = match status {
-                "pending" | "running" => ("running".to_owned(), false, false),
-                "paused" => ("paused".to_owned(), false, false),
-                "completed" | "ok" => ("completed".to_owned(), true, false),
-                "cancelled" | "timeout" | "failed" | "worker_disconnected" | "policy_denied" => {
-                    ("error".to_owned(), true, true)
-                }
-                _ => (capability.status.clone(), false, capability.is_error),
-            };
-            capability.status = projected_status;
-            capability.is_error = is_error;
-            if is_terminal {
-                capability.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                capability.progress_message = None;
-                capability.progress_percent = None;
-            } else {
-                capability.progress_message = Some(format!("Run {status}"));
-            }
-            capability.details = Some(details);
             capability.merge_identity(capability_identity);
         }
     }
@@ -772,38 +730,6 @@ impl TurnAccumulatorMap {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn handle_capability_run_status(
-        &self,
-        session_id: &str,
-        invocation_id: &str,
-        run_id: &str,
-        status: &str,
-        stream_topic: Option<&str>,
-        child_invocations: &[String],
-        details: Option<&Value>,
-        capability_identity: &CapabilityEventIdentity,
-        sequence: Option<i64>,
-    ) {
-        if let Some(session) = self.accumulators.lock().get_mut(session_id) {
-            if let Some(turn) = session.turn.as_mut() {
-                turn.update_capability_run_status(
-                    invocation_id,
-                    status,
-                    serde_json::json!({
-                        "runId": run_id,
-                        "runStatus": status,
-                        "streamTopic": stream_topic,
-                        "childInvocations": child_invocations,
-                        "runDetails": details,
-                    }),
-                    capability_identity,
-                );
-            }
-            session.observe_represented_sequence(sequence);
-        }
-    }
-
     /// Advance the projection cut for an event explicitly classified below as
     /// reconstructed elsewhere or intentionally transient.
     fn handle_covered_event(&self, session_id: &str, sequence: Option<i64>) {
@@ -1001,28 +927,6 @@ impl TurnAccumulatorMap {
                     sequence,
                 );
             }
-            TronEvent::CapabilityRunStatus {
-                run_id,
-                invocation_id,
-                status,
-                stream_topic,
-                child_invocations,
-                details,
-                capability_identity,
-                ..
-            } => {
-                self.handle_capability_run_status(
-                    session_id,
-                    invocation_id,
-                    run_id,
-                    status,
-                    stream_topic.as_deref(),
-                    child_invocations,
-                    details.as_ref(),
-                    capability_identity,
-                    sequence,
-                );
-            }
             TronEvent::CompactionStart { reason, .. } => {
                 let reason = serde_json::to_value(reason)
                     .ok()
@@ -1040,8 +944,6 @@ impl TurnAccumulatorMap {
             // new event variant to choose a reconstruction owner.
             TronEvent::CapabilityInvocationBatch { .. }
             | TronEvent::CapabilityInvocationArgumentDelta { .. }
-            | TronEvent::SessionSaved { .. }
-            | TronEvent::SessionLoaded { .. }
             | TronEvent::ContextWarning { .. }
             | TronEvent::Error { .. }
             | TronEvent::ApiRetry { .. }
