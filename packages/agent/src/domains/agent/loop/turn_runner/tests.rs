@@ -14,7 +14,7 @@ fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
         WorkerId::new("worker-kernel").expect("worker id"),
         "list persistent workers",
         VisibilityScope::System,
-        EffectClass::DelegatedInvocation,
+        EffectClass::PureRead,
     );
     let _ = targets_by_name.insert(
         "worker_list".to_owned(),

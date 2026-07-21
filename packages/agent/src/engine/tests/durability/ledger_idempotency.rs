@@ -299,9 +299,9 @@ async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() 
     catalog
         .register_function(
             write_function("alpha::write", "w1"),
-            Some(Arc::new(CountingHandler {
+            Arc::new(CountingHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
 
@@ -352,17 +352,17 @@ async fn idempotency_reject_and_noop_policies_are_enforced() {
     catalog
         .register_function(
             write_function("alpha::reject", "w1").with_idempotency(reject_idempotency()),
-            Some(Arc::new(CountingHandler {
+            Arc::new(CountingHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
     catalog
         .register_function(
             write_function("alpha::noop", "w1").with_idempotency(noop_idempotency()),
-            Some(Arc::new(CountingHandler {
+            Arc::new(CountingHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
 
@@ -419,9 +419,9 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
             .register_function(
                 write_function("alpha::write", "w1")
                     .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
-                Some(Arc::new(CountingHandler {
+                Arc::new(CountingHandler {
                     calls: calls.clone(),
-                })),
+                }),
             )
             .unwrap();
 
@@ -446,9 +446,9 @@ async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_
         .register_function(
             write_function("alpha::write", "w1")
                 .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
-            Some(Arc::new(CountingHandler {
+            Arc::new(CountingHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
 
@@ -472,9 +472,9 @@ async fn duplicate_after_handler_failure_replays_stored_error_without_reinvoking
     catalog
         .register_function(
             write_function("alpha::write", "w1"),
-            Some(Arc::new(CountingFailHandler {
+            Arc::new(CountingFailHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
 
@@ -512,9 +512,9 @@ async fn idempotency_reservation_failure_prevents_handler_execution() {
     catalog
         .register_function(
             write_function("alpha::write", "w1"),
-            Some(Arc::new(CountingHandler {
+            Arc::new(CountingHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
 
@@ -554,7 +554,7 @@ fn sqlite_ledger_reopen_preserves_watch_scope_metadata() {
                 .with_provenance(
                     Provenance::new(actor("agent"), "test").with_session_id("session-a"),
                 ),
-                Some(handler()),
+                handler(),
             )
             .unwrap();
     }

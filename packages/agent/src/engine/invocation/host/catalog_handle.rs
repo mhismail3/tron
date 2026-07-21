@@ -7,7 +7,7 @@ impl EngineHostHandle {
     pub async fn register_function(
         &self,
         definition: FunctionDefinition,
-        handler: Option<Arc<dyn InProcessFunctionHandler>>,
+        handler: Arc<dyn InProcessFunctionHandler>,
     ) -> Result<FunctionRevision> {
         self.inner
             .lock()
@@ -24,7 +24,7 @@ impl EngineHostHandle {
     pub fn register_function_for_setup(
         &self,
         definition: FunctionDefinition,
-        handler: Option<Arc<dyn InProcessFunctionHandler>>,
+        handler: Arc<dyn InProcessFunctionHandler>,
     ) -> Result<FunctionRevision> {
         self.inner
             .try_lock()

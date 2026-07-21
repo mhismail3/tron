@@ -80,7 +80,7 @@ impl LiveCatalog {
             )));
         };
         let function = entry.definition.clone();
-        let handler = entry.handler.clone();
+        let handler = Arc::clone(&entry.handler);
 
         invocation.causal_context.catalog_revision = self.revision;
 
@@ -184,35 +184,6 @@ impl LiveCatalog {
                 )));
             }
         }
-
-        let Some(handler) = handler else {
-            let mut result = InvocationResult::error(
-                &invocation,
-                function.owner_worker.clone(),
-                function.revision,
-                self.revision,
-                EngineError::NotRoutable {
-                    function_id: invocation.function_id.to_string(),
-                    reason: "no in-process handler".to_owned(),
-                },
-            );
-            if let Some(reservation) = &idempotency
-                && let Some(completion_error) = self.complete_invocation_idempotency(
-                    reservation,
-                    &invocation,
-                    &function,
-                    &result,
-                )
-            {
-                result = completion_error;
-            }
-            let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
-            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
-                &invocation,
-                result,
-                idempotency_scope,
-            )));
-        };
 
         PreparedSyncInvocationDecision::Execute(Box::new(PreparedSyncInvocation {
             invocation,

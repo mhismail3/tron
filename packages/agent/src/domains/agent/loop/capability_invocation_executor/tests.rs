@@ -125,9 +125,9 @@ async fn direct_tool_uses_typed_payload_and_trusted_local_context() {
     let revision = host
         .register_function(
             function.clone(),
-            Some(Arc::new(CapturingDirectHandler {
+            Arc::new(CapturingDirectHandler {
                 captured: Arc::clone(&captured),
-            })),
+            }),
         )
         .await
         .unwrap();

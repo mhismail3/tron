@@ -1,4 +1,8 @@
 //! In-memory live catalog registry.
+//!
+//! Every entry couples one canonical function definition to its required
+//! executable handler. The registry cannot represent an advertised-but-inert
+//! function.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,7 +30,7 @@ const RESERVED_ENGINE_WORKER_ID: &str = "engine";
 
 struct FunctionEntry {
     definition: FunctionDefinition,
-    handler: Option<Arc<dyn InProcessFunctionHandler>>,
+    handler: Arc<dyn InProcessFunctionHandler>,
 }
 
 /// In-memory live catalog.

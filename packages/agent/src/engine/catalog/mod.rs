@@ -6,7 +6,9 @@
 //! invocation completion returns a ledger error when persistence fails, and
 //! restart derives the cursor from persisted changes. Function definitions are
 //! self-sufficient; there is no parallel catalog-worker registry or namespace-
-//! claim preflight. The live registry does not retain duplicate history.
+//! claim preflight. Registration requires an executable handler, so discovery
+//! can never advertise a definition that the current process cannot route. The
+//! live registry does not retain duplicate history.
 //!
 //! Discovery actor context is provenance plus visibility scope, not an
 //! authorization token or permission object.

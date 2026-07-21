@@ -8,9 +8,9 @@ async fn mutating_invocation_missing_idempotency_key_stops_before_handler() {
         .register_function(
             write_function("alpha::write", "w1")
                 .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
-            Some(Arc::new(CountingHandler {
+            Arc::new(CountingHandler {
                 calls: calls.clone(),
-            })),
+            }),
         )
         .unwrap();
 

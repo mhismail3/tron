@@ -13,9 +13,6 @@ pub enum EffectClass {
     PureRead,
     /// Deterministic computation from payload only.
     DeterministicCompute,
-    /// Privileged meta-capability that delegates to another function whose
-    /// effect/idempotency policy is checked at runtime.
-    DelegatedInvocation,
     /// Mutates state with an idempotency key.
     IdempotentWrite,
     /// Appends immutable ledger/event data.
@@ -32,10 +29,7 @@ impl EffectClass {
     /// Whether this effect mutates durable state or the outside world.
     #[must_use]
     pub fn is_mutating(self) -> bool {
-        !matches!(
-            self,
-            Self::PureRead | Self::DeterministicCompute | Self::DelegatedInvocation
-        )
+        !matches!(self, Self::PureRead | Self::DeterministicCompute)
     }
 
     /// Whether this effect requires an idempotency contract.
@@ -169,8 +163,6 @@ pub struct FunctionDefinition {
     pub request_schema: Option<Value>,
     /// Response JSON schema.
     pub response_schema: Option<Value>,
-    /// Whether response is intentionally opaque.
-    pub opaque_response: bool,
     /// Search tags.
     pub tags: Vec<String>,
     /// Visibility scope.
@@ -206,7 +198,6 @@ impl FunctionDefinition {
             description: description.into(),
             request_schema: None,
             response_schema: None,
-            opaque_response: false,
             tags: Vec::new(),
             visibility,
             effect_class,

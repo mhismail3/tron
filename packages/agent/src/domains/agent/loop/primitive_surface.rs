@@ -295,7 +295,7 @@ mod tests {
             "workerProvenance": {"source": "test fixture"},
             "workerSuccessEvidence": {"completedRuns": 3}
         });
-        host.register_function_for_setup(definition, None)
+        host.register_function_for_setup(definition, Arc::new(InboxAttachHandler))
             .expect("worker function");
     }
 
@@ -311,7 +311,7 @@ mod tests {
         );
         old_builtin_like_function.metadata =
             serde_json::json!({"modelPrimitiveName": "old_filesystem_read"});
-        host.register_function_for_setup(old_builtin_like_function, None)
+        host.register_function_for_setup(old_builtin_like_function, Arc::new(InboxAttachHandler))
             .expect("nonprimitive function");
 
         let surface = resolve_provider_primitive_surface(&host, "session-a", None)
@@ -342,7 +342,7 @@ mod tests {
         .with_idempotency(crate::engine::IdempotencyContract::caller_system_engine_ledger())
         .with_request_schema(serde_json::json!({"type":"object"}))
         .with_response_schema(serde_json::json!({"type":"object"}));
-        host.register_function_for_setup(attach, Some(Arc::new(InboxAttachHandler)))
+        host.register_function_for_setup(attach, Arc::new(InboxAttachHandler))
             .expect("internal inbox attachment");
 
         let surface = resolve_provider_primitive_surface(&host, "session-a", None)

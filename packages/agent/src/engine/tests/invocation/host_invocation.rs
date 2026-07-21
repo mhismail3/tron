@@ -4,7 +4,7 @@ use super::*;
 async fn sync_invocation_succeeds_and_records_revisions() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()))
+        .register_function(read_function("alpha::read", "w1"), handler())
         .unwrap();
     let invocation = Invocation::new_sync(fid("alpha::read"), json!({"x": 1}), causal());
 
@@ -20,13 +20,11 @@ async fn invocation_rejects_a_function_surface_that_changed_after_advertisement(
     let mut catalog = LiveCatalog::new();
     let mut first = read_function("alpha::read", "w1");
     first.metadata = json!({"workerVersion":"worker-v1"});
-    let advertised_revision = catalog
-        .register_function(first.clone(), Some(handler()))
-        .unwrap();
+    let advertised_revision = catalog.register_function(first.clone(), handler()).unwrap();
 
     let mut second = first;
     second.metadata = json!({"workerVersion":"worker-v2"});
-    let current_revision = catalog.register_function(second, Some(handler())).unwrap();
+    let current_revision = catalog.register_function(second, handler()).unwrap();
     let invocation = Invocation::new_sync(
         fid("alpha::read"),
         json!({"x": 1}),
@@ -63,7 +61,7 @@ async fn invocation_rejects_a_function_surface_that_changed_after_advertisement(
 async fn invocation_ledger_records_success_error_and_full_causality() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_function(read_function("alpha::read", "w1"), Some(handler()))
+        .register_function(read_function("alpha::read", "w1"), handler())
         .unwrap();
 
     let parent = super::ids::InvocationId::new("parent-invocation").unwrap();
@@ -131,7 +129,7 @@ async fn schema_validation_checks_request_and_response_payloads() {
                     "properties": {"echo": {"type": "object"}},
                     "additionalProperties": true
                 })),
-            Some(handler()),
+            handler(),
         )
         .unwrap();
 
@@ -177,7 +175,7 @@ async fn schema_validation_checks_request_and_response_payloads() {
     let invalid_schema = read_function("alpha::invalid_schema", "w1")
         .with_request_schema(json!({"type": "definitely-not-json-schema"}));
     assert!(matches!(
-        catalog.register_function(invalid_schema, Some(handler())),
+        catalog.register_function(invalid_schema, handler()),
         Err(EngineError::InvalidSchema { .. })
     ));
 }
@@ -199,7 +197,7 @@ async fn schema_validation_enforces_array_max_items() {
                 },
                 "additionalProperties": false
             })),
-            Some(handler()),
+            handler(),
         )
         .unwrap();
 
@@ -230,7 +228,7 @@ async fn schema_validation_enforces_array_max_items() {
     let invalid_schema = read_function("alpha::bad_max_items", "w1")
         .with_request_schema(json!({"type": "array", "maxItems": -1}));
     assert!(matches!(
-        catalog.register_function(invalid_schema, Some(handler())),
+        catalog.register_function(invalid_schema, handler()),
         Err(EngineError::InvalidSchema { .. })
     ));
 }
@@ -244,7 +242,7 @@ async fn schema_validation_enforces_array_max_items_without_items_schema() {
                 "type": "array",
                 "maxItems": 1
             })),
-            Some(handler()),
+            handler(),
         )
         .unwrap();
 
@@ -267,7 +265,7 @@ async fn schema_validation_enforces_array_max_items_without_items_schema() {
 #[tokio::test]
 async fn host_unregister_function_updates_discovery() {
     let host = EngineHostHandle::new_in_memory().unwrap();
-    host.register_function_for_setup(read_function("alpha::read", "w1"), Some(handler()))
+    host.register_function_for_setup(read_function("alpha::read", "w1"), handler())
         .unwrap();
 
     let actor_context = ActorContext::new(actor("system"), ActorKind::System);
@@ -290,10 +288,7 @@ async fn host_unregister_function_updates_discovery() {
 async fn invocation_returns_structured_errors() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_function(
-            read_function("alpha::read", "w1"),
-            Some(Arc::new(FailHandler)),
-        )
+        .register_function(read_function("alpha::read", "w1"), Arc::new(FailHandler))
         .unwrap();
 
     let missing = catalog
@@ -328,9 +323,7 @@ async fn invocation_returns_structured_errors() {
 async fn invocation_enforces_health_and_idempotency_key() {
     let mut catalog = LiveCatalog::new();
     let function = write_function("alpha::write", "w1");
-    catalog
-        .register_function(function, Some(handler()))
-        .unwrap();
+    catalog.register_function(function, handler()).unwrap();
 
     let no_key = catalog
         .invoke_sync(Invocation::new_sync(
@@ -356,7 +349,7 @@ async fn invocation_enforces_health_and_idempotency_key() {
     catalog
         .register_function(
             write_function("alpha::write", "w1").with_health(FunctionHealth::Unhealthy),
-            Some(handler()),
+            handler(),
         )
         .unwrap();
     let unhealthy = catalog
@@ -384,7 +377,7 @@ async fn invocation_enforces_visibility_scope() {
     )
     .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
     catalog
-        .register_function(session_function, Some(handler()))
+        .register_function(session_function, handler())
         .unwrap();
 
     let hidden = catalog
@@ -424,10 +417,10 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
     handle
         .register_function(
             read_function("alpha::slow", "w1"),
-            Some(Arc::new(BlockingHandler {
+            Arc::new(BlockingHandler {
                 started: Arc::clone(&started),
                 release: Arc::clone(&release),
-            })),
+            }),
         )
         .await
         .unwrap();
@@ -454,7 +447,7 @@ async fn engine_host_handle_invokes_handlers_without_blocking_discovery() {
             .any(|function| function.id == fid("alpha::slow"))
     );
     handle
-        .register_function(read_function("alpha::new_read", "w1"), Some(handler()))
+        .register_function(read_function("alpha::new_read", "w1"), handler())
         .await
         .expect("catalog updates should not wait for slow handler");
 
@@ -487,9 +480,9 @@ async fn engine_host_handle_records_panics_and_replays_panic_errors() {
     handle
         .register_function(
             write_function("alpha::panic", "w1"),
-            Some(Arc::new(CountingPanicHandler {
+            Arc::new(CountingPanicHandler {
                 calls: Arc::clone(&calls),
-            })),
+            }),
         )
         .await
         .unwrap();
@@ -531,10 +524,10 @@ async fn regular_cancellation_records_and_replays_typed_error() {
         .register_function_for_setup(
             write_function("alpha::cancellable", "w1")
                 .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
-            Some(Arc::new(BlockingHandler {
+            Arc::new(BlockingHandler {
                 started: Arc::clone(&started),
                 release: Arc::new(Notify::new()),
-            })),
+            }),
         )
         .unwrap();
 
@@ -594,7 +587,7 @@ async fn sqlite_engine_host_handle_reopens_catalog_revision() {
         let handle = super::host::EngineHostHandle::open_sqlite(&ledger_path).unwrap();
         let mut host = handle.lock().await;
         host.catalog_mut()
-            .register_function(read_function("alpha::read", "w1"), Some(handler()))
+            .register_function(read_function("alpha::read", "w1"), handler())
             .unwrap();
     }
 

@@ -210,7 +210,7 @@ async fn phase_engine_surface_with_mode(
     )
     .with_risk(RiskLevel::Low);
     engine_host
-        .register_function(function.clone(), Some(Arc::new(DelayedCapabilityHandler)))
+        .register_function(function.clone(), Arc::new(DelayedCapabilityHandler))
         .await
         .expect("register function");
 

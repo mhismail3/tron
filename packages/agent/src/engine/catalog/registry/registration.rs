@@ -34,7 +34,7 @@ impl LiveCatalog {
     pub fn register_function(
         &mut self,
         mut definition: FunctionDefinition,
-        handler: Option<Arc<dyn InProcessFunctionHandler>>,
+        handler: Arc<dyn InProcessFunctionHandler>,
     ) -> Result<FunctionRevision> {
         validate_reserved_function_namespace(&definition)?;
         policy::validate_function_registration(&definition)?;

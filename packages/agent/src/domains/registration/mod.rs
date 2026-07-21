@@ -81,11 +81,11 @@ pub(crate) fn register_domains_for_context(
     let handle = &ctx.engine_host;
     for module in modules {
         for function in module.functions {
-            handle.register_function_for_setup(function.definition, Some(function.handler))?;
+            handle.register_function_for_setup(function.definition, function.handler)?;
         }
     }
     for function in engine_functions {
-        handle.register_function_for_setup(function.definition, Some(function.handler))?;
+        handle.register_function_for_setup(function.definition, function.handler)?;
     }
     Ok(activation)
 }
@@ -103,13 +103,13 @@ pub(crate) async fn register_domains_for_runtime_context(
     for module in modules {
         for function in module.functions {
             handle
-                .register_function(function.definition, Some(function.handler))
+                .register_function(function.definition, function.handler)
                 .await?;
         }
     }
     for function in engine_functions {
         handle
-            .register_function(function.definition, Some(function.handler))
+            .register_function(function.definition, function.handler)
             .await?;
     }
     Ok(activation)

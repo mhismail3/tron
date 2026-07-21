@@ -55,7 +55,7 @@ fn harness() -> ReplayHarness {
                 EffectClass::IdempotentWrite,
             )
             .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
-            Some(Arc::new(ReplayWriteHandler)),
+            Arc::new(ReplayWriteHandler),
         )
         .expect("register replay write function");
     ReplayHarness {
