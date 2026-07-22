@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Horizontal chip-button segmented control with equal-width segments.
-/// Replaces system `Picker(.segmented)` with the app's glass design language.
+/// Equal-width liquid-glass tabs used by dashboard and detail sheets.
+///
+/// The control owns the selected/unselected treatment so feature sheets do not
+/// recreate solid tab bars with subtly different spacing or contrast.
 struct TronSegmentedControl<T: Hashable>: View {
     let options: [(label: String, value: T)]
     @Binding var selection: T
@@ -9,23 +11,34 @@ struct TronSegmentedControl<T: Hashable>: View {
     var animatesSelection: Bool = true
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                let isSelected = selection == option.value
-                Button {
-                    select(option.value)
-                } label: {
-                    Text(option.label)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                        .foregroundStyle(isSelected ? .tronSurface : accent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(isSelected ? accent : accent.opacity(0.1))
-                        )
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                    let isSelected = selection == option.value
+                    Button {
+                        select(option.value)
+                    } label: {
+                        Text(option.label)
+                            .font(
+                                TronTypography.sans(
+                                    size: TronTypography.sizeBody3,
+                                    weight: isSelected ? .semibold : .medium
+                                )
+                            )
+                            .foregroundStyle(accent)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(
+                        .regular
+                            .tint(accent.opacity(isSelected ? 0.28 : 0.08))
+                            .interactive(),
+                        in: .rect(cornerRadius: 8)
+                    )
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
             }
         }
     }

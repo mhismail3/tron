@@ -8,9 +8,10 @@ struct DelegationRunDetailSheet: View {
     let isMutating: Bool
     let onCancel: () -> Void
     let onRetry: () -> Void
-    let onOpenSession: (String) -> Void
 
     @State private var confirmCancel = false
+    @State private var showTaskContract = false
+    @State private var showAuditSession = false
 
     var body: some View {
         NavigationStack {
@@ -30,8 +31,31 @@ struct DelegationRunDetailSheet: View {
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Delegated Task", color: .tronPurple)
                 }
+                if run.agentSessionId != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        SheetPrimaryActionButton(
+                            icon: "text.bubble",
+                            accent: .tronPurple,
+                            accessibilityLabel: "Open worker session"
+                        ) {
+                            showAuditSession = true
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     SheetDismissButton(color: .tronPurple)
+                }
+            }
+            .sheet(isPresented: $showTaskContract) {
+                WorkerJSONDetailSheet(
+                    title: "Task Contract",
+                    value: run.input,
+                    accent: .tronPurple
+                )
+            }
+            .sheet(isPresented: $showAuditSession) {
+                if let sessionId = run.agentSessionId {
+                    WorkerAuditSessionSheet(sessionId: sessionId)
                 }
             }
             .confirmationDialog(
@@ -50,17 +74,19 @@ struct DelegationRunDetailSheet: View {
     }
 
     private var requestContent: some View {
-        DisclosureGroup {
-            WorkerJSONBlock(value: run.input, accent: .tronPurple)
-                .padding(.top, 9)
-        } label: {
-            Label("Original task contract", systemImage: "doc.text")
+        Button { showTaskContract = true } label: {
+            HStack {
+                Label("Original task contract", systemImage: "doc.text")
+                Spacer()
+                Image(systemName: "chevron.right")
+            }
+            .contentShape(Rectangle())
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronPurple)
         }
-        .tint(.tronPurple)
+        .buttonStyle(.plain)
         .padding(12)
-        .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: false)
+        .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: true)
     }
 
     private var summaryCard: some View {
@@ -283,17 +309,6 @@ struct DelegationRunDetailSheet: View {
             }
             .sectionFill(.tronSlate, cornerRadius: 11, subtle: true, interactive: false)
 
-            if let sessionId = run.agentSessionId {
-                Button { onOpenSession(sessionId) } label: {
-                    Label("Open child session", systemImage: "arrow.up.forward.app")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronPurple)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(11)
-                        .sectionFill(.tronPurple, cornerRadius: 10, subtle: true, interactive: true)
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 

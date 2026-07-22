@@ -16,12 +16,12 @@ struct WorkerDetailSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
-    var onOpenSession: ((String) -> Void)?
     var mode: WorkerDetailMode = .operational
 
     @State private var confirmRetire = false
     @State private var confirmPurge = false
-    @State private var schemaExpanded = false
+    @State private var showSchema = false
+    @State private var showProvenance = false
     @State private var selectedSection = WorkerDetailSection.overview
 
     var body: some View {
@@ -94,6 +94,22 @@ struct WorkerDetailSheet: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Tron verifies a local recovery archive, then removes the retired worker and its live state. Restoring the archive is a manual operator action.")
+            }
+            .sheet(isPresented: $showSchema) {
+                if let schema = viewModel.inspection?.bundle["inputSchema"] {
+                    WorkerJSONDetailSheet(title: "Input Schema", value: schema, accent: .tronInfo)
+                }
+            }
+            .sheet(isPresented: $showProvenance) {
+                if let inspection = viewModel.inspection {
+                    WorkerTextDetailSheet(
+                        title: "Source Details",
+                        values: WorkerConsolePresentation.provenance(
+                            from: inspection.bundle["provenance"]
+                        ).map(\.fullLabel),
+                        accent: .tronInfo
+                    )
+                }
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
@@ -196,23 +212,17 @@ struct WorkerDetailSheet: View {
                                 .accessibilityLabel(item.fullLabel)
                         }
                     }
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 7) {
-                            ForEach(provenance) { item in
-                                Text(item.fullLabel)
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .textSelection(.enabled)
-                            }
+                    Button { showProvenance = true } label: {
+                        HStack {
+                            Label("Source details", systemImage: "doc.text.magnifyingglass")
+                            Spacer()
+                            Image(systemName: "chevron.right")
                         }
-                        .padding(.top, 7)
-                    } label: {
-                        Text("Source details")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(.tronInfo)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronInfo)
+                        .contentShape(Rectangle())
                     }
-                    .tint(.tronInfo)
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -252,16 +262,18 @@ struct WorkerDetailSheet: View {
                     }
                 }
 
-                if let schema {
-                    DisclosureGroup(isExpanded: $schemaExpanded) {
-                        WorkerJSONBlock(value: schema, accent: .tronInfo)
-                            .padding(.top, 9)
-                    } label: {
-                        Label("Raw input schema", systemImage: "curlybraces.square")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronInfo)
+                if schema != nil {
+                    Button { showSchema = true } label: {
+                        HStack {
+                            Label("Raw input schema", systemImage: "curlybraces.square")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronInfo)
+                        .contentShape(Rectangle())
                     }
-                    .tint(.tronInfo)
+                    .buttonStyle(.plain)
                 }
 
                 if allowsInvocation {
@@ -304,31 +316,20 @@ struct WorkerDetailSheet: View {
                         }
                     }
 
-                    Button {
+                    TronPrimaryActionButton(
+                        title: "Run worker",
+                        systemImage: "play.fill",
+                        accent: .tronEmerald,
+                        isBusy: viewModel.isMutating,
+                        isEnabled: viewModel.canInvokeSelectedWorker
+                    ) {
                         Task {
                             await viewModel.invoke(
                                 repository: repository,
                                 connectionState: connectionState
                             )
                         }
-                    } label: {
-                        HStack(spacing: 7) {
-                            if viewModel.isMutating {
-                                ProgressView().controlSize(.small).tint(.tronSurface)
-                            } else {
-                                Image(systemName: "play.fill")
-                            }
-                            Text("Run worker")
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronSurface)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .background(Color.tronEmerald, in: Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!viewModel.canInvokeSelectedWorker)
-                    .opacity(viewModel.canInvokeSelectedWorker ? 1 : 0.45)
 
                     if let result = viewModel.invocationResult {
                         VStack(alignment: .leading, spacing: 7) {
@@ -439,7 +440,7 @@ struct WorkerDetailSheet: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(viewModel.runs.prefix(20)) { run in
-                        WorkerRunCard(run: run, onOpenSession: onOpenSession) {
+                        WorkerRunCard(run: run) {
                             Task {
                                 await viewModel.cancel(
                                     run,

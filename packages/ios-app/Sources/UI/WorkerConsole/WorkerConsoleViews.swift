@@ -112,7 +112,6 @@ struct WorkerConsoleSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
-    let onOpenSession: (String) -> Void
 
     @State private var confirmStopAll = false
     @State private var selectedSection: EngineDashboardSection = .overview
@@ -174,23 +173,20 @@ struct WorkerConsoleSheet: View {
                         DelegationSheet(
                             consoleViewModel: viewModel,
                             repository: repository,
-                            connectionState: connectionState,
-                            onOpenSession: onOpenSession
+                            connectionState: connectionState
                         )
                     case .genericConsole:
                         WorkerDetailSheet(
                             viewModel: viewModel,
                             repository: repository,
-                            connectionState: connectionState,
-                            onOpenSession: onOpenSession
+                            connectionState: connectionState
                         )
                     }
                 } else {
                     WorkerDetailSheet(
                         viewModel: viewModel,
                         repository: repository,
-                        connectionState: connectionState,
-                        onOpenSession: onOpenSession
+                        connectionState: connectionState
                     )
                 }
             }
@@ -361,8 +357,7 @@ struct WorkerConsoleSheet: View {
                     ForEach(viewModel.activityRuns) { run in
                         WorkerRunCard(
                             run: run,
-                            workerName: viewModel.workerName(for: run.workerId),
-                            onOpenSession: onOpenSession
+                            workerName: viewModel.workerName(for: run.workerId)
                         )
                     }
                 }

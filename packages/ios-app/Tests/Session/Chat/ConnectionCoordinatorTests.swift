@@ -20,6 +20,32 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
     // MARK: - Connect and Reconstruct Tests
 
+    func testReadOnlyReconstructionNeverResumesInteractiveSession() async {
+        mockContext.isConnected = true
+
+        let outcome = await coordinator.reconstructReadOnly(context: mockContext)
+
+        XCTAssertEqual(outcome, .completed)
+        XCTAssertTrue(mockContext.connectCalled)
+        XCTAssertFalse(mockContext.resumeSessionCalled)
+        XCTAssertTrue(mockContext.reconstructSessionCalled)
+        XCTAssertTrue(mockContext.processReconstructionResultCalled)
+        XCTAssertFalse(mockContext.isReconstructing)
+    }
+
+    func testReadOnlyReconstructionFailureReleasesGateAndUsesWorkerError() async {
+        mockContext.isConnected = true
+        mockContext.reconstructShouldFail = true
+
+        let outcome = await coordinator.reconstructReadOnly(context: mockContext)
+
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertFalse(mockContext.resumeSessionCalled)
+        XCTAssertFalse(mockContext.isReconstructing)
+        XCTAssertEqual(mockContext.lastLocalErrorDedupKey, "worker.session.reconstruct.failed")
+        XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not load worker session")
+    }
+
     func testConnectAndReconstructCallsConnect() async {
         _ = await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.connectCalled)

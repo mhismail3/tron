@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-21 for the worker-first POC.
+> Last verified: 2026-07-22 for the worker-first POC.
 
 ## Overview
 
@@ -224,7 +224,7 @@ state.
 
 `WorkerConsoleViewModel` is `@MainActor` and owns only presentation state:
 
-- the selected-session engine snapshot, fixed inventory, and published worker
+- the profile-level engine snapshot, fixed inventory, and published worker
   projection state;
 - engine-wide activity runs and inbox results;
 - current list and selection;
@@ -255,9 +255,11 @@ identity is Engine. The sidebar owns the monitoring task, so the dashboard
 continues to receive durable lifecycle/invocation changes while its sheet is
 closed. The dashboard uses
 the same selected typography, semantic color tokens, liquid-glass section
-fills, compact inline sheet chrome, status hierarchy, and progressive evidence
-disclosure as the rest of Tron; raw schemas and durable payloads are supporting
-detail rather than the page's primary visual hierarchy. The dashboard shell,
+fills, tabs and execution actions, compact sheet chrome, status hierarchy, and
+progressive evidence disclosure as the rest of Tron. Inline expansion is
+reserved for bounded secondary text that cannot materially reflow a page;
+schemas, durable payloads, run details, evidence collections, and editable
+advanced forms open stable detail sheets. The dashboard shell,
 worker-detail workflow, reusable worker evidence components, and compiled-engine
 cards are separate files under the same feature owner; no all-in-one view file
 owns both navigation and every evidence renderer. It provides:
@@ -279,17 +281,18 @@ owns both navigation and every evidence renderer. It provides:
 - one generic worker workflow split into Overview, Run, Activity, and Manage;
 - native-experience technical detail limited to Contract and Manage so domain
   tasks, reports, runs, and inbox results have one presentation owner;
-- readable schema fields, progressively disclosed raw schema, generated valid
-  JSON input, inline syntax admission, and typed invocation results;
+- readable schema fields, raw-schema detail sheets, generated valid JSON input,
+  inline syntax admission, and typed invocation results;
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
-- recent runs with delivery-attempt counts and disclosed input/output, compact
-  inbox summaries whose full payloads expand on demand, progressively disclosed
-  audit history, and bounded load-more
+- compact recent-run rows that open canonical run-detail sheets with toolbar
+  actions, compact inbox and audit summaries whose full payloads open dedicated
+  sheets, and bounded load-more
   access to the complete profile ledger;
-- exact “Open audit session” navigation for agent-runner rows, while reserved
-  worker child sessions remain excluded from the ordinary Home session list;
+- a read-only worker-session transcript sheet launched from run-detail toolbar
+  actions, while reserved worker child sessions remain excluded from ordinary
+  Home navigation and the active interactive session remains unchanged;
 - stop current work without disabling the worker, enable/disable, retirement,
   exact run cancellation, and confirmation-backed archive-then-purge whose
   result retains the recovery archive path and checksum.
@@ -340,7 +343,8 @@ worker inventory by the immutable suite contract, reads bounded full-detail
 runs and inbox rows for every component, and decodes only exact
 `research.report.v1` coordinator outputs. It does not read the coordinator's
 state directory or reconstruct reports from client caches. Malformed canonical
-outputs remain visible as compact, disclosed historical compatibility issues;
+outputs remain visible as compact historical issue rows whose full evidence
+opens in a detail sheet;
 they do not falsely mark a successful worker/catalog refresh as failed.
 Unrelated outputs are not mistaken for reports.
 
@@ -370,10 +374,11 @@ Schema input, plus durable task and activity views. Run detail presents the
 deliverable, evidence, constraint observations, artifacts, unresolved work,
 attempt and causal evidence, and model/token/cost/timing data from the linked
 child session when that session is locally available. Opening a child session
-uses a dedicated audit route that admits the exact server-owned ID without
-requiring the reserved worker session to appear in the ordinary Home list.
-Chat reconstruction still resolves that exact ID from canonical session
-storage; no duplicate client or delegation session database exists. Task
+presents the shared chat transcript renderer in a read-only nested sheet. Its
+reconstruction path fetches the exact server-owned ID without `session::resume`,
+live-stream binding, drafts, settings, or an input bar, so auditing cannot
+replace or mutate the active interactive chat. No duplicate client or
+delegation session database exists. Task
 detail includes the original typed input, invocation/version, idempotency key,
 trigger, causal depth, trace, timestamps, model/token/cost evidence, and child
 session ID. Technical worker detail
@@ -408,6 +413,9 @@ stored paths both project the same typed server events into `ChatMessage`.
 Provider direct-tool calls render through generic invocation/result chips;
 “tool” in those UI type names means a provider tool call. Direct typed command vectors render as a
 readable command while the technical detail retains their exact JSON evidence.
+Unbounded raw payloads and technical-reference collections open nested detail
+sheets rather than expanding inside the invocation sheet and displacing its
+summary.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 

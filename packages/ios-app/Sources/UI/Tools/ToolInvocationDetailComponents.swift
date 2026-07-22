@@ -416,26 +416,58 @@ struct ToolReadableRow: View {
     }
 }
 
-struct ToolRawDisclosure: View {
+struct ToolRawDetailLink: View {
     let title: String
     let text: String
     let tint: TintedColors
 
+    @State private var showDetail = false
+
     var body: some View {
-        DisclosureGroup {
-            ToolInvocationCodeBlock(text: text)
-                .padding(.top, 8)
-        } label: {
+        Button { showDetail = true } label: {
             HStack(spacing: 8) {
                 Image(systemName: "curlybraces.square")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
             }
             .foregroundStyle(tint.heading)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .padding(.vertical, 8)
-        .contentShape(Rectangle())
+        .sheet(isPresented: $showDetail) {
+            ToolRawDetailSheet(title: title, text: text, tint: tint)
+        }
+    }
+}
+
+private struct ToolRawDetailSheet: View {
+    let title: String
+    let text: String
+    let tint: TintedColors
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                ToolInvocationCodeBlock(text: text)
+                    .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: title, color: tint.accent)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: tint.accent)
+                }
+            }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(tint.accent)
     }
 }

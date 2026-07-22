@@ -32,12 +32,10 @@ func pendingSessionDeepLink(
 
 func shouldPresentSelectedSession(
     selectedSessionId: String?,
-    knownSessionIds: Set<String>,
-    workerAuditSessionId: String?
+    knownSessionIds: Set<String>
 ) -> Bool {
     guard let selectedSessionId else { return false }
     return knownSessionIds.contains(selectedSessionId)
-        || selectedSessionId == workerAuditSessionId
 }
 
 // MARK: - Content View
@@ -57,7 +55,6 @@ struct ContentView: View {
 
     @State private var coordinator: ContentViewCoordinator?
     @State private var selectedSessionId: String?
-    @State private var workerAuditSessionId: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
@@ -137,22 +134,11 @@ struct ContentView: View {
                     }
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .openWorkerAuditSession)) { notification in
-                guard let sessionId = notification.object as? String else { return }
-                workerAuditSessionId = sessionId
-                selectedSessionId = sessionId
-                currentScrollTarget = .bottom
-            }
             .onReceive(NotificationCenter.default.publisher(for: .pendingShareContent)) { _ in
                 handlePendingShare()
             }
             .onChange(of: selectedSessionId) { _, newValue in
-                guard let newValue else {
-                    workerAuditSessionId = nil
-                    return
-                }
-                guard newValue != workerAuditSessionId else { return }
-                workerAuditSessionId = nil
+                guard let newValue else { return }
                 eventStoreManager.setActiveSession(newValue)
             }
             .onChange(of: deepLinkSessionId) { _, _ in
@@ -234,8 +220,7 @@ struct ContentView: View {
         if let sessionId = selectedSessionId,
            shouldPresentSelectedSession(
                selectedSessionId: sessionId,
-               knownSessionIds: Set(eventStoreManager.sessions.map(\.id)),
-               workerAuditSessionId: workerAuditSessionId
+               knownSessionIds: Set(eventStoreManager.sessions.map(\.id))
            ) {
             chatViewForSession(sessionId)
         } else if eventStoreManager.sessions.isEmpty {

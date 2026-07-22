@@ -12,12 +12,12 @@ struct DelegationSheet: View {
     @Bindable var consoleViewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
-    let onOpenSession: (String) -> Void
 
     @State private var viewModel = DelegationViewModel()
     @State private var selectedSection = DelegationSection.tasks
     @State private var selectedRun: WorkerInvocationDTO?
     @State private var showTechnicalDetails = false
+    @State private var showOptionalGuidance = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
 
     var body: some View {
@@ -85,8 +85,7 @@ struct DelegationSheet: View {
                             )
                             selectedRun = nil
                         }
-                    },
-                    onOpenSession: onOpenSession
+                    }
                 )
             }
             .sheet(isPresented: $showTechnicalDetails) {
@@ -96,6 +95,9 @@ struct DelegationSheet: View {
                     connectionState: connectionState,
                     mode: .technical
                 )
+            }
+            .sheet(isPresented: $showOptionalGuidance) {
+                DelegationGuidanceSheet(viewModel: viewModel)
             }
             .task { await refresh() }
             .onChange(of: consoleViewModel.workers) { _, _ in
@@ -256,52 +258,31 @@ struct DelegationSheet: View {
                 )
             }
 
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 14) {
-                    DelegationFormTextArea(
-                        title: "Context",
-                        detail: "Relevant background, not hidden instructions.",
-                        text: $viewModel.context,
-                        minHeight: 78
-                    )
-                    DelegationFormTextArea(
-                        title: "Files",
-                        detail: "One local path per line. The delegate must inspect each before relying on it.",
-                        text: $viewModel.filePaths,
-                        minHeight: 74,
-                        code: true
-                    )
-                    DelegationFormTextArea(
-                        title: "Constraints",
-                        detail: "One explicit constraint per line; every item must be accounted for in the result.",
-                        text: $viewModel.constraints,
-                        minHeight: 86
-                    )
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("Deadline")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            Button { showOptionalGuidance = true } label: {
+                HStack {
+                    Label("Optional guidance", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    if optionalGuidanceCount > 0 {
+                        Text("\(optionalGuidanceCount) set")
                             .foregroundStyle(.tronTextMuted)
-                        TextField("Optional ISO or human-readable deadline", text: $viewModel.deadline)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .padding(11)
-                            .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, interactive: false)
                     }
-                    DelegationFormTextArea(
-                        title: "Deliverable JSON Schema",
-                        detail: "Optional fail-closed schema object for the deliverable value.",
-                        text: $viewModel.deliverableSchema,
-                        minHeight: 120,
-                        code: true
-                    )
+                    Image(systemName: "chevron.right")
                 }
-                .padding(.top, 12)
-            } label: {
-                Label("Optional guidance", systemImage: "slider.horizontal.3")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronPurple)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronPurple)
+                .padding(12)
+                .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: true)
             }
+            .buttonStyle(.plain)
 
-            Button {
+            TronPrimaryActionButton(
+                title: "Delegate task",
+                systemImage: "paperplane.fill",
+                accent: .tronPurple,
+                isBusy: viewModel.isMutating,
+                isEnabled: viewModel.canSubmit
+            ) {
                 Task {
                     if await viewModel.submit(
                         repository: repository,
@@ -311,21 +292,18 @@ struct DelegationSheet: View {
                         selectedSection = .tasks
                     }
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    if viewModel.isMutating { ProgressView().controlSize(.small) }
-                    Label("Delegate task", systemImage: "paperplane.fill")
-                }
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.tronPurple, in: .capsule)
             }
-            .buttonStyle(.plain)
-            .disabled(!viewModel.canSubmit)
-            .opacity(viewModel.canSubmit ? 1 : 0.45)
         }
+    }
+
+    private var optionalGuidanceCount: Int {
+        [
+            viewModel.context,
+            viewModel.filePaths,
+            viewModel.constraints,
+            viewModel.deadline,
+            viewModel.deliverableSchema
+        ].count { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private var activityContent: some View {
@@ -384,6 +362,67 @@ struct DelegationSheet: View {
         await technicalViewModel.select(worker.workerId, repository: repository)
         guard technicalViewModel.selectedWorkerId == worker.workerId else { return }
         showTechnicalDetails = true
+    }
+}
+
+private struct DelegationGuidanceSheet: View {
+    @Bindable var viewModel: DelegationViewModel
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    DelegationFormTextArea(
+                        title: "Context",
+                        detail: "Relevant background, not hidden instructions.",
+                        text: $viewModel.context,
+                        minHeight: 78
+                    )
+                    DelegationFormTextArea(
+                        title: "Files",
+                        detail: "One local path per line. The delegate must inspect each before relying on it.",
+                        text: $viewModel.filePaths,
+                        minHeight: 74,
+                        code: true
+                    )
+                    DelegationFormTextArea(
+                        title: "Constraints",
+                        detail: "One explicit constraint per line; every item must be accounted for in the result.",
+                        text: $viewModel.constraints,
+                        minHeight: 86
+                    )
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Deadline")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(.tronTextMuted)
+                        TextField("Optional ISO or human-readable deadline", text: $viewModel.deadline)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                            .padding(11)
+                            .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, interactive: false)
+                    }
+                    DelegationFormTextArea(
+                        title: "Deliverable JSON Schema",
+                        detail: "Optional fail-closed schema object for the deliverable value.",
+                        text: $viewModel.deliverableSchema,
+                        minHeight: 120,
+                        code: true
+                    )
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Optional Guidance", color: .tronPurple)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronPurple)
+                }
+            }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(.tronPurple)
     }
 }
 

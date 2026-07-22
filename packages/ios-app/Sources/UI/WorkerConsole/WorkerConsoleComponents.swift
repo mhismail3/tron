@@ -110,6 +110,8 @@ struct WorkerTriggerCard: View {
     let isMutating: Bool
     let rotate: (() -> Void)?
 
+    @State private var showConfiguration = false
+
     private var color: Color { trigger.enabled ? .tronInfo : .tronTextMuted }
 
     var body: some View {
@@ -143,15 +145,17 @@ struct WorkerTriggerCard: View {
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
 
-            DisclosureGroup {
-                WorkerJSONBlock(value: trigger.configuration, accent: color)
-                    .padding(.top, 7)
-            } label: {
-                Text("Configuration")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(color)
+            Button { showConfiguration = true } label: {
+                HStack {
+                    Label("Configuration", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                }
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(color)
+                .contentShape(Rectangle())
             }
-            .tint(color)
+            .buttonStyle(.plain)
 
             if let rotate {
                 Button("Rotate webhook token", action: rotate)
@@ -162,6 +166,13 @@ struct WorkerTriggerCard: View {
         }
         .padding(11)
         .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+        .sheet(isPresented: $showConfiguration) {
+            WorkerJSONDetailSheet(
+                title: "Trigger Configuration",
+                value: trigger.configuration,
+                accent: color
+            )
+        }
     }
 }
 
@@ -216,8 +227,9 @@ struct WorkerVersionRow: View {
 struct WorkerRunCard: View {
     let run: WorkerInvocationDTO
     var workerName: String?
-    var onOpenSession: ((String) -> Void)?
     var onCancel: (() -> Void)?
+
+    @State private var showDetail = false
 
     private var color: Color {
         switch WorkerConsolePresentation.normalized(run.status) {
@@ -229,85 +241,62 @@ struct WorkerRunCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: statusSymbol)
-                    .foregroundStyle(color)
-                    .frame(width: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(workerName ?? WorkerConsolePresentation.displayLabel(run.status))
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(runMetadata)
+        Button { showDetail = true } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: statusSymbol)
+                        .foregroundStyle(color)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(workerName ?? WorkerConsolePresentation.displayLabel(run.status))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text(runMetadata)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                    Spacer()
+                    if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
+                        Text(timestamp)
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                        .foregroundStyle(.tronTextMuted)
+                }
+
+                Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+
+                if let summary = WorkerConsolePresentation.runSummary(run) {
+                    Text(summary)
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
                 }
-                Spacer()
-                if canCancel, let onCancel {
-                    Button("Cancel", role: .destructive, action: onCancel)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .buttonStyle(.plain)
-                }
-                if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
-                    Text(timestamp)
-                        .font(TronTypography.sans(size: TronTypography.sizeSM))
-                        .foregroundStyle(.tronTextMuted)
+
+                if let error = run.error {
+                    Label(error, systemImage: "exclamationmark.circle")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronError)
+                        .lineLimit(2)
                 }
             }
-
-            Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
-                .font(TronTypography.code(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-
-            if let summary = WorkerConsolePresentation.runSummary(run) {
-                Text(summary)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(2)
-            }
-
-            if let sessionId = run.agentSessionId, let onOpenSession {
-                Button {
-                    onOpenSession(sessionId)
-                } label: {
-                    Label("Open audit session", systemImage: "text.bubble")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronPurple)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("worker-run-open-session-\(run.invocationId)")
-            }
-
-            if let error = run.error {
-                Label(error, systemImage: "exclamationmark.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronError)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Input")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                    WorkerJSONBlock(value: run.input, accent: color)
-                    if let output = run.output {
-                        Text("Output")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(.tronTextMuted)
-                        WorkerJSONBlock(value: output, accent: color)
-                    }
-                }
-                .padding(.top, 8)
-            } label: {
-                Text("Execution detail")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            .tint(color)
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
         }
-        .padding(11)
-        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showDetail) {
+            WorkerRunDetailSheet(
+                run: run,
+                workerName: workerName,
+                onCancel: canCancel ? onCancel : nil
+            )
+        }
     }
 
     private var canCancel: Bool {
@@ -338,6 +327,8 @@ struct WorkerInboxCard: View {
     let item: WorkerInboxItemDTO
     var workerName: String?
 
+    @State private var showDetail = false
+
     private var color: Color {
         switch WorkerConsolePresentation.normalized(item.severity) {
         case "error", "critical": .tronError
@@ -347,10 +338,7 @@ struct WorkerInboxCard: View {
     }
 
     var body: some View {
-        DisclosureGroup {
-            WorkerJSONBlock(value: item.result, accent: color)
-                .padding(.top, 9)
-        } label: {
+        Button { showDetail = true } label: {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: item.seen ? "tray" : "tray.full.fill")
                     .foregroundStyle(color)
@@ -382,22 +370,33 @@ struct WorkerInboxCard: View {
                             .foregroundStyle(.tronTextMuted)
                     }
                 }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
             }
+            .contentShape(Rectangle())
         }
-        .tint(color)
+        .buttonStyle(.plain)
         .padding(11)
-        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
+        .sheet(isPresented: $showDetail) {
+            WorkerJSONDetailSheet(
+                title: workerName ?? "Inbox Result",
+                value: item.result,
+                accent: color
+            )
+        }
     }
 }
 
 struct WorkerAuditCard: View {
     let item: WorkerAuditDTO
 
+    @State private var showDetail = false
+
     var body: some View {
-        DisclosureGroup {
-            WorkerJSONBlock(value: item.details, accent: .tronSlate)
-                .padding(.top, 8)
-        } label: {
+        Button { showDetail = true } label: {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: "checklist")
                     .foregroundStyle(.tronSlate)
@@ -412,11 +411,23 @@ struct WorkerAuditCard: View {
                             .foregroundStyle(.tronTextMuted)
                     }
                 }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
             }
+            .contentShape(Rectangle())
         }
-        .tint(.tronSlate)
+        .buttonStyle(.plain)
         .padding(11)
-        .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, interactive: false)
+        .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, interactive: true)
+        .sheet(isPresented: $showDetail) {
+            WorkerJSONDetailSheet(
+                title: WorkerConsolePresentation.displayLabel(item.action),
+                value: item.details,
+                accent: .tronSlate
+            )
+        }
     }
 }
 

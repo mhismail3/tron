@@ -21,8 +21,10 @@ final class ToolInvocationDetailViewTests: XCTestCase {
 
         XCTAssertTrue(source.contains("ToolEvidencePresentation(data: data)"))
         XCTAssertTrue(source.contains("ToolInvocationBriefPresentation(data: data)"))
-        XCTAssertTrue(source.contains("ToolRowsDisclosure"))
-        XCTAssertTrue(source.contains("ToolRawDisclosure"))
+        XCTAssertTrue(source.contains("ToolRowsDetailLink"))
+        XCTAssertTrue(source.contains("ToolRawDetailLink"))
+        XCTAssertTrue(source.contains("ToolRowsDetailSheet"))
+        XCTAssertFalse(source.contains("DisclosureGroup"))
         XCTAssertFalse(source.contains("ForEach(evidence.sections)"))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Target""#))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Action""#))
@@ -31,11 +33,11 @@ final class ToolInvocationDetailViewTests: XCTestCase {
         XCTAssertFalse(source.contains("Approval state"))
     }
 
-    func testToolDetailSectionUsesLiquidGlassSurfaceForProgressiveDisclosure() throws {
+    func testToolDetailSectionUsesLiquidGlassSurfaceForStableDetailNavigation() throws {
         let source = try source(pathComponents: ["Sources", "UI", "Tools", "Shared", "ToolDetailSection.swift"])
 
         XCTAssertTrue(source.contains(".sectionFill(accent"))
-        XCTAssertTrue(source.contains("progressively reveal payload and evidence detail"))
+        XCTAssertTrue(source.contains("payload or evidence detail opens in nested sheets"))
         XCTAssertFalse(source.contains("Color.tronSurface.opacity(0.86)"))
     }
 

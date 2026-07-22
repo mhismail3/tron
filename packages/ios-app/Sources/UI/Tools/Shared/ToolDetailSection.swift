@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Tool Detail Section
 
 /// Liquid-glass detail container with the section header outside.
-/// Reusable across tool detail sheets where high-signal cards can
-/// progressively reveal payload and evidence detail.
+/// Reusable across tool detail sheets where high-signal cards summarize an
+/// invocation and unbounded payload or evidence detail opens in nested sheets.
 struct ToolDetailSection<Trailing: View, Content: View>: View {
     let title: String
     var accent: Color = .tronSlate

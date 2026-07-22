@@ -162,6 +162,13 @@ extension ChatViewModel: ConnectionContext {
 
 extension ChatViewModel {
 
+    /// Reconstruct a worker-owned child session without resuming it or binding
+    /// the shared transport's interactive-session context. Audit sheets are a
+    /// read-only projection and must not disrupt the user's active chat.
+    func reconstructReadOnlyTranscript() async -> ConnectionReconstructionOutcome {
+        await connectionCoordinator.reconstructReadOnly(context: self)
+    }
+
     /// Connect, resume, and reconstruct the session.
     ///
     /// Retryable and cancelled attempts retain the buffered live suffix; the

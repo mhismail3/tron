@@ -239,6 +239,8 @@ private struct ResearchClaimCard: View {
     let claim: ResearchClaim
     let citations: [ResearchCitation]
 
+    @State private var showDetail = false
+
     private var color: Color {
         switch claim.classification {
         case "supported": .tronSuccess
@@ -249,34 +251,7 @@ private struct ResearchClaimCard: View {
     }
 
     var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 9) {
-                Text(claim.rationale)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                ForEach(citations) { citation in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(citation.title)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(.tronTextPrimary)
-                        ForEach(Array(citation.excerpts.enumerated()), id: \.offset) { _, excerpt in
-                            Text("“\(excerpt)”")
-                                .font(TronTypography.sans(size: TronTypography.sizeSM))
-                                .foregroundStyle(.tronTextMuted)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(9)
-                    .sectionFill(.tronCyan, cornerRadius: 8, subtle: true, interactive: false)
-                }
-                ForEach(claim.gaps, id: \.self) { gap in
-                    Label(gap, systemImage: "exclamationmark.triangle")
-                        .font(TronTypography.sans(size: TronTypography.sizeSM))
-                        .foregroundStyle(.tronWarning)
-                }
-            }
-            .padding(.top, 8)
-        } label: {
+        Button { showDetail = true } label: {
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     Text(claim.claimId)
@@ -289,16 +264,22 @@ private struct ResearchClaimCard: View {
                     Text("\(citations.count) cite\(citations.count == 1 ? "" : "s")")
                         .font(TronTypography.sans(size: TronTypography.sizeSM))
                         .foregroundStyle(.tronTextMuted)
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.tronTextMuted)
                 }
                 Text(claim.text)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .contentShape(Rectangle())
         }
-        .tint(color)
+        .buttonStyle(.plain)
         .padding(12)
-        .sectionFill(color, cornerRadius: 11, subtle: true, interactive: false)
+        .sectionFill(color, cornerRadius: 11, subtle: true, interactive: true)
+        .sheet(isPresented: $showDetail) {
+            ResearchClaimDetailSheet(claim: claim, citations: citations, accent: color)
+        }
     }
 }
 
@@ -306,40 +287,20 @@ private struct ResearchSourceCard: View {
     let source: ResearchSource
     let citations: [ResearchCitation]
 
+    @State private var showDetail = false
+
     var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                if let url = URL(string: source.url) {
-                    Link(destination: url) {
-                        Label(source.url, systemImage: "arrow.up.right.square")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(.tronCyan)
-                            .lineLimit(2)
-                    }
-                }
-                ForEach(citations) { citation in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Claim \(citation.claimId)")
-                            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                            .foregroundStyle(.tronPurple)
-                        ForEach(Array(citation.excerpts.enumerated()), id: \.offset) { _, excerpt in
-                            Text("“\(excerpt)”")
-                                .font(TronTypography.sans(size: TronTypography.sizeSM))
-                                .foregroundStyle(.tronTextSecondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(9)
-                    .sectionFill(.tronPurple, cornerRadius: 8, subtle: true, interactive: false)
-                }
-            }
-            .padding(.top, 8)
-        } label: {
+        Button { showDetail = true } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(source.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top) {
+                    Text(source.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.tronTextMuted)
+                }
                 HStack(spacing: 8) {
                     if let domain = source.domain { Text(domain) }
                     if let date = source.updatedDate ?? source.publishedDate { Text(date) }
@@ -348,10 +309,120 @@ private struct ResearchSourceCard: View {
                 .font(TronTypography.sans(size: TronTypography.sizeSM))
                 .foregroundStyle(.tronTextMuted)
             }
+            .contentShape(Rectangle())
         }
-        .tint(.tronCyan)
+        .buttonStyle(.plain)
         .padding(12)
-        .sectionFill(.tronCyan, cornerRadius: 11, subtle: true, interactive: false)
+        .sectionFill(.tronCyan, cornerRadius: 11, subtle: true, interactive: true)
+        .sheet(isPresented: $showDetail) {
+            ResearchSourceDetailSheet(source: source, citations: citations)
+        }
+    }
+}
+
+private struct ResearchClaimDetailSheet: View {
+    let claim: ResearchClaim
+    let citations: [ResearchCitation]
+    let accent: Color
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(claim.text)
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(claim.rationale)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(.tronTextSecondary)
+                    ForEach(citations) { citation in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(citation.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(.tronTextPrimary)
+                            ForEach(Array(citation.excerpts.enumerated()), id: \.offset) { _, excerpt in
+                                Text("“\(excerpt)”")
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextSecondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(11)
+                        .sectionFill(.tronCyan, cornerRadius: 10, subtle: true, interactive: false)
+                    }
+                    ForEach(claim.gaps, id: \.self) { gap in
+                        Label(gap, systemImage: "exclamationmark.triangle")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronWarning)
+                    }
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Claim \(claim.claimId)", color: accent)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: accent)
+                }
+            }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(accent)
+    }
+}
+
+private struct ResearchSourceDetailSheet: View {
+    let source: ResearchSource
+    let citations: [ResearchCitation]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(source.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    if let url = URL(string: source.url) {
+                        Link(destination: url) {
+                            Label(source.url, systemImage: "arrow.up.right.square")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .foregroundStyle(.tronCyan)
+                        }
+                    }
+                    ForEach(citations) { citation in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Claim \(citation.claimId)")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(.tronPurple)
+                            ForEach(Array(citation.excerpts.enumerated()), id: \.offset) { _, excerpt in
+                                Text("“\(excerpt)”")
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextSecondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(11)
+                        .sectionFill(.tronPurple, cornerRadius: 10, subtle: true, interactive: false)
+                    }
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Research Source", color: .tronCyan)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronCyan)
+                }
+            }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(.tronCyan)
     }
 }
 

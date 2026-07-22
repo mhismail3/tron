@@ -15,6 +15,7 @@ struct ResearchSuiteSheet: View {
     @State private var selectedSection = ResearchSuiteSection.overview
     @State private var selectedReport: ResearchReport?
     @State private var selectedTechnicalWorker: WorkerSummaryDTO?
+    @State private var showReportIssues = false
     @State private var technicalViewModel = WorkerConsoleViewModel()
 
     var body: some View {
@@ -65,6 +66,13 @@ struct ResearchSuiteSheet: View {
                     repository: repository,
                     connectionState: connectionState,
                     mode: .technical
+                )
+            }
+            .sheet(isPresented: $showReportIssues) {
+                WorkerTextDetailSheet(
+                    title: "Report Issues",
+                    values: viewModel.reportIssues,
+                    accent: .tronWarning
                 )
             }
             .task { await refresh() }
@@ -206,26 +214,22 @@ struct ResearchSuiteSheet: View {
     private var activityContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             if !viewModel.reportIssues.isEmpty {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 7) {
-                        ForEach(viewModel.reportIssues, id: \.self) { issue in
-                            Text(issue)
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextSecondary)
-                        }
+                Button { showReportIssues = true } label: {
+                    HStack {
+                        Label(
+                            "\(viewModel.reportIssues.count) older report\(viewModel.reportIssues.count == 1 ? "" : "s") need review",
+                            systemImage: "clock.badge.exclamationmark"
+                        )
+                        Spacer()
+                        Image(systemName: "chevron.right")
                     }
-                    .padding(.top, 8)
-                } label: {
-                    Label(
-                        "\(viewModel.reportIssues.count) older report\(viewModel.reportIssues.count == 1 ? "" : "s") need review",
-                        systemImage: "clock.badge.exclamationmark"
-                    )
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronWarning)
+                    .contentShape(Rectangle())
                 }
-                .tint(.tronWarning)
+                .buttonStyle(.plain)
                 .padding(12)
-                .sectionFill(.tronWarning, cornerRadius: 11, subtle: true, interactive: false)
+                .sectionFill(.tronWarning, cornerRadius: 11, subtle: true, interactive: true)
             }
 
             WorkerConsoleSectionHeader(
@@ -237,7 +241,7 @@ struct ResearchSuiteSheet: View {
             } else {
                 LazyVStack(spacing: 9) {
                     ForEach(viewModel.runs) { run in
-                        ResearchRunCard(run: run, workerName: viewModel.workerName(for: run.workerId))
+                        WorkerRunCard(run: run, workerName: viewModel.workerName(for: run.workerId))
                     }
                 }
             }
@@ -435,55 +439,5 @@ private struct ResearchAttentionCard: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(.tronWarning, cornerRadius: 11, subtle: true, interactive: false)
-    }
-}
-
-private struct ResearchRunCard: View {
-    let run: WorkerInvocationDTO
-    let workerName: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(workerName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                Spacer()
-                Text(WorkerConsolePresentation.displayLabel(run.status))
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(runColor)
-            }
-            if let query = ResearchSuiteContract.query(from: run) {
-                Text(query)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(3)
-            }
-            HStack(spacing: 8) {
-                Text("Attempt \(run.attemptCount)")
-                if let timestamp = WorkerConsolePresentation.timestamp(run.createdAt) {
-                    Text(timestamp)
-                }
-            }
-            .font(TronTypography.sans(size: TronTypography.sizeSM))
-            .foregroundStyle(.tronTextMuted)
-            if let error = run.error, !error.isEmpty {
-                Text(error)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronError)
-                    .lineLimit(4)
-            }
-        }
-        .padding(11)
-        .sectionFill(runColor, cornerRadius: 10, subtle: true, interactive: false)
-    }
-
-    private var runColor: Color {
-        switch WorkerConsolePresentation.normalized(run.status) {
-        case "completed", "succeeded": .tronSuccess
-        case "queued", "running": .tronInfo
-        case "cancelled", "interrupted": .tronWarning
-        default: .tronError
-        }
     }
 }

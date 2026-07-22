@@ -174,14 +174,7 @@ struct SessionSidebar: View {
             WorkerConsoleSheet(
                 viewModel: workerConsole,
                 repository: dependencies.workerKernelRepository,
-                connectionState: dependencies.connectionRepository.connectionState,
-                onOpenSession: { sessionId in
-                    showWorkerConsole = false
-                    NotificationCenter.default.post(
-                        name: .openWorkerAuditSession,
-                        object: sessionId
-                    )
-                }
+                connectionState: dependencies.connectionRepository.connectionState
             )
         }
     }

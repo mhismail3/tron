@@ -70,12 +70,14 @@ extension ChatView {
         case .toolInvocationGroup(let data):
             sheetCoordinator.showToolInvocationGroupDetail(data)
         case .cancelToolInvocation(let id):
+            guard presentationMode == .interactiveSession else { return }
             viewModel.abortToolInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortToolInvocation"))
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
         case .localErrorDetail(let title, let message, let suggestion):
             sheetCoordinator.showLocalErrorDetail(title: title, message: message, suggestion: suggestion)
         case .retryTurn:
+            guard presentationMode == .interactiveSession else { return }
             // C7: user tapped the "Retry" button on a recoverable
             // `turn.failed` notification. Re-issues the last user prompt
             // so the agent tries the turn again.
