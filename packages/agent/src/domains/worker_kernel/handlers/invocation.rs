@@ -5,18 +5,30 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::engine::Invocation;
+use crate::shared::server::errors::ToolError;
 
+use super::super::runtime::WorkerInputContractError;
 use super::super::types::InvokeRequest;
 use super::Deps;
 use super::support::required_string;
 
-pub(super) async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    let worker_id = required_string(&invocation.payload, "workerId")?;
-    let input = invocation
-        .payload
-        .get("input")
-        .cloned()
-        .ok_or_else(|| "worker_invoke requires input".to_owned())?;
+pub(super) async fn invoke_worker(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, ToolError> {
+    let worker_id = required_string(&invocation.payload, "workerId")
+        .map_err(|message| ToolError::InvalidParams { message })?;
+    let input =
+        invocation
+            .payload
+            .get("input")
+            .cloned()
+            .ok_or_else(|| ToolError::InvalidParams {
+                message: "worker_invoke requires input".to_owned(),
+            })?;
+    deps.runtime
+        .validate_active_input_contract(&worker_id, &input)
+        .map_err(worker_input_contract_error)?;
     let key = invocation
         .payload
         .get("idempotencyKey")
@@ -38,11 +50,25 @@ pub(super) async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Resul
         .and_then(Value::as_str)
         .unwrap_or("wait")
     {
-        "enqueue" => deps.runtime.enqueue_and_dispatch(request)?,
-        "wait" => deps.runtime.invoke(request).await?,
-        mode => return Err(format!("unsupported worker invocation mode '{mode}'")),
+        "enqueue" => deps.runtime.enqueue_and_dispatch(request),
+        "wait" => deps.runtime.invoke(request).await,
+        mode => {
+            return Err(ToolError::InvalidParams {
+                message: format!("unsupported worker invocation mode '{mode}'"),
+            });
+        }
     };
-    serde_json::to_value(record).map_err(|error| error.to_string())
+    let record = record.map_err(|message| ToolError::Internal { message })?;
+    serde_json::to_value(record).map_err(|error| ToolError::Internal {
+        message: error.to_string(),
+    })
+}
+
+fn worker_input_contract_error(error: WorkerInputContractError) -> ToolError {
+    match error {
+        WorkerInputContractError::Invalid(message) => ToolError::InvalidParams { message },
+        WorkerInputContractError::Internal(message) => ToolError::Internal { message },
+    }
 }
 
 pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
@@ -119,4 +145,27 @@ pub(super) async fn stop_all(invocation: &Invocation, deps: &Deps) -> Result<Val
         .ok_or_else(|| "worker_stop_all requires stopped".to_owned())?;
     deps.runtime.set_stop_all(stopped).await?;
     Ok(json!({"stopped":stopped}))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::shared::server::errors::{INTERNAL_ERROR, INVALID_PARAMS};
+
+    use super::*;
+
+    #[test]
+    fn nested_worker_schema_errors_are_invalid_requests() {
+        let error = worker_input_contract_error(WorkerInputContractError::Invalid(
+            "worker input does not match its schema".to_owned(),
+        ));
+        assert_eq!(error.code(), INVALID_PARAMS);
+    }
+
+    #[test]
+    fn worker_contract_load_errors_remain_internal() {
+        let error = worker_input_contract_error(WorkerInputContractError::Internal(
+            "load worker contract".to_owned(),
+        ));
+        assert_eq!(error.code(), INTERNAL_ERROR);
+    }
 }

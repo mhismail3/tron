@@ -1,6 +1,37 @@
 use super::*;
 
 #[tokio::test]
+async fn selected_worker_input_contract_classifies_schema_violations() {
+    let (runtime, _home) = test_runtime(None);
+    let mut bundle = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import json,sys; print(json.dumps(json.load(sys.stdin)))".to_owned(),
+    ]);
+    bundle.worker_id = Some("typed-admission".to_owned());
+    bundle.input_schema = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "required":["task"],
+        "properties":{"task":{"type":"string","minLength":1}}
+    });
+    runtime.upsert(bundle, None).await.unwrap();
+
+    runtime
+        .validate_active_input_contract("typed-admission", &json!({"task":"inspect"}))
+        .unwrap();
+    let error = runtime
+        .validate_active_input_contract("typed-admission", &json!({}))
+        .expect_err("missing typed worker field must fail before dispatch");
+    assert!(matches!(&error, WorkerInputContractError::Invalid(_)));
+    assert!(
+        error
+            .to_string()
+            .contains("$.task: required field is missing")
+    );
+}
+
+#[tokio::test]
 async fn worker_owned_state_survives_update_rollback_disable_and_retirement() {
     let (runtime, home) = test_runtime(None);
     let state_script = r#"import json,os,pathlib

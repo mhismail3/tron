@@ -99,6 +99,11 @@
 //! function-contract text; successful work therefore cannot churn catalog
 //! revisions. Fixed invocation supports durable enqueue plus bounded await so
 //! parallel workers do not monopolize provider calls.
+//! The fixed invocation envelope and each selected worker's nested input
+//! schema are both transport admission boundaries. A nested schema or secret
+//! violation is returned as an actionable invalid request before any durable
+//! invocation exists; contract-loading and persistence failures remain
+//! internal failures rather than being blamed on caller input.
 //! Every canonical load verifies both `content.sha256` and the full version
 //! tree against its directory name. File and symlink targets participate in
 //! dependency and version hashes. Command, agent, and resident runners execute

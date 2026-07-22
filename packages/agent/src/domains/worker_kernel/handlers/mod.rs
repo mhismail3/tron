@@ -10,7 +10,8 @@
 //!   proposal handlers.
 //! - `authoring` owns atomic bundle upsert and bounded source-tree import.
 //! - `discovery` owns list, inspect, and relevance-backed promotion.
-//! - `invocation` owns manual dispatch and lifecycle controls.
+//! - `invocation` owns manual dispatch, nested worker-input admission errors,
+//!   and lifecycle controls.
 //! - `inbox` owns durable result projection and adaptive inbox context.
 //! - `webhook` owns credential rotation and authenticated ingress materialization.
 //! - `support` owns shared payload admission and response translation.
@@ -55,7 +56,7 @@ operation_bindings! {
         "discover" => |invocation, deps| { support::response(invocation, discovery::discover(invocation, deps).await) },
         "list" => |invocation, deps| { support::response(invocation, discovery::list(invocation, deps).await) },
         "inspect" => |invocation, deps| { support::response(invocation, discovery::inspect(invocation, deps).await) },
-        "invoke" => |invocation, deps| { support::response(invocation, invocation::invoke_worker(invocation, deps).await) },
+        "invoke" => |invocation, deps| { invocation::invoke_worker(invocation, deps).await },
         "await" => |invocation, deps| { support::response(invocation, invocation::await_worker(invocation, deps).await) },
         "cancel" => |invocation, deps| { support::response(invocation, invocation::cancel_worker_invocation(invocation, deps).await) },
         "stop" => |invocation, deps| { support::response(invocation, invocation::stop_worker(invocation, deps).await) },

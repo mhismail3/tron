@@ -2,7 +2,64 @@
 
 use super::*;
 
+/// Distinguishes invalid typed worker input from a failure to load the
+/// canonical worker contract. Transports can therefore report caller mistakes
+/// without disguising storage or integrity failures as invalid requests.
+#[derive(Debug)]
+pub(crate) enum WorkerInputContractError {
+    Invalid(String),
+    Internal(String),
+}
+
+impl std::fmt::Display for WorkerInputContractError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) | Self::Internal(message) => formatter.write_str(message),
+        }
+    }
+}
+
 impl WorkerRuntime {
+    /// Validate the selected dynamic worker's own input contract before
+    /// durable admission. `worker_kernel::invoke` has a fixed outer schema;
+    /// this is the nested typed boundary chosen by `workerId`.
+    pub(crate) fn validate_active_input_contract(
+        &self,
+        worker_id: &str,
+        input: &Value,
+    ) -> Result<(), WorkerInputContractError> {
+        let worker = self
+            .store
+            .load_indexed_active(worker_id)
+            .map_err(WorkerInputContractError::Internal)?;
+        self.validate_input_contract(&worker, input)
+    }
+
+    fn validate_input_contract(
+        &self,
+        worker: &ActiveWorker,
+        input: &Value,
+    ) -> Result<(), WorkerInputContractError> {
+        let worker_function = FunctionId::new(format!(
+            "worker_kernel::dynamic_{}",
+            worker.summary.worker_id
+        ))
+        .map_err(|error| WorkerInputContractError::Internal(error.to_string()))?;
+        crate::engine::validate_engine_schema_payload(
+            &worker_function,
+            "request",
+            &worker.bundle.input_schema,
+            input,
+        )
+        .map_err(|error| {
+            WorkerInputContractError::Invalid(format!(
+                "worker input does not match its schema: {error}"
+            ))
+        })?;
+        self.reject_secret_material_in_value(input, "worker input")
+            .map_err(WorkerInputContractError::Invalid)
+    }
+
     pub async fn invoke(
         self: &Arc<Self>,
         request: InvokeRequest,
@@ -83,17 +140,8 @@ impl WorkerRuntime {
         if !worker.summary.enabled || worker.summary.retired {
             return Err(format!("worker '{}' is not enabled", request.worker_id));
         }
-        let worker_function =
-            FunctionId::new(format!("worker_kernel::dynamic_{}", request.worker_id))
-                .map_err(|error| error.to_string())?;
-        crate::engine::validate_engine_schema_payload(
-            &worker_function,
-            "request",
-            &worker.bundle.input_schema,
-            &request.input,
-        )
-        .map_err(|error| format!("worker input does not match its schema: {error}"))?;
-        self.reject_secret_material_in_value(&request.input, "worker input")?;
+        self.validate_input_contract(&worker, &request.input)
+            .map_err(|error| error.to_string())?;
         let (queued, replayed) = self.store.begin_invocation(
             &request.worker_id,
             &worker.summary.active_version,

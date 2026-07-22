@@ -36,6 +36,7 @@ use support::*;
 
 mod activation;
 mod admission;
+pub(crate) use admission::WorkerInputContractError;
 mod dispatch;
 mod events;
 mod hooks;
