@@ -502,8 +502,9 @@ before loading the new endpoint.
 Provider cards share one leading-icon and trailing-action column contract.
 Provider names and row labels therefore remain left-aligned across differing
 brand symbols, while add, clear, refresh, disclosure, and endpoint-save controls
-share a stable trailing axis. Destructive credential controls are circular like
-the corresponding add controls rather than variable-width pills.
+share a stable trailing axis and the same visible edge inset as the leading
+icons. Destructive credential controls are circular like the corresponding add
+controls rather than variable-width pills.
 
 Compact mutually exclusive controls use one shared liquid-glass button style.
 Dashboard tabs, color-mode choices, and text/code font choices share selected

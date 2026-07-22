@@ -90,7 +90,8 @@ struct OllamaProviderSection: View {
             .buttonStyle(.plain)
             .frame(
                 width: ProviderSettingsRowLayout.trailingActionWidth,
-                height: ProviderSettingsRowLayout.circularActionDiameter
+                height: ProviderSettingsRowLayout.circularActionDiameter,
+                alignment: .trailing
             )
             .disabled(isRefreshing)
             .accessibilityLabel("Refresh Ollama models")
@@ -185,7 +186,10 @@ struct OllamaProviderSection: View {
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(.tronAmber)
-                .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
+                .frame(
+                    width: ProviderSettingsRowLayout.trailingActionWidth,
+                    alignment: .trailing
+                )
                 .disabled(!endpointIsValid || endpointDraft == baseUrl)
             }
         }

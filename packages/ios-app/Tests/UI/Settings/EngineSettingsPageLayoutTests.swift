@@ -181,10 +181,12 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(content.contains("SettingsRowDivider()"))
         XCTAssertTrue(content.contains("ProviderSettingsRowLayout.leadingIconWidth"))
         XCTAssertTrue(content.contains("ProviderSettingsRowLayout.trailingActionWidth"))
+        XCTAssertTrue(content.contains("alignment: .trailing"))
         XCTAssertTrue(credentialRow.contains("ProviderCredentialClearCircleLabel()"))
         XCTAssertTrue(credentialRow.contains("ProviderSettingsRowLayout.trailingActionWidth"))
+        XCTAssertTrue(credentialRow.contains("alignment: .trailing"))
         XCTAssertTrue(ollama.contains("arrow.clockwise.circle.fill"))
-        XCTAssertTrue(ollama.contains(".frame(width: ProviderSettingsRowLayout.trailingActionWidth)"))
+        XCTAssertTrue(ollama.contains("alignment: .trailing"))
     }
 
     func testEngineCoreUsesAlwaysVisibleCompactRowsAndSeparateDetailSheet() throws {

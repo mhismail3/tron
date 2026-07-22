@@ -44,7 +44,10 @@ struct GoogleCloudRows: View {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(.tronTextMuted)
-                        .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
+                        .frame(
+                            width: ProviderSettingsRowLayout.trailingActionWidth,
+                            alignment: .trailing
+                        )
                 }
                 .contentShape(Rectangle())
             }

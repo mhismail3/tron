@@ -38,7 +38,10 @@ struct ProviderCredentialRow: View {
                 ProviderCredentialClearCircleLabel()
             }
             .buttonStyle(.plain)
-            .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
+            .frame(
+                width: ProviderSettingsRowLayout.trailingActionWidth,
+                alignment: .trailing
+            )
             .accessibilityLabel("\(ProviderCredentialStatusAction.title) \(label)")
             .confirmationDialog(ProviderCredentialStatusAction.confirmationTitle, isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button(ProviderCredentialStatusAction.confirmationButtonTitle, role: .destructive) {

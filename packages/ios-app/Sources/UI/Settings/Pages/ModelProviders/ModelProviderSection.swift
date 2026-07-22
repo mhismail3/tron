@@ -184,7 +184,10 @@ struct ProviderSectionHeader: View {
                     )
                     .contentShape(Circle())
             }
-            .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
+            .frame(
+                width: ProviderSettingsRowLayout.trailingActionWidth,
+                alignment: .trailing
+            )
             .accessibilityLabel("Add \(provider.displayName) credential")
         }
         .padding(.horizontal, 12)
