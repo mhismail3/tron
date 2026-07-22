@@ -1,6 +1,6 @@
 # Tron Worker-First Technical Reference
 
-> Last verified: 2026-07-21 on `codex/worker-first-autonomy-poc`.
+> Last verified: 2026-07-21 on the worker-first POC branch.
 
 This document describes the active worker-first implementation.
 
@@ -62,7 +62,7 @@ undeclared top-level input and output fields; closed response contracts keep
 provider observations small and mechanically dependable.
 
 Callable function definitions have no generic metadata map. A closed typed
-model-tool contract owns the model name, autonomy exposure, fixed group/order,
+model-tool contract owns the model name, callability, fixed group/order,
 and—only for direct workers—the worker id, immutable version, routing phrases,
 update time, and compact provenance. Function contracts do not carry declared
 stream topics: durable stream publication is owned directly by the emitters
@@ -154,33 +154,27 @@ error/relevance selector and JSON projection provide deterministic recovery.
 Candidate reads never mark observations seen, invalid selections disable the
 hook owner, and a lost concurrent claim injects no stale narrative.
 
-## Autonomy Modes
+## Worker-First Execution
 
-`autonomousWorkers` is an engine setting.
+Worker-first execution is unconditional engine architecture, not a profile
+mode. Accepted local user sessions and workers are trusted operators. Direct
+host and worker calls carry actor, session, trace, version, and idempotency
+evidence into the engine, but those observations do not become permission
+gates. Fixed kernel tools are always model-callable, enabled worker tools are
+published dynamically, and dispatch starts with the server.
 
-- It defaults to `false`. The agent remains conversational and
-  explains that autonomous action can be enabled in Settings.
-- With the setting enabled, accepted user sessions and workers are trusted
-  local operators. Direct host and worker calls carry actor, session, trace,
-  version, and idempotency evidence into the engine.
-- Changes apply to the running engine without a server restart. Disabling
-  hides the fixed worker primitives, unregisters direct worker tools, cancels
-  active execution, and stops resident services while preserving canonical
-  bundles and queued work. Re-enabling restores the primitives, rebuilds the
-  enabled direct-tool surface from canonical state, and resumes dispatch unless
-  engine stop-all is still engaged.
-- The authenticated Engine Dashboard remains operational while autonomy is off:
-  it may inspect state and history or use enable/disable, rollback,
-  retire/purge, webhook rotation, and stop controls. Those operations do not
-  expose tools or start dispatch until autonomy is enabled. Worker authoring,
-  invocation, webhooks, process/network primitives, and core mutation stay
-  blocked while the mode is off.
-- Remote clients still require bearer-authenticated transport. Worker webhooks
-  are loopback-only and require their own rotatable trigger token.
+Operational control remains explicit without disabling the architecture:
+per-worker stop/disable and profile-wide stop-all cancel active execution,
+stop resident services, and block new dispatch while retaining canonical
+bundles, queued work, and history. Remote clients still require bearer-
+authenticated transport. Worker webhooks are loopback-only and require their
+own rotatable trigger token.
 
-The setting is included in the complete `settings::get` response and has iOS
-decode, state, load/reset/server-switch, mutation encoding, and Settings UI
-ownership.
+Context compaction remains a session-runtime setting because it governs the
+model window, durable compact-boundary checkpoints, restoration, and the
+conversation supplied to every tool call. It is not reusable task behavior and
+therefore is not a worker contract. Individual workers may define their own
+typed execution budgets without owning the parent session's context lifecycle.
 
 ## Canonical Worker State
 
@@ -216,7 +210,7 @@ contains:
 - smoke-test and health-check commands plus source provenance.
 
 Absent optional fields are omitted, so the human-inspectable manifest can be
-passed back to `worker_upsert` directly for autonomous improvement.
+passed back to `worker_upsert` directly for proactive improvement.
 
 `verification.json` seals redacted dependency-install, smoke-test, and health-
 check evidence before the version hash is computed. A version must carry at
@@ -311,7 +305,7 @@ pipes are handled concurrently.
 Tron drains all output while retaining at most 4 MiB from each pipe; oversized
 stdout fails the invocation instead of allocating without bound or deadlocking.
 On Unix the command and every descendant execute in a dedicated process group;
-timeout, disable, stop-all, autonomy shutdown, and server shutdown kill the
+timeout, disable, stop-all, and server shutdown kill the
 whole group rather than leaving a background helper running.
 
 ### Resident-service runner
@@ -322,8 +316,8 @@ runtime reuses a healthy process for later calls and supervises it between
 invocations. An unexpected process exit disables the worker immediately; three
 consecutive failed health probes do the same without treating a single
 transient probe as terminal. The runtime also terminates a service when the
-worker is disabled, retired, replaced, stop-all is engaged, autonomy is turned
-off, or Tron shuts down. A resident runs from a service-lifetime disposable
+worker is disabled, retired, replaced, stop-all is engaged, or Tron shuts down.
+A resident runs from a service-lifetime disposable
 copy and its HTTP result has a 4-MiB hard ceiling. Its dedicated Unix process
 group is terminated as one unit, including shell- or service-spawned children.
 
@@ -338,17 +332,23 @@ under `dependency-runtime/`. File contents and symlink targets participate in
 the digest. HTTP dependencies stream directly to disk and fail beyond 128 MiB;
 the limit is enforced during transfer rather than after buffering the body.
 
-Secret bindings resolve logical names from:
+Secret bindings resolve ordinary logical names from:
 
 ```text
 ~/.tron/workspace/vault/<binding-name>
 ```
 
+Bindings named `provider-<id>` instead resolve that provider's effective named
+API key from `~/.tron/auth.json`; for example, `provider-brave` is injected as
+`TRON_SECRET_PROVIDER_BRAVE`. OAuth credentials do not satisfy an API-key
+binding. This lets search workers consume the same Brave Search and Exa
+credentials managed by the Providers UI without copying values into the vault.
+
 Required bindings fail execution when absent; optional bindings permit graceful
 operation without a value. Values are injected as normalized `TRON_SECRET_*` environment
-variables. Upsert scans against every readable vault value, including undeclared
-ones, and rejects a candidate containing one. Invocation input containing a
-known vault value is rejected before it is persisted. Known values are redacted
+variables. Upsert scans against every readable vault and provider-key value,
+including undeclared ones, and rejects a candidate containing one. Invocation
+input containing a known credential is rejected before it is persisted. Known values are redacted
 from verification evidence, runner output, errors, inbox records, events, and
 diagnostics. Raw values are never stored in manifests or worker SQLite.
 
@@ -444,7 +444,7 @@ Operator controls are:
 
 ## Model-Facing Tools
 
-When autonomy is enabled, fixed kernel operations are direct typed tools. There
+Fixed kernel operations are direct typed tools. There
 is no wrapper operation field. `worker_upsert` publishes the complete bundle
 schema—including every runner, trigger, dependency lock, named-secret binding,
 test, health check, provenance record, and routing field—to the model. Its tool
@@ -573,20 +573,19 @@ invocation context. The typed response returns the same provider-neutral surface
 evidence plus three operational inventories:
 
 - all 28 fixed tools with their exact schemas, revisions, effect/risk,
-  primitive group, and whether autonomy currently exposes them;
+  primitive group, and model exposure;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, and immutable worker version;
-- canonical engine worker summaries, stop-all state, and autonomy state.
+- canonical engine worker summaries and stop-all state.
 
 The selected `surface.tools` array is the exact next provider projection; the
 fixed and available-worker inventories are operator evidence and must not be
-mistaken for provider availability. When autonomy is off, the fixed inventory
-remains inspectable with `exposed: false` while the provider surface contains no
-fixed tools. The operation is deliberately not projected as model vocabulary.
+mistaken for provider availability. The operation is deliberately not projected
+as model vocabulary.
 
 ## Local Authority and Provenance
 
-When autonomous workers are enabled, local model calls enter directly with
+Local model calls enter directly with
 their Agent or Worker actor identity. The durable engine record owns actor,
 session, workspace, trace, parent invocation, and deterministic idempotency
 evidence; the worker dispatcher owns trigger/delivery evidence, and session
@@ -677,9 +676,10 @@ through a process-local refresh mutex and then an auth-file `flock`. Refreshes
 re-read `auth.json` after the lock and fail the refresh if persistence fails.
 Model providers receive ephemeral token copies rather than owning credential files.
 
-Provider credentials live in `~/.tron/auth.json`. Worker secrets live
-under `~/.tron/workspace/vault/` and enter a worker only through declared
-logical bindings. Bundle validation rejects likely secret material; runtime
+Provider credentials live in `~/.tron/auth.json`. Other worker secrets live
+under `~/.tron/workspace/vault/`. Both enter a worker only through declared
+logical bindings, with the explicit `provider-<id>` namespace selecting a named
+provider API key. Bundle validation rejects likely secret material; runtime
 injection uses environment variables, and redaction covers persisted inputs,
 outputs, events, logs, and diagnostics. Redaction is field-aware for JSON and
 also recognizes worker webhook credential shapes. Tool start, batch, and
@@ -1018,8 +1018,6 @@ Deterministic tests cover:
   suppression, terminal-event cursor advancement, causal depth, concurrency
   queueing, timeout, stop/disable, failure disablement, system-inbox attachment,
   and all-vault secret rejection/redaction;
-- live autonomy enable/disable/re-enable without restart, including dynamic-tool
-  race closure and authenticated console management while execution is off;
 - lazy resident reuse plus shutdown, stop-all, disable, process-exit, and
   repeated-health-failure supervision;
 - a natural-language model loop that proactively upserts a complete worker,
@@ -1059,7 +1057,7 @@ worker, and invokes it.
 The permissive POC is evaluated through the deterministic scenario suite,
 opt-in live-network proof, actual sessions, and the production evidence they
 already persist: worker versions, runs, inbox results, causal traces, health,
-and audit history. The scenarios and autonomous-adaptation proofs are required;
+and audit history. The scenarios and proactive-adaptation proofs are required;
 there is no minimum elapsed-time or multi-day waiting period. Tron does not
 ship a second observation ledger that exists only to validate Tron. Future
 guardrails must map to an observed failure or concrete threat, include a

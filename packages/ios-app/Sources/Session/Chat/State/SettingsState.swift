@@ -17,10 +17,6 @@ final class SettingsState {
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
 
-    // MARK: - Engine Policy
-
-    var autonomousWorkers: Bool = false
-
     @ObservationIgnored
     private var lastLoadedSettings: ServerSettingsSnapshot?
 
@@ -102,6 +98,5 @@ final class SettingsState {
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        autonomousWorkers = settings.autonomousWorkers
     }
 }

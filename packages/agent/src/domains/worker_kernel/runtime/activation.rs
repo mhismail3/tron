@@ -67,7 +67,7 @@ impl WorkerRuntime {
         phase: &str,
         error: &str,
     ) -> String {
-        let secrets = self.load_all_vault_secrets().unwrap_or_default();
+        let secrets = self.load_all_runtime_secrets().unwrap_or_default();
         let reason = redact_known_secrets(error, &secrets);
         let mut recording_failures = Vec::new();
         if let Err(recording_error) = self.store.mark_failed(worker_id, phase, &reason) {
@@ -120,7 +120,7 @@ impl WorkerRuntime {
         let dependencies = prepared.staging_dir.join("dependencies");
         let runtime = prepared.staging_dir.join("dependency-runtime");
         let secrets = self.load_secrets(&prepared.bundle)?;
-        let redactions = self.load_all_vault_secrets()?;
+        let redactions = self.load_all_runtime_secrets()?;
         let mut install_evidence = Vec::new();
         let mut smoke_evidence = Vec::new();
         let mut health_evidence = Vec::new();

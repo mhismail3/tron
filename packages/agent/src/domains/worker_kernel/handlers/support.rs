@@ -5,8 +5,6 @@ use serde_json::Value;
 use crate::engine::Invocation;
 use crate::shared::server::errors::ToolError;
 
-use super::Deps;
-
 pub(super) fn response(
     invocation: &Invocation,
     result: Result<Value, String>,
@@ -35,17 +33,6 @@ pub(super) fn required_content(value: &Value, field: &str) -> Result<String, Str
         .filter(|content| !content.trim().is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| format!("{field} is required"))
-}
-
-pub(super) fn require_autonomous(deps: &Deps) -> Result<(), String> {
-    if deps.runtime.autonomous_enabled() {
-        Ok(())
-    } else {
-        Err(
-            "autonomous workers are disabled for this engine; set autonomousWorkers=true"
-                .to_owned(),
-        )
-    }
 }
 
 #[cfg(test)]

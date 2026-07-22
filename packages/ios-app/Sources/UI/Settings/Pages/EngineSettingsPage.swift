@@ -79,7 +79,6 @@ struct EngineSettingsPage: View {
 
                 VStack(spacing: 16) {
                     contextSection
-                    autonomousWorkersSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -116,37 +115,9 @@ struct EngineSettingsPage: View {
         Group {
             defaultsSection
             contextSection
-            autonomousWorkersSection
         }
         .disabled(!settingsState.isLoaded)
         .opacity(settingsState.isLoaded ? 1 : 0.45)
-    }
-
-    private var autonomousWorkersSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Autonomous Workers")
-
-            SettingsCard {
-                SettingsRow(icon: "bolt.horizontal.circle", label: "Worker-first mode") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.autonomousWorkers },
-                            set: { enabled in
-                                settingsState.autonomousWorkers = enabled
-                                updateServerSetting(.autonomousWorkers(enabled))
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(
-                text: "Allows trusted local agents to create, activate, and run persistent workers. Restart the active server after changing this mode."
-            )
-        }
     }
 
     private var defaultsSection: some View {

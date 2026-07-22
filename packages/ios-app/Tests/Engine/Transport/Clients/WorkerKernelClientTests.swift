@@ -74,7 +74,6 @@ struct WorkerKernelClientTests {
             #expect((payload as? EngineSurfaceSnapshotRequestDTO)?.relevanceQuery == "research")
             #expect(options.context?.sessionId == "session-1")
             return EngineIntrospectionSnapshotDTO(
-                autonomousWorkers: true,
                 dispatchStopped: false,
                 activeEngineHooks: [
                     EngineHookOwnerDTO(

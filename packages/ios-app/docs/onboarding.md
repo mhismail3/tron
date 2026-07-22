@@ -1,6 +1,6 @@
 # Onboarding (iOS sheet)
 
-> Last verified: 2026-07-13 (medium-first onboarding and pairing; Engine → Servers ownership; concise Settings destinations; Engine and Providers sheets start directly with their owned sections instead of duplicate summary heroes).
+> Last verified: 2026-07-21 (worker-first Engine settings; compact model/search provider credential cards).
 
 The iOS app always opens to the normal session shell after initialization.
 `TronMobileApp` uses `AppRuntimeMode` only to prevent hosted XCTest from
@@ -196,11 +196,13 @@ the model providers page refreshes even if the server event arrives later.
 Settings provider forms keep their local input until the auth engine protocol returns an
 updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
 fields visible for correction or retry.
-The Providers settings sheet starts directly with model-provider credential
-cards; it does not project the loaded `AuthState` into a duplicate summary
-hero. Each model provider uses cards for current credential status and
-provider-specific details such as Google Cloud OAuth configuration, followed
-by leading-aligned OAuth/API-key buttons. OAuth login
+The Providers settings sheet starts directly with separate Model Providers and
+Search Providers groups; Brave Search and Exa use the same named API-key store
+as model providers without becoming model choices. It does not project the
+loaded `AuthState` into a duplicate summary hero. Each provider uses one compact
+credential card whose header owns a trailing add/login menu, eliminating a
+separate action-button row. Provider-specific details such as Google Cloud OAuth
+configuration remain in their own subordinate card. OAuth login
 buttons are hidden when the provider already has a usable or refreshable OAuth
 account, and reappear for expired non-refreshable accounts. API-key-only
 providers use the same native Add API Key alert and collect a label plus the
@@ -261,8 +263,9 @@ at a bounded cadence until the server returns, the app backgrounds, or
 authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
 The Engine settings sheet starts directly with Servers, followed by the
-server-owned Session Defaults, Context, and Autonomous Workers sections; it has
-no top summary hero or separate presentation projection. Engine owns the
+server-owned Session Defaults and Context sections; it has no top summary hero
+or separate presentation projection. Worker-first execution is not a setting.
+Engine owns the
 retained quick-session defaults that exist as actionable iOS controls: model
 and workspace. Fixed local transcription and microphone capture are absent;
 speech workflows must return as workers developed through real use.

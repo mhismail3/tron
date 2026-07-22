@@ -66,13 +66,6 @@ fn test_runtime_at(
     responder: Option<Arc<dyn ModelResponderFactory>>,
 ) -> Arc<WorkerRuntime> {
     let context = crate::shared::server::test_support::make_test_context_with_responder(responder);
-    crate::domains::settings::config::SettingsStore::new(&context.settings_path)
-        .update(json!({"autonomousWorkers": true}))
-        .unwrap();
-    context
-        .settings_runtime
-        .reload_now("worker kernel test")
-        .unwrap();
     let store = WorkerStore::open_without_snapshot(home.to_path_buf()).unwrap();
     WorkerRuntime::new(
         store,
@@ -88,7 +81,7 @@ fn test_runtime_at(
 fn last30days_bundle(source_url: &str) -> WorkerBundle {
     let script = r#"import datetime,json,os,sys
 request=json.loads(sys.stdin.read() or '{}')
-topic=request.get('topic','worker autonomy')
+topic=request.get('topic','worker adaptation')
 as_of=datetime.date.fromisoformat(request.get('asOf','2026-07-19'))
 cutoff=as_of-datetime.timedelta(days=30)
 with open('sources.json',encoding='utf-8') as handle:
@@ -149,17 +142,17 @@ print(json.dumps({
                 WorkerTrigger::Schedule {
                     id: "daily".to_owned(),
                     every_seconds: 86_400,
-                    input: json!({"topic":"worker autonomy"}),
+                    input: json!({"topic":"worker adaptation"}),
                 },
                 WorkerTrigger::EngineEvent {
                     id: "research-requested".to_owned(),
                     topic: "research.requested".to_owned(),
                     filter: json!({"windowDays":30}),
-                    input: json!({"topic":"worker autonomy"}),
+                    input: json!({"topic":"worker adaptation"}),
                 },
                 WorkerTrigger::Webhook {
                     id: "local-research".to_owned(),
-                    input: json!({"topic":"worker autonomy"}),
+                    input: json!({"topic":"worker adaptation"}),
                 },
             ],
             secret_bindings: vec![super::super::types::WorkerSecretBinding::Optional(
@@ -186,7 +179,7 @@ print(json.dumps({
             engine_hooks: Vec::new(),
             routing: super::super::types::WorkerRouting {
                 intents: vec!["recent research".to_owned(), "last 30 days".to_owned()],
-                examples: vec!["What changed in autonomous workers in the last month?".to_owned()],
+                examples: vec!["What changed in persistent workers in the last month?".to_owned()],
             },
         }
 }

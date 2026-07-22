@@ -6,6 +6,7 @@ struct GoogleCloudRows: View {
     let onClear: () async -> ProviderAuthActionResult
 
     @State private var isEditing = false
+    @State private var isExpanded = false
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var projectId = ""
@@ -21,36 +22,59 @@ struct GoogleCloudRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "gearshape.2")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Google Cloud")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-                Spacer()
-                if isConfigured && !isEditing {
-                    Button {
-                        enterEditMode()
-                    } label: {
-                        Text("Edit")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                    .buttonStyle(.plain)
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
                 }
+            } label: {
+                HStack {
+                    Image(systemName: "gearshape.2")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Google Cloud")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text(isConfigured ? "Configured" : "Optional OAuth setup")
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
+                            .foregroundStyle(isConfigured ? .tronSuccess : .tronTextMuted)
+                    }
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
 
-            if isEditing || !isConfigured {
-                editFields
-                actionButtons
-            } else {
-                savedDisplay
+            if isExpanded {
+                if isEditing || !isConfigured {
+                    editFields
+                    actionButtons
+                } else {
+                    savedDisplay
+                    editButton
+                }
             }
         }
+    }
+
+    private var editButton: some View {
+        HStack {
+            Button("Edit Google Cloud") {
+                enterEditMode()
+            }
+            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+            .buttonStyle(.bordered)
+            .tint(.tronEmerald)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private var editFields: some View {

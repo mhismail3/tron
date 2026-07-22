@@ -195,7 +195,7 @@ async fn failed_current_hook_does_not_silently_reactivate_an_older_owner() {
 
 #[tokio::test]
 async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
-    let context = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+    let context = crate::shared::server::test_support::make_test_context();
     let actor = || {
         CausalContext::new(
             ActorId::new("agent:inbox-hook-test").unwrap(),

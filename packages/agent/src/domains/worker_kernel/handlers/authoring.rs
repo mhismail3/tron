@@ -11,13 +11,12 @@ use crate::shared::server::errors::ToolError;
 use super::super::host;
 use super::super::types::WorkerBundle;
 use super::Deps;
-use super::support::{require_autonomous, required_string};
+use super::support::required_string;
 
 const MAX_WORKER_SOURCE_FILES: usize = 1_024;
 const MAX_WORKER_SOURCE_BYTES: u64 = 16 * 1_048_576;
 
 pub(super) async fn upsert(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let mut bundle: WorkerBundle = serde_json::from_value(
         invocation
             .payload

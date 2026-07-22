@@ -4,6 +4,7 @@
 //! (`0o600`). A missing file is a legitimate first-write case. Present files
 //! must match the current strict schema.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::errors::AuthError;
@@ -246,6 +247,42 @@ pub fn save_named_api_key(
 
     storage.save_provider_base(provider, &pa);
     save_auth_storage(path, &mut storage)
+}
+
+/// Resolve the provider's effective named API key without exposing auth-file
+/// ownership to worker code. OAuth selections intentionally do not satisfy an
+/// API-key binding.
+pub fn load_provider_api_key(path: &Path, provider: &str) -> Result<Option<String>, AuthError> {
+    let Some(storage) = load_auth_storage(path)? else {
+        return Ok(None);
+    };
+    let Some(auth) = storage.get_provider_auth(provider) else {
+        return Ok(None);
+    };
+    Ok(match super::resolve_credential(&auth, None) {
+        Some(super::ResolvedCredential::ApiKey(key)) => Some(key.key.clone()),
+        _ => None,
+    })
+}
+
+/// Load every stored provider API-key value for leak detection and redaction.
+/// Internal labels are synthetic so credential labels never enter diagnostics.
+pub fn load_all_provider_api_keys(path: &Path) -> Result<HashMap<String, String>, AuthError> {
+    let Some(storage) = load_auth_storage(path)? else {
+        return Ok(HashMap::new());
+    };
+    let mut values = HashMap::new();
+    for provider in storage.providers.keys() {
+        let Some(auth) = storage.get_provider_auth(provider) else {
+            continue;
+        };
+        for (index, key) in auth.api_keys.unwrap_or_default().into_iter().enumerate() {
+            if !key.key.is_empty() {
+                let _ = values.insert(format!("provider-{provider}-{index}"), key.key);
+            }
+        }
+    }
+    Ok(values)
 }
 
 /// Remove a named API key by label.

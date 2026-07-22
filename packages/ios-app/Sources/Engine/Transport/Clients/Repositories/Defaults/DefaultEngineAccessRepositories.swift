@@ -76,8 +76,6 @@ final class DefaultSettingsRepository: SettingsRepository {
 private extension SettingsMutation {
     func toServerSettingsUpdate() -> ServerSettingsUpdate {
         switch self {
-        case .autonomousWorkers(let enabled):
-            return ServerSettingsUpdate(autonomousWorkers: enabled)
         case .defaultWorkspace(let workspace):
             return ServerSettingsUpdate(server: .init(defaultWorkspace: workspace))
         case .defaultModel(let model):

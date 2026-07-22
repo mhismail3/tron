@@ -85,7 +85,11 @@ mod tests {
         let home = root.path().join(".tron");
         ensure_tron_home_at(&home).unwrap();
         fs::write(home.join("auth.json"), "{\"token\":\"kept\"}").unwrap();
-        fs::write(home.join("settings.toml"), "autonomousWorkers = true\n").unwrap();
+        fs::write(
+            home.join("settings.toml"),
+            "[context.compactor]\ntriggerTokenThreshold = 0.6\n",
+        )
+        .unwrap();
 
         ensure_tron_home_at(&home).unwrap();
         assert_eq!(
@@ -94,7 +98,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(home.join("settings.toml")).unwrap(),
-            "autonomousWorkers = true\n"
+            "[context.compactor]\ntriggerTokenThreshold = 0.6\n"
         );
     }
 

@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock as StdRwLock, Weak};
 use std::time::Duration;
 
 use dashmap::{DashMap, DashSet};
@@ -51,9 +51,9 @@ use crate::domains::session::event_store::EventStore;
 use crate::domains::settings::SettingsRuntime;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, DirectWorkerToolContract, EffectClass, EngineHostHandle,
-    FunctionDefinition, FunctionId, FunctionVisibility, IdempotencyContract,
-    InProcessFunctionHandler, Invocation, ModelToolContract, PublishStreamEvent, RiskLevel,
-    StreamActorScope, StreamCursor, StreamVisibility, TraceId, WorkerId,
+    FunctionId, FunctionVisibility, IdempotencyContract, Invocation, ModelToolContract,
+    PublishStreamEvent, RiskLevel, StreamActorScope, StreamCursor, StreamVisibility, TraceId,
+    WorkerId,
 };
 
 struct ResidentProcess {
@@ -75,8 +75,8 @@ impl Drop for RemoveDirectoryOnDrop {
 }
 
 /// Couples an agent-runner child session to its durable worker invocation.
-/// Dropping the worker future because of timeout, disable, stop-all, autonomy
-/// shutdown, or server shutdown must also cancel the asynchronously spawned
+/// Dropping the worker future because of timeout, disable, stop-all, or server
+/// shutdown must also cancel the asynchronously spawned
 /// child agent; otherwise consequential work can outlive its terminal record.
 struct AbortAgentRunOnDrop {
     orchestrator: Arc<Orchestrator>,
@@ -106,12 +106,6 @@ impl Drop for AbortAgentRunOnDrop {
     }
 }
 
-#[derive(Clone)]
-struct KernelPrimitiveRegistration {
-    definition: FunctionDefinition,
-    handler: Weak<dyn InProcessFunctionHandler>,
-}
-
 pub struct WorkerRuntime {
     store: WorkerStore,
     host: EngineHostHandle,
@@ -129,8 +123,6 @@ pub struct WorkerRuntime {
     resident_supervisions: DashSet<String>,
     stopped: AtomicBool,
     shutting_down: AtomicBool,
-    kernel_primitives: StdRwLock<Vec<KernelPrimitiveRegistration>>,
-    kernel_visibility: AtomicBool,
     http: reqwest::Client,
     core_proposals: CoreProposalService,
 }
@@ -157,7 +149,6 @@ impl WorkerRuntime {
             }
         }
         let stopped = store.stop_all()?;
-        let kernel_visibility = settings_runtime.current().settings.autonomous_workers;
         let core_proposals = CoreProposalService::new(store.home(), Arc::clone(&event_store))?;
         Ok(Arc::new(Self {
             store,
@@ -176,8 +167,6 @@ impl WorkerRuntime {
             resident_supervisions: DashSet::new(),
             stopped: AtomicBool::new(stopped),
             shutting_down: AtomicBool::new(false),
-            kernel_primitives: StdRwLock::new(Vec::new()),
-            kernel_visibility: AtomicBool::new(kernel_visibility),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(MAX_INVOCATION_SECONDS))
                 .build()
@@ -208,7 +197,6 @@ impl WorkerRuntime {
                 .snapshot;
         let fixed_tools = super::surface::fixed_tool_inventory(&self.host, &surface).await?;
         Ok(json!({
-            "autonomousWorkers": self.autonomous_enabled(),
             "dispatchStopped": self.store.stop_all()?,
             "activeEngineHooks": self.engine_hook_inventory()?,
             "fixedTools": fixed_tools,
@@ -222,28 +210,6 @@ impl WorkerRuntime {
             },
             "workers": self.store.list(true)?,
         }))
-    }
-
-    pub fn autonomous_enabled(&self) -> bool {
-        self.settings_runtime.current().settings.autonomous_workers
-    }
-
-    pub(crate) fn configure_kernel_primitives(
-        &self,
-        primitives: Vec<(FunctionDefinition, Weak<dyn InProcessFunctionHandler>)>,
-    ) -> Result<(), String> {
-        let mut registrations = self
-            .kernel_primitives
-            .write()
-            .map_err(|_| "worker kernel primitive registry is poisoned".to_owned())?;
-        *registrations = primitives
-            .into_iter()
-            .map(|(definition, handler)| KernelPrimitiveRegistration {
-                definition,
-                handler,
-            })
-            .collect();
-        Ok(())
     }
 
     pub async fn create_core_proposal(
@@ -279,15 +245,10 @@ impl WorkerRuntime {
     }
 
     pub async fn activate(self: &Arc<Self>, cancellation: CancellationToken) {
-        let autonomous = self.autonomous_enabled();
-        let applied = match self.apply_autonomy_state(autonomous).await {
-            Ok(()) => Some(autonomous),
-            Err(error) => {
-                tracing::error!(%error, autonomous, "failed to apply initial worker autonomy state");
-                None
-            }
-        };
-        self.run_dispatcher(cancellation, applied).await;
+        if let Err(error) = self.register_active_tools().await {
+            tracing::error!(%error, "failed to register active worker tools");
+        }
+        self.run_dispatcher(cancellation).await;
     }
 
     pub async fn shutdown(&self) {

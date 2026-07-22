@@ -4,8 +4,25 @@ struct ProviderInfo: Identifiable {
     let id: String
     let displayName: String
     let assetIcon: String
+    let systemIcon: String?
     let color: Color
     let supportsOAuth: Bool
+
+    init(
+        id: String,
+        displayName: String,
+        assetIcon: String = "",
+        systemIcon: String? = nil,
+        color: Color,
+        supportsOAuth: Bool
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.assetIcon = assetIcon
+        self.systemIcon = systemIcon
+        self.color = color
+        self.supportsOAuth = supportsOAuth
+    }
 
     static let modelProviders: [ProviderInfo] = [
         ProviderInfo(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", color: .tronCoral, supportsOAuth: true),
@@ -15,8 +32,29 @@ struct ProviderInfo: Identifiable {
         ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo, supportsOAuth: false),
     ]
 
+    /// Search credentials share the provider credential store but are not
+    /// offered as model choices.
+    static let searchProviders: [ProviderInfo] = [
+        ProviderInfo(
+            id: "brave",
+            displayName: "Brave Search",
+            systemIcon: "magnifyingglass.circle.fill",
+            color: .tronAmber,
+            supportsOAuth: false
+        ),
+        ProviderInfo(
+            id: "exa",
+            displayName: "Exa",
+            systemIcon: "sparkle.magnifyingglass",
+            color: .tronPurple,
+            supportsOAuth: false
+        ),
+    ]
+
+    static let credentialProviders = modelProviders + searchProviders
+
     static func displayName(for id: String) -> String {
-        modelProviders.first { $0.id == id }?.displayName ?? id
+        credentialProviders.first { $0.id == id }?.displayName ?? id
     }
 
     static func settingsOptions(including currentProvider: String) -> [(value: String, label: String)] {

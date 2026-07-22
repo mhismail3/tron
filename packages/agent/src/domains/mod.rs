@@ -1,7 +1,7 @@
 //! Worker-first domain boundary.
 //!
 //! The fixed source tree owns session/model execution, authenticated product
-//! infrastructure, durable event/state custody, and the autonomous worker
+//! infrastructure, durable event/state custody, and the persistent worker
 //! kernel. Higher-level adaptive behavior belongs in persistent worker bundles
 //! under the engine-global worker store.
 //!

@@ -87,9 +87,8 @@
 //! exact provider contracts are not duplicated into the client response. It is
 //! not itself model vocabulary and reports executable runtime facts rather than
 //! a separately maintained description of the source tree.
-//! Fixed inventory remains inspectable while autonomy is off and marks each
-//! tool unexposed, so operator introspection never masquerades as provider
-//! availability.
+//! Fixed inventory is always model-callable. Worker-first operation is the
+//! engine architecture rather than an editable mode or secondary lifecycle.
 //! Explicit discovery and automatic projection use one worker-owned relevance
 //! hook when installed. Its bounded candidate contract carries canonical worker
 //! metadata and operational evidence without exposing provider internals. The
@@ -107,9 +106,10 @@
 //! mutate the canonical version, and an out-of-band mutation disables routing
 //! as an integrity failure before code executes.
 //! Local worker execution is deliberately not tool-authorized. Named
-//! secret values are injected only at runtime; known vault values are rejected
-//! from candidate bundles and invocation inputs, then redacted from outputs and
-//! errors so they never enter manifests, operational records, events, or logs.
+//! credential values are injected only at runtime; known vault and provider-key
+//! values are rejected from candidate bundles and invocation inputs, then
+//! redacted from outputs and errors so they never enter manifests, operational
+//! records, events, or logs.
 //! Every claimed delivery creates a numbered attempt. Interrupted attempts are
 //! terminalized before their invocation is requeued, making at-least-once
 //! redelivery and causal-loop suppression directly inspectable. Engine events
@@ -117,12 +117,7 @@
 //! no framework envelope is injected. A projected event outside the typed
 //! schema is a terminal worker failure, not an endlessly retried delivery. A
 //! persistence failure retains the cursor for retry.
-//! Edits to `autonomousWorkers` hide or restore fixed/dynamic model tools,
-//! cancel or resume dispatch, and stop resident services
-//! without a server restart or a change to canonical worker state.
-//! Authenticated clients retain read access and lifecycle/stop controls while
-//! autonomy is off, but authoring and invocation remain blocked. Lazy resident
-//! processes remain supervised between invocations: an exit or three
+//! Lazy resident processes remain supervised between invocations: an exit or three
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
 //! remain eligible for one-time attachment to the next relevant session.
@@ -206,7 +201,6 @@ pub(crate) struct Registration {
 pub(crate) fn registration(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<Registration> {
-    let autonomous = deps.settings_runtime.current().settings.autonomous_workers;
     let store = persistence::WorkerStore::open(deps.settings_runtime.home().to_path_buf())
         .map_err(crate::engine::EngineError::HandlerFailed)?;
     let runtime = WorkerRuntime::new(
@@ -230,27 +224,13 @@ pub(crate) fn registration(
         {
             registration.definition.model_tool = Some(crate::engine::ModelToolContract {
                 name: descriptor.model_name.to_owned(),
-                callable: autonomous,
+                callable: true,
                 order: Some(descriptor.order),
                 group: Some(descriptor.group.as_str().to_owned()),
                 worker: None,
             });
         }
     }
-    runtime
-        .configure_kernel_primitives(
-            functions
-                .iter()
-                .filter(|registration| registration.definition.model_tool.is_some())
-                .map(|registration| {
-                    (
-                        registration.definition.clone(),
-                        Arc::downgrade(&registration.handler),
-                    )
-                })
-                .collect(),
-        )
-        .map_err(crate::engine::EngineError::HandlerFailed)?;
     let (engine_functions, functions): (Vec<_>, Vec<_>) = functions
         .into_iter()
         .partition(|registration| registration.definition.id.namespace() == "engine");

@@ -7,11 +7,11 @@ struct EngineSurfaceCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Label(
-                    viewModel.autonomousWorkers ? "Live model surface" : "Model surface hidden",
-                    systemImage: viewModel.autonomousWorkers ? "eye.circle.fill" : "eye.slash.circle"
+                    "Live model surface",
+                    systemImage: "eye.circle.fill"
                 )
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(viewModel.autonomousWorkers ? .tronEmerald : .tronWarning)
+                .foregroundStyle(.tronEmerald)
                 Spacer()
                 if let revision = viewModel.catalogRevision {
                     Text("r\(revision)")
@@ -103,7 +103,70 @@ struct EngineSurfaceCard: View {
     }
 }
 
-struct EngineCoreToolCard: View {
+struct EngineCoreSection: View {
+    let group: String
+    let tools: [EngineSurfaceToolDTO]
+    let onSelect: (EngineSurfaceToolDTO) -> Void
+
+    private var color: Color {
+        switch group {
+        case "host": .tronCyan
+        case "core_change": .tronPurple
+        default: .tronEmerald
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            WorkerConsoleSectionHeader(
+                title: EngineDashboardPresentation.groupTitle(group),
+                detail: EngineDashboardPresentation.groupDetail(group, count: tools.count)
+            )
+
+            LazyVStack(spacing: 8) {
+                ForEach(tools) { tool in
+                    Button {
+                        onSelect(tool)
+                    } label: {
+                        EngineCoreToolRow(tool: tool, color: color)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+private struct EngineCoreToolRow: View {
+    let tool: EngineSurfaceToolDTO
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 11) {
+            Image(systemName: "function")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 24, height: 24)
+
+            Text(EngineDashboardPresentation.toolTitle(tool.modelName))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
+        .contentShape(Rectangle())
+    }
+}
+
+struct EngineCoreToolDetailSheet: View {
     let tool: EngineSurfaceToolDTO
 
     private var color: Color {
@@ -115,45 +178,81 @@ struct EngineCoreToolCard: View {
     }
 
     var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 9) {
-                metadata("Function", tool.functionId)
-                metadata("Owner", tool.ownerWorker)
-                metadata("Revision", "\(tool.functionRevision)")
-                schema("Input schema", tool.inputSchema)
-                if let output = tool.outputSchema {
-                    schema("Output schema", output)
-                }
-            }
-            .padding(.top, 10)
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: tool.exposed ? "function" : "function.slash")
-                    .foregroundStyle(tool.exposed ? color : .tronTextMuted)
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(tool.modelName)
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(tool.description)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 8) {
-                        Text(WorkerConsolePresentation.displayLabel(tool.effectClass))
-                        Text(tool.risk.capitalized)
-                        Text(tool.exposed ? "Exposed" : "Hidden")
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(tool.description)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: 7) {
+                            badge(WorkerConsolePresentation.displayLabel(tool.effectClass))
+                            badge(tool.risk.capitalized)
+                            badge(tool.exposed ? "Model visible" : "Internal")
+                        }
                     }
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
-                    .foregroundStyle(tool.exposed ? color : .tronTextMuted)
+                    .padding(14)
+                    .sectionFill(color, cornerRadius: 12, subtle: true, interactive: false)
+
+                    detailSection(title: "Identity") {
+                        metadata("Tool name", tool.modelName)
+                        metadata("Function", tool.functionId)
+                        metadata("Owner", tool.ownerWorker)
+                        metadata("Revision", "\(tool.functionRevision)")
+                    }
+
+                    detailSection(title: "Contract") {
+                        schema("Input", tool.inputSchema)
+                        if let output = tool.outputSchema {
+                            schema("Output", output)
+                        }
+                    }
                 }
-                Spacer(minLength: 0)
+                .padding(18)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(
+                        title: EngineDashboardPresentation.toolTitle(tool.modelName),
+                        color: color
+                    )
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: color)
+                }
             }
         }
-        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(color)
-        .padding(12)
-        .sectionFill(color, cornerRadius: 11, subtle: true, interactive: false)
+    }
+
+    private func detailSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            VStack(alignment: .leading, spacing: 12) {
+                content()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sectionFill(color, cornerRadius: 12, subtle: true, interactive: false)
+        }
+    }
+
+    private func badge(_ title: String) -> some View {
+        Text(title)
+            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12), in: Capsule())
     }
 
     private func metadata(_ label: String, _ value: String) -> some View {

@@ -6,7 +6,7 @@ use crate::engine::Invocation;
 
 use super::super::types::InvokeRequest;
 use super::Deps;
-use super::support::{require_autonomous, required_string};
+use super::support::required_string;
 
 pub(super) async fn rotate_webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     serde_json::to_value(deps.runtime.store().rotate_webhook(
@@ -17,7 +17,6 @@ pub(super) async fn rotate_webhook(invocation: &Invocation, deps: &Deps) -> Resu
 }
 
 pub(super) async fn webhook(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let worker_id = required_string(&invocation.payload, "workerId")?;
     let trigger_id = required_string(&invocation.payload, "triggerId")?;
     let token = required_string(&invocation.payload, "token")?;

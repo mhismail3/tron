@@ -1,6 +1,6 @@
 import SwiftUI
 
-// ARCHITECTURE: ~115 lines coordinator. Provider list, auth state, engine invocations,
+// ARCHITECTURE: Compact provider grids, auth state, engine invocations,
 // OAuth sheet, and error alert live here; per-provider UI lives under
 // ModelProviders/.
 
@@ -17,11 +17,8 @@ struct ProvidersSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: Self.title) {
-            if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
-                landscapeContent
-            } else {
-                stackedContent
-            }
+            providerGroup(title: "Model Providers", providers: ProviderInfo.modelProviders)
+            providerGroup(title: "Search Providers", providers: ProviderInfo.searchProviders)
         }
         .sheet(item: $oauthProvider) { provider in
             OAuthLoginSheet(provider: provider) { updatedAuthState in
@@ -32,29 +29,21 @@ struct ProvidersSettingsPage: View {
         .tronErrorAlert(message: $error)
     }
 
-    @ViewBuilder
-    private var stackedContent: some View {
-        ForEach(ProviderInfo.modelProviders) { provider in
-            modelProviderSection(provider)
-        }
+    private var providerColumns: [GridItem] {
+        let count = SettingsAdaptiveLayout.usesIPadLandscapeLayout ? 2 : 1
+        return Array(
+            repeating: GridItem(.flexible(), spacing: 16, alignment: .top),
+            count: count
+        )
     }
 
-    private var landscapeContent: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(ProviderInfo.modelProviders.prefix(3))) { provider in
-                        modelProviderSection(provider)
-                    }
+    private func providerGroup(title: String, providers: [ProviderInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: title)
+            LazyVGrid(columns: providerColumns, alignment: .leading, spacing: 12) {
+                ForEach(providers) { provider in
+                    modelProviderSection(provider)
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
-
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(ProviderInfo.modelProviders.dropFirst(3))) { provider in
-                        modelProviderSection(provider)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
             }
         }
     }

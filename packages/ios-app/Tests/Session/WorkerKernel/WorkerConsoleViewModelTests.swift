@@ -132,7 +132,6 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     ) async throws -> EngineIntrospectionSnapshotDTO {
         snapshotSessionIds.append(sessionId)
         return EngineIntrospectionSnapshotDTO(
-            autonomousWorkers: true,
             dispatchStopped: false,
             activeEngineHooks: [],
             fixedTools: [],

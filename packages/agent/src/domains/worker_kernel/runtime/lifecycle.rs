@@ -1,7 +1,7 @@
-//! Worker lifecycle, engine stop state, autonomy transitions, and direct-tool
-//! publication.
+//! Worker lifecycle, engine stop state, and direct-tool publication.
 
 use super::*;
+use crate::engine::FunctionDefinition;
 
 impl WorkerRuntime {
     pub async fn set_enabled(
@@ -12,9 +12,7 @@ impl WorkerRuntime {
         let worker = self.store.set_enabled(worker_id, enabled)?;
         if enabled {
             self.reset_worker_stop(worker_id);
-            if self.autonomous_enabled()
-                && let Err(error) = self.register_dynamic_tool(worker_id).await
-            {
+            if let Err(error) = self.register_dynamic_tool(worker_id).await {
                 return Err(self
                     .handle_tool_activation_failure(
                         worker_id,
@@ -81,9 +79,7 @@ impl WorkerRuntime {
         let (worker, webhooks) = self.store.rollback(worker_id, version)?;
         self.stop_obsolete_residents(worker_id, version).await;
         self.reset_worker_stop(worker_id);
-        if self.autonomous_enabled()
-            && let Err(error) = self.register_dynamic_tool(worker_id).await
-        {
+        if let Err(error) = self.register_dynamic_tool(worker_id).await {
             return Err(self
                 .handle_tool_activation_failure(worker_id, version, "rollback", &error)
                 .await);
@@ -141,7 +137,7 @@ impl WorkerRuntime {
         if stopped {
             self.execution_stop.lock().await.cancel();
             self.stop_residents(None).await;
-        } else if self.autonomous_enabled() {
+        } else {
             *self.execution_stop.lock().await = CancellationToken::new();
         }
         self.publish_event(
@@ -190,119 +186,6 @@ impl WorkerRuntime {
         }
     }
 
-    pub(super) async fn apply_autonomy_state(
-        self: &Arc<Self>,
-        enabled: bool,
-    ) -> Result<(), String> {
-        let visibility = self.sync_kernel_primitive_visibility(enabled).await;
-        if enabled {
-            visibility?;
-            if !self.stopped.load(Ordering::SeqCst) {
-                *self.execution_stop.lock().await = CancellationToken::new();
-            }
-            self.register_active_tools().await?;
-        } else {
-            self.execution_stop.lock().await.cancel();
-            self.stop_residents(None).await;
-            let unregistration = self.unregister_all_dynamic_tools().await;
-            visibility?;
-            unregistration?;
-        }
-        self.publish_event(
-            "worker.lifecycle",
-            json!({
-                "action": if enabled { "autonomy_enabled" } else { "autonomy_disabled" },
-                "autonomousWorkers": enabled,
-            }),
-            None,
-        )
-        .await;
-        Ok(())
-    }
-
-    pub(super) async fn sync_kernel_primitive_visibility(
-        &self,
-        enabled: bool,
-    ) -> Result<(), String> {
-        let previous = self.kernel_visibility.load(Ordering::SeqCst);
-        if previous == enabled {
-            return Ok(());
-        }
-        let registrations = self
-            .kernel_primitives
-            .read()
-            .map_err(|_| "worker kernel primitive registry is poisoned".to_owned())?
-            .clone();
-        let mut prepared = Vec::with_capacity(registrations.len());
-        for registration in registrations {
-            let handler = registration.handler.upgrade().ok_or_else(|| {
-                format!(
-                    "worker kernel handler for {} is no longer registered",
-                    registration.definition.id.as_str()
-                )
-            })?;
-            let mut next = registration.definition.clone();
-            let model_tool = next.model_tool.as_mut().ok_or_else(|| {
-                format!(
-                    "worker kernel function {} has no model-tool contract",
-                    next.id.as_str()
-                )
-            })?;
-            model_tool.callable = enabled;
-            let mut rollback = registration.definition;
-            let rollback_model_tool = rollback.model_tool.as_mut().ok_or_else(|| {
-                format!(
-                    "worker kernel function {} has no model-tool contract",
-                    rollback.id.as_str()
-                )
-            })?;
-            rollback_model_tool.callable = previous;
-            prepared.push((next, rollback, handler));
-        }
-
-        let mut updated = 0;
-        for (next, _, handler) in &prepared {
-            if let Err(error) = self
-                .host
-                .register_function(next.clone(), Arc::clone(handler))
-                .await
-            {
-                let mut rollback_failures = Vec::new();
-                for (_, rollback, rollback_handler) in prepared.iter().take(updated).rev() {
-                    if let Err(rollback_error) = self
-                        .host
-                        .register_function(rollback.clone(), Arc::clone(rollback_handler))
-                        .await
-                    {
-                        rollback_failures.push(rollback_error.to_string());
-                    }
-                }
-                let rollback_evidence = if rollback_failures.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "; visibility rollback failures: {}",
-                        rollback_failures.join(" | ")
-                    )
-                };
-                return Err(format!(
-                    "update worker kernel tool visibility for {}: {error}{rollback_evidence}",
-                    next.id.as_str()
-                ));
-            }
-            updated += 1;
-        }
-        self.kernel_visibility.store(enabled, Ordering::SeqCst);
-        Ok(())
-    }
-
-    pub(super) async fn unregister_all_dynamic_tools(&self) -> Result<(), String> {
-        for worker in self.store.list(true)? {
-            self.unregister_dynamic_tool(&worker.worker_id).await;
-        }
-        Ok(())
-    }
-
     pub(super) async fn register_active_tools(self: &Arc<Self>) -> Result<(), String> {
         let mut failures = Vec::new();
         for worker in self.store.list(false)? {
@@ -332,10 +215,6 @@ impl WorkerRuntime {
         self: &Arc<Self>,
         worker_id: &str,
     ) -> Result<(), String> {
-        if !self.autonomous_enabled() {
-            self.unregister_dynamic_tool(worker_id).await;
-            return Ok(());
-        }
         let active = self.store.load_active(worker_id)?;
         self.refresh_worker_surface_evidence(worker_id).await?;
         let provenance = active
@@ -394,9 +273,6 @@ impl WorkerRuntime {
             )
             .await
             .map_err(|error| format!("register dynamic worker tool: {error}"))?;
-        if !self.autonomous_enabled() {
-            self.unregister_dynamic_tool(worker_id).await;
-        }
         Ok(())
     }
 

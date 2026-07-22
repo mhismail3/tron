@@ -36,8 +36,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct TronSettings {
-    /// Enables the trusted-local, self-authoring worker runtime for this engine.
-    pub autonomous_workers: bool,
     /// API provider settings (Anthropic, `OpenAI`, Google).
     pub api: ApiSettings,
     /// Retry configuration for API calls.
@@ -53,7 +51,6 @@ pub struct TronSettings {
 impl Default for TronSettings {
     fn default() -> Self {
         Self {
-            autonomous_workers: false,
             api: ApiSettings::default(),
             retry: RetrySettings::default(),
             context: ContextSettings::default(),
@@ -139,7 +136,6 @@ mod tests {
         let defaults = TronSettings::default();
         let json = serde_json::to_string(&defaults).unwrap();
         let back: TronSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.autonomous_workers, defaults.autonomous_workers);
         assert_eq!(
             back.server.heartbeat_interval_ms,
             defaults.server.heartbeat_interval_ms
@@ -157,7 +153,6 @@ mod tests {
 
         // Root fields are camelCase
         assert!(json.get("api").is_some());
-        assert_eq!(json["autonomousWorkers"], false);
         assert!(json["server"].get("transcription").is_none());
 
         assert!(json.get("models").is_none());

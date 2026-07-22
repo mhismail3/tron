@@ -1,4 +1,4 @@
-//! OAuth 2.0 and API key authentication for LLM providers.
+//! OAuth 2.0 and named API-key authentication for model and search providers.
 //!
 //! Supports two auth modes:
 //! - **API key**: Direct key-based auth
@@ -61,7 +61,10 @@ pub(crate) use storage::{
     acquire_auth_file_lock, clear_provider_auth, get_google_provider_auth, get_provider_auth,
     load_or_init_for_write, save_named_api_key,
 };
-pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
+pub use storage::{
+    auth_file_path, load_all_provider_api_keys, load_auth_storage, load_provider_api_key,
+    save_auth_storage,
+};
 pub(crate) use types::calculate_expires_at;
 pub use types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleProviderAuth,
@@ -70,8 +73,15 @@ pub use types::{
 };
 
 pub(crate) const DEFAULT_API_KEY_LABEL: &str = "Default";
-pub(crate) const KNOWN_PROVIDERS: &[&str] =
-    &["anthropic", "openai-codex", "google", "minimax", "kimi"];
+pub(crate) const KNOWN_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai-codex",
+    "google",
+    "minimax",
+    "kimi",
+    "brave",
+    "exa",
+];
 
 // ─── Credential resolution ──────────────────────────────────────────────────
 
@@ -157,6 +167,22 @@ mod tests {
         let _pair = generate_pkce();
         let _storage = AuthStorage::new();
         let _pa = ProviderAuth::default();
+    }
+
+    #[test]
+    fn credential_provider_inventory_includes_model_and_search_keys() {
+        assert_eq!(
+            KNOWN_PROVIDERS,
+            [
+                "anthropic",
+                "openai-codex",
+                "google",
+                "minimax",
+                "kimi",
+                "brave",
+                "exa",
+            ]
+        );
     }
 
     #[test]

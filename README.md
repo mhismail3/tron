@@ -8,7 +8,7 @@
 
 Tron runs an AI agent as a background service on your Mac and provides a native
 iOS interface for conversations, durable sessions, and worker operations. The
-current worker-first POC deliberately favors useful autonomous adaptation over
+current worker-first POC deliberately favors useful proactive adaptation over
 permission ceremony: a model can research, author, test, activate, and reuse an
 engine-global worker through one atomic operation.
 
@@ -95,8 +95,9 @@ scripts/tron logs
 scripts/tron ci fmt check clippy test
 ```
 
-Autonomous workers remain opt-in through Settings. The toggle applies to the
-running server without a restart while preserving persistent worker state.
+Worker-first execution is the engine architecture: trusted local sessions can
+create, activate, discover, and run persistent workers without enabling a
+separate mode.
 
 Build the iOS app:
 

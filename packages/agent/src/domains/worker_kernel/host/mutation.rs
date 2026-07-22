@@ -10,9 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::engine::Invocation;
 
 use super::super::runtime::WorkerRuntime;
-use super::support::{
-    MAX_FILE_BYTES, require_autonomous, required_string, resolve_path, run_blocking,
-};
+use super::support::{MAX_FILE_BYTES, required_string, resolve_path, run_blocking};
 
 const DEFAULT_FILE_READ_BYTES: usize = 262_144;
 const MAX_HASH_INPUT_BYTES: u64 = 64 * 1_048_576;
@@ -20,9 +18,8 @@ const MAX_EDIT_REPLACEMENTS: usize = 128;
 
 pub(in crate::domains::worker_kernel) async fn filesystem_write(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
     let content = invocation
         .payload
@@ -53,9 +50,8 @@ pub(in crate::domains::worker_kernel) async fn filesystem_write(
 }
 pub(in crate::domains::worker_kernel) async fn filesystem_edit(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
     let replacements = invocation
         .payload

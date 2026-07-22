@@ -1,6 +1,43 @@
 use super::*;
 
 #[tokio::test]
+async fn provider_api_keys_resolve_through_declared_runtime_bindings() {
+    let (runtime, home) = test_runtime(None);
+    let auth_path = crate::shared::foundation::paths::auth_path_for_home(home.path());
+    let secret = "brave-provider-secret";
+    crate::domains::auth::credentials::save_named_api_key(&auth_path, "brave", "Default", secret)
+        .unwrap();
+
+    let mut bundle = command_bundle(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "printf '{\"value\":\"%s\"}' \"$TRON_SECRET_PROVIDER_BRAVE\"".to_owned(),
+    ]);
+    bundle.secret_bindings = vec![
+        super::super::super::types::WorkerSecretBinding::Configured {
+            name: "provider-brave".to_owned(),
+            required: true,
+        },
+    ];
+
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let result = runtime
+        .invoke(request(
+            &outcome.worker.worker_id,
+            json!({}),
+            "provider-secret",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(result.output, Some(json!({"value":"[REDACTED]"})));
+    assert!(
+        !serde_json::to_string(&runtime.store().runs_filtered(None, None, 10).unwrap())
+            .unwrap()
+            .contains(secret)
+    );
+}
+
+#[tokio::test]
 async fn secret_values_are_injected_then_redacted_from_durable_results() {
     let (captured_logs, _log_guard) = crate::shared::observability::capture_logs();
     let (runtime, home) = test_runtime(None);

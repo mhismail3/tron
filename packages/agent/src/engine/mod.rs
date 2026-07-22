@@ -1,7 +1,7 @@
 //! # Worker-first engine kernel
 //!
 //! This crate-private fabric provides typed invocation, durable state and
-//! events and authenticated transport primitives. Autonomous workers are
+//! events and authenticated transport primitives. Persistent workers are
 //! owned by domains::worker_kernel; model-facing calls use direct typed
 //! functions.
 //!

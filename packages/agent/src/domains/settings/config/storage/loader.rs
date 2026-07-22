@@ -118,14 +118,9 @@ mod tests {
     fn flat_sparse_toml_overrides_compiled_defaults() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("settings.toml");
-        std::fs::write(
-            &path,
-            "autonomousWorkers = true\n[server]\nheartbeatIntervalMs = 45000\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[server]\nheartbeatIntervalMs = 45000\n").unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
-        assert!(settings.autonomous_workers);
         assert_eq!(settings.server.heartbeat_interval_ms, 45_000);
         assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
     }

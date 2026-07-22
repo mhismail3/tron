@@ -386,8 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn production_summarizer_uses_an_active_worker_hook() {
-        let context =
-            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let context = crate::shared::server::test_support::make_test_context();
         install_worker(
             &context.engine_host,
             worker_bundle(
@@ -411,8 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_worker_hook_disables_itself_and_compaction_recovers() {
-        let context =
-            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let context = crate::shared::server::test_support::make_test_context();
         let worker_id = install_worker(
             &context.engine_host,
             worker_bundle("printf failure >&2; exit 7", "failing-summary-policy"),

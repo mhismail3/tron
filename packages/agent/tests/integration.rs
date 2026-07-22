@@ -50,24 +50,6 @@ async fn boot_server() -> TestServer {
 }
 
 async fn boot_server_with_config(config: ServerConfig) -> TestServer {
-    boot_server_with_config_and_autonomy(config, false).await
-}
-
-async fn boot_server_with_autonomous_workers() -> TestServer {
-    boot_server_with_config_and_autonomy(
-        ServerConfig {
-            host: "127.0.0.1".to_owned(),
-            ..ServerConfig::default()
-        },
-        true,
-    )
-    .await
-}
-
-async fn boot_server_with_config_and_autonomy(
-    config: ServerConfig,
-    autonomous_workers: bool,
-) -> TestServer {
     let temp = tempfile::tempdir().unwrap();
     let home = unique_home(temp.path());
     let db_path = temp.path().join("tron.sqlite");
@@ -82,11 +64,6 @@ async fn boot_server_with_config_and_autonomy(
     let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
     let settings_path = tron::shared::foundation::paths::settings_path_for_home(&home);
     let auth_path = tron::shared::foundation::paths::auth_path_for_home(&home);
-    if autonomous_workers {
-        tron::domains::settings::config::SettingsStore::new(&settings_path)
-            .update(json!({"autonomousWorkers": true}))
-            .expect("enable autonomous workers for worker-kernel integration test");
-    }
     let runtime_context = ServerRuntimeContext {
         orchestrator: Arc::clone(&orchestrator),
         session_manager,
@@ -355,7 +332,7 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
 
 #[tokio::test]
 async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_connectivity() {
-    let runtime = boot_server_with_autonomous_workers().await;
+    let runtime = boot_server().await;
     let mut ws = connect(&runtime.url, &runtime.auth_path).await;
     wait_for_connection_count(&runtime.server, 1).await;
     let working_directory = runtime._temp.path().join("workspace");
@@ -408,8 +385,7 @@ async fn worker_first_baseline_characterizes_startup_tools_events_settings_and_c
 
     let settings =
         unwrap_invoke_value(invoke(&mut ws, "settings-get", "settings::get", json!({})).await);
-    assert_eq!(settings["autonomousWorkers"], true);
-
+    assert!(settings["server"]["defaultModel"].is_string());
     let upserted = unwrap_invoke_value(
         invoke_with_context(
             &mut ws,

@@ -69,10 +69,6 @@ final class WorkerConsoleViewModel {
         engineSnapshot?.surface.catalogRevision
     }
 
-    var autonomousWorkers: Bool {
-        engineSnapshot?.autonomousWorkers ?? false
-    }
-
     var invocationJSONIsValid: Bool {
         (try? Self.decodeJSON(invocationInput)) != nil
     }

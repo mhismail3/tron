@@ -71,7 +71,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
         .host
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::dynamic_last30days-research").unwrap(),
-            json!({"topic":"worker autonomy","asOf":"2026-07-19"}),
+            json!({"topic":"worker adaptation","asOf":"2026-07-19"}),
             CausalContext::new(
                 ActorId::new("agent:last30days-replay").unwrap(),
                 ActorKind::Agent,
@@ -94,7 +94,7 @@ async fn last30days_replay_activates_one_typed_worker_and_survives_restart() {
         value["summary"]
             .as_str()
             .unwrap()
-            .contains("worker autonomy")
+            .contains("worker adaptation")
     );
 
     let webhook_credential = &outcome.webhooks[0];

@@ -12,9 +12,7 @@ use super::super::contract::{
     MAX_TEXT_SEARCH_TIMEOUT_SECONDS, MAX_TEXT_SEARCH_WALK_ENTRIES,
 };
 use super::super::runtime::WorkerRuntime;
-use super::support::{
-    bounded_usize, require_autonomous, required_string, resolve_path, run_blocking,
-};
+use super::support::{bounded_usize, required_string, resolve_path, run_blocking};
 
 const DEFAULT_TEXT_SEARCH_RESULTS: usize = 200;
 const MAX_TEXT_SEARCH_RESULTS: usize = 1_000;
@@ -37,9 +35,8 @@ const DEFAULT_IGNORED_SEARCH_DIRECTORIES: &[&str] = &[
 
 pub(in crate::domains::worker_kernel) async fn filesystem_search_text(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let requested = invocation
         .payload
         .get("path")

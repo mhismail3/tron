@@ -64,12 +64,6 @@ pub(super) struct DynamicWorkerHandler {
 #[async_trait::async_trait]
 impl InProcessFunctionHandler for DynamicWorkerHandler {
     async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
-        if !self.runtime.autonomous_enabled() {
-            return Err(crate::engine::EngineError::HandlerFailed(
-                "autonomous workers are disabled for this engine; set autonomousWorkers=true"
-                    .to_owned(),
-            ));
-        }
         let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
         let depth = invocation.causal_context.trigger_depth();
         let idempotency_key = invocation

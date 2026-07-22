@@ -11,16 +11,15 @@ use super::super::process::{
     MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
 };
 use super::super::runtime::WorkerRuntime;
-use super::support::{require_autonomous, resolve_path};
+use super::support::resolve_path;
 
 const MAX_PROCESS_ARGUMENTS: usize = 256;
 const MAX_PROCESS_INPUT_BYTES: usize = 4 * 1_048_576;
 
 pub(in crate::domains::worker_kernel) async fn process_run(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let command = invocation
         .payload
         .get("command")

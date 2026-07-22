@@ -65,14 +65,6 @@ enum ProviderCredentialStatusAction {
     static let confirmationButtonTitle = "Clear"
 }
 
-enum ProviderAuthActionButtonsAlignment: Equatable, Sendable {
-    case leading
-}
-
-enum ProviderAuthActionButtonsLayout {
-    static let alignment = ProviderAuthActionButtonsAlignment.leading
-}
-
 enum ProviderApiKeyPromptPresentation: Equatable, Sendable {
     case nativeAlert
 }

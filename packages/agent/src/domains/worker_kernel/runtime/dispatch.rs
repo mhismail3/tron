@@ -3,11 +3,7 @@
 use super::*;
 
 impl WorkerRuntime {
-    pub(super) async fn run_dispatcher(
-        self: &Arc<Self>,
-        cancellation: CancellationToken,
-        mut applied_autonomy: Option<bool>,
-    ) {
+    pub(super) async fn run_dispatcher(self: &Arc<Self>, cancellation: CancellationToken) {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut runs = JoinSet::new();
@@ -15,18 +11,7 @@ impl WorkerRuntime {
             tokio::select! {
                 () = cancellation.cancelled() => break,
                 _ = ticker.tick() => {
-                    let autonomous = self.autonomous_enabled();
-                    if applied_autonomy != Some(autonomous) {
-                        match self.apply_autonomy_state(autonomous).await {
-                            Ok(()) => applied_autonomy = Some(autonomous),
-                            Err(error) => {
-                                tracing::error!(%error, autonomous, "failed to apply live worker autonomy state");
-                                applied_autonomy = None;
-                                continue;
-                            }
-                        }
-                    }
-                    if autonomous && !self.stopped.load(Ordering::SeqCst) {
+                    if !self.stopped.load(Ordering::SeqCst) {
                         if self.execution_stop.lock().await.is_cancelled() {
                             *self.execution_stop.lock().await = CancellationToken::new();
                         }

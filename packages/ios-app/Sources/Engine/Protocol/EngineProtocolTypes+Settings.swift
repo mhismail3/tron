@@ -8,7 +8,6 @@ import Foundation
 /// admits only the mobile product-settings projection, ignores unrelated
 /// provider/runtime/TUI keys, and decodes every admitted field strictly.
 struct ServerSettings: Decodable {
-    let autonomousWorkers: Bool
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
@@ -16,7 +15,7 @@ struct ServerSettings: Decodable {
     let compaction: CompactionSettings
 
     private enum CodingKeys: String, CodingKey {
-        case autonomousWorkers, server, context
+        case server, context
     }
 
     private enum ServerKeys: String, CodingKey {
@@ -29,8 +28,6 @@ struct ServerSettings: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        autonomousWorkers = try container.decode(Bool.self, forKey: .autonomousWorkers)
 
         let serverContainer = try container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server)
         defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
@@ -62,7 +59,6 @@ struct ServerSettings: Decodable {
 }
 
 struct ServerSettingsUpdate: Encodable {
-    var autonomousWorkers: Bool?
     var server: ServerUpdate?
     var context: ContextUpdate?
 

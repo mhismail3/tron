@@ -7,9 +7,8 @@
 //! The complete production composition validates canonical identity uniqueness
 //! before either registration path mutates the engine catalog. The worker runtime returns one
 //! activation token so transport setup starts its lifecycle observer only after
-//! registration. That observer always runs; the editable autonomous-worker
-//! setting controls dispatch and the provider tool surface live rather than
-//! deciding whether the lifecycle exists at boot.
+//! registration. That observer always runs and keeps worker dispatch, dynamic
+//! tool projection, schedules, events, and resident services live.
 //!
 //! # INVARIANT: canonical functions are the executable surface
 //!
@@ -185,7 +184,6 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
     use std::sync::Arc;
-    use std::time::Duration;
 
     use crate::engine::{
         ActorContext, ActorId, ActorKind, CausalContext, EffectClass, FunctionDefinition,
@@ -235,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_catalog_contains_worker_first_fixed_functions() {
-        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let ctx = crate::shared::server::test_support::make_test_context();
         let functions = ctx.engine_host.visible_functions(&system_actor()).await;
         let function_ids = functions
             .iter()
@@ -269,7 +267,7 @@ mod tests {
 
     #[tokio::test]
     async fn trusted_local_kernel_invocation_records_actor_and_trace_without_grant_plane() {
-        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let ctx = crate::shared::server::test_support::make_test_context();
         let invocation = Invocation::new_sync(
             FunctionId::new("worker_kernel::list").expect("function id"),
             json!({}),
@@ -305,7 +303,7 @@ mod tests {
 
     #[tokio::test]
     async fn host_write_edit_and_read_are_atomic_bounded_direct_primitives() {
-        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let ctx = crate::shared::server::test_support::make_test_context();
         let root = tempfile::tempdir().expect("host primitive temp root");
         let path = root.path().join("value.txt");
         let write = ctx
@@ -367,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn engine_surface_snapshot_is_invocable_but_not_model_visible() {
-        let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let ctx = crate::shared::server::test_support::make_test_context();
         let result = ctx
             .engine_host
             .invoke(Invocation::new_sync(
@@ -382,7 +380,6 @@ mod tests {
             result.error
         );
         let value = result.value.expect("surface snapshot value");
-        assert_eq!(value["autonomousWorkers"], true);
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
@@ -428,197 +425,14 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn engine_surface_snapshot_keeps_fixed_inventory_visible_when_autonomy_is_off() {
-        let ctx = crate::shared::server::test_support::make_test_context();
-        let result = ctx
-            .engine_host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("engine::surface_snapshot").expect("surface function id"),
-                json!({}),
-                trusted_local_context("engine-surface-snapshot-disabled"),
-            ))
-            .await;
-        assert_eq!(
-            result.error, None,
-            "disabled engine surface snapshot failed: {:?}",
-            result.error
-        );
-        let value = result.value.expect("disabled surface snapshot value");
-        assert_eq!(value["autonomousWorkers"], false);
-        let fixed_tools = value["fixedTools"]
-            .as_array()
-            .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 28);
-        assert!(fixed_tools.iter().all(|tool| tool["exposed"] == false));
-        assert_eq!(value["surface"]["fixedToolCount"], 0);
-    }
-
-    #[tokio::test]
-    async fn autonomous_worker_setting_reconfigures_live_tools_without_restart() {
-        let ctx = crate::shared::server::test_support::make_test_context();
-        assert_provider_tools(&ctx, &[], &["worker_upsert"]).await;
-        let initial_list = ctx
-            .engine_host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("worker_kernel::list").expect("list function id"),
-                json!({}),
-                trusted_local_context("live-autonomy-initial-list"),
-            ))
-            .await;
-        assert_eq!(
-            initial_list.error, None,
-            "authenticated operational reads must remain available while autonomy is off"
-        );
-        set_autonomous_workers(&ctx, true);
-        assert_provider_tools(&ctx, &["worker_upsert"], &[]).await;
-
-        let upsert = ctx
-            .engine_host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("worker_kernel::upsert").expect("upsert function id"),
-                json!({
-                    "bundle": {
-                        "schemaVersion": "tron.worker_bundle.v1",
-                        "workerId": "live-autonomy-toggle",
-                        "name": "Live Autonomy Toggle",
-                        "description": "Echo typed input to prove live profile autonomy transitions.",
-                        "toolName": "worker_live_autonomy_toggle",
-                        "inputSchema": {
-                            "type": "object",
-                            "required": ["value"],
-                            "properties": {"value": {"type": "integer"}}
-                        },
-                        "outputSchema": {
-                            "type": "object",
-                            "required": ["value"],
-                            "properties": {"value": {"type": "integer"}}
-                        },
-                        "runner": {"kind": "command", "command": ["sh", "-c", "cat"]},
-                        "triggers": [{"kind": "manual", "id": "manual"}],
-                        "smokeTests": [{"command": ["sh", "-c", "exit 0"], "timeoutSeconds": 5}],
-                        "healthChecks": [{"command": ["sh", "-c", "exit 0"], "timeoutSeconds": 5}],
-                        "provenance": [{"source": "test:live-autonomy-toggle"}]
-                    }
-                }),
-                trusted_local_context("live-autonomy-toggle-upsert"),
-            ))
-            .await;
-        assert_eq!(
-            upsert.error, None,
-            "worker upsert failed: {:?}",
-            upsert.error
-        );
-        assert_provider_tools(&ctx, &["worker_live_autonomy_toggle"], &[]).await;
-
-        set_autonomous_workers(&ctx, false);
-        assert_provider_tools(&ctx, &[], &["worker_upsert", "worker_live_autonomy_toggle"]).await;
-        let blocked_invoke = ctx
-            .engine_host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("worker_kernel::invoke").expect("invoke function id"),
-                json!({
-                    "workerId":"live-autonomy-toggle",
-                    "input":{"value":7},
-                    "idempotencyKey":"live-autonomy-blocked-invoke"
-                }),
-                trusted_local_context("live-autonomy-blocked-invoke"),
-            ))
-            .await;
-        assert!(
-            blocked_invoke.error.as_ref().is_some_and(|error| error
-                .to_string()
-                .contains("autonomous workers are disabled")),
-            "worker execution must remain blocked while autonomy is off: {blocked_invoke:?}"
-        );
-        for (operation, trace) in [
-            ("disable", "live-autonomy-console-disable"),
-            ("enable", "live-autonomy-console-enable"),
-        ] {
-            let result = ctx
-                .engine_host
-                .invoke(Invocation::new_sync(
-                    FunctionId::new(format!("worker_kernel::{operation}"))
-                        .expect("management function id"),
-                    json!({"workerId":"live-autonomy-toggle"}),
-                    trusted_local_context(trace),
-                ))
-                .await;
-            assert_eq!(
-                result.error, None,
-                "authenticated console management {operation} failed while autonomy was off: {:?}",
-                result.error
-            );
-        }
-        assert_provider_tools(&ctx, &[], &["worker_upsert", "worker_live_autonomy_toggle"]).await;
-
-        set_autonomous_workers(&ctx, true);
-        assert_provider_tools(&ctx, &["worker_upsert", "worker_live_autonomy_toggle"], &[]).await;
-        let invoked = ctx
-            .engine_host
-            .invoke(Invocation::new_sync(
-                FunctionId::new("worker_kernel::dynamic_live-autonomy-toggle")
-                    .expect("dynamic function id"),
-                json!({"value": 7}),
-                trusted_local_context("live-autonomy-toggle-invoke"),
-            ))
-            .await;
-        assert_eq!(
-            invoked.error, None,
-            "dynamic invoke failed: {:?}",
-            invoked.error
-        );
-        assert_eq!(invoked.value, Some(json!({"value": 7})));
-
-        set_autonomous_workers(&ctx, false);
-    }
-
-    fn set_autonomous_workers(ctx: &ServerRuntimeContext, enabled: bool) {
-        crate::domains::settings::config::SettingsStore::new(&ctx.settings_path)
-            .update(json!({"autonomousWorkers": enabled}))
-            .expect("persist autonomous worker setting");
-        ctx.settings_runtime
-            .reload_now("live autonomous worker setting test")
-            .expect("reload autonomous worker setting");
-    }
-
     fn trusted_local_context(trace: &str) -> CausalContext {
         CausalContext::new(
-            ActorId::new("agent:live-autonomy-toggle-test").expect("actor id"),
+            ActorId::new("agent:worker-first-test").expect("actor id"),
             ActorKind::Agent,
             TraceId::new(trace).expect("trace id"),
         )
-        .with_session_id("live-autonomy-toggle-test")
+        .with_session_id("worker-first-test")
         .with_idempotency_key(trace)
-    }
-
-    async fn assert_provider_tools(ctx: &ServerRuntimeContext, present: &[&str], absent: &[&str]) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let surface = crate::domains::agent::r#loop::primitive_surface::resolve_provider_primitive_surface(
-                    &ctx.engine_host,
-                    "live-autonomy-toggle-test",
-                )
-                .await
-                .expect("resolve provider surface");
-                let all_present = present
-                    .iter()
-                    .all(|name| surface.targets_by_name.contains_key(*name));
-                let all_absent = absent
-                    .iter()
-                    .all(|name| !surface.targets_by_name.contains_key(*name));
-                if all_present && all_absent {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "provider tool surface did not converge; expected present={present:?}, absent={absent:?}"
-            )
-        });
     }
 
     fn system_actor() -> ActorContext {

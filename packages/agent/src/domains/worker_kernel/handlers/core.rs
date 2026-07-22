@@ -8,7 +8,7 @@ use crate::engine::Invocation;
 
 use super::super::types::WorkerEngineHook;
 use super::Deps;
-use super::support::{require_autonomous, required_content, required_string};
+use super::support::{required_content, required_string};
 
 pub(super) async fn session_set_title(
     invocation: &Invocation,
@@ -26,7 +26,6 @@ pub(super) async fn core_proposal_create(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let test_command = invocation
         .payload
         .get("testCommand")
@@ -162,7 +161,6 @@ pub(super) async fn core_proposal_apply(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, String> {
-    require_autonomous(deps)?;
     serde_json::to_value(
         deps.runtime
             .apply_core_proposal(

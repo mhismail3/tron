@@ -8,10 +8,9 @@ use crate::engine::Invocation;
 
 use super::super::types::InvokeRequest;
 use super::Deps;
-use super::support::{require_autonomous, required_string};
+use super::support::required_string;
 
 pub(super) async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let worker_id = required_string(&invocation.payload, "workerId")?;
     let input = invocation
         .payload
@@ -47,7 +46,6 @@ pub(super) async fn invoke_worker(invocation: &Invocation, deps: &Deps) -> Resul
 }
 
 pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    require_autonomous(deps)?;
     let timeout = Duration::from_secs(
         invocation
             .payload

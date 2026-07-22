@@ -8,8 +8,6 @@ use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::ToolError;
 
-use super::super::runtime::WorkerRuntime;
-
 pub(super) const MAX_FILE_BYTES: usize = 4 * 1_048_576;
 
 pub(in crate::domains::worker_kernel) fn resolve_path(
@@ -60,17 +58,6 @@ pub(super) fn required_string(value: &Value, field: &str) -> Result<String, Stri
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| format!("{field} is required"))
-}
-
-pub(super) fn require_autonomous(runtime: &WorkerRuntime) -> Result<(), String> {
-    if runtime.autonomous_enabled() {
-        Ok(())
-    } else {
-        Err(
-            "autonomous workers are disabled for this engine; set autonomousWorkers=true"
-                .to_owned(),
-        )
-    }
 }
 
 pub(super) async fn run_blocking<F>(operation: &'static str, task: F) -> Result<Value, String>

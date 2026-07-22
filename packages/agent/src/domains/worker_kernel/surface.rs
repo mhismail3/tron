@@ -407,7 +407,7 @@ pub(crate) async fn resolve_tool_surface(
 }
 
 /// Inspect the canonical fixed model-tool inventory independently of whether
-/// autonomous mode currently projects those tools to a provider request.
+/// the current provider request projects those tools.
 pub(crate) async fn fixed_tool_inventory(
     host: &EngineHostHandle,
     resolved_surface: &EngineSurfaceSnapshot,

@@ -153,7 +153,7 @@ impl IdempotencyScope {
 pub struct ModelToolContract {
     /// Stable model-facing tool name.
     pub name: String,
-    /// Whether autonomous mode currently exposes this tool.
+    /// Whether the current model surface exposes this tool.
     pub callable: bool,
     /// Stable ordering for fixed kernel tools. Dynamic workers have no fixed
     /// order because relevance owns their placement.

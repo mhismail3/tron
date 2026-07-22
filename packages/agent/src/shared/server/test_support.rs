@@ -130,24 +130,11 @@ impl ModelResponderFactory for StrictMockFactory {
 
 /// Build an `ServerRuntimeContext` backed by an in-memory event store.
 pub fn make_test_context() -> ServerRuntimeContext {
-    make_test_context_with_responder_and_autonomy(None, false)
+    make_test_context_with_responder(None)
 }
 
 pub fn make_test_context_with_responder(
     responder_factory: Option<Arc<dyn ModelResponderFactory>>,
-) -> ServerRuntimeContext {
-    make_test_context_with_responder_and_autonomy(responder_factory, false)
-}
-
-/// Build a fully registered test server with the worker-first provider surface
-/// enabled before domain composition occurs.
-pub fn make_test_context_with_autonomous_workers() -> ServerRuntimeContext {
-    make_test_context_with_responder_and_autonomy(None, true)
-}
-
-fn make_test_context_with_responder_and_autonomy(
-    responder_factory: Option<Arc<dyn ModelResponderFactory>>,
-    autonomous_workers: bool,
 ) -> ServerRuntimeContext {
     let pool = crate::domains::session::event_store::new_in_memory(
         &crate::domains::session::event_store::ConnectionConfig::default(),
@@ -164,14 +151,6 @@ fn make_test_context_with_responder_and_autonomy(
     let settings_path = test_settings_path(&home);
     let auth_path = test_auth_path(&home);
     let settings_runtime = test_settings_runtime(&home);
-    if autonomous_workers {
-        crate::domains::settings::config::SettingsStore::new(&settings_path)
-            .update(serde_json::json!({"autonomousWorkers": true}))
-            .expect("enable autonomous workers for test context");
-        settings_runtime
-            .reload_now("autonomous worker test context")
-            .expect("reload autonomous worker test settings");
-    }
     let ctx = ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,

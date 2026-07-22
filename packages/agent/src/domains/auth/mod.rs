@@ -2,7 +2,8 @@
 //!
 //! This module owns canonical function execution for the auth namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! Credential reads/writes and account selection live under `credentials/`.
+//! Model/search credential reads, writes, and account selection live under
+//! `credentials/`.
 //! OAuth provider routing, flow state, and completion live under `oauth/` and
 //! are shared by engine functions and the contributor CLI bridge. This root
 //! only registers the auth worker and exposes the concrete ownership modules.

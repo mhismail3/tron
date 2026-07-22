@@ -28,7 +28,6 @@ protocol SessionEventRepository: AnyObject {
 /// UI/session-facing settings snapshot. The engine repository maps the wire
 /// `ServerSettings` DTO into this contract before it crosses into SwiftUI.
 struct ServerSettingsSnapshot: Equatable, Sendable {
-    let autonomousWorkers: Bool
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
@@ -40,15 +39,13 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         defaultWorkspace: String?,
         tailscaleIp: String?,
         compactionPreserveRecentCount: Int,
-        compactionTriggerTokenThreshold: Double,
-        autonomousWorkers: Bool = false
+        compactionTriggerTokenThreshold: Double
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
         self.tailscaleIp = tailscaleIp
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
-        self.autonomousWorkers = autonomousWorkers
     }
 
     init(_ settings: ServerSettings) {
@@ -57,8 +54,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             defaultWorkspace: settings.defaultWorkspace,
             tailscaleIp: settings.tailscaleIp,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
-            compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
-            autonomousWorkers: settings.autonomousWorkers
+            compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold
         )
     }
 }
@@ -66,7 +62,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 /// UI-owned settings mutation vocabulary translated to wire DTOs inside the
 /// settings repository boundary.
 enum SettingsMutation {
-    case autonomousWorkers(Bool)
     case defaultWorkspace(String)
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)

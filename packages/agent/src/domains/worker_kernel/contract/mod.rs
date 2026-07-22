@@ -133,7 +133,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         EffectClass::PureRead,
         RiskLevel::Low,
         json!({"type":"object","additionalProperties":false,"properties":{}}),
-        "List tested and applied autonomous core-change proposals.",
+        "List tested and applied core-change proposals.",
     )?);
     specs.push(spec(
         "worker_kernel::core_proposal_inspect",
@@ -282,9 +282,8 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["autonomousWorkers","dispatchStopped","activeEngineHooks","fixedTools","surface","workers"],
+            "required":["dispatchStopped","activeEngineHooks","fixedTools","surface","workers"],
             "properties":{
-                "autonomousWorkers":{"type":"boolean"},
                 "dispatchStopped":{"type":"boolean"},
                 "activeEngineHooks":{
                     "type":"array",

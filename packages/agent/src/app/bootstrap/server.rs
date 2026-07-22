@@ -382,9 +382,7 @@ async fn ws_auth_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::server::test_support::{
-        make_test_context, make_test_context_with_autonomous_workers,
-    };
+    use crate::shared::server::test_support::make_test_context;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -398,14 +396,6 @@ mod tests {
     fn make_server() -> TronServer {
         let ctx = make_test_context();
         TronServer::new(ServerConfig::default(), ctx, make_metrics_handle())
-    }
-
-    fn make_autonomous_server() -> TronServer {
-        TronServer::new(
-            ServerConfig::default(),
-            make_test_context_with_autonomous_workers(),
-            make_metrics_handle(),
-        )
     }
 
     fn make_server_with_auth() -> (TronServer, tempfile::TempDir, String) {
@@ -529,7 +519,7 @@ mod tests {
 
     #[tokio::test]
     async fn worker_webhook_is_loopback_token_authenticated_and_durably_dispatched() {
-        let server = make_autonomous_server();
+        let server = make_server();
         let created = server
             .runtime_context()
             .engine_host

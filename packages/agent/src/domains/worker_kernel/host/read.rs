@@ -10,8 +10,7 @@ use crate::engine::Invocation;
 
 use super::super::runtime::WorkerRuntime;
 use super::support::{
-    MAX_FILE_BYTES, bounded_usize, decode_bounded_utf8, require_autonomous, required_string,
-    resolve_path, run_blocking,
+    MAX_FILE_BYTES, bounded_usize, decode_bounded_utf8, required_string, resolve_path, run_blocking,
 };
 
 const DEFAULT_FILE_READ_BYTES: usize = 262_144;
@@ -22,9 +21,8 @@ const MAX_DIRECTORY_WALK_ENTRIES: usize = 50_000;
 
 pub(in crate::domains::worker_kernel) async fn filesystem_read(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let path = resolve_path(invocation, &required_string(&invocation.payload, "path")?)?;
     let max_bytes = bounded_usize(
         &invocation.payload,
@@ -56,9 +54,8 @@ pub(in crate::domains::worker_kernel) async fn filesystem_read(
 }
 pub(in crate::domains::worker_kernel) async fn filesystem_list(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let requested = invocation
         .payload
         .get("path")

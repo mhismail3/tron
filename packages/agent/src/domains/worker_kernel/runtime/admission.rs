@@ -70,12 +70,6 @@ impl WorkerRuntime {
         &self,
         request: InvokeRequest,
     ) -> Result<(InvocationRecord, bool), String> {
-        if !self.autonomous_enabled() {
-            return Err(
-                "autonomous workers are disabled for this engine; set autonomousWorkers=true"
-                    .to_owned(),
-            );
-        }
         if self.stopped.load(Ordering::SeqCst) || self.store.stop_all()? {
             return Err("worker dispatch is stopped for this engine".to_owned());
         }

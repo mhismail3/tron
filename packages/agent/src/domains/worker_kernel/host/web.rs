@@ -8,17 +8,14 @@ use serde_json::{Value, json};
 use crate::engine::Invocation;
 
 use super::super::runtime::WorkerRuntime;
-use super::support::{
-    MAX_FILE_BYTES, bounded_usize, decode_bounded_utf8, require_autonomous, required_string,
-};
+use super::support::{MAX_FILE_BYTES, bounded_usize, decode_bounded_utf8, required_string};
 
 const DEFAULT_WEB_FETCH_BYTES: usize = 1_048_576;
 
 pub(in crate::domains::worker_kernel) async fn web_fetch(
     invocation: &Invocation,
-    runtime: &WorkerRuntime,
+    _runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
-    require_autonomous(runtime)?;
     let url = required_string(&invocation.payload, "url")?;
     let parsed = url::Url::parse(&url).map_err(|error| format!("invalid URL: {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {

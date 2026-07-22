@@ -56,7 +56,6 @@ struct EngineHookOwnerDTO: Codable, Equatable, Identifiable, Sendable {
 }
 
 struct EngineIntrospectionSnapshotDTO: Codable, Equatable, Sendable {
-    let autonomousWorkers: Bool
     let dispatchStopped: Bool
     let activeEngineHooks: [EngineHookOwnerDTO]
     let fixedTools: [EngineSurfaceToolDTO]

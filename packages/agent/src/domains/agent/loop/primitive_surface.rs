@@ -351,7 +351,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn autonomous_surface_hides_execute_and_selects_relevant_typed_workers() {
+    async fn direct_surface_hides_wrapper_and_selects_relevant_typed_workers() {
         let host = EngineHostHandle::new_in_memory().expect("host");
         register_worker_primitive(
             &host,
@@ -383,12 +383,12 @@ mod tests {
 
         let surface = resolve_provider_primitive_surface_for_query(
             &host,
-            "autonomy-session",
+            "worker-surface-session",
             Some("perform recent research with sources"),
             None,
         )
         .await
-        .expect("autonomous surface");
+        .expect("direct surface");
 
         assert!(surface.targets_by_name.contains_key("worker_upsert"));
         assert!(surface.targets_by_name.contains_key("recent_research"));

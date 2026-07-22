@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-20 for the worker-first autonomous POC.
+> Last verified: 2026-07-21 for the worker-first POC.
 
 ## Overview
 
@@ -137,7 +137,6 @@ description of its own source architecture. UI code does not reconstruct model
 visibility from raw catalog `[AnyCodable]` entries. Exact selected tool
 contracts remain internal to the provider request; the dashboard receives
 their surface evidence without duplicating the fixed schemas it already owns.
-When autonomy is off, fixed tools remain inspectable but explicitly unexposed.
 The dashboard renders fixed-function ownership and worker routing reason, score,
 and completed-run evidence; the same bounded routing evidence reaches the model
 in the per-turn surface primer without changing catalog revisions after a run.
@@ -248,8 +247,10 @@ owns both navigation and every evidence renderer. It provides:
 - Overview, Core, Workers, and Activity modes in one compact cockpit;
 - the compiled kernel/product-boundary component map and selected session's
   exact provider surface revision/hash;
-- every fixed tool grouped as host, worker control, or core change, with
-  progressively disclosed input/output schemas and exposure state;
+- every fixed tool shown immediately under host, worker-control, and core-change
+  section headings; each operation is a separate compact title-only card that
+  opens a dedicated detail sheet for its description, identifiers, exact
+  schemas, effect, risk, and exposure state;
 - every published worker's distinction between availability, current-session
   projection, and explicit promotion;
 - engine stop-all/resume with an explanation that queued work remains durable;
@@ -338,23 +339,15 @@ sheet, hidden prompt memory editor, or Session Briefing surface.
 `settings::get` returns the complete validated engine settings. iOS admits only
 the explicit product projection in `ServerSettings`.
 
-`autonomousWorkers` has end-to-end ownership:
+The admitted product settings are the default model, optional workspace,
+read-only Tailscale address, and context-compaction threshold/recent-turn count.
+Worker-first execution is unconditional server architecture and therefore has
+no settings DTO, client state, mutation, reset path, or toggle.
 
-1. decode in `EngineProtocolTypes+Settings.swift`;
-2. value in `ServerSettingsSnapshot` and `SettingsState`;
-3. load, reset, and server-switch handling;
-4. `SettingsMutation.autonomousWorkers` and `ServerSettingsUpdate` encoding;
-5. editable toggle in `EngineSettingsPage`.
-
-Existing engines default off. The UI explains that enabling it lets local
-agents create and run persistent workers with the Mac user's normal
-permissions. The setting is server-owned and applies live: disabling it hides
-the model-facing kernel and worker tools, cancels worker execution, and stops
-resident services without deleting worker state. The authenticated Worker
-Console can still inspect that state and use lifecycle or stop controls, but it
-cannot invoke workers while the mode is off. Re-enabling restores the persistent
-tools and dispatcher without restarting the server. Changing paired servers
-reloads the new server's value.
+Compaction remains in Engine settings because it controls the parent session's
+model window and durable context boundary. A worker contract may own its own
+input, output, timeout, and execution policy, but it must not redefine the
+conversation compactor shared by every model and tool call.
 
 No server-only provider, retry, or runtime field may drift into only
 one Swift layer. `SettingsParityTests` guard the admitted projection.

@@ -80,11 +80,11 @@ struct DirectWorkerListLoopResponder {
     observed_result: Arc<Mutex<Option<String>>>,
 }
 
-struct AutonomousAdaptationResponder {
+struct PersistentAdaptationResponder {
     calls: Arc<AtomicUsize>,
 }
 
-impl AutonomousAdaptationResponder {
+impl PersistentAdaptationResponder {
     fn tool_call(
         invocation_id: &str,
         name: &str,
@@ -149,7 +149,7 @@ impl AutonomousAdaptationResponder {
 }
 
 #[async_trait]
-impl ModelResponder for AutonomousAdaptationResponder {
+impl ModelResponder for PersistentAdaptationResponder {
     fn info(&self) -> ModelResponderInfo {
         test_responder_info()
     }
@@ -239,7 +239,7 @@ impl ModelResponder for AutonomousAdaptationResponder {
                     }],
                     "routing":{
                         "intents":["recent research","last 30 days"],
-                        "examples":["Research recent autonomous worker changes"]
+                        "examples":["Research recent persistent worker changes"]
                     }
                 });
                 Ok(Self::tool_call(
@@ -257,14 +257,14 @@ impl ModelResponder for AutonomousAdaptationResponder {
                     TOOL,
                     serde_json::Map::from_iter([(
                         "query".to_owned(),
-                        serde_json::json!("autonomous worker changes"),
+                        serde_json::json!("persistent worker changes"),
                     )]),
                 ))
             }
             2 => {
                 assert!(names.contains(&TOOL), "{names:?}");
                 let result = Self::result_text(&request, "tc-proactive-invoke");
-                assert!(result.contains("autonomous worker changes"), "{result}");
+                assert!(result.contains("persistent worker changes"), "{result}");
                 assert!(result.contains("last30days"), "{result}");
                 Ok(model_response(vec![
                     Ok(StreamEvent::Start),
@@ -282,7 +282,7 @@ impl ModelResponder for AutonomousAdaptationResponder {
                     }),
                 ]))
             }
-            _ => panic!("unexpected autonomous adaptation responder call {call}"),
+            _ => panic!("unexpected persistent adaptation responder call {call}"),
         }
     }
 }
@@ -465,7 +465,7 @@ async fn text_only_run_succeeds_without_frozen_tools() {
 async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues() {
     let calls = Arc::new(AtomicUsize::new(0));
     let observed_result = Arc::new(Mutex::new(None));
-    let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+    let ctx = crate::shared::server::test_support::make_test_context();
     let mut agent = TronAgent::new(
         AgentConfig {
             max_turns: 2,
@@ -512,7 +512,7 @@ async fn primitive_loop_calls_direct_worker_tool_observes_result_and_continues()
 #[tokio::test]
 async fn natural_language_task_proactively_creates_invokes_and_reports_persistent_worker() {
     let calls = Arc::new(AtomicUsize::new(0));
-    let ctx = crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+    let ctx = crate::shared::server::test_support::make_test_context();
     let home = ctx.settings_runtime.home().to_path_buf();
     let mut agent = TronAgent::new(
         AgentConfig {
@@ -520,7 +520,7 @@ async fn natural_language_task_proactively_creates_invokes_and_reports_persisten
             ..AgentConfig::default()
         },
         make_primitive_loop_deps(
-            AutonomousAdaptationResponder {
+            PersistentAdaptationResponder {
                 calls: Arc::clone(&calls),
             },
             ctx.engine_host.clone(),
@@ -530,7 +530,7 @@ async fn natural_language_task_proactively_creates_invokes_and_reports_persisten
 
     let result = agent
         .run(
-            "Research recent autonomous worker changes using https://github.com/mvanhorn/last30days-skill and return a useful result.",
+            "Research recent persistent worker changes using https://github.com/mvanhorn/last30days-skill and return a useful result.",
             crate::domains::agent::r#loop::types::RunContext {
                 run_id: Some("proactive-adaptation-run".into()),
                 ..Default::default()

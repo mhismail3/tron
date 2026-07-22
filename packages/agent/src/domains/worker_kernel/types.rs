@@ -214,8 +214,10 @@ pub struct SourceProvenance {
     pub checksum: Option<String>,
 }
 
-/// Logical vault binding. Bare strings remain the concise optional form;
-/// object form can declare a binding mandatory for execution.
+/// Logical runtime credential binding. Vault names resolve directly;
+/// `provider-<id>` resolves the active named API key from provider auth. Bare
+/// strings remain the concise optional form; object form can declare a binding
+/// mandatory for execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WorkerSecretBinding {

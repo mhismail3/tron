@@ -162,7 +162,7 @@ pub(super) fn worker_bundle_schema() -> Value {
             },
             "secretBindings":{
                 "type":"array",
-                "description":"Logical vault names only; never include secret values.",
+                "description":"Logical credential names only; use provider-<id> for a provider API key and never include secret values.",
                 "items":{
                     "oneOf":[
                         {"type":"string"},

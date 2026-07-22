@@ -23,9 +23,6 @@ impl WorkerRuntime {
         self: &Arc<Self>,
         queued: InvocationRecord,
     ) -> Result<InvocationRecord, String> {
-        if !self.autonomous_enabled() {
-            return Err("worker autonomy was disabled while the invocation was queued".to_owned());
-        }
         let summary = self
             .store
             .summary(&queued.worker_id)?
@@ -104,7 +101,7 @@ impl WorkerRuntime {
             FunctionId::new(format!("worker_kernel::dynamic_{}", queued.worker_id))
                 .map_err(|error| error.to_string())?;
         let execution = execution.and_then(|output| {
-            let secrets = self.load_all_vault_secrets()?;
+            let secrets = self.load_all_runtime_secrets()?;
             let output = redact_json_known_secrets(output, &secrets);
             crate::engine::validate_engine_schema_payload(
                 &worker_function,
@@ -122,7 +119,7 @@ impl WorkerRuntime {
                 Ok(&output),
             )?,
             Err(error) => {
-                let secrets = self.load_all_vault_secrets().unwrap_or_default();
+                let secrets = self.load_all_runtime_secrets().unwrap_or_default();
                 let redacted = redact_known_secrets(&error, &secrets);
                 if !was_stopped {
                     self.store
@@ -186,7 +183,7 @@ impl WorkerRuntime {
                     "worker invocation disappeared during integrity failure".to_owned()
                 });
         }
-        let secrets = self.load_all_vault_secrets().unwrap_or_default();
+        let secrets = self.load_all_runtime_secrets().unwrap_or_default();
         let reason = redact_known_secrets(
             &format!("worker immutable-version integrity check failed: {error}"),
             &secrets,

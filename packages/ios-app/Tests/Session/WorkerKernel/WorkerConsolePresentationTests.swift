@@ -62,6 +62,10 @@ struct WorkerConsolePresentationTests {
         #expect(EngineDashboardPresentation.groupTitle("host") == "Host primitives")
         #expect(EngineDashboardPresentation.groupTitle("worker_control") == "Worker controls")
         #expect(EngineDashboardPresentation.groupTitle("core_change") == "Core changes")
+        #expect(EngineDashboardPresentation.toolTitle("filesystem_read") == "Read File")
+        #expect(EngineDashboardPresentation.toolTitle("worker_upsert") == "Create or Update Worker")
+        #expect(EngineDashboardPresentation.toolTitle("core_proposal_apply") == "Apply Core Proposal")
+        #expect(EngineDashboardPresentation.toolTitle("future_operation") == "Future Operation")
         #expect(
             EngineDashboardPresentation.groupDetail("host", count: 6)
                 .hasPrefix("6 fixed tools")

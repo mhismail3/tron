@@ -406,8 +406,7 @@ mod tests {
 
     #[tokio::test]
     async fn active_worker_hook_ranks_projection_and_self_origin_recovers_locally() {
-        let context =
-            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let context = crate::shared::server::test_support::make_test_context();
         install_relevance_worker(
             &context.engine_host,
             r#"{"rankings":[{"workerId":"formatter","score":1000},{"workerId":"research","score":1}]}"#,
@@ -445,8 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_worker_hook_ranking_disables_owner_and_uses_recovery() {
-        let context =
-            crate::shared::server::test_support::make_test_context_with_autonomous_workers();
+        let context = crate::shared::server::test_support::make_test_context();
         install_relevance_worker(
             &context.engine_host,
             r#"{"rankings":[{"workerId":"not-a-candidate","score":1000}]}"#,

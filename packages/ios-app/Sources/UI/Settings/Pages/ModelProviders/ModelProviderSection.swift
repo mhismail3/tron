@@ -36,23 +36,29 @@ struct ModelProviderSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ProviderSectionHeader(provider: provider, isConfigured: isConfigured)
+        VStack(alignment: .leading, spacing: 8) {
+            providerStatusCard
 
-            VStack(alignment: .leading, spacing: 8) {
-                providerStatusCard
-
-                if ProviderSettingsContainer.containers(for: provider).contains(.googleCloud) {
-                    googleCloudCard
-                }
-
-                providerActionButtons
+            if ProviderSettingsContainer.containers(for: provider).contains(.googleCloud) {
+                googleCloudCard
             }
+        }
+        .providerApiKeyAlert(isPresented: $showAddApiKeyPrompt, scope: apiKeyPromptScope) { draft in
+            await onAddApiKey(draft.saveLabel(for: apiKeyPromptScope), draft.apiKey)
         }
     }
 
     private var providerStatusCard: some View {
         SettingsCard {
+            ProviderSectionHeader(
+                provider: provider,
+                isConfigured: isConfigured,
+                actionItems: actionItems,
+                onSelect: handleAction
+            )
+
+            SettingsRowDivider()
+
             if credentialRows.isEmpty {
                 emptyStatusRow
             } else {
@@ -76,20 +82,12 @@ struct ModelProviderSection: View {
         }
     }
 
-    private var providerActionButtons: some View {
-        ProviderAuthActionButtons(
-            items: actionItems,
-            onSelect: { item in
-                switch item {
-                case .oauthLogin:
-                    onOAuthLogin()
-                case .addApiKey:
-                    showAddApiKeyPrompt = true
-                }
-            }
-        )
-        .providerApiKeyAlert(isPresented: $showAddApiKeyPrompt, scope: apiKeyPromptScope) { draft in
-            await onAddApiKey(draft.saveLabel(for: apiKeyPromptScope), draft.apiKey)
+    private func handleAction(_ item: ProviderAuthActionItem) {
+        switch item {
+        case .oauthLogin:
+            onOAuthLogin()
+        case .addApiKey:
+            showAddApiKeyPrompt = true
         }
     }
 
@@ -149,70 +147,57 @@ struct ModelProviderSection: View {
 struct ProviderSectionHeader: View {
     let provider: ProviderInfo
     let isConfigured: Bool
+    let actionItems: [ProviderAuthActionItem]
+    let onSelect: (ProviderAuthActionItem) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(provider.assetIcon)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(provider.color)
-                .frame(width: 18, height: 18)
+            providerIcon
             Text(provider.displayName)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(provider.color)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
             if isConfigured {
                 Image(systemName: "checkmark.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronEmerald)
             }
             Spacer()
-        }
-        .padding(.bottom, 8)
-    }
-}
 
-struct ProviderAuthActionButtons: View {
-    let items: [ProviderAuthActionItem]
-    let onSelect: (ProviderAuthActionItem) -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(items) { item in
-                Button {
-                    onSelect(item)
-                } label: {
-                    ProviderAuthActionButtonLabel(item: item)
+            Menu {
+                ForEach(actionItems) { item in
+                    Button {
+                        onSelect(item)
+                    } label: {
+                        Label(item.title, systemImage: item.icon)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.accessibilityLabel)
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(provider.color)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Circle())
             }
-
-            Spacer(minLength: 0)
+            .accessibilityLabel("Add \(provider.displayName) credential")
         }
-        .padding(.top, 2)
-        .padding(.bottom, 4)
-    }
-}
-
-private struct ProviderAuthActionButtonLabel: View {
-    let item: ProviderAuthActionItem
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: item.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-            Text(item.title)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-        }
-        .foregroundStyle(.tronEmerald)
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.tronEmerald.opacity(0.12), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(.tronEmerald.opacity(0.2), lineWidth: 1)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var providerIcon: some View {
+        if let systemIcon = provider.systemIcon {
+            Image(systemName: systemIcon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(provider.color)
+                .frame(width: 20, height: 20)
+        } else {
+            Image(provider.assetIcon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(provider.color)
+                .frame(width: 20, height: 20)
         }
-        .contentShape(Capsule())
     }
 }
 

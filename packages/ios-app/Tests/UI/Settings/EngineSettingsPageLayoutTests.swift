@@ -44,7 +44,6 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertNotNil(landscapeContent.range(of: "serversSection"))
         XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
         XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "autonomousWorkersSection"))
         XCTAssertNil(landscapeContent.range(of: "evidencePolicySection"))
         XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(
@@ -68,7 +67,6 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertFalse(content.contains("storageRetentionEnabled"))
         XCTAssertFalse(content.contains("storageMaxDatabaseMb"))
         XCTAssertFalse(content.contains("message" + "Queue" + "Card"))
-        XCTAssertFalse(content.contains("autonomy" + "Section"))
         XCTAssertFalse(content.contains("guard" + "rails" + "Section"))
         XCTAssertFalse(content.contains("hooks" + "Section"))
         XCTAssertFalse(content.contains("protected" + "Branches" + "Section"))
@@ -142,17 +140,47 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             "Providers settings should use the shared iPad-landscape branch"
         )
         XCTAssertTrue(
-            content.contains("private var landscapeContent: some View"),
-            "Providers settings needs a dedicated landscape projection"
+            content.contains("LazyVGrid(columns: providerColumns"),
+            "Provider groups should use a compact adaptive card grid"
         )
         XCTAssertTrue(
-            content.contains("ProviderInfo.modelProviders.prefix(3)"),
-            "The left providers column should hold the first configured model providers"
+            content.contains("ProviderInfo.searchProviders"),
+            "Search credentials should be visible alongside model providers"
         )
-        XCTAssertTrue(
-            content.contains("ProviderInfo.modelProviders.dropFirst(3)"),
-            "The right providers column should keep remaining providers visible"
+    }
+
+    func testProviderActionsLiveInCompactCredentialCardHeaders() throws {
+        let content = try source(pathComponents: [
+            "Sources", "UI", "Settings", "Pages", "ModelProviders", "ModelProviderSection.swift",
+        ])
+
+        XCTAssertTrue(content.contains("ProviderSectionHeader("))
+        XCTAssertTrue(content.contains("Menu {"))
+        XCTAssertTrue(content.contains("plus.circle.fill"))
+        XCTAssertTrue(content.contains("SettingsRowDivider()"))
+    }
+
+    func testEngineCoreUsesAlwaysVisibleCompactRowsAndSeparateDetailSheet() throws {
+        let shell = try source(pathComponents: [
+            "Sources", "UI", "WorkerConsole", "WorkerConsoleViews.swift",
+        ])
+        let views = try source(pathComponents: [
+            "Sources", "UI", "WorkerConsole", "EngineDashboardViews.swift",
+        ])
+        let compactRow = try XCTUnwrap(
+            views.components(separatedBy: "private struct EngineCoreToolRow").last?
+                .components(separatedBy: "struct EngineCoreToolDetailSheet").first
         )
+
+        XCTAssertTrue(shell.contains("EngineCoreSection(group: group, tools: tools)"))
+        XCTAssertTrue(shell.contains(".sheet(item: $selectedCoreTool)"))
+        XCTAssertTrue(views.contains("LazyVStack(spacing: 8)"))
+        XCTAssertFalse(views.contains("DisclosureGroup(isExpanded: $isExpanded)"))
+        XCTAssertTrue(views.contains("EngineCoreToolDetailSheet"))
+        XCTAssertTrue(views.contains("EngineDashboardPresentation.toolTitle(tool.modelName)"))
+        XCTAssertFalse(compactRow.contains("tool.description"))
+        XCTAssertFalse(compactRow.contains("tool.effectClass"))
+        XCTAssertFalse(compactRow.contains("tool.risk"))
     }
 
     func testEngineAndProvidersSheetsDoNotMountSummaryHeroes() throws {
@@ -177,7 +205,6 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(engine.contains("label: \"Model\""))
         XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.autonomousWorkers(enabled))"))
         XCTAssertTrue(settingsMain.contains("MainSettingsGridDestination.order"))
         XCTAssertFalse(settingsMain.contains("Server-Owned"))
         XCTAssertFalse(settingsMain.contains("This iPhone"))

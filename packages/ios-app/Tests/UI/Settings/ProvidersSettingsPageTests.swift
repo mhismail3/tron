@@ -48,6 +48,14 @@ struct ProvidersSettingsPageTests {
         #expect(ids == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
     }
 
+    @Test("search providers use the shared credential store without becoming model choices")
+    func searchProviderShape() {
+        #expect(ProviderInfo.searchProviders.map(\.id) == ["brave", "exa"])
+        #expect(ProviderInfo.displayName(for: "brave") == "Brave Search")
+        #expect(ProviderInfo.displayName(for: "exa") == "Exa")
+        #expect(!ProviderInfo.settingsOptions(including: "google").contains { $0.value == "brave" })
+    }
+
     @Test("only Anthropic, OpenAI, and Google support OAuth")
     func oauthFlags() {
         let oauthIds = Set(ProviderInfo.modelProviders.filter(\.supportsOAuth).map(\.id))
@@ -97,11 +105,6 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderAuthActionItem.visibleItems(for: anthropic, providerAuth: activeOAuth) == [.addApiKey])
         #expect(ProviderAuthActionItem.visibleItems(for: anthropic, providerAuth: deadOAuth) == [.oauthLogin, .addApiKey])
         #expect(ProviderAuthActionItem.visibleItems(for: minimax, providerAuth: activeOAuth) == [.addApiKey])
-    }
-
-    @Test("provider auth action buttons are leading aligned")
-    func providerAuthActionButtonsAreLeadingAligned() {
-        #expect(ProviderAuthActionButtonsLayout.alignment == .leading)
     }
 
 }

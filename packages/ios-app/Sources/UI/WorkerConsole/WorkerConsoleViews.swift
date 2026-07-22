@@ -88,7 +88,6 @@ struct WorkerConsoleDashboardBand: View {
 
     private var summaryDetail: String {
         if viewModel.stopAll { return "Dispatch is paused; durable work remains queued." }
-        if !viewModel.autonomousWorkers { return "Autonomous workers are off for this engine." }
         if viewModel.workers.isEmpty { return "Core ready; create persistent workers conversationally." }
         if viewModel.attentionCount > 0 {
             return "\(viewModel.attentionCount) worker\(viewModel.attentionCount == 1 ? " needs" : "s need") review."
@@ -117,6 +116,7 @@ struct WorkerConsoleSheet: View {
 
     @State private var confirmStopAll = false
     @State private var selectedSection: EngineDashboardSection = .overview
+    @State private var selectedCoreTool: EngineSurfaceToolDTO?
 
     var body: some View {
         NavigationStack {
@@ -161,6 +161,9 @@ struct WorkerConsoleSheet: View {
                     repository: repository,
                     connectionState: connectionState
                 )
+            }
+            .sheet(item: $selectedCoreTool) { tool in
+                EngineCoreToolDetailSheet(tool: tool)
             }
             .confirmationDialog(
                 "Stop every worker?",
@@ -272,17 +275,11 @@ struct WorkerConsoleSheet: View {
     }
 
     private var coreContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             ForEach(["host", "worker_control", "core_change"], id: \.self) { group in
                 let tools = viewModel.coreTools.filter { $0.primitiveGroup == group }
-                WorkerConsoleSectionHeader(
-                    title: EngineDashboardPresentation.groupTitle(group),
-                    detail: EngineDashboardPresentation.groupDetail(group, count: tools.count)
-                )
-                LazyVStack(spacing: 9) {
-                    ForEach(tools) { tool in
-                        EngineCoreToolCard(tool: tool)
-                    }
+                EngineCoreSection(group: group, tools: tools) { tool in
+                    selectedCoreTool = tool
                 }
             }
         }
@@ -372,9 +369,6 @@ struct WorkerConsoleSheet: View {
     private var consoleStatus: (title: String, detail: String, symbol: String, color: Color) {
         if !connectionState.isConnected {
             return ("Engine unavailable", connectionState.displayText, "network.slash", .tronTextMuted)
-        }
-        if !viewModel.autonomousWorkers {
-            return ("Core visible · autonomy off", "The fixed engine is healthy; model-facing worker tools are disabled for this engine.", "lock.circle", .tronWarning)
         }
         if viewModel.stopAll {
             return ("Dispatch paused", "Queued work is durable and ready to resume.", "pause.circle", .tronWarning)
