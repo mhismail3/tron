@@ -517,6 +517,9 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
         .unwrap();
     assert!(store.claim_running(&queued.invocation_id).unwrap());
     store
+        .set_agent_session_id(&queued.invocation_id, "sess_interrupted")
+        .unwrap();
+    store
         .connection()
         .unwrap()
         .execute("DELETE FROM worker_triggers", [])
@@ -554,10 +557,31 @@ fn index_reconstruction_recovers_canonical_bundle_and_interrupted_queue() {
             .status,
         "queued"
     );
+    assert_eq!(
+        reopened
+            .invocation(&queued.invocation_id)
+            .unwrap()
+            .unwrap()
+            .agent_session_id,
+        None,
+        "a redelivered agent attempt must not inherit its interrupted child session"
+    );
     let recovered_attempts = reopened.attempts(&queued.invocation_id).unwrap();
     assert_eq!(recovered_attempts.len(), 1);
     assert_eq!(recovered_attempts[0]["status"], "interrupted");
     assert!(reopened.claim_running(&queued.invocation_id).unwrap());
+    reopened
+        .set_agent_session_id(&queued.invocation_id, "sess_recovered")
+        .unwrap();
+    assert_eq!(
+        reopened
+            .invocation(&queued.invocation_id)
+            .unwrap()
+            .unwrap()
+            .agent_session_id
+            .as_deref(),
+        Some("sess_recovered")
+    );
     let completed = reopened
         .complete_invocation(
             &queued.invocation_id,

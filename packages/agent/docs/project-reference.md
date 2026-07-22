@@ -410,8 +410,11 @@ Tron does not inject a framework-specific wrapper key.
 Delivery is at least once. Tron persists `queued` before execution and records a
 numbered attempt whenever a dispatcher claims it. On restart, the unfinished
 attempt becomes `interrupted` and its invocation returns to `queued` for a new
-attempt. A `(workerId, idempotencyKey)` uniqueness constraint suppresses repeated
-delivery. The idempotency key, invocation id, trace, depth, and trigger kind are
+attempt. Recovery clears an interrupted agent attempt's stale current-child
+link before requeueing, allowing the new attempt to attach its own child session
+while the interrupted attempt remains visible. A `(workerId, idempotencyKey)`
+uniqueness constraint suppresses repeated delivery. The idempotency key,
+invocation id, trace, depth, and trigger kind are
 also passed to command runners as `TRON_WORKER_*` variables, to agent runners in
 their durable prompt contract, and to resident services as `X-Tron-*` headers.
 Every run records its pinned version, timestamps, input, output or error, and
@@ -977,6 +980,67 @@ The Search component is therefore independently proven, while live result
 quality remains intentionally unclaimed until at least one real Brave or Exa
 credential is configured. Source Review, Citation, and the Research coordinator
 remain separate guided workers and have not been fabricated by this component.
+
+### Guided Research Source Review proof
+
+The second Research-suite component was authored and improved through an
+ordinary `gpt-5.5` Tron session rather than installed from the repository. The
+profile-owned `research-source-review` agent worker projects the typed
+`worker_research_source_review` tool. Its immutable presentation envelope joins
+Research suite contract version 1 as component role `source-review`, without
+claiming primary-suite custody. Search finds candidate URLs; Source Review owns
+the materially different closure of bounded retrieval, extraction, source
+assessment, evidence comparison, contradiction reporting, and gap reporting.
+
+The guided run exposed two engine defects rather than merely worker-specific
+prompt problems. Agent-runner children were asked for typed JSON without being
+shown their immutable output schema, and the host fetch primitive defaulted to
+retaining up to one MiB of raw response content. The kernel now includes the
+exact output schema in every agent worker's durable execution contract. The raw
+fetch primitive remains deliberately non-semantic, but defaults to a 128-KiB
+response ceiling, accepts a bounded timeout, and records a digest of retained
+content so workers can reason about truncation and provenance without pushing
+unbounded pages into model context. `session_set_title` also defaults to the
+causal session, removing an unrelated session-id ceremony uncovered by the
+same ordinary authoring session.
+
+The corrected worker keeps semantic extraction in worker custody. Its
+dependency-free `fetch_extract.py` helper performs bounded HTTP retrieval,
+redirect tracking, HTML title/date/link extraction, script/style exclusion,
+plain-text handling, raw and retained hashes, normalized same-domain links,
+truncation reporting, and actionable unsupported-binary results. The helper is
+invoked through exact `python3` argv by the agent, may review independent URLs
+in parallel, retains at most 50,000 characters per page and 120,000 characters
+overall, and never requires the model to ingest raw HTML. PDF content is not
+silently fabricated: this version returns a typed unsupported result until a
+real PDF extraction dependency is justified by use.
+
+Acceptance evidence for immutable version
+`3899d5e1a2ffeaa130afea9386453eb2644cab10afe816d0028f2f0c03b0d0d4`
+covers:
+
+- independent deterministic extraction and smoke suites for HTML, redirects,
+  hashes, truncation, bounded links, plain text, unsupported binaries, input
+  bounds, instruction invariants, and the output fixture;
+- a useful two-source review of the official Brave and Exa search
+  documentation, with typed source, evidence, agreement, contradiction, gap,
+  freshness, archival, and fetch-provenance records;
+- a completed linked child session and schema-valid
+  `research.source_review.v1` result rather than unvalidated prose;
+- reduction of roughly 1.45 MiB of fetched HTML to fewer than 23,000 retained
+  review characters, a greater-than-98-percent source-text reduction before
+  model reasoning; and
+- durable failed-run evidence for the earlier invisible-schema and stale-child
+  defects instead of deletion or rewriting of history.
+
+Restart testing found one additional dispatcher defect: an interrupted agent
+attempt retained its current-child pointer when returned to `queued`, so the
+redelivered attempt could not attach a fresh child. Recovery now terminalizes
+the interrupted attempt, clears only the invocation's stale live pointer, and
+permits the next attempt to link its own child session. The old attempt and its
+child remain inspectable. Source Review must still complete restart invocation
+and retained-version rollback checks before the component is declared fully
+accepted; Citation and the coordinator remain unimplemented.
 
 ### Prior inventory coverage evidence
 

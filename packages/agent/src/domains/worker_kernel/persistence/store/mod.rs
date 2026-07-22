@@ -351,7 +351,8 @@ impl WorkerStore {
             .map_err(|error| format!("recover interrupted worker attempts: {error}"))?;
         transaction
             .execute(
-                "UPDATE worker_invocations SET status='queued', started_at=NULL
+                "UPDATE worker_invocations SET status='queued', started_at=NULL,
+                    agent_session_id=NULL
                  WHERE status='running'",
                 [],
             )

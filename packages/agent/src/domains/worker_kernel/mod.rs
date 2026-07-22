@@ -112,7 +112,9 @@
 //! records, events, or logs.
 //! Every claimed delivery creates a numbered attempt. Interrupted attempts are
 //! terminalized before their invocation is requeued, making at-least-once
-//! redelivery and causal-loop suppression directly inspectable. Engine events
+//! redelivery and causal-loop suppression directly inspectable. Recovery clears
+//! an interrupted agent attempt's stale child-session pointer before redelivery,
+//! so the next attempt can link its own live child. Engine events
 //! overlay payload keys declared by the input schema onto configured defaults;
 //! no framework envelope is injected. A projected event outside the typed
 //! schema is a terminal worker failure, not an endlessly retried delivery. A
