@@ -22,7 +22,6 @@ final class WorkerConsoleViewModel {
     var stopAll = false
     var lastError: String?
     var monitoringError: String?
-    private(set) var currentSessionId: String?
     private(set) var activityRunsNextOffset: UInt64?
     private(set) var activityInboxNextOffset: UInt64?
 
@@ -61,20 +60,12 @@ final class WorkerConsoleViewModel {
         engineSnapshot?.activeEngineHooks ?? []
     }
 
-    var projectedWorkerCount: Int {
-        Int(engineSnapshot?.surface.projectedWorkerCount ?? 0)
-    }
-
     var coreToolCount: Int {
         coreTools.count
     }
 
     var availableWorkerCount: Int {
         Int(engineSnapshot?.surface.availableWorkerCount ?? 0)
-    }
-
-    var catalogRevision: UInt64? {
-        engineSnapshot?.surface.catalogRevision
     }
 
     var invocationJSONIsValid: Bool {
@@ -91,10 +82,8 @@ final class WorkerConsoleViewModel {
 
     func refresh(
         repository: any WorkerKernelRepository,
-        connectionState: ConnectionState,
-        sessionId: String? = nil
+        connectionState: ConnectionState
     ) async {
-        currentSessionId = sessionId
         guard connectionState.isConnected else {
             engineSnapshot = nil
             workers = []
@@ -115,7 +104,7 @@ final class WorkerConsoleViewModel {
         }
         do {
             let snapshot = try await repository.engineSurfaceSnapshot(
-                sessionId: sessionId,
+                sessionId: nil,
                 relevanceQuery: nil
             )
             let globalRuns = try await repository.workerRuns(workerId: nil, limit: 20)
@@ -229,8 +218,7 @@ final class WorkerConsoleViewModel {
             if changed {
                 await refresh(
                     repository: repository,
-                    connectionState: connectionState,
-                    sessionId: currentSessionId
+                    connectionState: connectionState
                 )
             }
             try? await Task.sleep(for: .seconds(1))
@@ -391,8 +379,7 @@ final class WorkerConsoleViewModel {
             try await operation()
             await refresh(
                 repository: repository,
-                connectionState: connectionState,
-                sessionId: currentSessionId
+                connectionState: connectionState
             )
             lastError = nil
         } catch {

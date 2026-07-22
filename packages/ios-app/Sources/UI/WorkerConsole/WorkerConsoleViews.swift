@@ -50,7 +50,7 @@ struct WorkerConsoleDashboardBand: View {
                         .lineLimit(2)
                     HStack(spacing: 8) {
                         metric("Core", viewModel.coreToolCount)
-                        metric("Visible", viewModel.projectedWorkerCount)
+                        metric("Workers", viewModel.enabledCount)
                         metric("Issues", viewModel.attentionCount)
                     }
                 }
@@ -112,7 +112,6 @@ struct WorkerConsoleSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
-    let sessionId: String?
     let onOpenSession: (String) -> Void
 
     @State private var confirmStopAll = false
@@ -252,9 +251,9 @@ struct WorkerConsoleSheet: View {
             HStack(spacing: 0) {
                 summaryMetric(value: viewModel.coreToolCount, label: "Core")
                 summaryDivider
-                summaryMetric(value: viewModel.projectedWorkerCount, label: "Visible")
+                summaryMetric(value: viewModel.enabledCount, label: "Workers")
                 summaryDivider
-                summaryMetric(value: viewModel.availableWorkerCount, label: "Available")
+                summaryMetric(value: viewModel.attentionCount, label: "Issues")
             }
 
             Button {
@@ -288,8 +287,8 @@ struct WorkerConsoleSheet: View {
     private var overviewContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             WorkerConsoleSectionHeader(
-                title: "Current agent surface",
-                detail: "Executable tools resolved for the selected session at the next provider boundary."
+                title: "Engine availability",
+                detail: "Profile-wide primitives and persistent worker tools available for agent selection."
             )
             EngineSurfaceCard(viewModel: viewModel)
 
@@ -406,7 +405,7 @@ struct WorkerConsoleSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             WorkerConsoleSectionHeader(
                 title: "Persistent workers",
-                detail: "Each enabled worker is published as its own direct typed tool."
+                detail: "Each enabled worker publishes one direct typed tool for agents to select when useful."
             )
 
             if !connectionState.isConnected {
@@ -485,8 +484,7 @@ struct WorkerConsoleSheet: View {
     private func refresh() async {
         await viewModel.refresh(
             repository: repository,
-            connectionState: connectionState,
-            sessionId: sessionId
+            connectionState: connectionState
         )
     }
 
@@ -534,35 +532,36 @@ private struct WorkerConsoleRow: View {
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
-                    Label(WorkerConsolePresentation.displayLabel(worker.runnerKind), systemImage: "cpu")
                     Label(
-                        WorkerConsolePresentation.compactIdentifier(worker.activeVersion, length: 8),
-                        systemImage: "point.3.connected.trianglepath.dotted"
+                        WorkerConsolePresentation.runnerLabel(worker.runnerKind),
+                        systemImage: "cpu"
                     )
-                    if worker.triggerCount > 0 {
-                        Label("\(worker.triggerCount)", systemImage: "alarm")
+                    Label(
+                        WorkerConsolePresentation.triggerLabel(worker.triggerCount),
+                        systemImage: "alarm"
+                    )
+                    if let surface {
+                        Label(
+                            WorkerConsolePresentation.completedRunLabel(surface.completedRuns),
+                            systemImage: "checkmark.circle"
+                        )
                     }
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
+                .lineLimit(1)
 
-                if let surface {
-                    HStack(spacing: 6) {
-                        workerSurfaceBadge("Published", color: .tronSuccess)
-                        if surface.projected {
-                            workerSurfaceBadge("This session", color: .tronEmerald)
-                        }
-                        if surface.promoted {
-                            workerSurfaceBadge("Promoted", color: .tronPurple)
-                        }
+                HStack(spacing: 7) {
+                    if surface != nil {
+                        workerSurfaceBadge("Available to agents", color: .tronSuccess)
+                    } else if worker.enabled && !worker.retired {
+                        workerSurfaceBadge("Tool unavailable", color: .tronWarning)
                     }
-                    .lineLimit(1)
-
-                    Text("\(surface.modelName) · r\(surface.functionRevision) · \(EngineDashboardPresentation.routingEvidence(surface))")
+                    Text("Version \(WorkerConsolePresentation.compactIdentifier(worker.activeVersion, length: 8))")
                         .font(TronTypography.code(size: TronTypography.sizeSM))
                         .foregroundStyle(.tronTextMuted)
-                        .lineLimit(2)
                 }
+                .lineLimit(1)
             }
 
             Spacer(minLength: 6)
@@ -577,7 +576,9 @@ private struct WorkerConsoleRow: View {
         .sectionFill(status.color, cornerRadius: 12, subtle: true, interactive: true)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(worker.name), \(status.title), \(worker.runnerKind) worker")
+        .accessibilityLabel(
+            "\(worker.name), \(status.title), \(WorkerConsolePresentation.runnerLabel(worker.runnerKind))"
+        )
     }
 
     private func workerSurfaceBadge(_ title: String, color: Color) -> some View {

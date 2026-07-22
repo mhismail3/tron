@@ -1575,12 +1575,15 @@ The iOS Engine Dashboard is backed by `WorkerKernelClient`,
 `WorkerKernelRepository`, `WorkerConsoleViewModel`, and `UI/WorkerConsole`.
 It exposes:
 
-- an Overview of the selected session's exact provider surface, current
-  operational state, and active worker-owned engine hooks;
+- a profile-level Overview of fixed and published worker-tool availability,
+  current operational state, and active worker-owned engine hooks;
 - a Core inventory of all fixed host, worker-control, and core-change tools,
   including schemas and current exposure;
-- published workers with distinct Published, This session, and Promoted state;
-- worker list, health, runner, active content version, provenance, and triggers;
+- published workers with explicit profile-global availability to agents;
+  session promotion and raw query-relevance scores are reserved for a future
+  named-chat diagnostic rather than shown without context;
+- worker list, health, explicit runner type, active content version, successful
+  run count, provenance, and triggers;
 - JSON-schema-aware typed invocation;
 - engine-wide Activity plus per-worker runs, durable inbox, and audit history;
   Activity can load every bounded history page, and any agent-runner row opens

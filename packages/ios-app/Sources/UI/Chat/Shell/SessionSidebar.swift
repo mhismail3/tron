@@ -26,13 +26,8 @@ struct SessionSidebar: View {
         Dictionary(uniqueKeysWithValues: workspaceGroups.map { ($0.id, $0.sessions.count) })
     }
 
-    private var dashboardSessionId: String? {
-        selectedSessionId ?? eventStoreManager.sortedSessions.first?.id
-    }
-
     private var workerConsoleRefreshKey: WorkerConsoleRefreshKey {
         WorkerConsoleRefreshKey(
-            sessionId: dashboardSessionId,
             isConnected: dependencies.connectionRepository.connectionState.isConnected
         )
     }
@@ -180,7 +175,6 @@ struct SessionSidebar: View {
                 viewModel: workerConsole,
                 repository: dependencies.workerKernelRepository,
                 connectionState: dependencies.connectionRepository.connectionState,
-                sessionId: dashboardSessionId,
                 onOpenSession: { sessionId in
                     showWorkerConsole = false
                     NotificationCenter.default.post(
@@ -270,8 +264,7 @@ struct SessionSidebar: View {
     private func refreshWorkerConsole() async {
         await workerConsole.refresh(
             repository: dependencies.workerKernelRepository,
-            connectionState: dependencies.connectionRepository.connectionState,
-            sessionId: dashboardSessionId
+            connectionState: dependencies.connectionRepository.connectionState
         )
     }
 
@@ -321,6 +314,5 @@ struct SessionSidebar: View {
 }
 
 private struct WorkerConsoleRefreshKey: Equatable {
-    let sessionId: String?
     let isConnected: Bool
 }

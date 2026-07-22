@@ -48,6 +48,13 @@ struct WorkerConsolePresentationTests {
                 == "2026-07-20 · 16:18"
         )
         #expect(WorkerConsolePresentation.displayLabel("resident_service") == "Resident Service")
+        #expect(WorkerConsolePresentation.runnerLabel("agent") == "Agent runner")
+        #expect(WorkerConsolePresentation.runnerLabel("command") == "Command runner")
+        #expect(WorkerConsolePresentation.runnerLabel("service") == "Service runner")
+        #expect(WorkerConsolePresentation.triggerLabel(1) == "1 trigger")
+        #expect(WorkerConsolePresentation.triggerLabel(2) == "2 triggers")
+        #expect(WorkerConsolePresentation.completedRunLabel(1) == "1 successful run")
+        #expect(WorkerConsolePresentation.completedRunLabel(3) == "3 successful runs")
 
         let provenance = WorkerConsolePresentation.provenance(from: AnyCodable([
             ["source": "field:agent-runner-scenario", "revision": "2-authenticated-model"],
@@ -79,7 +86,7 @@ struct WorkerConsolePresentationTests {
         #expect(WorkerConsolePresentation.inboxSummary(item).count == 80)
     }
 
-    @Test("Engine primitive groups and projection reasons use stable operator language")
+    @Test("Engine primitive groups use stable operator language")
     func engineDashboardProjection() {
         #expect(EngineDashboardPresentation.groupTitle("host") == "Host primitives")
         #expect(EngineDashboardPresentation.groupTitle("worker_control") == "Worker controls")
@@ -91,31 +98,6 @@ struct WorkerConsolePresentationTests {
         #expect(
             EngineDashboardPresentation.groupDetail("host", count: 6)
                 .hasPrefix("6 fixed tools")
-        )
-        #expect(
-            EngineDashboardPresentation.selectionReason("session_promotion")
-                == "Promoted for this session"
-        )
-        #expect(
-            EngineDashboardPresentation.selectionReason("relevance")
-                == "Relevant to the current task"
-        )
-        #expect(EngineDashboardPresentation.selectionReason(nil) == "Available")
-        #expect(
-            EngineDashboardPresentation.routingEvidence(
-                AvailableWorkerToolDTO(
-                    workerId: "research",
-                    modelName: "worker_research",
-                    functionId: "worker_kernel::dynamic_research",
-                    functionRevision: 2,
-                    workerVersion: "version",
-                    promoted: false,
-                    projected: true,
-                    selectionReason: "relevance",
-                    relevanceScore: 7,
-                    completedRuns: 3
-                )
-            ) == "Relevant to the current task · score 7 · 3 completed runs"
         )
     }
 

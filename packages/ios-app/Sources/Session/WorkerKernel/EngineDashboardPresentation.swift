@@ -57,19 +57,4 @@ enum EngineDashboardPresentation {
         return "\(count) fixed tool\(count == 1 ? "" : "s") · \(purpose)"
     }
 
-    static func selectionReason(_ reason: String?) -> String {
-        switch reason {
-        case "session_promotion": "Promoted for this session"
-        case "relevance": "Relevant to the current task"
-        case "default": "Default visible worker"
-        case "fixed": "Always-on core"
-        default: "Available"
-        }
-    }
-
-    static func routingEvidence(_ worker: AvailableWorkerToolDTO) -> String {
-        let reason = selectionReason(worker.selectionReason)
-        let runs = "\(worker.completedRuns) completed run\(worker.completedRuns == 1 ? "" : "s")"
-        return "\(reason) · score \(worker.relevanceScore) · \(runs)"
-    }
 }

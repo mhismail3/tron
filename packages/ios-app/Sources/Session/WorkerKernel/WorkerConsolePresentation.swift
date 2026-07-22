@@ -94,6 +94,23 @@ enum WorkerConsolePresentation {
         return String(collapsed.prefix(maxLength - 1)) + "…"
     }
 
+    static func runnerLabel(_ value: String) -> String {
+        switch normalized(value) {
+        case "agent": "Agent runner"
+        case "command": "Command runner"
+        case "service", "residentservice": "Service runner"
+        default: "\(displayLabel(value)) runner"
+        }
+    }
+
+    static func triggerLabel(_ count: UInt64) -> String {
+        "\(count) trigger\(count == 1 ? "" : "s")"
+    }
+
+    static func completedRunLabel(_ count: UInt64) -> String {
+        "\(count) successful run\(count == 1 ? "" : "s")"
+    }
+
     static func runSummary(_ run: WorkerInvocationDTO) -> String? {
         summaryValue(from: run.input, preferredKeys: ["task", "question", "query", "action", "title"])
     }

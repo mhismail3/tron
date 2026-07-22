@@ -164,7 +164,7 @@ struct WorkerDetailSheet: View {
                 WorkerMetadataDivider()
                 WorkerMetadataRow(
                     label: "Runner",
-                    value: WorkerConsolePresentation.displayLabel(worker.runnerKind)
+                    value: WorkerConsolePresentation.runnerLabel(worker.runnerKind)
                 )
                 WorkerMetadataDivider()
                 WorkerMetadataRow(

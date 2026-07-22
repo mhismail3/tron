@@ -7,51 +7,25 @@ struct EngineSurfaceCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Label(
-                    "Live model surface",
-                    systemImage: "eye.circle.fill"
+                    "Available tools",
+                    systemImage: "wrench.and.screwdriver.fill"
                 )
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronEmerald)
-                Spacer()
-                if let revision = viewModel.catalogRevision {
-                    Text("r\(revision)")
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                }
             }
 
             HStack(spacing: 0) {
                 metric(viewModel.coreToolCount, "Fixed")
                 divider
-                metric(viewModel.projectedWorkerCount, "Projected")
+                metric(viewModel.availableWorkerCount, "Workers")
                 divider
-                metric(viewModel.availableWorkerCount, "Available")
+                metric(viewModel.coreToolCount + viewModel.availableWorkerCount, "Total")
             }
 
-            let projected = viewModel.availableWorkerTools.filter(\.projected)
-            if !projected.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Worker tools on the next turn")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                    ForEach(projected) { worker in
-                        HStack(spacing: 7) {
-                            Circle()
-                                .fill(worker.promoted ? Color.tronPurple : .tronEmerald)
-                                .frame(width: 6, height: 6)
-                            Text(worker.modelName)
-                                .font(TronTypography.code(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextPrimary)
-                                .lineLimit(1)
-                            Spacer()
-                            Text(EngineDashboardPresentation.routingEvidence(worker))
-                                .font(TronTypography.sans(size: TronTypography.sizeSM))
-                                .foregroundStyle(.tronTextMuted)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
+            Text("Fixed tools are always present. Every healthy enabled worker publishes a typed tool, and agents select the relevant worker set for each turn.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if !viewModel.activeEngineHooks.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
@@ -76,11 +50,6 @@ struct EngineSurfaceCard: View {
                 }
             }
 
-            if let hash = viewModel.engineSnapshot?.surface.surfaceHash, !hash.isEmpty {
-                Text("Surface \(WorkerConsolePresentation.compactIdentifier(hash, length: 12))")
-                    .font(TronTypography.code(size: TronTypography.sizeSM))
-                    .foregroundStyle(.tronTextMuted)
-            }
         }
         .padding(13)
         .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)

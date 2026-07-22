@@ -46,11 +46,19 @@ extension SourceGuardTests {
         #expect(source.contains(".accessibilityLabel(notification.textContent)"))
     }
 
-    @Test("Engine Dashboard is the single high-signal engine surface")
+    @Test("Engine Dashboard is the single profile-level high-signal engine surface")
     func testEngineDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()
         let sidebar = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
+            encoding: .utf8
+        )
+        let console = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/WorkerConsole/WorkerConsoleViews.swift"),
+            encoding: .utf8
+        )
+        let viewModel = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Session/WorkerKernel/WorkerConsoleViewModel.swift"),
             encoding: .utf8
         )
         let theme = try String(
@@ -61,8 +69,15 @@ extension SourceGuardTests {
         #expect(sidebar.contains("WorkerConsoleSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
         #expect(sidebar.contains("workerConsoleRefreshKey"))
-        #expect(sidebar.contains("dashboardSessionId"))
-        #expect(sidebar.contains("sessionId: dashboardSessionId"))
+        #expect(!sidebar.contains("dashboardSessionId"))
+        #expect(!sidebar.contains("sessionId: selectedSessionId"))
+        #expect(viewModel.contains("sessionId: nil"))
+        #expect(!viewModel.contains("currentSessionId"))
+        #expect(console.contains("Available to agents"))
+        #expect(console.contains("runnerLabel(worker.runnerKind)"))
+        #expect(!console.contains("\"This session\""))
+        #expect(!console.contains("\"Promoted\""))
+        #expect(!console.contains("routingEvidence"))
         #expect(sidebar.contains("await workerConsole.monitor("))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
         #expect(sidebar.contains(".task(id: workerConsoleRefreshKey)"))

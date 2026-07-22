@@ -135,18 +135,21 @@ response's top-level `result`; failures decode only the canonical top-level
 protocol error. There is no nested child-invocation response envelope.
 
 `WorkerKernelClient.engineSurfaceSnapshot` calls the authenticated,
-non-model-facing `engine::surface_snapshot` read with optional session context.
+non-model-facing `engine::surface_snapshot` read. The profile-level Engine
+Dashboard intentionally omits session context; a future contextual chat view
+may supply it when per-turn routing evidence is useful and clearly attributed.
 Strongly typed catalog DTOs expose the complete executable fixed-tool
 inventory, catalog revision, surface hash/counts, function/worker versions,
 every published worker's promoted/projected state, selection evidence, and
 canonical worker inventory. The server does not send a separately maintained
 description of its own source architecture. UI code does not reconstruct model
 visibility from raw catalog `[AnyCodable]` entries. Exact selected tool
-contracts remain internal to the provider request; the dashboard receives
-their surface evidence without duplicating the fixed schemas it already owns.
-The dashboard renders fixed-function ownership and worker routing reason, score,
-and completed-run evidence; the same bounded routing evidence reaches the model
-in the per-turn surface primer without changing catalog revisions after a run.
+contracts remain internal to the provider request. The profile dashboard
+renders fixed-function ownership plus global worker publication, health,
+runner, version, trigger, and successful-run evidence. It does not present
+session promotion or query-relevance scores without a named chat and actual
+task query. Bounded routing evidence still reaches the model in the per-turn
+surface primer without changing catalog revisions after a run.
 The client models current surface truth only; it has no catalog-watch, catalog-
 change-history, or raw catalog snapshot DTO plane.
 
@@ -230,8 +233,8 @@ state.
 - one-time returned webhook credential;
 - refresh/mutation flags, stop-all status, and the last transport error.
 
-`refresh` loads one authoritative, optionally session-scoped engine snapshot,
-then engine activity and the selected worker if it still exists. A disconnected
+`refresh` loads one authoritative profile-level engine snapshot, then engine
+activity and the selected worker if it still exists. A disconnected
 refresh clears server-owned rows. `monitor` polls
 both worker stream topics with independent cursors and refreshes only after new
 events. Topic polling is historical replay, so the repository contract requires
@@ -246,8 +249,8 @@ the worker's actual input schema.
 
 ### Views
 
-The session sidebar contains a compact Engine band showing core, selected-
-surface, and issue counts. It opens `WorkerConsoleSheet`, whose visible product
+The session sidebar contains a compact Engine band showing core, active-worker,
+and issue counts. It opens `WorkerConsoleSheet`, whose visible product
 identity is Engine. The sidebar owns the monitoring task, so the dashboard
 continues to receive durable lifecycle/invocation changes while its sheet is
 closed. The dashboard uses
@@ -260,16 +263,17 @@ cards are separate files under the same feature owner; no all-in-one view file
 owns both navigation and every evidence renderer. It provides:
 
 - Overview, Core, Workers, and Activity modes in one compact cockpit;
-- the compiled kernel/product-boundary component map and selected session's
-  exact provider surface revision/hash;
+- the compiled kernel/product-boundary component map and profile-wide fixed and
+  published worker-tool counts;
 - every fixed tool shown immediately under host, worker-control, and core-change
   section headings; each operation is a separate compact title-only card that
   opens a dedicated detail sheet for its description, identifiers, exact
   schemas, effect, risk, and exposure state;
-- every published worker's distinction between availability, current-session
-  projection, and explicit promotion;
+- every published worker's profile-global availability to agents, without
+  leaking unnamed session promotion or queryless relevance diagnostics;
 - engine stop-all/resume with an explanation that queued work remains durable;
-- worker list with runner, health, active hash prefix, and trigger count;
+- worker list with explicit runner type, health, active hash prefix, trigger
+  count, and successful-run evidence;
 - bounded provenance tags with full accessible source labels;
 - one generic worker workflow split into Overview, Run, Activity, and Manage;
 - native-experience technical detail limited to Contract and Manage so domain

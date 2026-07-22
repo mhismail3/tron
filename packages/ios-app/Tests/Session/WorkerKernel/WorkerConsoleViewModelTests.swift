@@ -12,15 +12,13 @@ struct WorkerConsoleViewModelTests {
 
         await viewModel.refresh(
             repository: repository,
-            connectionState: .connected,
-            sessionId: "session-current"
+            connectionState: .connected
         )
         #expect(viewModel.workers.map(\.workerId) == ["research"])
         #expect(viewModel.healthyCount == 1)
-        #expect(viewModel.currentSessionId == "session-current")
-        #expect(repository.snapshotSessionIds == ["session-current"])
-        #expect(viewModel.catalogRevision == 42)
-        #expect(viewModel.projectedWorkerCount == 1)
+        #expect(viewModel.enabledCount == 1)
+        #expect(repository.snapshotSessionIds.count == 1)
+        #expect(repository.snapshotSessionIds[0] == nil)
         #expect(viewModel.availableWorkerTools.map(\.workerId) == ["research"])
         #expect(viewModel.activityRuns.map(\.invocationId) == ["prior-run"])
         #expect(viewModel.activityInbox.map(\.inboxId) == ["inbox-1"])

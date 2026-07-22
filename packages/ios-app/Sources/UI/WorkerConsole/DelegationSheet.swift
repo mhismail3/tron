@@ -379,8 +379,7 @@ struct DelegationSheet: View {
         guard let worker = viewModel.worker else { return }
         await technicalViewModel.refresh(
             repository: repository,
-            connectionState: connectionState,
-            sessionId: consoleViewModel.currentSessionId
+            connectionState: connectionState
         )
         await technicalViewModel.select(worker.workerId, repository: repository)
         guard technicalViewModel.selectedWorkerId == worker.workerId else { return }
