@@ -1038,9 +1038,12 @@ attempt retained its current-child pointer when returned to `queued`, so the
 redelivered attempt could not attach a fresh child. Recovery now terminalizes
 the interrupted attempt, clears only the invocation's stale live pointer, and
 permits the next attempt to link its own child session. The old attempt and its
-child remain inspectable. Source Review must still complete restart invocation
-and retained-version rollback checks before the component is declared fully
-accepted; Citation and the coordinator remain unimplemented.
+child remain inspectable. After rebuilding from that recovery change, the
+corrected worker completed another two-source review with a new linked child
+session. It then activated a retained earlier version and returned to the
+corrected version while remaining enabled and healthy. Source Review is
+therefore independently accepted; Citation and the coordinator remain
+unimplemented.
 
 ### Prior inventory coverage evidence
 
