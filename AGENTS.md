@@ -5,13 +5,50 @@
 1. **Code, tests, and docs ship together.** Every change must include updated tests and updated documentation in the same commit. Outdated docs and missing tests are bugs.
 2. **Keep the documentation hierarchy accurate.** The root `README.md` is the concise project front door. Detailed, source-backed behavior belongs in the technical reference and concern-owned docs: see [Documentation maintenance](#documentation-maintenance) below.
 3. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
-4. **Use `@self-inspect` skill** to investigate issues. Query `~/.tron/internal/database/` directly — don't guess.
+4. **Inspect live state directly.** Follow [Live-state investigations](#live-state-investigations); do not depend on a repository-managed inspection skill or guess from stale schemas.
 5. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
 6. **Personal data stays out of source; secrets stay in owned stores.** Never hardcode personal info (names, emails, handles, domains) anywhere in code, tests, or skill docs. User-specific values belong in runtime state outside the repository. Worker-owned secrets go in `~/.tron/workspace/vault/`; Tron-owned provider and transport credentials live in `~/.tron/auth.json`. Regression-guarded by `workspace_has_no_personal_info_literals` in `packages/agent/src/shared/foundation/paths/`.
 7. **Production behavior justifies production code.** A schema field, wrapper,
    helper, branch, or subsystem referenced only by its own tests/docs is not a
    reason to retain it. Keep test hooks behind `cfg(test)`; delete speculative
    runtime surfaces until an independent production caller exists.
+
+## Live-state investigations
+
+For runtime failures, establish what the running system actually persisted
+before changing source:
+
+1. Confirm the target server variant and resolve its Tron home using the same
+   precedence as the runtime: `TRON_DATA_DIR`, then `$HOME/$TRON_HOME_NAME`,
+   then `~/.tron`. The isolated Mac install normally uses `~/.tron-dev`; do not
+   assume the investigator's shell and the target process use the same home.
+2. Query the databases at that resolved home's `internal/database/` path. Start
+   every SQLite invocation with `PRAGMA query_only = ON`, then discover the
+   current shape through `sqlite_schema` and `PRAGMA table_info` before writing
+   diagnostic queries. For example:
+
+   ```bash
+   target_tron_home="/resolved/tron/home"
+   sqlite3 "$target_tron_home/internal/database/tron.sqlite" \
+     "PRAGMA query_only = ON; SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name;"
+   ```
+
+   Query the live database path so SQLite reads current WAL state. Never
+   diagnose from a copied main file alone, and never assume a historical table
+   or column still exists.
+3. Use `tron.sqlite` for sessions, events, logs, and engine durability. Use
+   `workers.sqlite` for worker indexes and durable operational evidence, but
+   remember that worker bundles and active pointers under `workspace/workers/`
+   are filesystem-canonical; persistent worker-owned state lives separately
+   under `workspace/worker-state/`.
+4. Inspect `settings.toml`, `internal/database/journals/`, worker files, and
+   runtime logs when the symptom crosses those owners. Do not print credential
+   values from `auth.json`, worker vaults, or other personal runtime state.
+5. Trace live evidence to source owners: use `rg` for the relevant table,
+   column, event, setting, or error; read the nearest Rust `mod.rs`; and, for
+   client-visible behavior, follow the protocol DTO through its Swift state and
+   UI consumer, consulting the package architecture docs. Live state proves the
+   symptom; owning source and tests establish the root cause.
 
 ## Commands
 

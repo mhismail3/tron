@@ -291,6 +291,52 @@ fn probe_ci_summary(
         .expect("CI summary probe should start")
 }
 
+#[test]
+fn agent_investigation_guidance_is_self_contained() {
+    let retired_skill = ["self", "inspect"].join("-");
+    let stale_references = Command::new("git")
+        .args(["grep", "-n", "-i", "-F", "-e"])
+        .arg(&retired_skill)
+        .arg("--")
+        .current_dir(repo_root())
+        .output()
+        .expect("retired-skill scan should start");
+    assert_eq!(
+        stale_references.status.code(),
+        Some(1),
+        "tracked files still reference the retired investigation skill, or git grep failed:\n{}{}",
+        String::from_utf8_lossy(&stale_references.stdout),
+        String::from_utf8_lossy(&stale_references.stderr)
+    );
+
+    assert!(
+        git_output(&["ls-files", "packages/agent/skills"])
+            .trim()
+            .is_empty(),
+        "repo-managed first-party skills must remain absent"
+    );
+
+    let guidance = read_repo_file("AGENTS.md");
+    for required in [
+        "## Live-state investigations",
+        "TRON_DATA_DIR",
+        "TRON_HOME_NAME",
+        "tron.sqlite",
+        "workers.sqlite",
+        "PRAGMA query_only = ON",
+        "sqlite_schema",
+        "PRAGMA table_info",
+        "current WAL state",
+        "nearest Rust `mod.rs`",
+        "Swift state",
+    ] {
+        assert!(
+            guidance.contains(required),
+            "root agent guidance lost live-investigation requirement {required:?}"
+        );
+    }
+}
+
 fn workflow_step_script(workflow: &str, step_name: &str) -> String {
     let marker = format!("      - name: {step_name}\n");
     let (_, step) = workflow
