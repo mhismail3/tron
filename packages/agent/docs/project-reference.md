@@ -989,8 +989,8 @@ Acceptance evidence for the corrected component covers:
 
 The Search component is therefore independently proven, while live result
 quality remains intentionally unclaimed until at least one real Brave or Exa
-credential is configured. Source Review, Citation, and the Research coordinator
-remain separate guided workers and have not been fabricated by this component.
+credential is configured. The separately owned Source Review, Citation, and
+Coordinator proofs follow below.
 
 ### Guided Research Source Review proof
 
@@ -1053,8 +1053,7 @@ child remain inspectable. After rebuilding from that recovery change, the
 corrected worker completed another two-source review with a new linked child
 session. It then activated a retained earlier version and returned to the
 corrected version while remaining enabled and healthy. Source Review is
-therefore independently accepted. Citation is documented next; the Research
-coordinator remains unimplemented.
+therefore independently accepted. Citation and Coordinator are documented next.
 
 ### Guided Research Citation proof
 
@@ -1126,8 +1125,101 @@ for the corrected Citation worker the authenticated response is 14,079 bytes
 versus 39,360 bytes for explicit full operator detail. Citation's remaining
 limitation is intrinsic rather than hidden: semantic assessment is fallible,
 while the deterministic guard covers the cited provenance and adversarial
-relations above but is not a theorem prover. The Research coordinator remains
-unimplemented.
+relations above but is not a theorem prover.
+
+### Guided Research Coordinator proof
+
+The fourth and primary Research-suite component was authored, tested, and
+repeatedly improved by Tron through the same ordinary `gpt-5.5` session. The
+profile-owned `research-coordinator` agent worker projects
+`worker_research_coordinator`, is the primary component of Research suite
+presentation contract version 1, requires no secrets of its own, and retains
+only a manual trigger. Active immutable version
+`9370477ad5af01f50713104b4e6b3a10ed14d03ab487972bb44d2e7ad1870496`
+calls Search first, merges explicit seeds with discovered candidates, calls
+Source Review only when candidates exist, submits reviewed claims to Citation,
+and persists one strict `research.report.v1` through its worker-owned state
+helper.
+
+The useful final seeded proof used the official Brave and Exa search API
+references. Search returned the current profile's typed `unavailable` result
+because neither optional provider credential is configured, while the explicit
+seeds still flowed through Source Review and Citation. The completed run retained
+two sources, 13 evidence items, six claims, 11 claim-linked citation records,
+and five fully supported claims. Its answer preserved documentation terms such
+as `x-subscription-token`, `x-api-key`, and Bearer authorization, reported one
+partially supported Brave-query comparison conservatively, and stored the
+canonical report under helper-generated id
+`rr-20260722T130645Z-d480507abb3e`. The exact child trace contains one
+`finalize_report` call, successful on its first attempt, followed by a
+schema-valid terminal result.
+
+The accepted no-candidate path is distinct rather than an invalid empty
+specialist call. Search still executes and reports its missing logical
+bindings; Source Review is recorded as `called:false`, `status:skipped` with
+zero sources/evidence and a reason; Citation receives its valid empty evidence
+corpus and classifies the procedural claim as unsupported; then the helper
+persists one partial report. This correction removed the earlier avoidable
+`sources: []` schema violation instead of treating a recoverable final response
+as sufficient proof of graceful degradation.
+
+Guided field use exposed and corrected several deeper contract and runtime
+problems before acceptance:
+
+- agent-runner results originally lacked the active output schema, so the
+  kernel now includes that schema in the durable child instruction and rejects
+  a terminal value that does not match it;
+- interrupted agent delivery originally retained a stale child pointer, so
+  recovery now terminalizes the old attempt, clears only its live pointer, and
+  links the redelivered attempt to a new durable child; the interrupted
+  Coordinator invocation was then cancelled precisely with `worker_cancel`;
+- worker processes originally lacked `TRON_WORKER_STATE_DIR`, and hidden prompt
+  transport originally lost worker causality; both kernel paths now preserve
+  the worker-owned state and causal trace used by the Coordinator;
+- an early helper stored its pre-receipt draft and one failed iteration left a
+  `rr-placeholder` artifact; exact cleanup, normalized stored receipts, and
+  historical-hash assertions corrected both without hiding the audit trail;
+- intermediate schemas admitted compatibility unions such as `answer.type`,
+  claim `id`/`citations`, string excerpts, object evidence gaps, and open nested
+  objects. Those versions were rejected. The active schema has one closed
+  canonical shape, with legacy handling isolated in explicit migration;
+- legacy stored reports were canonicalized, including renaming the one old
+  short-suffix id. Report bodies omit mutable index counts, hashes, migration
+  counts, and cleanup receipts, so appending a report cannot change historical
+  bytes;
+- a model-generated `a1b2c3d4e5` suffix proved that a regex was not identity
+  custody. `finalize_report` now accepts a bounded draft without identity or
+  storage receipts, allocates the current unique id itself, fills every matching
+  path/reference, validates, atomically stores, verifies, and returns the full
+  canonical body for the agent to return unchanged; and
+- the first helper-owned seeded run treated documentation prose naming Bearer
+  authorization as secret material. The active validator permits authentication
+  terminology while still rejecting secret-shaped bearer values, `sk-` values,
+  header key/value secrets, and sensitive-field values.
+
+The active smoke and health evidence covers canonical storage, all removed
+aliases, closed nested objects, historical-hash preservation, two unique
+helper-owned ids, path/reference consistency, rejection of model-authored ids,
+the positive and negative secret cases, and legacy migration. The state index
+contains 14 reports, every indexed digest matches its file, the known synthetic
+id no longer exists, and all reports validate under the active helper. An
+immutable rollback to the immediately preceding helper version and restoration
+to the accepted version preserved the complete state. Restoration initially
+failed closed when an independent diagnostic imported code directly from the
+canonical version and Python wrote `__pycache__`; removing that exact
+diagnostic-generated file restored the recorded content hash, after which
+rollback restoration and server restart both succeeded. Diagnostics must copy
+immutable source to temporary storage before importing it.
+
+The Coordinator is therefore independently accepted for ordinary field use,
+same-session direct-tool routing, durable child/run/inbox inspection, retained
+version recovery, restart persistence, and generic-console access. Its current
+limitation is explicit: without Brave or Exa credentials, discovery cannot
+produce live search results, so the accepted cited run used caller-supplied
+official seeds. Semantic synthesis also remains model-fallible within the
+Citation worker's deterministic provenance and relation guard. The next
+Research milestone is the grouped native suite experience, not another
+Coordinator contract revision.
 
 ### Prior inventory coverage evidence
 
