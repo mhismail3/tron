@@ -82,4 +82,47 @@ struct ChatViewportMeasurementsTests {
         measurements.recordViewportHeight(600)
         #expect(measurements.initialDistanceFromBottom == 100)
     }
+
+    @Test("Scroll geometry distinguishes undersized and overflowing transcripts")
+    func scrollGeometryOwnsOverflowClassification() {
+        let measurements = ChatViewportMeasurements()
+
+        measurements.recordScrollGeometry(
+            contentHeight: 700,
+            viewportHeight: 1_200,
+            bottomInset: 80
+        )
+        #expect(measurements.hasScrollGeometry)
+        #expect(!measurements.hasScrollableOverflow)
+        #expect(measurements.scrollContentHeight == 700)
+        #expect(measurements.messageViewportHeight == 1_200)
+
+        measurements.recordScrollGeometry(
+            contentHeight: 1_500,
+            viewportHeight: 800,
+            bottomInset: 80
+        )
+        #expect(measurements.hasScrollableOverflow)
+        #expect(measurements.scrollBottomInset == 80)
+    }
+
+    @Test("Invalid scroll geometry cannot replace the last valid classification")
+    func invalidScrollGeometryIsIgnored() {
+        let measurements = ChatViewportMeasurements()
+        measurements.recordScrollGeometry(
+            contentHeight: 700,
+            viewportHeight: 1_200,
+            bottomInset: 80
+        )
+
+        measurements.recordScrollGeometry(
+            contentHeight: .infinity,
+            viewportHeight: 0,
+            bottomInset: .nan
+        )
+
+        #expect(measurements.hasScrollGeometry)
+        #expect(!measurements.hasScrollableOverflow)
+        #expect(measurements.scrollContentHeight == 700)
+    }
 }

@@ -12,6 +12,10 @@ final class ChatViewportMeasurements {
     private(set) var initialDistanceFromBottom: CGFloat = .infinity
     private(set) var messageViewportHeight: CGFloat = 0
     private(set) var initialBottomAnchorMaxY: CGFloat?
+    private(set) var scrollContentHeight: CGFloat = 0
+    private(set) var scrollBottomInset: CGFloat = 0
+    private(set) var hasScrollGeometry = false
+    private(set) var hasScrollableOverflow = true
     var messageViewportFrames: [UUID: CGRect] = [:]
     var isNearTopHistoryDetent = false
     var hasConsumedTopHistoryDetent = false
@@ -40,6 +44,29 @@ final class ChatViewportMeasurements {
             viewportHeight: messageViewportHeight,
             anchorMaxY: maxY
         )
+    }
+
+    func recordScrollGeometry(
+        contentHeight: CGFloat,
+        viewportHeight: CGFloat,
+        bottomInset: CGFloat
+    ) {
+        guard contentHeight.isFinite,
+              viewportHeight.isFinite,
+              bottomInset.isFinite,
+              contentHeight >= 0,
+              viewportHeight > 0 else {
+            return
+        }
+        scrollContentHeight = contentHeight
+        scrollBottomInset = max(0, bottomInset)
+        hasScrollGeometry = true
+        hasScrollableOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(
+            contentHeight: contentHeight,
+            viewportHeight: viewportHeight,
+            bottomInset: bottomInset
+        )
+        recordViewportHeight(viewportHeight)
     }
 
     private func updateInitialBottomDistance(

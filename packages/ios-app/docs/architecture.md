@@ -121,6 +121,13 @@ response continuations, stream polling, reconnection, and frame-size admission.
 The bearer token comes from pairing and is never logged. Unauthorized state
 requires re-pairing.
 
+An open WebSocket is transport state, not application readiness. The connection
+remains publicly `connecting` until the bounded `hello` exchange succeeds and
+supplies the negotiated frame ceiling. Session restoration, reconnect hooks,
+and editable UI therefore cannot run against a socket that opened but never
+became protocol-ready; a stalled hello is torn down and rejoins normal
+foreground reconnection.
+
 Typed domain clients call exact engine function ids. Worker operations use
 `worker_kernel::*` directly and the server supplies their execution context.
 Successful invocations decode the target function value directly from the
@@ -306,6 +313,15 @@ Provider direct-tool calls render through generic invocation/result chips;
 readable command while the technical detail retains their exact JSON evidence.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
+
+Transcript geometry has one explicit alignment rule. Content that fits inside
+the available viewport is top-aligned and rejects automatic bottom-positioning
+requests during streaming and restoration. Once content develops real
+scrollable overflow, the existing bottom-follow state machine takes ownership.
+Initial restoration measures this boundary while content is hidden, revealing a
+short transcript at the top and a long transcript at its latest content. This
+prevents repeated streaming scroll requests from moving an undersized message
+stack between incompatible anchors.
 
 ## Composer and Attachments
 

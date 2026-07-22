@@ -104,4 +104,54 @@ struct ChatTranscriptRevealPolicyTests {
         #expect(ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(distanceFromBottom: 99))
         #expect(!ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(distanceFromBottom: 100))
     }
+
+    @Test("Undersized transcripts reveal at top and reject bottom positioning")
+    func undersizedTranscriptStaysTopAligned() {
+        let hasOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(
+            contentHeight: 700,
+            viewportHeight: 1_200,
+            bottomInset: 80
+        )
+
+        #expect(!hasOverflow)
+        #expect(ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+        #expect(!ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+    }
+
+    @Test("Overflowing transcripts retain bottom-follow behavior")
+    func overflowingTranscriptFollowsBottom() {
+        let hasOverflow = ChatTranscriptRevealPolicy.hasScrollableOverflow(
+            contentHeight: 2_000,
+            viewportHeight: 800,
+            bottomInset: 80
+        )
+
+        #expect(hasOverflow)
+        #expect(!ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+        #expect(ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: true,
+            hasScrollableOverflow: hasOverflow
+        ))
+    }
+
+    @Test("Unmeasured transcripts preserve conservative bottom eligibility")
+    func unmeasuredTranscriptPreservesBottomEligibility() {
+        #expect(!ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: false,
+            hasScrollableOverflow: false
+        ))
+        #expect(ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: false,
+            hasScrollableOverflow: false
+        ))
+    }
 }

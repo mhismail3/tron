@@ -71,7 +71,8 @@ extension ChatView {
     // MARK: - Message Visibility Animation
 
     /// Handle initial message visibility on session load.
-    /// Scrolls to bottom while content is hidden, then fades everything in.
+    /// Measures while content is hidden, then reveals short transcripts at the
+    /// top or settles overflowing transcripts at the bottom before fading in.
     ///
     /// LazyVStack only materializes cells near the visible viewport, so each
     /// `scrollTo("bottom")` can reveal cells whose true heights move the target again.
@@ -108,6 +109,27 @@ extension ChatView {
             guard await layoutDelay(milliseconds: 100) else { return }
             guard isCurrent(ticket), !Task.isCancelled else { return }
             await performDeepLinkScroll(to: target, guardedBy: ticket)
+            return
+        }
+
+        if !(await waitForInitialScrollGeometry()) {
+            logger.warning("[INIT] scroll geometry did not become ready before reveal; continuing with bounded reveal", category: .ui)
+        }
+        guard isCurrent(ticket), !Task.isCancelled else { return }
+
+        if ChatTranscriptRevealPolicy.shouldRevealAtTop(
+            hasScrollGeometry: viewportMeasurements.hasScrollGeometry,
+            hasScrollableOverflow: viewportMeasurements.hasScrollableOverflow
+        ) {
+            logger.debug(
+                "[INIT] transcript fits viewport; revealing at top content=\(viewportMeasurements.scrollContentHeight) viewport=\(viewportMeasurements.messageViewportHeight)",
+                category: .ui
+            )
+            withAnimation(.easeOut(duration: 0.3)) {
+                viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
+                initialLoadComplete = true
+            }
+            logger.debug("[INIT] Session loaded with \(viewModel.messages.count) top-aligned messages", category: .session)
             return
         }
 
@@ -187,6 +209,16 @@ extension ChatView {
         return scrollProxy != nil
     }
 
+    private func waitForInitialScrollGeometry() async -> Bool {
+        for _ in 0..<ChatTranscriptRevealPolicy.initialScrollGeometryWaitAttempts {
+            if viewportMeasurements.hasScrollGeometry {
+                return true
+            }
+            guard await layoutDelay(milliseconds: 25) else { return false }
+        }
+        return viewportMeasurements.hasScrollGeometry
+    }
+
     private func isCurrent(_ ticket: ChatViewTaskTicket?) -> Bool {
         guard let ticket else { return true }
         return taskCoordinator.isCurrent(ticket)
@@ -229,6 +261,13 @@ extension ChatView {
         animation: Animation = .easeOut(duration: 0.2),
         reason: String
     ) {
+        guard ChatTranscriptRevealPolicy.shouldRequestBottomPosition(
+            hasScrollGeometry: viewportMeasurements.hasScrollGeometry,
+            hasScrollableOverflow: viewportMeasurements.hasScrollableOverflow
+        ) else {
+            logger.debug("[SCROLL] suppressed bottom scroll for undersized transcript: \(reason)", category: .ui)
+            return
+        }
         guard let scrollProxy, scrollCoordinator.beginAutomaticBottomScroll() else {
             logger.debug("[SCROLL] suppressed bottom scroll for \(reason)", category: .ui)
             return

@@ -19,6 +19,9 @@ final class EngineConnection {
     var receiveTask: Task<Void, Never>?
 
     let serverURL: URL
+    /// The URLSession transport is open and can carry the protocol handshake.
+    /// Public readiness remains `connectionState == .connected`, which is not
+    /// published until `hello.ok` completes.
     var isConnectedFlag = false
     var reconnectAttempts = 0
     /// Exact outbound frame budget negotiated through `hello.ok`.
@@ -29,6 +32,7 @@ final class EngineConnection {
 
     let requestTimeout: TimeInterval = 30.0
     nonisolated static let connectionVerificationTimeout: TimeInterval = 10.0
+    nonisolated static let protocolHandshakeTimeout: TimeInterval = 10.0
     nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
     nonisolated static let manualRetryOpenTimeout: TimeInterval = connectionOpenTimeout
     nonisolated static let automaticReconnectProbeTimeout: TimeInterval = ReconnectProbePolicy().probeTimeout
@@ -210,10 +214,10 @@ final class EngineConnection {
         }
 
         isConnectedFlag = true
-        reconnectAttempts = 0
-        connectionState = .connected
-        logger.logWebSocketState("Connected", details: "Verified connection to \(serverURL.host ?? "unknown")")
-        logger.info("Connection verified for \(self.serverURL.absoluteString)", category: .websocket)
+        logger.info(
+            "WebSocket transport opened for \(self.serverURL.absoluteString); awaiting protocol hello",
+            category: .websocket
+        )
 
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
@@ -221,8 +225,12 @@ final class EngineConnection {
         logger.verbose("Receive loop started", category: .websocket)
 
         do {
-            let helloResult = try await hello()
-            negotiatedMaxMessageSize = helloResult.maxMessageSize
+            let helloResult = try await hello(timeout: Self.protocolHandshakeTimeout)
+            guard engineConnectionTask === task, isConnectedFlag else {
+                logger.debug("Protocol hello completed after socket teardown", category: .websocket)
+                return
+            }
+            markProtocolReady(maxMessageSize: helloResult.maxMessageSize)
         } catch {
             logger.warning("Engine hello failed: \(error.localizedDescription)", category: .websocket)
             cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
@@ -233,6 +241,19 @@ final class EngineConnection {
             await self?.heartbeatLoop()
         }
         logger.verbose("Heartbeat loop started", category: .websocket)
+    }
+
+    /// Publish usable connection state only after the server has acknowledged
+    /// the protocol and supplied its negotiated frame ceiling.
+    func markProtocolReady(maxMessageSize: Int?) {
+        negotiatedMaxMessageSize = maxMessageSize
+        reconnectAttempts = 0
+        connectionState = .connected
+        logger.logWebSocketState(
+            "Connected",
+            details: "Protocol ready for \(serverURL.host ?? "unknown")"
+        )
+        logger.info("Connection protocol ready for \(serverURL.absoluteString)", category: .websocket)
     }
 
     func markWebSocketOpened(_ task: URLSessionWebSocketTask) {

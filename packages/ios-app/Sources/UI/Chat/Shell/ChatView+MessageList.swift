@@ -132,8 +132,9 @@ extension ChatView {
                 // NOTE: We intentionally do NOT use .defaultScrollAnchor(.bottom) here.
                 // It causes content to jump off-screen when keyboard appears with long content,
                 // because it tries to re-anchor when container size changes.
-                // Instead, we manually scroll to bottom on initial load and when keyboard appears.
+                // Undersized transcripts align to the top; overflow is positioned manually.
                 .coordinateSpace(name: ChatMessageScrollCoordinateSpace.name)
+                .defaultScrollAnchor(.top, for: .alignment)
                 .scrollPosition($transcriptScrollPosition)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
@@ -202,8 +203,7 @@ extension ChatView {
                 // After initial reveal, one observer owns bottom distance and the
                 // history top detent so overlapping scroll-geometry callbacks cannot
                 // invalidate each other's LazyVStack layout pass.
-                .onScrollGeometryChange(for: ChatScrollGeometryMetrics?.self) { geometry in
-                    guard initialLoadComplete else { return nil }
+                .onScrollGeometryChange(for: ChatScrollGeometryMetrics.self) { geometry in
                     let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
                     return ChatScrollGeometryMetrics(
                         distanceFromBottom: ChatTranscriptRevealPolicy.bottomDistance(
@@ -212,6 +212,7 @@ extension ChatView {
                             containerHeight: geometry.containerSize.height,
                             bottomInset: geometry.contentInsets.bottom
                         ),
+                        contentHeight: geometry.contentSize.height,
                         contentOffsetY: geometry.contentOffset.y,
                         viewportHeight: geometry.containerSize.height,
                         bottomInset: geometry.contentInsets.bottom,
@@ -220,10 +221,13 @@ extension ChatView {
                             viewportHeight: geometry.containerSize.height
                         )
                     )
-                } action: { oldMetrics, newMetrics in
-                    guard let metrics = newMetrics else { return }
-                    let oldMetrics = oldMetrics ?? metrics
-                    viewportMeasurements.recordViewportHeight(metrics.viewportHeight)
+                } action: { oldMetrics, metrics in
+                    viewportMeasurements.recordScrollGeometry(
+                        contentHeight: metrics.contentHeight,
+                        viewportHeight: metrics.viewportHeight,
+                        bottomInset: metrics.bottomInset
+                    )
+                    guard initialLoadComplete else { return }
                     viewportMeasurements.isNearTopHistoryDetent = metrics.historyTopMetrics.isNearTop
                     if !metrics.historyTopMetrics.isNearTop,
                        viewportMeasurements.hasConsumedTopHistoryDetent {
@@ -555,6 +559,7 @@ private enum ChatMessageScrollCoordinateSpace {
 
 private struct ChatScrollGeometryMetrics: Equatable {
     let distanceFromBottom: CGFloat
+    let contentHeight: CGFloat
     let contentOffsetY: CGFloat
     let viewportHeight: CGFloat
     let bottomInset: CGFloat

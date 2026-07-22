@@ -38,6 +38,26 @@ struct EngineConnectionReconnectTests {
         #expect(EngineConnection.connectionVerificationTimeout < 30.0)
     }
 
+    @Test("protocol hello is bounded independently of ordinary requests")
+    func protocolHelloIsBounded() {
+        #expect(EngineConnection.protocolHandshakeTimeout == 10.0)
+        #expect(EngineConnection.protocolHandshakeTimeout < 30.0)
+    }
+
+    @Test("open transport is not public connection readiness before hello")
+    func protocolHelloOwnsConnectedState() {
+        let connection = makeSUT()
+        connection.connectionState = .connecting
+        connection.isConnectedFlag = true
+
+        #expect(!connection.connectionState.isConnected)
+
+        connection.markProtocolReady(maxMessageSize: 1_024)
+
+        #expect(connection.connectionState == .connected)
+        #expect(connection.negotiatedMaxMessageSize == 1_024)
+    }
+
     @Test("initial websocket open timeout remains longer than reconnect probe")
     func initialWebSocketOpenTimeoutIsBounded() {
         #expect(EngineConnection.connectionOpenTimeout == 10.0)
