@@ -1078,13 +1078,13 @@ fn runtime_command_help_has_one_shared_owner() {
         .collect::<Vec<_>>()
         .join(" ");
     assert_eq!(
-        dispatcher_commands, "status start stop restart uninstall logs errors rollback login auth",
+        dispatcher_commands,
+        "status start stop restart uninstall logs errors rollback login auth state",
         "runtime dispatcher inventory drifted"
     );
-    let expected_help_commands =
-        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate"
-            .split('|')
-            .collect::<Vec<_>>();
+    let expected_help_commands = "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate|state snapshot|state snapshots"
+        .split('|')
+        .collect::<Vec<_>>();
     assert_eq!(
         shared_help
             .lines()
@@ -1098,7 +1098,7 @@ fn runtime_command_help_has_one_shared_owner() {
         assert_eq!(entrypoint.matches("show_runtime_command_help").count(), 1);
     }
     for help_command in expected_help_commands {
-        let help_row = format!("echo \"  {help_command}");
+        let help_row = format!("echo \"  {help_command} ");
         assert_eq!(
             shared_help.matches(&help_row).count(),
             1,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::cli::{AuthAction, Cli, Command};
+use crate::app::cli::{AuthAction, Cli, Command, StateAction};
 use clap::Parser;
 
 #[test]
@@ -103,6 +103,27 @@ fn cli_parses_auth_rotate_subcommand() {
         }) => {}
         other => panic!("expected Some(Auth {{ Rotate }}), got {other:?}"),
     }
+}
+
+#[test]
+fn cli_parses_profile_snapshot_and_restore_commands() {
+    let snapshot = Cli::parse_from(["tron", "state", "snapshot"]);
+    assert!(matches!(
+        snapshot.command,
+        Some(Command::State {
+            action: StateAction::Snapshot {
+                for_worker_schema: None
+            }
+        })
+    ));
+
+    let restore = Cli::parse_from(["tron", "state", "restore", "/tmp/profile.tar.zst"]);
+    assert!(matches!(
+        restore.command,
+        Some(Command::State {
+            action: StateAction::Restore { snapshot }
+        }) if snapshot == std::path::Path::new("/tmp/profile.tar.zst")
+    ));
 }
 
 #[test]

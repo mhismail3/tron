@@ -55,7 +55,7 @@ impl WorkerRuntime {
                 .store
                 .invocation(invocation_id)?
                 .ok_or_else(|| format!("worker invocation '{invocation_id}' was not found"))?;
-            if matches!(record.status.as_str(), "completed" | "failed") {
+            if matches!(record.status.as_str(), "completed" | "failed" | "cancelled") {
                 return Ok((record, false));
             }
             let now = tokio::time::Instant::now();

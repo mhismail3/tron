@@ -14,14 +14,19 @@ impl WorkerRuntime {
                 .invocation(&invocation_id)?
                 .ok_or_else(|| "worker invocation disappeared".to_owned());
         }
-        let result = self.execute_queued_inner(queued).await;
+        let invocation_stop = self.invocation_stop(&invocation_id);
+        let result = self
+            .execute_queued_inner(queued, invocation_stop.clone())
+            .await;
         let _ = self.inflight.remove(&invocation_id);
+        let _ = self.invocation_stops.remove(&invocation_id);
         result
     }
 
     pub(super) async fn execute_queued_inner(
         self: &Arc<Self>,
         queued: InvocationRecord,
+        invocation_stop: CancellationToken,
     ) -> Result<InvocationRecord, String> {
         let summary = self
             .store
@@ -46,6 +51,7 @@ impl WorkerRuntime {
             permit = engine_permit => permit,
             () = global_stop.cancelled() => return Err("worker dispatch stopped while queued".to_owned()),
             () = worker_stop.cancelled() => return Err(self.worker_cancelled_error(&queued.worker_id, true)),
+            () = invocation_stop.cancelled() => return self.store.invocation(&queued.invocation_id)?.ok_or_else(|| "cancelled worker invocation disappeared".to_owned()),
         }
             .map_err(|_| "worker engine concurrency gate is closed".to_owned())?;
         let worker_limit = self
@@ -57,6 +63,7 @@ impl WorkerRuntime {
             permit = worker_limit.acquire_owned() => permit,
             () = global_stop.cancelled() => return Err("worker dispatch stopped while queued".to_owned()),
             () = worker_stop.cancelled() => return Err(self.worker_cancelled_error(&queued.worker_id, true)),
+            () = invocation_stop.cancelled() => return self.store.invocation(&queued.invocation_id)?.ok_or_else(|| "cancelled worker invocation disappeared".to_owned()),
         }
             .map_err(|_| "worker concurrency gate is closed".to_owned())?;
         let _permits = (engine_permit, worker_permit);
@@ -91,7 +98,14 @@ impl WorkerRuntime {
                 .and_then(|result| result),
             () = global_stop.cancelled() => Err("worker invocation stopped by engine stop-all".to_owned()),
             () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false)),
+            () = invocation_stop.cancelled() => Err("worker invocation cancelled explicitly".to_owned()),
         };
+        if invocation_stop.is_cancelled() {
+            return self
+                .store
+                .invocation(&queued.invocation_id)?
+                .ok_or_else(|| "cancelled worker invocation disappeared".to_owned());
+        }
         if self.shutting_down.load(Ordering::SeqCst) && global_stop.is_cancelled() {
             return Err("worker invocation interrupted by runtime shutdown".to_owned());
         }
@@ -244,6 +258,7 @@ impl WorkerRuntime {
                     .await
             }
             WorkerRunner::Command { command } => {
+                let state_dir = self.store.state_dir(&worker.summary.worker_id)?;
                 let (runtime_root, workdir) = self.materialize_runtime_artifact(
                     worker,
                     "worker-invocations",
@@ -257,6 +272,7 @@ impl WorkerRuntime {
                 run_worker_command(
                     &command,
                     &workdir,
+                    Some(&state_dir),
                     Some(&invocation.input),
                     &secrets,
                     Some(invocation),
@@ -386,8 +402,11 @@ impl WorkerRuntime {
                 Some(&format!("Worker: {}", worker.summary.name)),
             )
             .map_err(|error| format!("create agent worker session: {error}"))?;
+        self.store
+            .set_agent_session_id(&invocation.invocation_id, &session_id)?;
+        let state_dir = self.store.state_dir(&worker.summary.worker_id)?;
         let prompt = format!(
-            "You are executing persistent worker '{}'. Follow its durable contract exactly.\n\n{}\n\nInvocation metadata (preserve the idempotency key when deduplicating side effects):\n{}\n\nInput JSON:\n{}\n\nNamed secrets, when configured, are available as files under {}. Never reveal their values. Return only the result required by the output schema.",
+            "You are executing persistent worker '{}'. Follow its durable contract exactly.\n\n{}\n\nInvocation metadata (preserve the idempotency key when deduplicating side effects):\n{}\n\nInput JSON:\n{}\n\nDurable worker-owned state is at {}. This path survives worker updates, rollback, disable, retirement, and server restart. Named secrets, when configured, are available as files under {}. Never reveal their values or copy them into worker state. Return only the result required by the output schema.",
             worker.summary.name,
             instructions,
             serde_json::to_string_pretty(&json!({
@@ -399,6 +418,7 @@ impl WorkerRuntime {
             }))
             .map_err(|error| error.to_string())?,
             serde_json::to_string_pretty(&invocation.input).map_err(|error| error.to_string())?,
+            state_dir.display(),
             secret_dir.display(),
         );
         let context = CausalContext::new(
@@ -467,6 +487,7 @@ impl WorkerRuntime {
             .or_insert_with(|| {
                 Arc::new(Mutex::new(ResidentProcess {
                     child: None,
+                    ready: false,
                     consecutive_health_failures: 0,
                     runtime_root: None,
                 }))
@@ -495,6 +516,7 @@ impl WorkerRuntime {
             let child = spawn_process(
                 command,
                 &workdir,
+                Some(&self.store.state_dir(&worker.summary.worker_id)?),
                 secrets,
                 Stdio::null(),
                 // Resident output is not part of an invocation result. Leaving
@@ -512,42 +534,48 @@ impl WorkerRuntime {
             };
             process.child = Some(child);
             process.runtime_root = Some(runtime_root);
+            process.ready = health_url.is_none();
             process.consecutive_health_failures = 0;
-            if let Some(url) = health_url {
-                let mut healthy = false;
-                for _ in 0..50 {
-                    if self
-                        .http
-                        .get(url)
-                        .send()
-                        .await
-                        .is_ok_and(|response| response.status().is_success())
-                    {
-                        healthy = true;
-                        break;
-                    }
-                    if process
-                        .child
-                        .as_mut()
-                        .expect("resident was just spawned")
-                        .try_wait()
-                        .map_err(|error| error.to_string())?
-                        .is_some()
-                    {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !process.ready
+            && let Some(url) = health_url
+        {
+            let mut healthy = false;
+            for _ in 0..50 {
+                if self
+                    .http
+                    .get(url)
+                    .send()
+                    .await
+                    .is_ok_and(|response| response.status().is_success())
+                {
+                    healthy = true;
+                    break;
                 }
-                if !healthy {
-                    if let Some(child) = process.child.as_mut() {
-                        child.terminate().await;
-                    }
-                    if let Some(runtime_root) = process.runtime_root.take() {
-                        let _ = std::fs::remove_dir_all(runtime_root);
-                    }
-                    return Err("resident worker failed its startup health check".to_owned());
+                if process
+                    .child
+                    .as_mut()
+                    .expect("resident startup requires a child")
+                    .try_wait()
+                    .map_err(|error| error.to_string())?
+                    .is_some()
+                {
+                    break;
                 }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
+            if !healthy {
+                if let Some(child) = process.child.as_mut() {
+                    child.terminate().await;
+                }
+                process.child = None;
+                process.ready = false;
+                if let Some(runtime_root) = process.runtime_root.take() {
+                    let _ = std::fs::remove_dir_all(runtime_root);
+                }
+                return Err("resident worker failed its startup health check".to_owned());
+            }
+            process.ready = true;
         }
         Ok(())
     }

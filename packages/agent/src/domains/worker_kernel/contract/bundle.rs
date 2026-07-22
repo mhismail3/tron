@@ -197,6 +197,19 @@ pub(super) fn worker_bundle_schema() -> Value {
                     }
                 }
             },
+            "presentation":{
+                "type":"object",
+                "additionalProperties":false,
+                "required":["experienceId","contractVersion"],
+                "description":"Optional immutable binding to a supported worker experience. Unknown or unsupported contracts fall back to the generic Worker Console.",
+                "properties":{
+                    "experienceId":{"type":"string","minLength":1},
+                    "contractVersion":{"type":"integer","minimum":1},
+                    "suiteId":{"type":"string","minLength":1},
+                    "componentRole":{"type":"string","minLength":1},
+                    "primary":{"type":"boolean"}
+                }
+            },
             "routing":{
                 "type":"object","additionalProperties":false,
                 "properties":{

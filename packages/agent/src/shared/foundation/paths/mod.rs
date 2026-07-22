@@ -36,12 +36,16 @@ pub mod dirs {
     pub const RUN: &str = "run";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
+    /// Verified compressed profile snapshots and purge archives.
+    pub const BACKUPS: &str = "backups";
     // ── Under workspace/ ──
 
     /// Workspace-local credential vault.
     pub const VAULT: &str = "vault";
     /// Approved local worker packages and launchable worker bundles.
     pub const WORKERS: &str = "workers";
+    /// Mutable profile-global state owned by persistent workers.
+    pub const WORKER_STATE: &str = "worker-state";
 }
 
 /// Well-known file names under `~/.tron/`.
@@ -174,6 +178,11 @@ pub fn run_dir_for_home(home: &Path) -> PathBuf {
 /// `~/.tron/internal/database/journals/`
 pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
+}
+
+/// `~/.tron/internal/backups/`.
+pub fn backups_dir() -> PathBuf {
+    internal_dir().join(dirs::BACKUPS)
 }
 
 // ── Composite file path helpers ────────────────────────────────────────

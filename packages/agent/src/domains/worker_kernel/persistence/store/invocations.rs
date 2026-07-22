@@ -217,6 +217,94 @@ impl WorkerStore {
             .ok_or_else(|| "completed worker invocation disappeared".to_owned())
     }
 
+    pub fn set_agent_session_id(
+        &self,
+        invocation_id: &str,
+        session_id: &str,
+    ) -> Result<(), String> {
+        validate_runtime_identifier(session_id, "agent session id", 256)?;
+        let changed = self
+            .connection()?
+            .execute(
+                "UPDATE worker_invocations SET agent_session_id=?2
+                 WHERE invocation_id=?1 AND status='running' AND agent_session_id IS NULL",
+                params![invocation_id, session_id],
+            )
+            .map_err(|error| format!("link agent session to worker invocation: {error}"))?;
+        if changed != 1 {
+            return Err(format!(
+                "worker invocation '{invocation_id}' was not running or already had an agent session"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn cancel_invocation(&self, invocation_id: &str) -> Result<InvocationRecord, String> {
+        validate_runtime_identifier(invocation_id, "invocation id", 256)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("start worker invocation cancellation: {error}"))?;
+        let current = transaction
+            .query_row(
+                "SELECT worker_id,status FROM worker_invocations WHERE invocation_id=?1",
+                [invocation_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("load worker invocation for cancellation: {error}"))?
+            .ok_or_else(|| format!("worker invocation '{invocation_id}' was not found"))?;
+        if matches!(current.1.as_str(), "completed" | "failed" | "cancelled") {
+            drop(transaction);
+            return self
+                .invocation(invocation_id)?
+                .ok_or_else(|| "terminal worker invocation disappeared".to_owned());
+        }
+        let completed_at = chrono::Utc::now().to_rfc3339();
+        let reason = "worker invocation cancelled explicitly";
+        let changed = transaction
+            .execute(
+                "UPDATE worker_invocations SET status='cancelled',error=?2,completed_at=?3
+                 WHERE invocation_id=?1 AND status IN ('queued','running')",
+                params![invocation_id, reason, completed_at],
+            )
+            .map_err(|error| format!("cancel worker invocation: {error}"))?;
+        if changed == 1 {
+            transaction
+                .execute(
+                    "UPDATE worker_attempts SET status='cancelled',completed_at=?2,error=?3
+                     WHERE invocation_id=?1 AND status='running'",
+                    params![invocation_id, completed_at, reason],
+                )
+                .map_err(|error| format!("cancel worker delivery attempt: {error}"))?;
+            transaction
+                .execute(
+                    "INSERT INTO worker_inbox(inbox_id,invocation_id,worker_id,severity,result_json,created_at)
+                     VALUES (?1,?2,?3,'info',?4,?5)",
+                    params![
+                        format!("worker_inbox_{}", uuid::Uuid::now_v7()),
+                        invocation_id,
+                        current.0,
+                        serde_json::to_string(&json!({"status":"cancelled","reason":reason}))
+                            .map_err(|error| error.to_string())?,
+                        completed_at,
+                    ],
+                )
+                .map_err(|error| format!("record worker cancellation inbox result: {error}"))?;
+            insert_audit(
+                &transaction,
+                &current.0,
+                "invocation_cancelled",
+                &json!({"invocationId":invocation_id}),
+            )?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("commit worker invocation cancellation: {error}"))?;
+        self.invocation(invocation_id)?
+            .ok_or_else(|| "cancelled worker invocation disappeared".to_owned())
+    }
+
     pub fn invocation(&self, invocation_id: &str) -> Result<Option<InvocationRecord>, String> {
         self.connection()?
             .query_row(

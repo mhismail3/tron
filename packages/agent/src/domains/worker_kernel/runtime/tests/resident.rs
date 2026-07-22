@@ -124,6 +124,93 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever(
 }
 
 #[tokio::test]
+async fn cancelling_one_resident_invocation_keeps_the_service_available() {
+    let (runtime, _home) = test_runtime(None);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let script = r#"import http.server,json,sys,time
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+ def do_POST(self):
+  n=int(self.headers.get('Content-Length','0')); value=json.loads(self.rfile.read(n))
+  if value.get('slow'): time.sleep(30)
+  self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(json.dumps(value).encode())
+ def log_message(self,*args): pass
+http.server.ThreadingHTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()"#;
+    let mut bundle = command_bundle(Vec::new());
+    bundle.worker_id = Some("precise-resident-cancel".to_owned());
+    bundle.name = "Precise Resident Cancel".to_owned();
+    bundle.description = "Resident fixture proving invocation-scoped cancellation".to_owned();
+    bundle.tool_name = Some("worker_precise_resident_cancel".to_owned());
+    bundle.runner = WorkerRunner::Service {
+        command: vec![
+            "python3".to_owned(),
+            "-u".to_owned(),
+            "-c".to_owned(),
+            script.to_owned(),
+            port.to_string(),
+        ],
+        invoke_url: format!("http://127.0.0.1:{port}/invoke"),
+        health_url: Some(format!("http://127.0.0.1:{port}/health")),
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let worker_id = outcome.worker.worker_id.clone();
+    let invoke_runtime = Arc::clone(&runtime);
+    let invoke_worker_id = worker_id.clone();
+    let invocation = tokio::spawn(async move {
+        invoke_runtime
+            .invoke(request(
+                &invoke_worker_id,
+                json!({"slow":true}),
+                "precise-resident-cancel",
+            ))
+            .await
+            .unwrap()
+    });
+
+    let run = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(run) = runtime
+                .store()
+                .runs_filtered(Some(&worker_id), Some("running"), 1)
+                .unwrap()
+                .into_iter()
+                .next()
+            {
+                break run;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("resident invocation did not enter running state");
+    let cancelled = runtime.cancel_invocation(&run.invocation_id).await.unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+    assert_eq!(invocation.await.unwrap().status, "cancelled");
+    assert_eq!(runtime.residents.len(), 1);
+    assert!(
+        runtime
+            .store()
+            .summary(&worker_id)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
+
+    let next = runtime
+        .invoke(request(
+            &worker_id,
+            json!({"slow":false,"value":"still-running"}),
+            "resident-after-cancel",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next.status, "completed", "{next:?}");
+    assert_eq!(next.output.unwrap()["value"], "still-running");
+}
+
+#[tokio::test]
 async fn oversized_resident_response_fails_bounded_and_disables_the_worker() {
     let (runtime, _home) = test_runtime(None);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

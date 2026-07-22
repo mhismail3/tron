@@ -12,8 +12,17 @@ struct WorkerSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     let health: String
     let triggerCount: UInt64
     let updatedAt: String
+    let presentation: WorkerPresentationDTO?
 
     var id: String { workerId }
+}
+
+struct WorkerPresentationDTO: Codable, Equatable, Sendable {
+    let experienceId: String
+    let contractVersion: UInt32
+    let suiteId: String?
+    let componentRole: String?
+    let primary: Bool
 }
 
 struct WorkerListResultDTO: Codable, Equatable, Sendable {
@@ -72,6 +81,7 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
     let traceId: String
     let causalDepth: UInt32
     let triggerKind: String
+    let agentSessionId: String?
     let attemptCount: UInt32
     let createdAt: String
     let startedAt: String?
@@ -124,6 +134,10 @@ struct WorkerInvokeRequestDTO: Codable, Equatable, Sendable {
     let idempotencyKey: String
 }
 
+struct WorkerCancelRequestDTO: Codable, Equatable, Sendable {
+    let invocationId: String
+}
+
 struct WorkerRollbackRequestDTO: Codable, Equatable, Sendable {
     let workerId: String
     let version: String
@@ -140,6 +154,8 @@ struct WorkerStopAllResultDTO: Codable, Equatable, Sendable {
 struct WorkerPurgeResultDTO: Codable, Equatable, Sendable {
     let workerId: String
     let purged: Bool
+    let archivePath: String
+    let archiveSha256: String
 }
 
 struct WorkerWebhookRotateRequestDTO: Codable, Equatable, Sendable {

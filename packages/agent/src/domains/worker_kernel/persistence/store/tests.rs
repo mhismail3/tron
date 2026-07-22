@@ -1,5 +1,5 @@
 use super::*;
-use crate::domains::worker_kernel::types::{WorkerRunner, WorkerTrigger};
+use crate::domains::worker_kernel::types::{WorkerPresentation, WorkerRunner, WorkerTrigger};
 
 fn bundle() -> WorkerBundle {
     WorkerBundle {
@@ -29,6 +29,7 @@ fn bundle() -> WorkerBundle {
         }],
         engine_hooks: Vec::new(),
         routing: Default::default(),
+        presentation: None,
     }
 }
 
@@ -54,6 +55,93 @@ fn prepare_and_publish_is_atomic_and_versioned() {
     assert_eq!(inspection["route"]["workerVersion"], version);
     assert_eq!(inspection["route"]["enabled"], true);
     assert_eq!(inspection["healthHistory"][0]["status"], "healthy");
+}
+
+#[test]
+fn presentation_binding_is_immutable_indexed_and_reconstructed() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut candidate = bundle();
+    candidate.presentation = Some(WorkerPresentation {
+        experience_id: "research-suite".to_owned(),
+        contract_version: 1,
+        suite_id: Some("research".to_owned()),
+        component_role: Some("search".to_owned()),
+        primary: false,
+    });
+    let mut prepared = store.prepare(candidate, None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let version = prepared.version.clone();
+    let outcome = store.publish(prepared).unwrap();
+    assert_eq!(
+        outcome
+            .worker
+            .presentation
+            .as_ref()
+            .unwrap()
+            .suite_id
+            .as_deref(),
+        Some("research")
+    );
+    assert_eq!(
+        store
+            .load_version("recent-research", &version)
+            .unwrap()
+            .bundle
+            .presentation
+            .as_ref()
+            .unwrap()
+            .component_role
+            .as_deref(),
+        Some("search")
+    );
+
+    store
+        .connection()
+        .unwrap()
+        .execute("UPDATE workers SET presentation_json=NULL", [])
+        .unwrap();
+    super::super::rebuild::rebuild_indexes(&store.root, &store.database).unwrap();
+    assert_eq!(
+        store
+            .summary("recent-research")
+            .unwrap()
+            .unwrap()
+            .presentation
+            .as_ref()
+            .unwrap()
+            .experience_id,
+        "research-suite"
+    );
+}
+
+#[test]
+fn purge_rejects_known_secret_material_before_removing_bundle_or_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let _ = store.publish(prepared).unwrap();
+    let state = store.state_dir("recent-research").unwrap();
+    let secret = "purge-archive-secret-value";
+    std::fs::write(
+        state.join("state.json"),
+        format!("{{\"secret\":\"{secret}\"}}"),
+    )
+    .unwrap();
+    let _ = store.retire("recent-research").unwrap();
+
+    let error = store
+        .purge("recent-research", &[secret.to_owned()])
+        .unwrap_err();
+    assert!(error.contains("credential material"), "{error}");
+    assert!(
+        temp.path()
+            .join("workspace/workers/recent-research")
+            .is_dir()
+    );
+    assert!(state.join("state.json").is_file());
+    assert!(store.summary("recent-research").unwrap().is_some());
 }
 
 #[test]
@@ -339,13 +427,39 @@ fn versions_are_immutable_rollback_restores_triggers_and_purge_leaves_audit() {
 
     let retired = store.retire("recent-research").unwrap();
     assert!(retired.retired);
+    let state = store.state_dir("recent-research").unwrap();
+    std::fs::write(state.join("ledger.sqlite"), b"durable worker state").unwrap();
     let retired_inspection = store.inspect("recent-research").unwrap();
     assert!(
         !retired_inspection["triggers"][0]["enabled"]
             .as_bool()
             .unwrap_or(true)
     );
-    assert!(store.purge("recent-research").unwrap());
+    let purge = store.purge("recent-research", &[]).unwrap();
+    assert!(purge.purged);
+    assert!(std::path::Path::new(&purge.archive_path).is_file());
+    assert_eq!(purge.archive_sha256.len(), 64);
+    let decoder =
+        zstd::stream::read::Decoder::new(std::fs::File::open(&purge.archive_path).unwrap())
+            .unwrap();
+    let archived_paths = tar::Archive::new(decoder)
+        .entries()
+        .unwrap()
+        .map(|entry| entry.unwrap().path().unwrap().into_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        archived_paths.iter().any(|path| path
+            == std::path::Path::new(
+                "payload/workspace/worker-state/recent-research/ledger.sqlite",
+            )),
+        "purge archive omitted durable worker state: {archived_paths:?}"
+    );
+    assert!(
+        !temp
+            .path()
+            .join("workspace/worker-state/recent-research")
+            .exists()
+    );
     assert!(store.summary("recent-research").unwrap().is_none());
     assert!(
         store

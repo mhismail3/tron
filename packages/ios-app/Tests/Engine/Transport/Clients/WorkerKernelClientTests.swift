@@ -25,7 +25,8 @@ struct WorkerKernelClientTests {
             retired: false,
             health: "healthy",
             triggerCount: 1,
-            updatedAt: "2026-07-19T12:00:00Z"
+            updatedAt: "2026-07-19T12:00:00Z",
+            presentation: nil
         )
     }
 
@@ -103,7 +104,7 @@ struct WorkerKernelClientTests {
                 surface: AgentToolSurfaceDTO(
                     catalogRevision: 42,
                     surfaceHash: "abc123",
-                    fixedToolCount: 28,
+                    fixedToolCount: 29,
                     projectedWorkerCount: 1,
                     availableWorkerCount: 3,
                     availableWorkers: [
@@ -164,6 +165,7 @@ struct WorkerKernelClientTests {
                     traceId: "trace-1",
                     causalDepth: 0,
                     triggerKind: "manual",
+                    agentSessionId: nil,
                     attemptCount: 1,
                     createdAt: "2026-07-19T12:00:00Z",
                     startedAt: nil,
@@ -171,6 +173,26 @@ struct WorkerKernelClientTests {
                 )
             case "worker_kernel::disable":
                 return worker(enabled: false)
+            case "worker_kernel::cancel":
+                #expect((payload as? WorkerCancelRequestDTO)?.invocationId == "run-1")
+                return WorkerInvocationDTO(
+                    invocationId: "run-1",
+                    workerId: "research",
+                    workerVersion: "v1",
+                    status: "cancelled",
+                    input: AnyCodable(["query": "Tron"]),
+                    output: nil,
+                    error: "worker invocation cancelled explicitly",
+                    idempotencyKey: key.rawValue,
+                    traceId: "trace-1",
+                    causalDepth: 0,
+                    triggerKind: "manual",
+                    agentSessionId: nil,
+                    attemptCount: 1,
+                    createdAt: "2026-07-19T12:00:00Z",
+                    startedAt: nil,
+                    completedAt: "2026-07-19T12:00:01Z"
+                )
             case "worker_kernel::stop":
                 return worker(enabled: true)
             case "worker_kernel::stop_all":
@@ -186,12 +208,14 @@ struct WorkerKernelClientTests {
             input: AnyCodable(["query": "Tron"]),
             idempotencyKey: key
         )
+        _ = try await client.cancelWorkerInvocation(invocationId: "run-1", idempotencyKey: key)
         _ = try await client.stopWorker(workerId: "research", idempotencyKey: key)
         _ = try await client.setWorkerEnabled(false, workerId: "research", idempotencyKey: key)
         _ = try await client.setWorkersStopped(true, idempotencyKey: key)
 
         #expect(functions == [
             "worker_kernel::invoke",
+            "worker_kernel::cancel",
             "worker_kernel::stop",
             "worker_kernel::disable",
             "worker_kernel::stop_all",

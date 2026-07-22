@@ -198,13 +198,14 @@ impl WorkerStore {
             .is_none();
         transaction
             .execute(
-                "INSERT INTO workers(worker_id,name,description,tool_name,runner_kind,active_version,enabled,retired,health,created_at,updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,1,0,'healthy',?7,?7)
+                "INSERT INTO workers(worker_id,name,description,tool_name,runner_kind,active_version,enabled,retired,health,presentation_json,created_at,updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,1,0,'healthy',?7,?8,?8)
                  ON CONFLICT(worker_id) DO UPDATE SET
                     name=excluded.name, description=excluded.description,
                     tool_name=excluded.tool_name, runner_kind=excluded.runner_kind,
                     active_version=excluded.active_version, enabled=1, retired=0,
-                    health='healthy', updated_at=excluded.updated_at",
+                    health='healthy', presentation_json=excluded.presentation_json,
+                    updated_at=excluded.updated_at",
                 params![
                     prepared.worker_id,
                     prepared.bundle.name,
@@ -212,6 +213,13 @@ impl WorkerStore {
                     prepared.tool_name,
                     prepared.bundle.runner.kind(),
                     prepared.version,
+                    prepared
+                        .bundle
+                        .presentation
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| error.to_string())?,
                     now,
                 ],
             )
@@ -318,7 +326,8 @@ impl WorkerStore {
             .prepare(
                 "SELECT w.worker_id,w.name,w.description,w.tool_name,w.runner_kind,w.active_version,
                         w.enabled,w.retired,w.health,w.updated_at,
-                        (SELECT COUNT(*) FROM worker_triggers t WHERE t.worker_id=w.worker_id AND t.enabled=1)
+                        (SELECT COUNT(*) FROM worker_triggers t WHERE t.worker_id=w.worker_id AND t.enabled=1),
+                        w.presentation_json
                  FROM workers w WHERE (?1=1 OR w.retired=0) ORDER BY w.updated_at DESC",
             )
             .map_err(|error| format!("prepare worker list: {error}"))?;
@@ -334,7 +343,8 @@ impl WorkerStore {
             .query_row(
                 "SELECT w.worker_id,w.name,w.description,w.tool_name,w.runner_kind,w.active_version,
                         w.enabled,w.retired,w.health,w.updated_at,
-                        (SELECT COUNT(*) FROM worker_triggers t WHERE t.worker_id=w.worker_id AND t.enabled=1)
+                        (SELECT COUNT(*) FROM worker_triggers t WHERE t.worker_id=w.worker_id AND t.enabled=1),
+                        w.presentation_json
                  FROM workers w WHERE w.worker_id=?1",
                 [worker_id],
                 row_summary,
@@ -564,6 +574,7 @@ impl WorkerStore {
             health: state.health.clone(),
             trigger_count,
             updated_at: state.updated_at.clone(),
+            presentation: bundle.presentation.clone(),
         })
     }
 }

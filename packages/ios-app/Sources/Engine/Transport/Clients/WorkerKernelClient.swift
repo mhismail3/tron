@@ -57,6 +57,17 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
+    func cancelWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWrite(
+            "worker_kernel::cancel",
+            WorkerCancelRequestDTO(invocationId: invocationId),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func setWorkerEnabled(
         _ enabled: Bool,
         workerId: String,

@@ -100,6 +100,21 @@ async fn agent_runner_returns_typed_json() {
         Some(json!({"answer":"agent-runner"})),
         "agent worker result: {result:?}"
     );
+    let agent_session_id = result
+        .agent_session_id
+        .as_deref()
+        .expect("agent invocation should expose its child session");
+    assert!(agent_session_id.starts_with("sess_"), "{agent_session_id}");
+    assert_eq!(
+        runtime
+            .store()
+            .invocation(&result.invocation_id)
+            .unwrap()
+            .unwrap()
+            .agent_session_id
+            .as_deref(),
+        Some(agent_session_id)
+    );
 }
 
 #[tokio::test]
@@ -382,4 +397,75 @@ async fn disabling_agent_worker_aborts_its_spawned_child_session() {
     })
     .await
     .expect("agent worker child session outlived its disabled invocation");
+}
+
+#[tokio::test]
+async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
+    let (runtime, _home) = test_runtime(Some(Arc::new(PendingResponderFactory)));
+    let mut bundle = command_bundle(Vec::new());
+    bundle.worker_id = Some("precise-agent-cancel".to_owned());
+    bundle.name = "Precise Agent Cancel".to_owned();
+    bundle.description = "Pending agent runner used to prove invocation cancellation".to_owned();
+    bundle.tool_name = Some("worker_precise_agent_cancel".to_owned());
+    bundle.runner = WorkerRunner::Agent {
+        instructions: "Wait until this invocation is cancelled.".to_owned(),
+        model: None,
+    };
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+    let worker_id = outcome.worker.worker_id.clone();
+    let invoke_runtime = Arc::clone(&runtime);
+    let invoke_worker_id = worker_id.clone();
+    let invocation = tokio::spawn(async move {
+        invoke_runtime
+            .invoke(request(
+                &invoke_worker_id,
+                json!({}),
+                "precise-agent-cancel",
+            ))
+            .await
+            .unwrap()
+    });
+
+    let run = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(run) = runtime
+                .store()
+                .runs_filtered(Some(&worker_id), Some("running"), 1)
+                .unwrap()
+                .into_iter()
+                .next()
+                && run.agent_session_id.is_some()
+            {
+                break run;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("agent invocation never linked its running child session");
+
+    let cancelled = runtime.cancel_invocation(&run.invocation_id).await.unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+    assert_eq!(cancelled.agent_session_id, run.agent_session_id);
+    let joined = tokio::time::timeout(Duration::from_secs(5), invocation)
+        .await
+        .expect("cancelled agent invocation did not terminate")
+        .unwrap();
+    assert_eq!(joined.status, "cancelled", "{joined:?}");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while runtime.orchestrator.active_run_count() != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("agent child session outlived precise invocation cancellation");
+    assert!(
+        runtime
+            .store()
+            .summary(&worker_id)
+            .unwrap()
+            .unwrap()
+            .enabled,
+        "precise cancellation must not disable the worker"
+    );
 }

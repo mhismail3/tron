@@ -127,6 +127,7 @@ pub(super) async fn read_http_body_limited(
 pub(super) async fn run_worker_command(
     spec: &WorkerCommand,
     workdir: &Path,
+    state_dir: Option<&Path>,
     input: Option<&Value>,
     secrets: &HashMap<String, String>,
     invocation: Option<&InvocationRecord>,
@@ -134,6 +135,7 @@ pub(super) async fn run_worker_command(
     let child = spawn_process(
         &spec.command,
         workdir,
+        state_dir,
         secrets,
         Stdio::piped(),
         Stdio::piped(),
@@ -195,6 +197,7 @@ pub(super) async fn run_worker_command(
 pub(super) fn spawn_process(
     command: &[String],
     workdir: &Path,
+    state_dir: Option<&Path>,
     secrets: &HashMap<String, String>,
     stdout: Stdio,
     stderr: Stdio,
@@ -230,6 +233,9 @@ pub(super) fn spawn_process(
             .env("GEM_HOME", dependency_runtime.join("gems"))
             .env("BUNDLE_PATH", dependency_runtime.join("gems"))
             .env("PATH", path);
+    }
+    if let Some(state_dir) = state_dir {
+        process.env("TRON_WORKER_STATE_DIR", state_dir);
     }
     for (name, value) in secrets {
         let env_name = format!(

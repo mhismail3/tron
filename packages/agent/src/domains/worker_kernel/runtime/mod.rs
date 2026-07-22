@@ -29,8 +29,8 @@ use super::persistence::WorkerStore;
 use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
-    MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, UpsertOutcome, WorkerBundle,
-    WorkerCommand, WorkerDependency, WorkerEngineHook, WorkerRunner, WorkerTrigger,
+    MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, PurgeOutcome, UpsertOutcome,
+    WorkerBundle, WorkerCommand, WorkerDependency, WorkerEngineHook, WorkerRunner, WorkerTrigger,
 };
 use support::*;
 
@@ -58,6 +58,7 @@ use crate::engine::{
 
 struct ResidentProcess {
     child: Option<ProcessTree>,
+    ready: bool,
     consecutive_health_failures: u8,
     runtime_root: Option<PathBuf>,
 }
@@ -116,6 +117,7 @@ pub struct WorkerRuntime {
     engine_limit: Arc<Semaphore>,
     worker_limits: DashMap<String, Arc<Semaphore>>,
     inflight: DashSet<String>,
+    invocation_stops: DashMap<String, CancellationToken>,
     worker_stops: DashMap<String, CancellationToken>,
     execution_stop: Mutex<CancellationToken>,
     residents: DashMap<String, Arc<Mutex<ResidentProcess>>>,
@@ -160,6 +162,7 @@ impl WorkerRuntime {
             engine_limit: Arc::new(Semaphore::new(MAX_ENGINE_CONCURRENCY)),
             worker_limits: DashMap::new(),
             inflight: DashSet::new(),
+            invocation_stops: DashMap::new(),
             worker_stops: DashMap::new(),
             execution_stop: Mutex::new(CancellationToken::new()),
             residents: DashMap::new(),

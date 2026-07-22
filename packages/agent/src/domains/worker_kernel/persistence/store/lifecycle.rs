@@ -310,7 +310,11 @@ impl WorkerStore {
             .ok_or_else(|| format!("worker '{worker_id}' was not found"))
     }
 
-    pub fn purge(&self, worker_id: &str) -> Result<bool, String> {
+    pub fn purge(
+        &self,
+        worker_id: &str,
+        known_secrets: &[String],
+    ) -> Result<super::super::super::types::PurgeOutcome, String> {
         validate_identifier(worker_id, "workerId")?;
         let summary = self
             .summary(worker_id)?
@@ -318,16 +322,36 @@ impl WorkerStore {
         if !summary.retired {
             return Err("a worker must be retired before permanent purge".to_owned());
         }
+        let worker_dir = self.root.join(worker_id);
+        let worker_state_dir = self.state_root.join(worker_id);
+        let operational_export = self.purge_operational_export(worker_id)?;
+        let archive = super::super::snapshot::create_worker_purge_archive(
+            &self.home,
+            worker_id,
+            &worker_dir,
+            &worker_state_dir,
+            &operational_export,
+            known_secrets,
+        )?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        let worker_dir = self.root.join(worker_id);
         let purging_root = self.root.join(".purging");
         fs::create_dir_all(&purging_root).map_err(|error| error.to_string())?;
         let staged = purging_root.join(format!("{worker_id}-{}", uuid::Uuid::now_v7()));
         fs::rename(&worker_dir, &staged)
             .map_err(|error| format!("stage worker bundle for purge: {error}"))?;
+        let state_purging_root = self.state_root.join(".purging");
+        fs::create_dir_all(&state_purging_root).map_err(|error| error.to_string())?;
+        let staged_state = state_purging_root.join(format!("{worker_id}-{}", uuid::Uuid::now_v7()));
+        let state_was_present = worker_state_dir.exists();
+        if state_was_present {
+            if let Err(error) = fs::rename(&worker_state_dir, &staged_state) {
+                let _ = fs::rename(&staged, &worker_dir);
+                return Err(format!("stage worker state for purge: {error}"));
+            }
+        }
         let result = (|| -> Result<usize, String> {
             transaction
                 .execute("DELETE FROM worker_inbox WHERE worker_id=?1", [worker_id])
@@ -361,6 +385,9 @@ impl WorkerStore {
             Ok(changed) => changed,
             Err(error) => {
                 let _ = fs::rename(&staged, &worker_dir);
+                if state_was_present {
+                    let _ = fs::rename(&staged_state, &worker_state_dir);
+                }
                 return Err(error);
             }
         };
@@ -370,7 +397,114 @@ impl WorkerStore {
                 staged.display()
             ));
         }
-        Ok(changed > 0)
+        if state_was_present {
+            fs::remove_dir_all(&staged_state).map_err(|error| {
+                format!(
+                    "worker was purged but its staged state could not be erased at {}: {error}",
+                    staged_state.display()
+                )
+            })?;
+        }
+        Ok(super::super::super::types::PurgeOutcome {
+            worker_id: worker_id.to_owned(),
+            purged: changed > 0,
+            archive_path: archive.path.display().to_string(),
+            archive_sha256: archive.sha256,
+        })
+    }
+
+    fn purge_operational_export(&self, worker_id: &str) -> Result<Value, String> {
+        let summary = self
+            .summary(worker_id)?
+            .ok_or_else(|| format!("worker '{worker_id}' was not found"))?;
+        let connection = self.connection()?;
+        let runs = {
+            let mut statement = connection
+                .prepare(&format!(
+                    "{} WHERE worker_id=?1 ORDER BY created_at",
+                    invocation_select_base()
+                ))
+                .map_err(|error| error.to_string())?;
+            statement
+                .query_map([worker_id], row_invocation)
+                .map_err(|error| error.to_string())?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| error.to_string())?
+        };
+        let attempts = runs
+            .iter()
+            .map(|run| {
+                self.attempts(&run.invocation_id)
+                    .map(|attempts| (run.invocation_id.clone(), attempts))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let traces = runs
+            .iter()
+            .map(|run| run.trace_id.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|trace_id| self.trace(&trace_id).map(|trace| (trace_id, trace)))
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let inbox = query_json_rows(
+            &connection,
+            "SELECT inbox_id,invocation_id,severity,result_json,seen,created_at
+             FROM worker_inbox WHERE worker_id=?1 ORDER BY created_at",
+            worker_id,
+            |row| {
+                let result: String = row.get(3)?;
+                Ok(json!({
+                    "inboxId":row.get::<_, String>(0)?,
+                    "invocationId":row.get::<_, String>(1)?,
+                    "severity":row.get::<_, String>(2)?,
+                    "result":serde_json::from_str::<Value>(&result).unwrap_or(Value::Null),
+                    "seen":row.get::<_, i64>(4)? != 0,
+                    "createdAt":row.get::<_, String>(5)?,
+                }))
+            },
+        )?;
+        let audit = query_json_rows(
+            &connection,
+            "SELECT audit_id,action,details_json,created_at FROM worker_audit
+             WHERE worker_id=?1 ORDER BY created_at",
+            worker_id,
+            |row| {
+                let details: String = row.get(2)?;
+                Ok(json!({
+                    "auditId":row.get::<_, String>(0)?,
+                    "action":row.get::<_, String>(1)?,
+                    "details":serde_json::from_str::<Value>(&details).unwrap_or(Value::Null),
+                    "createdAt":row.get::<_, String>(3)?,
+                }))
+            },
+        )?;
+        let health = query_json_rows(
+            &connection,
+            "SELECT health_id,worker_version,status,source,details_json,recorded_at
+             FROM worker_health WHERE worker_id=?1 ORDER BY recorded_at",
+            worker_id,
+            |row| {
+                let details: String = row.get(4)?;
+                Ok(json!({
+                    "healthId":row.get::<_, String>(0)?,
+                    "workerVersion":row.get::<_, String>(1)?,
+                    "status":row.get::<_, String>(2)?,
+                    "source":row.get::<_, String>(3)?,
+                    "details":serde_json::from_str::<Value>(&details).unwrap_or(Value::Null),
+                    "recordedAt":row.get::<_, String>(5)?,
+                }))
+            },
+        )?;
+        Ok(json!({
+            "format":"tron.worker_purge_records.v1",
+            "exportedAt":chrono::Utc::now().to_rfc3339(),
+            "worker":summary,
+            "runs":runs,
+            "attempts":attempts,
+            "traces":traces,
+            "inbox":inbox,
+            "audit":audit,
+            "health":health,
+        }))
     }
 
     pub fn set_stop_all(&self, stopped: bool) -> Result<(), String> {
@@ -393,4 +527,18 @@ impl WorkerStore {
             .map(|value| value == "true")
             .map_err(|error| format!("read worker stop-all: {error}"))
     }
+}
+
+fn query_json_rows(
+    connection: &Connection,
+    sql: &str,
+    worker_id: &str,
+    mut map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<Value>,
+) -> Result<Vec<Value>, String> {
+    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
+    statement
+        .query_map([worker_id], |row| map(row))
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
 }

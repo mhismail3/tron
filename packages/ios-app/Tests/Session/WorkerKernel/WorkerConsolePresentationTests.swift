@@ -113,7 +113,8 @@ struct WorkerConsolePresentationTests {
             retired: retired,
             health: health,
             triggerCount: 1,
-            updatedAt: "2026-07-20T16:18:00Z"
+            updatedAt: "2026-07-20T16:18:00Z",
+            presentation: nil
         )
     }
 }

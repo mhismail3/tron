@@ -3,20 +3,27 @@
 //! Filesystem worker bundles and active pointers are canonical. The SQLite
 //! backend owns rebuildable routing indexes plus durable operational ledgers.
 //! Database implementation types stay private to this module. Callers use
-//! [`WorkerStore`]; current worker history and caller-owned durable events
-//! remain as evidence.
+//! [`WorkerStore`]. `snapshot` owns verified compressed profile backup and
+//! offline restoration before an on-disk worker schema changes.
 //!
 //! ## Ownership
 //!
 //! - `filesystem` owns the one canonical atomic-JSON and immutable-tree hash
 //!   implementation used by publication and reconstruction.
 //! - `rebuild` projects canonical bundles into disposable SQLite indexes.
+//! - `snapshot` creates, verifies, and restores owner-only profile archives.
 //! - `store` owns canonical publication plus durable invocation, inbox,
 //!   trigger, health, and audit ledgers. Its concern modules and scenario tests
 //!   live beside that single state owner.
 
 mod filesystem;
 mod rebuild;
+mod snapshot;
 mod store;
 
 pub(super) use store::WorkerStore;
+
+pub(crate) use snapshot::{
+    ProfileSnapshot, create_profile_snapshot, ensure_worker_schema_snapshot,
+    list_profile_snapshots, restore_profile_snapshot, verify_profile_snapshot,
+};

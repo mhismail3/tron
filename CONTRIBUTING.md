@@ -58,6 +58,13 @@ You should never need to run `scripts/tron deploy` or any production
 deployment command — those are manual-only and reserved for the maintainer.
 Use `tron dev` for everything.
 
+Before a storage migration or risky local-state experiment, create and verify
+an owner-only profile archive with `scripts/tron state snapshot`. List or
+verify archives with `scripts/tron state snapshots` and
+`scripts/tron state verify <archive>`. `scripts/tron state restore <archive>`
+requires the server to be stopped and preserves replaced state in a dated
+recovery directory.
+
 ### iOS
 
 ```bash

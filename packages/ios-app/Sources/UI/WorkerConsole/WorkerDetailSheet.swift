@@ -66,11 +66,11 @@ struct WorkerDetailSheet: View {
                 Text("The worker will stop receiving work but its versions and durable history will be retained.")
             }
             .confirmationDialog(
-                "Permanently purge this worker?",
+                "Archive and purge this worker?",
                 isPresented: $confirmPurge,
                 titleVisibility: .visible
             ) {
-                Button("Purge permanently", role: .destructive) {
+                Button("Archive and purge", role: .destructive) {
                     Task {
                         await viewModel.purge(
                             repository: repository,
@@ -80,7 +80,7 @@ struct WorkerDetailSheet: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This removes the retired worker and its retained state. This cannot be undone.")
+                Text("Tron verifies a local recovery archive, then removes the retired worker and its live state. Restoring the archive is a manual operator action.")
             }
         }
         .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
@@ -372,7 +372,15 @@ struct WorkerDetailSheet: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(viewModel.runs.prefix(20)) { run in
-                        WorkerRunCard(run: run)
+                        WorkerRunCard(run: run) {
+                            Task {
+                                await viewModel.cancel(
+                                    run,
+                                    repository: repository,
+                                    connectionState: connectionState
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -215,6 +215,7 @@ struct WorkerVersionRow: View {
 
 struct WorkerRunCard: View {
     let run: WorkerInvocationDTO
+    var onCancel: (() -> Void)?
 
     private var color: Color {
         switch WorkerConsolePresentation.normalized(run.status) {
@@ -240,6 +241,11 @@ struct WorkerRunCard: View {
                         .foregroundStyle(.tronTextSecondary)
                 }
                 Spacer()
+                if canCancel, let onCancel {
+                    Button("Cancel", role: .destructive, action: onCancel)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .buttonStyle(.plain)
+                }
                 if let timestamp = WorkerConsolePresentation.timestamp(run.completedAt ?? run.startedAt ?? run.createdAt) {
                     Text(timestamp)
                         .font(TronTypography.sans(size: TronTypography.sizeSM))
@@ -281,6 +287,10 @@ struct WorkerRunCard: View {
         }
         .padding(11)
         .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
+    }
+
+    private var canCancel: Bool {
+        run.status == "queued" || run.status == "running"
     }
 
     private var statusSymbol: String {

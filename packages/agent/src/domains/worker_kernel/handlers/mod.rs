@@ -57,6 +57,7 @@ operation_bindings! {
         "inspect" => |invocation, deps| { support::response(invocation, discovery::inspect(invocation, deps).await) },
         "invoke" => |invocation, deps| { support::response(invocation, invocation::invoke_worker(invocation, deps).await) },
         "await" => |invocation, deps| { support::response(invocation, invocation::await_worker(invocation, deps).await) },
+        "cancel" => |invocation, deps| { support::response(invocation, invocation::cancel_worker_invocation(invocation, deps).await) },
         "stop" => |invocation, deps| { support::response(invocation, invocation::stop_worker(invocation, deps).await) },
         "disable" => |invocation, deps| { support::response(invocation, invocation::set_enabled(invocation, deps, false).await) },
         "enable" => |invocation, deps| { support::response(invocation, invocation::set_enabled(invocation, deps, true).await) },

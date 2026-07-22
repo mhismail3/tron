@@ -1,6 +1,88 @@
 use super::*;
 
 #[tokio::test]
+async fn worker_owned_state_survives_update_rollback_disable_and_retirement() {
+    let (runtime, home) = test_runtime(None);
+    let state_script = r#"import json,os,pathlib
+root=pathlib.Path(os.environ['TRON_WORKER_STATE_DIR'])
+root.mkdir(parents=True,exist_ok=True)
+counter=root/'counter.txt'
+value=int(counter.read_text())+1 if counter.exists() else 1
+counter.write_text(str(value))
+print(json.dumps({'count':value,'stateDir':str(root)}))
+"#;
+    let mut bundle = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        state_script.to_owned(),
+    ]);
+    bundle.worker_id = Some("stateful-counter".to_owned());
+    bundle.name = "Stateful Counter".to_owned();
+    bundle.output_schema = json!({
+        "type":"object","additionalProperties":false,"required":["count","stateDir"],
+        "properties":{"count":{"type":"integer"},"stateDir":{"type":"string"}}
+    });
+    bundle.smoke_tests = vec![WorkerCommand {
+        command: vec![
+            "python3".to_owned(),
+            "-c".to_owned(),
+            "import json,os,pathlib; pathlib.Path(os.environ['TRON_WORKER_STATE_DIR'],'smoke.txt').write_text('isolated'); print(json.dumps({'ok':True}))".to_owned(),
+        ],
+        timeout_seconds: 5,
+    }];
+
+    let first = runtime.upsert(bundle.clone(), None).await.unwrap();
+    let durable = home.path().join("workspace/worker-state/stateful-counter");
+    assert!(!durable.join("smoke.txt").exists());
+    let first_run = runtime
+        .invoke(request("stateful-counter", json!({}), "state-1"))
+        .await
+        .unwrap();
+    assert_eq!(first_run.output.as_ref().unwrap()["count"], 1);
+    assert_eq!(
+        first_run.output.as_ref().unwrap()["stateDir"],
+        durable.display().to_string()
+    );
+
+    bundle.description = "Updated stateful counter contract".to_owned();
+    bundle.provenance[0].revision = Some("2".to_owned());
+    let second = runtime
+        .upsert(bundle, Some("stateful-counter"))
+        .await
+        .unwrap();
+    assert_ne!(first.version, second.version);
+    let second_run = runtime
+        .invoke(request("stateful-counter", json!({}), "state-2"))
+        .await
+        .unwrap();
+    assert_eq!(second_run.output.as_ref().unwrap()["count"], 2);
+
+    runtime
+        .rollback("stateful-counter", &first.version)
+        .await
+        .unwrap();
+    let third_run = runtime
+        .invoke(request("stateful-counter", json!({}), "state-3"))
+        .await
+        .unwrap();
+    assert_eq!(third_run.output.as_ref().unwrap()["count"], 3);
+    runtime
+        .set_enabled("stateful-counter", false)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(durable.join("counter.txt")).unwrap(),
+        "3"
+    );
+    runtime.set_enabled("stateful-counter", true).await.unwrap();
+    runtime.retire("stateful-counter").await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(durable.join("counter.txt")).unwrap(),
+        "3"
+    );
+}
+
+#[tokio::test]
 async fn provider_api_keys_resolve_through_declared_runtime_bindings() {
     let (runtime, home) = test_runtime(None);
     let auth_path = crate::shared::foundation::paths::auth_path_for_home(home.path());
@@ -209,6 +291,7 @@ async fn command_timeout_is_bounded_and_kills_the_child() {
         },
         temporary.path(),
         None,
+        None,
         &HashMap::new(),
         None,
     )
@@ -231,6 +314,7 @@ async fn successful_command_may_ignore_typed_input_without_a_broken_pipe_failure
             timeout_seconds: 5,
         },
         temporary.path(),
+        None,
         Some(&json!({"payload":"x".repeat(2_000_000)})),
         &HashMap::new(),
         None,
@@ -258,6 +342,7 @@ async fn worker_command_rejects_oversized_stdout_after_draining_the_child() {
             timeout_seconds: 5,
         },
         temporary.path(),
+        None,
         None,
         &HashMap::new(),
         None,

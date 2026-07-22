@@ -350,6 +350,88 @@ async fn disabling_a_worker_stops_its_active_invocation() {
 }
 
 #[tokio::test]
+async fn invocation_cancel_is_precise_for_queued_and_running_work() {
+    let (runtime, home) = test_runtime(None);
+    let started = home.path().join("cancel-started");
+    let survived = home.path().join("cancel-survived");
+    let mut bundle = command_bundle(vec![
+        "python3".to_owned(),
+        "-c".to_owned(),
+        "import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text('started'); time.sleep(30); pathlib.Path(sys.argv[2]).write_text('survived')".to_owned(),
+        started.display().to_string(),
+        survived.display().to_string(),
+    ]);
+    bundle.worker_id = Some("precise-cancel".to_owned());
+    bundle.name = "Precise Cancel".to_owned();
+    let outcome = runtime.upsert(bundle, None).await.unwrap();
+
+    let queued = runtime
+        .enqueue(request(
+            &outcome.worker.worker_id,
+            json!({}),
+            "queued-cancel",
+        ))
+        .unwrap();
+    let cancelled_queued = runtime
+        .cancel_invocation(&queued.invocation_id)
+        .await
+        .unwrap();
+    assert_eq!(cancelled_queued.status, "cancelled");
+    assert!(cancelled_queued.started_at.is_none());
+
+    let running = {
+        let runtime = Arc::clone(&runtime);
+        let worker_id = outcome.worker.worker_id.clone();
+        tokio::spawn(async move {
+            runtime
+                .invoke(request(&worker_id, json!({}), "running-cancel"))
+                .await
+        })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline && !started.exists() {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(started.exists(), "running worker never started");
+    let run_id = runtime
+        .store()
+        .runs_filtered(Some(&outcome.worker.worker_id), Some("running"), 10)
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("running invocation")
+        .invocation_id;
+    let cancelled_running = runtime.cancel_invocation(&run_id).await.unwrap();
+    assert_eq!(cancelled_running.status, "cancelled");
+    let joined = running.await.unwrap().unwrap();
+    assert_eq!(joined.status, "cancelled");
+    assert!(
+        runtime
+            .store()
+            .summary(&outcome.worker.worker_id)
+            .unwrap()
+            .unwrap()
+            .enabled
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        !survived.exists(),
+        "cancelled process continued after terminalization"
+    );
+    let inbox = runtime
+        .store()
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
+        .unwrap();
+    assert_eq!(
+        inbox
+            .iter()
+            .filter(|item| item["result"]["status"] == "cancelled")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn stopping_one_worker_cancels_current_work_without_disabling_future_dispatch() {
     let (runtime, home) = test_runtime(None);
     let child_started = home.path().join("stop-descendant-started");

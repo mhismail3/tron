@@ -164,15 +164,17 @@ worker metadata from the client. The server supplies internal causal context.
 `Engine/Protocol/EngineProtocolTypes+WorkerKernel.swift` owns:
 
 - `WorkerSummaryDTO` for identity, tool name, runner, health, active version,
-  enabled/retired status, trigger count, and update time;
+  enabled/retired status, trigger count, immutable presentation/suite binding,
+  and update time;
 - `WorkerInspectResultDTO` for the bundle, versions, triggers, audit, and
   canonical version directory;
 - `WorkerInvocationDTO` for queued/running/terminal runs, typed input/output,
   idempotency, trace, causal depth, trigger kind, numbered delivery-attempt
-  count, and timestamps;
+  count, optional child-agent session id, and timestamps;
 - `WorkerInboxItemDTO` for durable visible results and failures;
-- request/response DTOs for invocation, per-worker stop, rollback, stop-all,
-  purge, and webhook token rotation.
+- request/response DTOs for invocation, exact invocation cancellation,
+  per-worker stop, rollback, stop-all, archive-backed purge, and webhook token
+  rotation.
 
 Worker history reads include `detail: "full"` explicitly and request at most 20
 records. The server still applies per-value byte ceilings and reports truncation;
@@ -198,6 +200,7 @@ invalidation/change-feed contract only.
 - list and inspect;
 - runs and inbox;
 - typed invoke;
+- cancel one queued or running invocation while preserving the worker route;
 - stop current work while preserving enabled routing, plus enable/disable;
 - rollback;
 - retire and purge;
@@ -271,14 +274,15 @@ owns both navigation and every evidence renderer. It provides:
 - recent runs with delivery-attempt counts and disclosed input/output, durable
   inbox results, and progressively disclosed audit history;
 - stop current work without disabling the worker, enable/disable, retirement,
-  and confirmation-backed permanent purge.
+  exact run cancellation, and confirmation-backed archive-then-purge whose
+  result retains the recovery archive path and checksum.
 
 Loading, disconnected, empty, partial-error, and section-empty states all use
 the same compact semantic cards instead of raw list placeholders. An empty
 console explicitly directs the user to create workers conversationally. A
 retired worker does not show the invalid ordinary Enable action; its version
 rows become Restore actions that reactivate canonical server state. Stop-all,
-retirement, and permanent purge use explicit destructive affordances and
+retirement, and archive-backed purge use explicit destructive affordances and
 confirmation; ordinary stop/disable controls explain their durable-state
 semantics. Webhook credentials are shown only from the mutation response that
 created or rotated them.

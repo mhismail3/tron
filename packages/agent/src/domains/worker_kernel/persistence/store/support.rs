@@ -330,6 +330,9 @@ pub(super) fn row_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerSum
         health: row.get(8)?,
         updated_at: row.get(9)?,
         trigger_count: row.get(10)?,
+        presentation: row
+            .get::<_, Option<String>>(11)?
+            .and_then(|value| serde_json::from_str(&value).ok()),
     })
 }
 
@@ -343,7 +346,7 @@ pub(super) fn invocation_select_base() -> &'static str {
             worker_invocations.input_json,worker_invocations.output_json,
             worker_invocations.error,worker_invocations.idempotency_key,
             worker_invocations.trace_id,worker_invocations.causal_depth,
-            worker_invocations.trigger_kind,
+            worker_invocations.trigger_kind,worker_invocations.agent_session_id,
             (SELECT COUNT(*) FROM worker_attempts a
                 WHERE a.invocation_id=worker_invocations.invocation_id),
             worker_invocations.created_at,
@@ -366,10 +369,11 @@ pub(super) fn row_invocation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invoca
         trace_id: row.get(8)?,
         causal_depth: row.get(9)?,
         trigger_kind: row.get(10)?,
-        attempt_count: row.get(11)?,
-        created_at: row.get(12)?,
-        started_at: row.get(13)?,
-        completed_at: row.get(14)?,
+        agent_session_id: row.get(11)?,
+        attempt_count: row.get(12)?,
+        created_at: row.get(13)?,
+        started_at: row.get(14)?,
+        completed_at: row.get(15)?,
     })
 }
 

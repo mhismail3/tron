@@ -57,6 +57,25 @@ pub struct WorkerBundle {
     pub engine_hooks: Vec<WorkerEngineHook>,
     #[serde(default)]
     pub routing: WorkerRouting,
+    /// Optional immutable binding to a supported native or declarative worker
+    /// experience. Unsupported contracts always use the generic console.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<WorkerPresentation>,
+}
+
+/// Minimal immutable worker-experience identity used before the generalized
+/// declarative presentation descriptor exists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerPresentation {
+    pub experience_id: String,
+    pub contract_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_role: Option<String>,
+    #[serde(default)]
+    pub primary: bool,
 }
 
 /// Semantic policy seams that may be implemented by normal workers.
@@ -282,6 +301,8 @@ pub struct WorkerSummary {
     pub health: String,
     pub trigger_count: u64,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<WorkerPresentation>,
 }
 
 #[derive(Clone, Debug)]
@@ -315,6 +336,9 @@ pub struct InvocationRecord {
     pub trace_id: String,
     pub causal_depth: u32,
     pub trigger_kind: String,
+    /// Child session created for an agent-runner invocation, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_id: Option<String>,
     /// Durable delivery attempts made for this invocation. Values greater than
     /// one are explicit at-least-once redelivery evidence.
     pub attempt_count: u32,
@@ -349,4 +373,13 @@ pub struct UpsertOutcome {
     pub created: bool,
     pub replaced_worker_id: Option<String>,
     pub webhooks: Vec<WebhookCredential>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeOutcome {
+    pub worker_id: String,
+    pub purged: bool,
+    pub archive_path: String,
+    pub archive_sha256: String,
 }

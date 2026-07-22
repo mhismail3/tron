@@ -121,6 +121,18 @@ impl WorkerRuntime {
         let runtime = prepared.staging_dir.join("dependency-runtime");
         let secrets = self.load_secrets(&prepared.bundle)?;
         let redactions = self.load_all_runtime_secrets()?;
+        let activation_state_root = self
+            .store
+            .home()
+            .join(crate::shared::foundation::paths::dirs::INTERNAL)
+            .join(crate::shared::foundation::paths::dirs::RUN);
+        std::fs::create_dir_all(&activation_state_root).map_err(|error| error.to_string())?;
+        let activation_state = tempfile::Builder::new()
+            .prefix("worker-activation-state-")
+            .tempdir_in(&activation_state_root)
+            .map_err(|error| format!("create isolated activation state: {error}"))?;
+        crate::shared::foundation::home::set_private_directory_permissions(activation_state.path())
+            .map_err(|error| format!("secure isolated activation state: {error}"))?;
         let mut install_evidence = Vec::new();
         let mut smoke_evidence = Vec::new();
         let mut health_evidence = Vec::new();
@@ -135,9 +147,10 @@ impl WorkerRuntime {
                 .map_err(|error| redact_known_secrets(&error, &redactions))?;
             prepared.bundle.dependencies[index].checksum = Some(actual_checksum);
             if let Some(install) = &dependency.install {
-                let output = run_worker_command(install, &dependency_dir, None, &secrets, None)
-                    .await
-                    .map_err(|error| redact_known_secrets(&error, &redactions))?;
+                let output =
+                    run_worker_command(install, &dependency_dir, None, None, &secrets, None)
+                        .await
+                        .map_err(|error| redact_known_secrets(&error, &redactions))?;
                 install_evidence.push(json!({
                     "dependency":dependency.name,
                     "command":install.command,
@@ -147,18 +160,32 @@ impl WorkerRuntime {
         }
         self.store.seal_resolved_dependencies(prepared)?;
         for test in &prepared.bundle.smoke_tests {
-            let output = run_worker_command(test, &workdir, None, &secrets, None)
-                .await
-                .map_err(|error| redact_known_secrets(&error, &redactions))?;
+            let output = run_worker_command(
+                test,
+                &workdir,
+                Some(activation_state.path()),
+                None,
+                &secrets,
+                None,
+            )
+            .await
+            .map_err(|error| redact_known_secrets(&error, &redactions))?;
             smoke_evidence.push(json!({
                 "command":test.command,
                 "output":redact_json_known_secrets(output, &redactions),
             }));
         }
         for check in &prepared.bundle.health_checks {
-            let output = run_worker_command(check, &workdir, None, &secrets, None)
-                .await
-                .map_err(|error| redact_known_secrets(&error, &redactions))?;
+            let output = run_worker_command(
+                check,
+                &workdir,
+                Some(activation_state.path()),
+                None,
+                &secrets,
+                None,
+            )
+            .await
+            .map_err(|error| redact_known_secrets(&error, &redactions))?;
             health_evidence.push(json!({
                 "command":check.command,
                 "output":redact_json_known_secrets(output, &redactions),
@@ -210,7 +237,7 @@ impl WorkerRuntime {
                 ],
                 timeout_seconds: 1_800,
             };
-            run_worker_command(&clone, destination, None, &HashMap::new(), None).await?;
+            run_worker_command(&clone, destination, None, None, &HashMap::new(), None).await?;
             let checkout = WorkerCommand {
                 command: vec![
                     "git".to_owned(),
@@ -221,7 +248,7 @@ impl WorkerRuntime {
                 ],
                 timeout_seconds: 300,
             };
-            run_worker_command(&checkout, destination, None, &HashMap::new(), None).await?;
+            run_worker_command(&checkout, destination, None, None, &HashMap::new(), None).await?;
             let _ = std::fs::remove_dir_all(destination.join(".git"));
         } else {
             let url = url::Url::parse(&dependency.source)

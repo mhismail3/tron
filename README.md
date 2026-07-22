@@ -44,7 +44,8 @@ engine-global worker through one atomic operation.
 The Rust server owns model execution, authenticated transport, durable session
 truth, worker dispatch, and worker storage. The iOS app is a thin client with a
 Worker Console for health, versions, triggers, typed invocation, runs, inbox,
-rollback, retirement, per-worker stop/disable, and engine stop-all controls.
+rollback, retirement, exact run cancellation, per-worker stop/disable, and
+engine stop-all controls.
 The Mac app packages and supervises the server and owns pairing; it is not a
 second engine client.
 
@@ -53,6 +54,10 @@ Worker bundles live under:
 ```text
 ~/.tron/workspace/workers/<worker-id>/versions/<content-hash>/
 ```
+
+Worker-owned mutable data lives separately under
+`~/.tron/workspace/worker-state/<worker-id>/`; verified profile and purge
+archives live under `~/.tron/internal/backups/`.
 
 Each version contains its schemas, runner, source or instructions, dependency
 lock, provenance, triggers, secret-binding names, smoke tests, health checks,

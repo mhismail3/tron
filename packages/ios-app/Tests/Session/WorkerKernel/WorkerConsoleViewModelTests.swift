@@ -101,6 +101,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var enabled = true
     var retired = false
     var invokedWorkerIds: [String] = []
+    var cancelledInvocationIds: [String] = []
     var stoppedWorkerIds: [String] = []
     var enabledMutations: [Bool] = []
     var rollbackVersions: [String] = []
@@ -122,7 +123,8 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             retired: retired,
             health: enabled ? "healthy" : "disabled",
             triggerCount: 1,
-            updatedAt: "2026-07-19T12:00:00Z"
+            updatedAt: "2026-07-19T12:00:00Z",
+            presentation: nil
         )
     }
 
@@ -138,7 +140,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             surface: AgentToolSurfaceDTO(
                 catalogRevision: 42,
                 surfaceHash: "surface-test",
-                fixedToolCount: 28,
+                fixedToolCount: 29,
                 projectedWorkerCount: 1,
                 availableWorkerCount: 1,
                 availableWorkers: [
@@ -214,6 +216,14 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         return invocation(id: "new-run", output: ["accepted": true])
     }
 
+    func cancelWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        cancelledInvocationIds.append(invocationId)
+        return invocation(id: invocationId, output: ["cancelled": true])
+    }
+
     func setWorkerEnabled(
         _ enabled: Bool,
         workerId: String,
@@ -254,7 +264,12 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         workerId: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerPurgeResultDTO {
-        WorkerPurgeResultDTO(workerId: workerId, purged: true)
+        WorkerPurgeResultDTO(
+            workerId: workerId,
+            purged: true,
+            archivePath: "/test/backups/research.tar.zst",
+            archiveSha256: String(repeating: "a", count: 64)
+        )
     }
 
     func setWorkersStopped(
@@ -293,6 +308,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             traceId: "trace-1",
             causalDepth: 0,
             triggerKind: "manual",
+            agentSessionId: nil,
             attemptCount: 1,
             createdAt: "2026-07-19T12:00:00Z",
             startedAt: nil,

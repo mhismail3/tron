@@ -613,7 +613,7 @@ mod tests {
                 catalog_revision: 42,
                 surface_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
                     .to_owned(),
-                fixed_tool_count: 28,
+                fixed_tool_count: 29,
                 projected_worker_count: 1,
                 available_worker_count: 7,
                 tools: vec![crate::domains::worker_kernel::SurfaceToolSnapshot {

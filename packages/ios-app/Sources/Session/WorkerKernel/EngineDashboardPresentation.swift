@@ -19,6 +19,7 @@ enum EngineDashboardPresentation {
         case "worker_inspect": "Inspect Worker"
         case "worker_invoke": "Run Worker"
         case "worker_await": "Wait for Worker"
+        case "worker_cancel": "Cancel Worker Run"
         case "worker_enable": "Enable Worker"
         case "worker_disable": "Disable Worker"
         case "worker_stop": "Stop Worker"

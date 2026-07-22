@@ -19,6 +19,13 @@ struct WorkerKernelDTOTests {
             "retired": false,
             "health": "healthy",
             "triggerCount": 2,
+            "presentation": {
+              "experienceId": "research-suite",
+              "contractVersion": 1,
+              "suiteId": "research",
+              "componentRole": "coordinator",
+              "primary": true
+            },
             "updatedAt": "2026-07-19T12:00:00Z"
           },
           "bundle": {
@@ -57,6 +64,9 @@ struct WorkerKernelDTOTests {
         )
 
         #expect(inspection.worker.toolName == "recent_research")
+        #expect(inspection.worker.presentation?.experienceId == "research-suite")
+        #expect(inspection.worker.presentation?.suiteId == "research")
+        #expect(inspection.worker.presentation?.primary == true)
         #expect(inspection.versions.first?.contentHash == "abc123")
         #expect(inspection.triggers.first?.kind == "schedule")
         #expect(inspection.audit.first?.action == "activated")
@@ -70,6 +80,7 @@ struct WorkerKernelDTOTests {
           "invocationId":"run-1","workerId":"recent-research","workerVersion":"abc123",
           "status":"completed","input":{"query":"Tron"},"output":{"items":[1,2]},
           "error":null,"idempotencyKey":"test-key","traceId":"trace-1","causalDepth":1,
+          "agentSessionId":"sess_worker_child",
           "triggerKind":"manual","attemptCount":2,"createdAt":"2026-07-19T12:00:00Z",
           "startedAt":"2026-07-19T12:00:01Z","completedAt":"2026-07-19T12:00:02Z"
         }]}
@@ -87,6 +98,7 @@ struct WorkerKernelDTOTests {
 
         #expect(runs.runs.first?.status == "completed")
         #expect(runs.runs.first?.attemptCount == 2)
+        #expect(runs.runs.first?.agentSessionId == "sess_worker_child")
         #expect(runs.runs.first?.output != nil)
         #expect(inbox.items.first?.seen == false)
         let result = try #require(inbox.items.first?.result.value as? [String: Any])

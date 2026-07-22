@@ -49,8 +49,11 @@ fn required_directories(home: &Path) -> Vec<PathBuf> {
         home.join(dirs::INTERNAL)
             .join(dirs::DB)
             .join(dirs::JOURNALS),
+        home.join(dirs::INTERNAL).join(dirs::BACKUPS),
         home.join(dirs::WORKSPACE),
         home.join(dirs::WORKSPACE).join(dirs::VAULT),
+        home.join(dirs::WORKSPACE).join(dirs::WORKERS),
+        home.join(dirs::WORKSPACE).join(dirs::WORKER_STATE),
     ]
 }
 
@@ -65,7 +68,10 @@ mod tests {
         ensure_tron_home_at(&home).unwrap();
 
         assert!(home.join("internal/database").is_dir());
+        assert!(home.join("internal/backups").is_dir());
         assert!(home.join("workspace/vault").is_dir());
+        assert!(home.join("workspace/workers").is_dir());
+        assert!(home.join("workspace/worker-state").is_dir());
         assert!(!home.join("auth.json").exists());
         assert!(!home.join("profiles").exists());
         assert!(!home.join("workspace/projects").exists());

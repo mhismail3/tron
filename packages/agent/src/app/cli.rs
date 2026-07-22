@@ -53,6 +53,27 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: AuthAction,
     },
+    /// Verified profile backup and offline restoration.
+    State {
+        #[command(subcommand)]
+        action: StateAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum StateAction {
+    /// Create and verify an owner-only compressed profile snapshot.
+    Snapshot {
+        /// Also mark this as the required backup before a worker schema opens.
+        #[arg(long, hide = true)]
+        for_worker_schema: Option<u32>,
+    },
+    /// List available profile snapshot archives.
+    Snapshots,
+    /// Verify one snapshot without changing active state.
+    Verify { snapshot: PathBuf },
+    /// Restore one verified snapshot. Tron must be stopped.
+    Restore { snapshot: PathBuf },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -99,7 +120,65 @@ pub(crate) async fn run_subcommand(cmd: &Command) -> Result<()> {
             AuthAction::BeginOauth { provider } => begin_oauth_cli(provider),
             AuthAction::CompleteOauth => complete_oauth_cli().await,
         },
+        Command::State { action } => match action {
+            StateAction::Snapshot { for_worker_schema } => {
+                create_profile_snapshot_cli(*for_worker_schema)
+            }
+            StateAction::Snapshots => list_profile_snapshots_cli(),
+            StateAction::Verify { snapshot } => verify_profile_snapshot_cli(snapshot),
+            StateAction::Restore { snapshot } => restore_profile_snapshot_cli(snapshot),
+        },
     }
+}
+
+fn create_profile_snapshot_cli(for_worker_schema: Option<u32>) -> Result<()> {
+    let snapshot = if let Some(target) = for_worker_schema {
+        crate::domains::worker_kernel::prepare_worker_schema_snapshot(target)
+            .map_err(anyhow::Error::msg)?
+            .context("Worker-schema snapshot marker exists but no verified snapshot is available")?
+    } else {
+        crate::domains::worker_kernel::create_profile_snapshot().map_err(anyhow::Error::msg)?
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&snapshot).context("Failed to encode snapshot report")?
+    );
+    eprintln!("Profile snapshot verified at {}.", snapshot.path.display());
+    Ok(())
+}
+
+fn list_profile_snapshots_cli() -> Result<()> {
+    for snapshot in
+        crate::domains::worker_kernel::list_profile_snapshots().map_err(anyhow::Error::msg)?
+    {
+        println!("{}", snapshot.display());
+    }
+    Ok(())
+}
+
+fn verify_profile_snapshot_cli(snapshot: &Path) -> Result<()> {
+    let report = crate::domains::worker_kernel::verify_profile_snapshot(snapshot)
+        .map_err(anyhow::Error::msg)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).context("Failed to encode snapshot report")?
+    );
+    eprintln!("Profile snapshot is valid.");
+    Ok(())
+}
+
+fn restore_profile_snapshot_cli(snapshot: &Path) -> Result<()> {
+    let database = crate::shared::foundation::paths::db_dir().join("tron.sqlite");
+    let _offline_lock = crate::domains::session::event_store::acquire_database_lock(&database)
+        .map_err(|error| anyhow::anyhow!("Tron must be stopped before profile restore: {error}"))?;
+    let recovery = crate::domains::worker_kernel::restore_profile_snapshot(snapshot)
+        .map_err(anyhow::Error::msg)?;
+    println!("{}", recovery.display());
+    eprintln!(
+        "Profile restored. Replaced state is recoverable at {}.",
+        recovery.display()
+    );
+    Ok(())
 }
 
 fn rotate_bearer_token_cli() -> Result<()> {

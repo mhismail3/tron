@@ -64,6 +64,17 @@ pub(super) async fn await_worker(invocation: &Invocation, deps: &Deps) -> Result
     Ok(json!({"invocation":record,"timedOut":timed_out}))
 }
 
+pub(super) async fn cancel_worker_invocation(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, String> {
+    let record = deps
+        .runtime
+        .cancel_invocation(&required_string(&invocation.payload, "invocationId")?)
+        .await?;
+    serde_json::to_value(record).map_err(|error| error.to_string())
+}
+
 pub(super) async fn set_enabled(
     invocation: &Invocation,
     deps: &Deps,
@@ -97,7 +108,7 @@ pub(super) async fn retire(invocation: &Invocation, deps: &Deps) -> Result<Value
 
 pub(super) async fn purge(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     let worker_id = required_string(&invocation.payload, "workerId")?;
-    Ok(json!({"workerId":worker_id,"purged":deps.runtime.purge(&worker_id).await?}))
+    serde_json::to_value(deps.runtime.purge(&worker_id).await?).map_err(|error| error.to_string())
 }
 
 pub(super) async fn stop_all(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {

@@ -4,6 +4,24 @@ use super::*;
 use crate::engine::FunctionDefinition;
 
 impl WorkerRuntime {
+    pub async fn cancel_invocation(&self, invocation_id: &str) -> Result<InvocationRecord, String> {
+        self.invocation_stop(invocation_id).cancel();
+        let record = self.store.cancel_invocation(invocation_id)?;
+        let _ = self.invocation_stops.remove(invocation_id);
+        self.publish_event(
+            "worker.invocations",
+            json!({
+                "action":"cancelled",
+                "invocationId":record.invocation_id,
+                "workerId":record.worker_id,
+                "causalDepth":record.causal_depth,
+            }),
+            TraceId::new(record.trace_id.clone()).ok(),
+        )
+        .await;
+        Ok(record)
+    }
+
     pub async fn set_enabled(
         self: &Arc<Self>,
         worker_id: &str,
@@ -115,12 +133,16 @@ impl WorkerRuntime {
         serde_json::to_value(worker).map_err(|error| error.to_string())
     }
 
-    pub async fn purge(self: &Arc<Self>, worker_id: &str) -> Result<bool, String> {
+    pub async fn purge(self: &Arc<Self>, worker_id: &str) -> Result<PurgeOutcome, String> {
         self.cancel_worker(worker_id);
         self.stop_residents(Some(worker_id)).await;
         self.unregister_dynamic_tool(worker_id).await;
-        let purged = self.store.purge(worker_id)?;
-        if purged {
+        let secrets = self
+            .load_all_runtime_secrets()?
+            .into_values()
+            .collect::<Vec<_>>();
+        let outcome = self.store.purge(worker_id, &secrets)?;
+        if outcome.purged {
             self.publish_event(
                 "worker.lifecycle",
                 json!({"action":"purged","workerId":worker_id}),
@@ -128,7 +150,7 @@ impl WorkerRuntime {
             )
             .await;
         }
-        Ok(purged)
+        Ok(outcome)
     }
 
     pub async fn set_stop_all(&self, stopped: bool) -> Result<(), String> {
@@ -155,6 +177,13 @@ impl WorkerRuntime {
     pub(super) fn worker_stop(&self, worker_id: &str) -> CancellationToken {
         self.worker_stops
             .entry(worker_id.to_owned())
+            .or_insert_with(CancellationToken::new)
+            .clone()
+    }
+
+    pub(super) fn invocation_stop(&self, invocation_id: &str) -> CancellationToken {
+        self.invocation_stops
+            .entry(invocation_id.to_owned())
             .or_insert_with(CancellationToken::new)
             .clone()
     }

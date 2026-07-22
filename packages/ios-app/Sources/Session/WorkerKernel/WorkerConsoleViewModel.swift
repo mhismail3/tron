@@ -236,6 +236,20 @@ final class WorkerConsoleViewModel {
         }
     }
 
+    func cancel(
+        _ run: WorkerInvocationDTO,
+        repository: any WorkerKernelRepository,
+        connectionState: ConnectionState
+    ) async {
+        guard run.status == "queued" || run.status == "running" else { return }
+        await mutate(repository: repository, connectionState: connectionState) {
+            _ = try await repository.cancelWorkerInvocation(
+                invocationId: run.invocationId,
+                idempotencyKey: .userAction("worker.cancel")
+            )
+        }
+    }
+
     func rollback(
         to version: String,
         repository: any WorkerKernelRepository,

@@ -53,8 +53,8 @@ interrupted-turn recovery, session summaries, and operator diagnostics. It is
 execution evidence for an actual model tool call. It neither grants authority
 nor participates in worker discovery, activation, or permission decisions.
 
-The model-facing fixed surface currently has 28 direct primitives grouped as
-eight host operations, sixteen worker-control operations, and four core-change
+The model-facing fixed surface currently has 29 direct primitives grouped as
+eight host operations, seventeen worker-control operations, and four core-change
 operations. A single typed manifest owns their canonical function IDs, provider
 names, groups, and stable order; registration, provider projection,
 introspection, and exact-set tests do not reconstruct partial identities. Every fixed primitive rejects
@@ -208,6 +208,7 @@ contains:
 - typed semantic engine-hook declarations activated with the version;
 - logical named-secret bindings only;
 - smoke-test and health-check commands plus source provenance.
+- immutable presentation identity, contract version, and optional suite role.
 
 Absent optional fields are omitted, so the human-inspectable manifest can be
 passed back to `worker_upsert` directly for proactive improvement.
@@ -352,6 +353,40 @@ input containing a known credential is rejected before it is persisted. Known va
 from verification evidence, runner output, errors, inbox records, events, and
 diagnostics. Raw values are never stored in manifests or worker SQLite.
 
+## Worker-Owned State and Profile Recovery
+
+Immutable worker code and mutable worker data have separate custody:
+
+```text
+~/.tron/workspace/worker-state/<worker-id>/
+```
+
+Command and resident-service runners receive that owner-only directory as
+`TRON_WORKER_STATE_DIR`; agent runners receive its resolved path in their
+durable instruction contract. Each worker owns its file or SQLite schema and
+transactional migrations. The kernel does not interpret higher-level worker
+records. Candidate smoke and health tests receive a temporary isolated state
+directory, so activation cannot mutate live data. Update, rollback, disable,
+and retirement preserve state.
+
+Before a newer worker database schema first opens an existing profile, Tron
+creates and verifies one owner-only, checksummed `tar.zst` snapshot under
+`~/.tron/internal/backups/`. Snapshots contain settings, authentication state,
+vault files, canonical worker bundles/state, and compact consistent copies of
+the session and worker databases. Runtime caches, logs, journals, WAL/SHM
+files, and disposable process trees are excluded. The manifest records source
+home, schema versions, checksums, and restoration instructions. Operators can
+use `tron state snapshot`, `tron state snapshots`, `tron state verify <path>`,
+and—only while the server is stopped—`tron state restore <path>`. Restore first
+moves replaced state into a dated recovery directory and rolls back if
+publication fails.
+
+Permanent worker purge is similarly recoverable. Before deletion, Tron creates
+and verifies an owner-only archive containing the worker's immutable bundles,
+mutable state, and operational history. Purge aborts if known credential
+material is present. The response reports the archive path and checksum; named
+secret values are never intentionally included.
+
 ## Dispatcher and Delivery Contract
 
 All invocation sources enter the same durable queue:
@@ -430,6 +465,8 @@ does not silently repair or roll it back.
 
 Operator controls are:
 
+- cancel — terminalize one queued or running invocation, stop only its current
+  process/request/child-agent work, and preserve the worker's enabled route;
 - stop — cancel the worker's current invocations and resident process while
   preserving its enabled route, triggers, health, and ability to accept later
   work; the action is retained in worker audit and lifecycle streams;
@@ -437,8 +474,9 @@ Operator controls are:
   active-work stop (webhooks restore only when a token hash exists);
 - rollback — activate a retained version and rotate any restored webhook token;
 - retire — disable routes and triggers while preserving bundles and history;
-- purge — as an irreversible critical operation, permanently remove a retired
-  worker's bundle and operational rows while retaining the purge audit entry;
+- purge — as an explicit critical operation, archive then remove a retired
+  worker's bundle, state, and operational rows while retaining the purge audit
+  entry and returning the verified archive path/checksum;
 - stop-all — block new dispatch, cancel active work, and stop resident services;
   queued rows stay visible and resume only after explicit release.
 
@@ -499,6 +537,7 @@ new file is required, or provide raw/`sha256:`-prefixed 64-digit hex.
 | `worker_inspect` | `worker_kernel::inspect` |
 | `worker_invoke` | `worker_kernel::invoke` |
 | `worker_await` | `worker_kernel::await` |
+| `worker_cancel` | `worker_kernel::cancel` |
 | `worker_stop` | `worker_kernel::stop` |
 | `worker_disable` / `worker_enable` | `worker_kernel::disable` / `enable` |
 | `worker_rollback` | `worker_kernel::rollback` |
@@ -513,6 +552,8 @@ dispatcher remains restart recovery. `worker_await` observes one invocation
 until terminal state or a bounded timeout, and a wait timeout never cancels the
 work. These two operations let a model launch parallel or long work without
 holding one provider call open for the worker's two-hour execution ceiling.
+`worker_cancel` targets one durable invocation id. It is intentionally distinct
+from per-worker `worker_stop` and profile-wide `worker_stop_all`.
 
 Every enabled worker is also registered as a stable direct typed tool using the
 bundle's `toolName`, input schema, output schema, description, routing metadata,
@@ -572,7 +613,7 @@ Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
 evidence plus three operational inventories:
 
-- all 28 fixed tools with their exact schemas, revisions, effect/risk,
+- all 29 fixed tools with their exact schemas, revisions, effect/risk,
   primitive group, and model exposure;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, and immutable worker version;
@@ -724,12 +765,67 @@ directly with the proposal evidence.
 ## Worker Restoration Backlog
 
 The clean cut intentionally removed higher-level source-owned behavior so it
-can be rebuilt from observed tasks as executable workers. This backlog is the
-complete restoration map. An item is complete only when a real worker performs
-the useful action; recreating a record-only request, proposal, or decision API
-does not count.
+can be rebuilt from observed tasks as executable workers. The old itemized
+inventory remains coverage evidence that no useful behavior was forgotten; it
+does not dictate worker boundaries, names, or implementation order. The
+authoritative restoration map is the following thirteen first-principles
+capability families:
 
-### User-workflow workers
+| Family | Functional closure and absorbed behavior |
+|---|---|
+| **Work Ledger** | Durable human/agent work state: goals, questions, answers, dependencies, decisions, status changes, completion, cancellation, filtering, and export/import. Reminders remain Automation custody. |
+| **Continuity Curator** | Useful continuity across turns and sessions: titles, grouping, labels, archival policy, facts, decisions, personal policies, semantic retrieval/editing/tombstones, context summaries, survivor/exclusion decisions, inspection, and explicit clear behavior. |
+| **Delegation Coordinator** | Bounded specialist-agent work: launch, status, inspection, results, invocation cancellation, reusable roles, later fan-out/synthesis, and child-session traceability. |
+| **Research Suite** | Source-backed freshness-aware answers: search, crawling, fetch/archive, freshness, source review, citation extraction, recent research, evidence comparison, contradictions, and synthesis. |
+| **Knowledge Index** | Retrievable durable source material: document/web/repository ingestion, semantic retrieval, provenance, lineage, previews, history, update detection, export/import, and corpus maintenance. Personal memory remains Continuity custody. |
+| **Software Workspace** | Safe repository work: structure/history, Git status/diff/branches/staging/commits, test selection, patch/review preparation, change analysis, and cleanup. Live-core application remains fixed custody. |
+| **Automation Orchestrator** | Work caused by time or events: reminders, schedules, engine events, follow-ups, background jobs, multistep programs, retries, notifications, and workflow state over the executable dispatcher. |
+| **Procedure Library and Worker Forge** | Reusable prompts, templates, procedures, skills, roles, hook patterns, external tool/API/repository scouting, worker creation/improvement, consolidation, and retirement recommendations. |
+| **Worker Evaluator** | Evidence of usefulness and reliability: run inspection, traces/logs/replay, failure clustering, regression fixtures, conformance, comparison, benchmarks, routing evidence, and improvement recommendations. |
+| **Connector Fabric** | Typed external-system adaptation: MCP/A2A/API adapters plus separately versioned email, calendar, issue/source-hosting, messaging, database, home, and business connectors where credentials/dependencies/failure domains differ. |
+| **Artifact Studio** | Focused text, data, document, PDF, spreadsheet, presentation, image, audio, video, transcription, language, diarization, transformation, analysis, and archival specialists. |
+| **Interactive Operator** | Stateful observe-act-verify loops for browser control, computer operation, screenshots, and device inspection. |
+| **Engine Steward** | Provider/model monitoring, diagnostics, core patch authoring, test selection, and isolated proposal evidence without application custody. |
+
+Every restored behavior has one primary family owner. A family splits only
+when contracts, dependencies/credentials, failure isolation, semantic tool
+selection, or independent usefulness materially differ. Individual CRUD verbs,
+internal text helpers, authorization-only tools, and record-only metadata do
+not qualify as workers. Completion means a real worker performs a useful
+outcome through a concise typed contract and survives independent testing,
+versioning, disabling, inspection, and improvement.
+
+Restoration order is deliberate:
+
+1. close concrete kernel gaps and refresh providers/models;
+2. collaboratively author and field-prove Work Ledger, the four-worker
+   Research suite, and General Delegate one worker at a time;
+3. after explicit user confidence, generalize the presentation contract from
+   those three real experiences;
+4. build Evaluator, Procedure Library, Worker Forge, and Provider Steward;
+5. restore Continuity/Knowledge, Software, Automation, Artifacts/Interactive,
+   Connectors, then Engine Steward;
+6. consolidate overlaps, remove unused adapters/helpers/fixtures, and confirm
+   no legacy administrative plane returned.
+
+There is no elapsed-day or concurrent-creation gate. Each worker still needs
+schema validation, atomic activation, useful success and failure scenarios,
+restart/update/rollback evidence, direct-tool routing, generic-console access,
+and accurate dedicated/declarative UI before its family advances.
+
+The kernel foundation for this program is present: mutable worker-owned state,
+isolated activation state, invocation-specific cancellation, durable child-
+agent session linkage, initial immutable presentation/suite bindings, verified
+profile snapshots/restoration, and archive-before-purge. Provider/model refresh
+is the next prerequisite before guided Work Ledger authoring.
+
+### Prior inventory coverage evidence
+
+The following detail is retained only to cross-check the family map above.
+Worker authors must recombine it by functional closure rather than reconstruct
+these bullets as one tool apiece.
+
+#### User workflows
 
 - **Session organization:** derive useful session titles and any later grouping,
   labeling, or archival policy from real conversation context. The kernel
@@ -758,7 +854,7 @@ does not count.
   extraction, summarization, recent-research synthesis, and other repeatable
   transforms developed from concrete sessions.
 
-### Agent and automation workers
+#### Agent and automation behavior
 
 - **Delegated agents:** launch, status, result, cancel, task list, and task
   inspect. The agent runner is the execution substrate; delegation policy,
@@ -783,7 +879,7 @@ does not count.
   external tools, repositories, skills, or APIs into locked worker versions.
   The motivating `last30days` adaptation is the first concrete example.
 
-### External-world workers
+#### External-world behavior
 
 - **Web research:** robots-policy handling, search, crawl, source discovery,
   source review, source archive, freshness checks, citation extraction, and
@@ -803,7 +899,7 @@ does not count.
   hosting, messaging, databases, and home or business systems should enter as
   named-secret-bound workers authored when their first real workflow appears.
 
-### Developer and engine-maintenance workers
+#### Developer and engine-maintenance behavior
 
 - **Git workflows:** status, diff, branch inventory, stage, unstage, commit,
   branch creation, review preparation, test selection, and repository cleanup.
@@ -940,7 +1036,7 @@ Worker live topics are:
 
 - `worker.lifecycle` — activation, per-worker stop, enablement, disablement,
   rollback, retirement, purge, engine stop/resume, failure, and related state;
-- `worker.invocations` — started/completed/failed invocation summaries.
+- `worker.invocations` — started/completed/failed/cancelled invocation summaries.
 
 The durable session log has **13 event variants**. Live-only deltas, progress,
 context notices, and errors remain transport events and are not duplicated as

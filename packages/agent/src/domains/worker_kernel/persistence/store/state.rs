@@ -64,6 +64,21 @@ pub(in crate::domains::worker_kernel::persistence) fn validate_bundle(
     }
     validate_object_schema(&bundle.input_schema, "inputSchema")?;
     validate_object_schema(&bundle.output_schema, "outputSchema")?;
+    if let Some(presentation) = &bundle.presentation {
+        validate_identifier(&presentation.experience_id, "presentation experienceId")?;
+        if presentation.contract_version == 0 {
+            return Err("presentation contractVersion must be greater than zero".to_owned());
+        }
+        if let Some(suite_id) = presentation.suite_id.as_deref() {
+            validate_identifier(suite_id, "presentation suiteId")?;
+        }
+        if let Some(role) = presentation.component_role.as_deref() {
+            validate_identifier(role, "presentation componentRole")?;
+        }
+        if presentation.primary && presentation.suite_id.is_none() {
+            return Err("a primary presentation component requires suiteId".to_owned());
+        }
+    }
     let mut engine_hooks = BTreeSet::new();
     for hook in &bundle.engine_hooks {
         if !engine_hooks.insert(*hook) {

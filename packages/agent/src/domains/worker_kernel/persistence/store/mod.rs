@@ -34,6 +34,7 @@ mod triggers;
 pub struct WorkerStore {
     home: PathBuf,
     root: PathBuf,
+    state_root: PathBuf,
     database: PathBuf,
 }
 
@@ -63,9 +64,13 @@ impl Drop for RemoveDirectoryOnDrop {
 
 impl WorkerStore {
     pub fn open(home: PathBuf) -> Result<Self, String> {
+        let _ = super::snapshot::ensure_worker_schema_snapshot(&home, 4)?;
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
+        let state_root = home
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join(crate::shared::foundation::paths::dirs::WORKER_STATE);
         let database = home
             .join(crate::shared::foundation::paths::dirs::INTERNAL)
             .join(crate::shared::foundation::paths::dirs::DB)
@@ -73,6 +78,10 @@ impl WorkerStore {
         fs::create_dir_all(&root).map_err(|error| format!("create worker root: {error}"))?;
         crate::shared::foundation::home::set_private_directory_permissions(&root)
             .map_err(|error| format!("secure worker root: {error}"))?;
+        fs::create_dir_all(&state_root)
+            .map_err(|error| format!("create worker state root: {error}"))?;
+        crate::shared::foundation::home::set_private_directory_permissions(&state_root)
+            .map_err(|error| format!("secure worker state root: {error}"))?;
         if let Some(parent) = database.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("create worker database directory: {error}"))?;
@@ -82,6 +91,7 @@ impl WorkerStore {
         let store = Self {
             home,
             root,
+            state_root,
             database,
         };
         store.initialize()?;
@@ -93,12 +103,18 @@ impl WorkerStore {
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join(crate::shared::foundation::paths::dirs::WORKERS);
+        let state_root = home
+            .join(crate::shared::foundation::paths::dirs::WORKSPACE)
+            .join(crate::shared::foundation::paths::dirs::WORKER_STATE);
         let database = home
             .join(crate::shared::foundation::paths::dirs::INTERNAL)
             .join(crate::shared::foundation::paths::dirs::DB)
             .join("workers.sqlite");
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         crate::shared::foundation::home::set_private_directory_permissions(&root)
+            .map_err(|error| error.to_string())?;
+        fs::create_dir_all(&state_root).map_err(|error| error.to_string())?;
+        crate::shared::foundation::home::set_private_directory_permissions(&state_root)
             .map_err(|error| error.to_string())?;
         if let Some(parent) = database.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -108,6 +124,7 @@ impl WorkerStore {
         let store = Self {
             home,
             root,
+            state_root,
             database,
         };
         store.initialize()?;
@@ -116,6 +133,16 @@ impl WorkerStore {
 
     pub fn home(&self) -> &Path {
         &self.home
+    }
+
+    pub fn state_dir(&self, worker_id: &str) -> Result<PathBuf, String> {
+        validate_identifier(worker_id, "workerId")?;
+        let path = self.state_root.join(worker_id);
+        fs::create_dir_all(&path)
+            .map_err(|error| format!("create worker state directory: {error}"))?;
+        crate::shared::foundation::home::set_private_directory_permissions(&path)
+            .map_err(|error| format!("secure worker state directory: {error}"))?;
+        Ok(path)
     }
 
     fn connection(&self) -> Result<Connection, String> {
@@ -132,7 +159,8 @@ impl WorkerStore {
     }
 
     fn initialize(&self) -> Result<(), String> {
-        self.connection()?
+        let connection = self.connection()?;
+        connection
             .execute_batch(
                 "
                 CREATE TABLE IF NOT EXISTS worker_schema (
@@ -156,6 +184,7 @@ impl WorkerStore {
                     enabled INTEGER NOT NULL,
                     retired INTEGER NOT NULL,
                     health TEXT NOT NULL,
+                    presentation_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -202,6 +231,7 @@ impl WorkerStore {
                     trace_id TEXT NOT NULL,
                     causal_depth INTEGER NOT NULL,
                     trigger_kind TEXT NOT NULL,
+                    agent_session_id TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     completed_at TEXT,
@@ -282,6 +312,26 @@ impl WorkerStore {
                 ",
             )
             .map_err(|error| format!("initialize worker database: {error}"))?;
+        if !table_has_column(&connection, "workers", "presentation_json")? {
+            connection
+                .execute("ALTER TABLE workers ADD COLUMN presentation_json TEXT", [])
+                .map_err(|error| format!("add worker presentation index: {error}"))?;
+        }
+        if !table_has_column(&connection, "worker_invocations", "agent_session_id")? {
+            connection
+                .execute(
+                    "ALTER TABLE worker_invocations ADD COLUMN agent_session_id TEXT",
+                    [],
+                )
+                .map_err(|error| format!("add agent session linkage: {error}"))?;
+        }
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO worker_schema(version, applied_at)
+                 VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                [],
+            )
+            .map_err(|error| format!("record worker schema v4: {error}"))?;
         super::rebuild::rebuild_indexes(&self.root, &self.database)?;
         self.recover_interrupted()
     }
@@ -310,6 +360,21 @@ impl WorkerStore {
             .commit()
             .map_err(|error| format!("commit interrupted worker recovery: {error}"))
     }
+}
+
+fn table_has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| format!("inspect {table} columns: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("query {table} columns: {error}"))?;
+    for candidate in columns {
+        if candidate.map_err(|error| format!("decode {table} column: {error}"))? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

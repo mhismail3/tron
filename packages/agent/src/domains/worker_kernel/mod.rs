@@ -14,7 +14,7 @@
 //! | `contract` | Primitive identity plus request, response, and worker-bundle schemas |
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
-//! | `persistence` | Canonical bundles, index reconstruction, and durable operational ledgers |
+//! | `persistence` | Canonical bundles, worker-owned state, verified profile/purge archives, index reconstruction, and durable operational ledgers |
 //! | `core_proposals` | Temporary isolated Git worktrees, durable tested commits, bounded evidence, and recorded conversational approval |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router recovery |
@@ -25,9 +25,9 @@
 //! ## Entry Points
 //!
 //! [`registration`] composes fixed operations and the durable runtime.
-//! [`resolve_tool_surface`] builds each provider turn's exact tool set. State
-//! retirement and offline restore are re-exported from `persistence` for
-//! bootstrap and CLI callers.
+//! [`resolve_tool_surface`] builds each provider turn's exact tool set. The
+//! offline `tron state` CLI reaches verified snapshot/list/restore entry points
+//! here without opening the live engine databases.
 //!
 //! ## Dependency Direction
 //!
@@ -121,6 +121,9 @@
 //! consecutive health-check failures disables routing and creates a durable
 //! high-visibility inbox result. System inbox failures without invocation rows
 //! remain eligible for one-time attachment to the next relevant session.
+//! Resident readiness is distinct from process existence. If cancellation
+//! interrupts lazy startup, the next invocation resumes the health handshake
+//! before sending work rather than racing a merely spawned service.
 //! Trusted-local host operations are unrestricted by policy but bounded for
 //! reliability. File reads, directory listings, searches, writes, and edits run
 //! off the async executor. Writes and exact occurrence-checked edits stage,
@@ -148,13 +151,33 @@
 //! defaults, request keys override them, and no engine wrapper is injected.
 //! Unseen inbox attachment uses an internal runtime identity with session/trace
 //! provenance; it never requires or fabricates an agent grant.
+//! Mutable worker-owned state lives outside immutable versions under
+//! `workspace/worker-state/<worker-id>/`. Command and resident runners receive
+//! it as `TRON_WORKER_STATE_DIR`; agent runners receive the resolved path in
+//! their instruction contract. Activation checks use a temporary isolated
+//! state root, so a candidate cannot mutate the active worker's data before it
+//! publishes. Update, rollback, disable, and retirement preserve state.
+//! Every worker schema transition first creates one verified owner-only profile
+//! snapshot. Explicit purge creates and verifies a compressed archive of the
+//! worker's bundles, state, and operational evidence before removing them, and
+//! refuses to archive known credential material.
+//! Invocation cancellation is exact: `worker_cancel` terminalizes one queued or
+//! running invocation, cancels its process/request/child agent, and leaves the
+//! worker enabled. Agent invocations persist their child session id as run
+//! evidence; the session remains ordinary session custody rather than a second
+//! delegation database.
+//! Presentation metadata is immutable worker-version identity. It binds a
+//! worker to a versioned native/declarative experience and optional suite role;
+//! unsupported or absent bindings remain operable through the generic console.
 //! Core proposal worktrees exist only while a patch is authored and tested.
 //! Successful creation removes the worktree and retains the branch/commit plus
 //! proposal evidence, so idle proposals do not duplicate an entire source tree.
 //! An agent-runner drop guard aborts its child on timeout, stop, disable, or
 //! shutdown. Causal depth survives the child hop, and pre-admission event
 //! subscription preserves even an immediate provider failure's terminal error.
-//! Core proposal diffs retain exact text/newlines; purge is irreversible while retirement remains recoverable.
+//! Core proposal diffs retain exact text/newlines; purge removes live state
+//! only after creating a verified recovery archive, while retirement remains
+//! directly reversible from retained versions.
 //! Core proposal approval rejects negated or ambiguous messages. A failed
 //! approved cherry-pick is aborted and verified back at its original commit
 //! before the proposal remains in the tested state. Failed proposal creation
@@ -184,6 +207,35 @@ mod surface;
 #[cfg(test)]
 mod tests;
 mod types;
+
+pub(crate) fn create_profile_snapshot() -> Result<persistence::ProfileSnapshot, String> {
+    persistence::create_profile_snapshot(&crate::shared::foundation::paths::tron_home())
+}
+
+pub(crate) fn prepare_worker_schema_snapshot(
+    target_worker_schema: u32,
+) -> Result<Option<persistence::ProfileSnapshot>, String> {
+    persistence::ensure_worker_schema_snapshot(
+        &crate::shared::foundation::paths::tron_home(),
+        target_worker_schema,
+    )
+}
+
+pub(crate) fn list_profile_snapshots() -> Result<Vec<std::path::PathBuf>, String> {
+    persistence::list_profile_snapshots(&crate::shared::foundation::paths::tron_home())
+}
+
+pub(crate) fn verify_profile_snapshot(
+    path: &std::path::Path,
+) -> Result<persistence::ProfileSnapshot, String> {
+    persistence::verify_profile_snapshot(path)
+}
+
+pub(crate) fn restore_profile_snapshot(
+    path: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    persistence::restore_profile_snapshot(path, &crate::shared::foundation::paths::tron_home())
+}
 
 pub(crate) use contract::{CONTEXT_SUMMARY_FUNCTION, WORKER_RELEVANCE_FUNCTION};
 

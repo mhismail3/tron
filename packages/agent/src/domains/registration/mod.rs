@@ -383,7 +383,7 @@ mod tests {
         let fixed_tools = value["fixedTools"]
             .as_array()
             .expect("fixed tool inventory");
-        assert_eq!(fixed_tools.len(), 28);
+        assert_eq!(fixed_tools.len(), 29);
         assert!(fixed_tools.iter().all(|tool| tool["exposed"] == true));
         assert!(
             fixed_tools
@@ -398,7 +398,7 @@ mod tests {
             8
         );
         assert!(value["surface"]["catalogRevision"].is_u64());
-        assert_eq!(value["surface"]["fixedToolCount"], 28);
+        assert_eq!(value["surface"]["fixedToolCount"], 29);
         assert!(value["surface"]["surfaceHash"].is_string());
         assert!(value["surface"]["availableWorkers"].is_array());
         assert!(value["surface"].get("tools").is_none());

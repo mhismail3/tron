@@ -50,6 +50,7 @@ fn command_bundle(command: Vec<String>) -> WorkerBundle {
         }],
         engine_hooks: Vec::new(),
         routing: Default::default(),
+        presentation: None,
     }
 }
 
@@ -181,6 +182,7 @@ print(json.dumps({
                 intents: vec!["recent research".to_owned(), "last 30 days".to_owned()],
                 examples: vec!["What changed in persistent workers in the last month?".to_owned()],
             },
+            presentation: None,
         }
 }
 

@@ -62,6 +62,7 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"worker":worker_summary_response_schema(),"bundle":{"type":"object"},"route":{},"versions":{"type":"array"},"triggers":{"type":"array"},"healthHistory":{"type":"array"},"audit":{"type":"array"},"versionDirectory":{"type":"string"}}
         }),
         "worker_kernel::invoke" => invocation_response_schema(),
+        "worker_kernel::cancel" => invocation_response_schema(),
         "worker_kernel::await" => json!({
             "type":"object","additionalProperties":false,"required":["invocation","timedOut"],
             "properties":{"invocation":invocation_response_schema(),"timedOut":{"type":"boolean"}}
@@ -75,8 +76,8 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"worker":worker_summary_response_schema(),"webhooks":{"type":"array"}}
         }),
         "worker_kernel::purge" => json!({
-            "type":"object","additionalProperties":false,"required":["workerId","purged"],
-            "properties":{"workerId":{"type":"string"},"purged":{"type":"boolean"}}
+            "type":"object","additionalProperties":false,"required":["workerId","purged","archivePath","archiveSha256"],
+            "properties":{"workerId":{"type":"string"},"purged":{"type":"boolean"},"archivePath":{"type":"string"},"archiveSha256":{"type":"string"}}
         }),
         "worker_kernel::inbox" => json!({
             "type":"object","additionalProperties":false,"required":["detail","items","returned","truncated","contentTruncated"],
@@ -118,7 +119,7 @@ fn worker_summary_response_schema() -> Value {
     json!({
         "type":"object","additionalProperties":false,
         "required":["workerId","name","description","toolName","runnerKind","activeVersion","enabled","retired","health","triggerCount","updatedAt"],
-        "properties":{"workerId":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"toolName":{"type":"string"},"runnerKind":{"type":"string"},"activeVersion":{"type":"string"},"enabled":{"type":"boolean"},"retired":{"type":"boolean"},"health":{"type":"string"},"triggerCount":{"type":"integer"},"updatedAt":{"type":"string"}}
+        "properties":{"workerId":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"toolName":{"type":"string"},"runnerKind":{"type":"string"},"activeVersion":{"type":"string"},"enabled":{"type":"boolean"},"retired":{"type":"boolean"},"health":{"type":"string"},"triggerCount":{"type":"integer"},"updatedAt":{"type":"string"},"presentation":presentation_response_schema()}
     })
 }
 
@@ -126,7 +127,15 @@ fn invocation_response_schema() -> Value {
     json!({
         "type":"object","additionalProperties":false,
         "required":["invocationId","workerId","workerVersion","status","input","output","error","idempotencyKey","traceId","causalDepth","triggerKind","attemptCount","createdAt","startedAt","completedAt"],
-        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+        "properties":{"invocationId":{"type":"string"},"workerId":{"type":"string"},"workerVersion":{"type":"string"},"status":{"type":"string"},"input":{},"output":{},"error":{},"idempotencyKey":{"type":"string"},"traceId":{"type":"string"},"causalDepth":{"type":"integer"},"triggerKind":{"type":"string"},"agentSessionId":{"type":"string"},"attemptCount":{"type":"integer"},"createdAt":{"type":"string"},"startedAt":{},"completedAt":{}}
+    })
+}
+
+fn presentation_response_schema() -> Value {
+    json!({
+        "type":"object","additionalProperties":false,
+        "required":["experienceId","contractVersion","primary"],
+        "properties":{"experienceId":{"type":"string"},"contractVersion":{"type":"integer"},"suiteId":{"type":"string"},"componentRole":{"type":"string"},"primary":{"type":"boolean"}}
     })
 }
 

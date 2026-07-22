@@ -185,6 +185,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
         }],
         engine_hooks: Vec::new(),
         routing: Default::default(),
+        presentation: None,
     };
     let mut service_bundle = bundle.clone();
     service_bundle.runner = WorkerRunner::Service {
@@ -247,7 +248,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
 }
 
 #[test]
-fn permanent_worker_purge_is_explicitly_irreversible() {
+fn archive_backed_worker_purge_remains_an_explicit_critical_live_state_removal() {
     let purge = function_definitions()
         .unwrap()
         .into_iter()
@@ -255,7 +256,7 @@ fn permanent_worker_purge_is_explicitly_irreversible() {
         .expect("worker purge contract");
     assert_eq!(purge.effect_class, EffectClass::IrreversibleSideEffect);
     assert_eq!(purge.risk_level, RiskLevel::Critical);
-    assert!(purge.description.contains("Permanently purge"));
+    assert!(purge.description.contains("verified recovery archive"));
 }
 
 #[test]
@@ -405,7 +406,7 @@ fn worker_history_defaults_to_compact_bounded_observations() {
         .expect("runs request schema");
     assert_eq!(
         runs["properties"]["status"]["enum"],
-        json!(["queued", "running", "completed", "failed"])
+        json!(["queued", "running", "completed", "failed", "cancelled"])
     );
     let inbox = definitions
         .iter()

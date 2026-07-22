@@ -269,6 +269,16 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func cancelWorkerInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await client.cancelWorkerInvocation(
+            invocationId: invocationId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func setWorkerEnabled(
         _ enabled: Bool,
         workerId: String,

@@ -198,6 +198,13 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":0,"maximum":7200}}}),
         "Wait boundedly for one durable worker invocation. A wait timeout returns current state and never cancels the worker.",
     )?);
+    specs.push(spec(
+        "worker_kernel::cancel",
+        EffectClass::ReversibleSideEffect,
+        RiskLevel::High,
+        json!({"type":"object","additionalProperties":false,"required":["invocationId"],"properties":{"invocationId":{"type":"string"}}}),
+        "Cancel one queued or running worker invocation without stopping unrelated work or disabling its worker.",
+    )?);
     for (method, description) in [
         (
             "worker_kernel::stop",
@@ -229,7 +236,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         EffectClass::IrreversibleSideEffect,
         RiskLevel::Critical,
         worker_id_schema(false),
-        "Permanently purge a previously retired worker, its bundle, runs, and inbox history.",
+        "Create a verified recovery archive, then purge a previously retired worker's live bundle, state, runs, and inbox history.",
     )?);
     specs.push(spec(
         "worker_kernel::rollback",
@@ -249,7 +256,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::runs",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"status":{"type":"string","enum":["queued","running","completed","failed"]},"limit":{"type":"integer","minimum":1,"maximum":20},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
+        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"status":{"type":"string","enum":["queued","running","completed","failed","cancelled"]},"limit":{"type":"integer","minimum":1,"maximum":20},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
         "List durable worker invocations, optionally filtered by execution status. Omit workerId to query the entire profile. Compact summaries omit attempt and trace expansion by default; explicit full detail is bounded to 20 records and 8 KiB per input or output.",
     )?);
     specs.push(spec(
