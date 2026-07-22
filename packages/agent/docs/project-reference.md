@@ -1050,7 +1050,80 @@ child remain inspectable. After rebuilding from that recovery change, the
 corrected worker completed another two-source review with a new linked child
 session. It then activated a retained earlier version and returned to the
 corrected version while remaining enabled and healthy. Source Review is
-therefore independently accepted; Citation and the coordinator remain
+therefore independently accepted. Citation is documented next; the Research
+coordinator remains unimplemented.
+
+### Guided Research Citation proof
+
+The third Research-suite component was created and corrected through an
+ordinary `gpt-5.5` Tron session. The profile-owned `research-citation` worker
+projects `worker_research_citation`, joins Research suite presentation contract
+version 1 as component role `citation`, requires no secrets, and has only its
+manual trigger. It consumes explicit claims plus one or more
+`research.source_review.v1` results (or the equivalent normalized evidence
+corpus); it does not search, fetch, review raw sources, or synthesize the final
+report.
+
+The first active version was executable but not acceptable. It used a command
+runner with lexical-overlap heuristics and correctly handled the prepared
+supported/partial/unsupported fixture, missing references, and excerpt bounds.
+An independent adversarial invocation then supplied positive evidence for a
+negated claim. That version returned `partial` and attached the semantically
+opposite evidence as a citation. Its healthy status proved only that it ran; it
+did not prove useful semantic correctness. The failed invocation and immutable
+version remain inspectable evidence rather than being rewritten or deleted.
+
+Tron improved the same worker id and tool through another atomic upsert. Active
+version `8da7088f55d57e3ab5c7854389e7a2b0c4d62b905619dc923b56fc8925841a35`
+uses the `openai/gpt-5.5` agent runner for semantic support assessment strictly
+over supplied evidence. It pairs that judgment with worker-owned
+`citation_guard.py`. Before returning, the child agent must submit the original
+input and proposed output to the guard through exact
+`["python3", "citation_guard.py"]` argv. The final result is the guard's
+canonical validated object and carries `research.citation.guard.v2` evidence.
+
+The deterministic guard validates relational guarantees that JSON Schema alone
+cannot express:
+
+- output claim ids and text correspond one-for-one with the caller's claims;
+- every source/evidence reference exists in the supplied corpus and evidence
+  belongs to the cited source;
+- unsupported claims have no positive citations, and evidence marked
+  `contradicts` is never cited positively;
+- polarity-opposite evidence and unsupported numeric/quantifier overstatements
+  cannot pass as supported citations;
+- quote excerpts are copied from the referenced supplied excerpt and contain at
+  most 25 words; and
+- source URL, title, and publication/update/access metadata are preserved from
+  input rather than invented or altered.
+
+Acceptance evidence covers:
+
+- independent smoke and health execution for exact negation, numeric
+  overstatement, missing references, invented excerpts, invented metadata,
+  unsupported-with-citation, and excerpt-length cases;
+- a same-session direct invocation where the positive claim was supported, its
+  negation was unsupported with no citation, `always exactly 100` was partial,
+  and contradictory crawling evidence was not cited;
+- a linked child-session trace that contains the mandatory guard process call,
+  followed by schema-valid output with guard status `passed` and no validation
+  errors;
+- a second successful guarded invocation after rebuilding and restarting the
+  server; and
+- retained-version rollback to the rejected command version and immediate
+  restoration to the corrected agent version while routing stayed enabled and
+  healthy.
+
+The authoring session also exposed fixed-surface inefficiency. Optional
+`sessionId` encouraged the model to invent placeholder targets, so
+`session_set_title` now accepts only `title` and binds the causal session.
+Full worker inspection also made the model absorb source files and audit history
+when it needed contracts. Default `detail=contract` now strips those payloads;
+for the corrected Citation worker the authenticated response is 14,079 bytes
+versus 39,360 bytes for explicit full operator detail. Citation's remaining
+limitation is intrinsic rather than hidden: semantic assessment is fallible,
+while the deterministic guard covers the cited provenance and adversarial
+relations above but is not a theorem prover. The Research coordinator remains
 unimplemented.
 
 ### Prior inventory coverage evidence
