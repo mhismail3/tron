@@ -21,7 +21,7 @@ use crate::domains::model::providers::google::types::{
 };
 use crate::domains::model::providers::kimi::types::all_kimi_models_api_json;
 use crate::domains::model::providers::minimax::types::all_minimax_models_api_json;
-use crate::domains::model::providers::ollama::types::all_ollama_models_api_json_with_availability;
+use crate::domains::model::providers::ollama::discovery::all_ollama_models_api_json_with_availability;
 use crate::domains::model::providers::openai::types::openai_model_available_for_auth_path;
 use crate::domains::model::providers::openai::types::{
     all_openai_models_api_json_for_auth_path, get_openai_model,
@@ -34,13 +34,16 @@ use crate::shared::server::params::require_string_param;
 ///
 /// Ollama models include live availability status from the local Ollama server.
 /// Adding a new model? Update the provider's `types.rs` — it appears here automatically.
-pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value> {
+pub(crate) async fn known_models(
+    openai_auth_path: OpenAIAuthPath,
+    ollama_base_url: &str,
+) -> Vec<Value> {
     let mut models = all_claude_models_api_json();
     models.extend(all_openai_models_api_json_for_auth_path(openai_auth_path));
     models.extend(all_gemini_models_api_json());
     models.extend(all_minimax_models_api_json());
     models.extend(all_kimi_models_api_json());
-    models.extend(all_ollama_models_api_json_with_availability(None).await);
+    models.extend(all_ollama_models_api_json_with_availability(ollama_base_url).await);
     models
         .into_iter()
         .map(super::attachments::decorate_model)
@@ -48,6 +51,9 @@ pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value>
 }
 
 pub(crate) fn is_model_supported(model_id: &str) -> bool {
+    if model_id.starts_with("ollama/") {
+        return model_id.len() > "ollama/".len();
+    }
     let bare = strip_provider_prefix(model_id);
     get_claude_model(bare).is_some()
         || get_openai_model(bare).is_some()
@@ -81,7 +87,11 @@ pub(crate) fn active_openai_auth_path(deps: &Deps) -> OpenAIAuthPath {
 pub(crate) async fn switch_model(params: Option<&Value>, deps: &Deps) -> Result<Value, ToolError> {
     let session_id = require_string_param(params, "sessionId")?;
     let requested_model = require_string_param(params, "model")?;
-    let model = strip_provider_prefix(&requested_model).to_string();
+    let model = if requested_model.starts_with("ollama/") {
+        requested_model.clone()
+    } else {
+        strip_provider_prefix(&requested_model).to_string()
+    };
 
     if !is_model_supported(&model) {
         return Err(ToolError::InvalidParams {

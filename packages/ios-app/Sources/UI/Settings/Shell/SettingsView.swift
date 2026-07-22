@@ -190,7 +190,10 @@ struct SettingsView: View {
                 startServerOnboarding: { startOnboarding(prefill: $0) }
             )
         case .providers:
-            ProvidersSettingsPage()
+            ProvidersSettingsPage(
+                settingsState: settingsState,
+                updateServerSetting: updateServerSetting
+            )
         case .app:
             AppearanceSettingsPage(
                 confirmArchive: $confirmArchive

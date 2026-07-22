@@ -46,6 +46,52 @@ struct ModelInfoComputedTests {
         )
     }
 
+    // MARK: - Wire Evidence
+
+    @Test("Ollama discovery evidence decodes without a client model allowlist")
+    func ollamaDiscoveryEvidenceDecodes() throws {
+        let payload = #"""
+        {
+          "id": "ollama/example:8b",
+          "canonicalModelId": "example:8b",
+          "name": "Example 8B",
+          "provider": "ollama",
+          "contextWindow": 16384,
+          "maxContextWindow": 32768,
+          "supportsThinking": false,
+          "supportsImages": true,
+          "supportsDocuments": false,
+          "supportsTools": true,
+          "attachmentPolicy": {
+            "supportsPdfContent": false,
+            "supportsTextFiles": true,
+            "maxImageDimension": 1568,
+            "maxImageBytes": 1400000,
+            "maxDocumentBytes": 0,
+            "supportedImageMimeTypes": ["image/png"]
+          },
+          "tier": "local",
+          "isRetiredGeneration": false,
+          "available": true,
+          "providerReachable": true,
+          "installed": true,
+          "metadataSource": "ollama-show",
+          "parameterSize": "8B",
+          "quantizationLevel": "Q4_K_M"
+        }
+        """#
+        let model = try JSONDecoder().decode(ModelInfo.self, from: Data(payload.utf8))
+
+        #expect(model.id == "ollama/example:8b")
+        #expect(model.canonicalModelId == "example:8b")
+        #expect(model.available == true)
+        #expect(model.providerReachable == true)
+        #expect(model.installed == true)
+        #expect(model.metadataSource == "ollama-show")
+        #expect(model.parameterSize == "8B")
+        #expect(model.quantizationLevel == "Q4_K_M")
+    }
+
     // MARK: - Pricing Format
 
     @Test("pricing both nil returns nil")

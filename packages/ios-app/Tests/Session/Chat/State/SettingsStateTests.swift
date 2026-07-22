@@ -11,6 +11,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.defaultModel, "")
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
         XCTAssertNil(state.tailscaleIp)
+        XCTAssertEqual(state.ollamaBaseUrl, "http://localhost:11434")
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertFalse(state.isLoaded)
@@ -50,13 +51,14 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(
             ServerSettings.self,
-            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6","tailscaleIp":"100.64.0.7"}}"#)
+            from: try ServerSettingsFixture.data(#"{"api":{"ollama":{"baseUrl":"http://192.168.1.5:11434"}},"server":{"defaultModel":"claude-opus-4-6","tailscaleIp":"100.64.0.7"}}"#)
         )
 
         state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         XCTAssertEqual(state.defaultModel, "claude-opus-4-6")
         XCTAssertEqual(state.tailscaleIp, "100.64.0.7")
+        XCTAssertEqual(state.ollamaBaseUrl, "http://192.168.1.5:11434")
     }
 
     func testClearServerSnapshotHidesServerSettingsDuringSwitch() {
@@ -64,12 +66,14 @@ final class SettingsStateTests: XCTestCase {
         state.isLoaded = true
         state.loadError = "old error"
         state.tailscaleIp = "100.64.0.7"
+        state.ollamaBaseUrl = "http://old:11434"
 
         state.clearServerSnapshot()
 
         XCTAssertFalse(state.isLoaded)
         XCTAssertNil(state.loadError)
         XCTAssertNil(state.tailscaleIp)
+        XCTAssertEqual(state.ollamaBaseUrl, "http://localhost:11434")
     }
 
     func testClearServerSnapshotClearsRollbackAnchor() throws {

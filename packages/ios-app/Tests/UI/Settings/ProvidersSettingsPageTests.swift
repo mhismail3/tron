@@ -19,7 +19,7 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderInfo.displayName(for: "future-provider") == "future-provider")
 
         let knownOptions = ProviderInfo.settingsOptions(including: "google")
-        #expect(knownOptions.map(\.value) == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
+        #expect(knownOptions.map(\.value) == ["anthropic", "openai-codex", "google", "minimax", "kimi", "ollama"])
 
         let unknownOptions = ProviderInfo.settingsOptions(including: "future-provider")
         #expect(unknownOptions.last?.value == "future-provider")
@@ -42,10 +42,11 @@ struct ProvidersSettingsPageTests {
         #expect(oauth.id != apiKey.id)
     }
 
-    @Test("modelProviders array contains the five expected providers")
+    @Test("modelProviders array contains credential and local providers")
     func providerArrayShape() {
         let ids = ProviderInfo.modelProviders.map(\.id)
-        #expect(ids == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
+        #expect(ids == ["anthropic", "openai-codex", "google", "minimax", "kimi", "ollama"])
+        #expect(ProviderInfo.displayName(for: "ollama") == "Ollama")
     }
 
     @Test("search providers use the shared credential store without becoming model choices")
@@ -62,10 +63,11 @@ struct ProvidersSettingsPageTests {
         #expect(oauthIds == ["anthropic", "openai-codex", "google"])
     }
 
-    @Test("MiniMax and Kimi do not support OAuth")
-    func apiKeyOnlyProviders() {
-        let apiKeyOnly = ProviderInfo.modelProviders.filter { !$0.supportsOAuth }.map(\.id)
-        #expect(Set(apiKeyOnly) == ["minimax", "kimi"])
+    @Test("non-OAuth model providers distinguish credentials from local runtime")
+    func nonOAuthProviders() {
+        let nonOAuth = ProviderInfo.modelProviders.filter { !$0.supportsOAuth }.map(\.id)
+        #expect(Set(nonOAuth) == ["minimax", "kimi", "ollama"])
+        #expect(ProviderInfo.modelProviders.first { $0.id == "ollama" }?.supportsCredentials == false)
     }
 
     @Test("provider section containers exclude auth action buttons")
@@ -83,9 +85,11 @@ struct ProvidersSettingsPageTests {
     func providerAuthActionsMatchOAuthTool() {
         let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
         let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
+        let ollama = ProviderInfo.modelProviders.first { $0.id == "ollama" }!
 
         #expect(ProviderAuthActionItem.items(for: anthropic) == [.oauthLogin, .addApiKey])
         #expect(ProviderAuthActionItem.items(for: minimax) == [.addApiKey])
+        #expect(ProviderAuthActionItem.items(for: ollama).isEmpty)
         #expect(ProviderAuthActionItem.oauthLogin.title == "OAuth Login")
         #expect(ProviderAuthActionItem.addApiKey.title == "Add API Key")
     }

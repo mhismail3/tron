@@ -480,6 +480,46 @@ Operator controls are:
 - stop-all — block new dispatch, cancel active work, and stop resident services;
   queued rows stay visible and resume only after explicit release.
 
+## Provider and Model Runtime
+
+`model.list` is server-authoritative. It projects current cloud catalog facts
+and effective local-provider availability; clients do not maintain their own
+model allowlist. The cloud registry preserves provider/auth-path distinctions,
+aliases, current context and output ceilings, capability flags, price metadata,
+retirement state, and recommendation order. A profile's explicit selected
+model survives catalog refreshes. Only new profiles receive the current
+balanced frontier default.
+
+Ollama is a first-class credential-free local provider. Its strict
+`api.ollama.baseUrl` setting accepts an absolute HTTP(S) endpoint without a
+query or fragment and is editable through complete iOS settings parity. A
+`model.list` read performs bounded discovery against that endpoint:
+
+- `GET /api/tags` establishes which native model names are installed;
+- bounded concurrent `POST /api/show` reads establish tool, thinking, vision,
+  audio, family, parameter, quantization, digest, and maximum-context evidence;
+- known Gemma 4 models remain visible while the endpoint is offline, but are
+  unavailable and carry actionable start/pull guidance;
+- installed unknown models become explicit `ollama/<native-name>` choices and
+  receive only capabilities proven by `/api/show`; absent evidence falls back
+  to text-only, no-tools, and a 16K context rather than optimistic admission.
+
+The runtime uses Ollama's native `/api/chat`, including `options.num_ctx`,
+native tool-call history, and separate thinking output. It retains historical
+thinking only on assistant tool-call turns, matching Gemma 4's documented
+conversation contract. The built-in Gemma 4 E4B and 26B A4B entries request a
+conservative 65,536-token working window while exposing their larger proven
+maximums. E4B carries audio evidence; both variants carry thinking, tool, image,
+and structured-output evidence. An ignored, operator-enabled local test checks
+both installed models for discovery, tool calling, JSON-schema output, image
+input, and a 32K retained Ollama context. Tron never installs, pulls, starts,
+stops, or removes Ollama or its models.
+
+The iOS Providers page shows endpoint reachability and installed-model evidence
+alongside model-provider credentials. Brave Search and Exa remain separate
+named API-key providers because Research workers consume `provider-brave` and
+`provider-exa` secret bindings; neither becomes a model choice.
+
 ## Model-Facing Tools
 
 Fixed kernel operations are direct typed tools. There
@@ -831,8 +871,10 @@ in a profile always wins over that refreshed default. Catalog facts are checked
 against the providers' official [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model),
 [Anthropic model overview](https://platform.claude.com/docs/en/about-claude/models/overview),
 and [Gemini model documentation](https://ai.google.dev/gemini-api/docs/latest-model).
-Ollama/Gemma discovery, local capability evidence, and provider UI status are
-the remaining provider prerequisite before guided Work Ledger authoring.
+Ollama/Gemma discovery, conservative dynamic admission, live local contract
+evidence, endpoint settings parity, and provider UI status are present. The
+provider/model prerequisite is therefore closed before guided Work Ledger
+authoring.
 
 ### Prior inventory coverage evidence
 

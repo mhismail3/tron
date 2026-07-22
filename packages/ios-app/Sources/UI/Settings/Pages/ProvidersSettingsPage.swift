@@ -9,9 +9,14 @@ struct ProvidersSettingsPage: View {
 
     static let title = SettingsLabels.providers
 
+    let settingsState: SettingsState
+    let updateServerSetting: (SettingsMutation) -> Void
+
     @State private var authState: AuthSnapshot?
     @State private var error: String?
     @State private var oauthProvider: OAuthProvider?
+    @State private var ollamaModels: [ModelInfo] = []
+    @State private var isRefreshingOllama = false
 
     private var authRepository: any AuthRepository { dependencies.authRepository }
 
@@ -26,6 +31,7 @@ struct ProvidersSettingsPage: View {
             }
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
+        .task(id: settingsState.ollamaBaseUrl) { await refreshOllamaModels(force: true) }
         .tronErrorAlert(message: $error)
     }
 
@@ -49,6 +55,24 @@ struct ProvidersSettingsPage: View {
     }
 
     private func modelProviderSection(_ provider: ProviderInfo) -> some View {
+        Group {
+            if provider.id == "ollama" {
+                OllamaProviderSection(
+                    baseUrl: settingsState.ollamaBaseUrl,
+                    models: ollamaModels,
+                    isRefreshing: isRefreshingOllama,
+                    onSaveEndpoint: { endpoint in
+                        updateServerSetting(.ollamaBaseUrl(endpoint))
+                    },
+                    onRefresh: { await refreshOllamaModels(force: true) }
+                )
+            } else {
+                credentialProviderSection(provider)
+            }
+        }
+    }
+
+    private func credentialProviderSection(_ provider: ProviderInfo) -> some View {
         ModelProviderSection(
             provider: provider,
             providerAuth: authState?.providers[provider.id],
@@ -67,6 +91,17 @@ struct ProvidersSettingsPage: View {
     private func loadAuthState() async {
         do {
             authState = try await authRepository.get()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func refreshOllamaModels(force: Bool) async {
+        isRefreshingOllama = true
+        defer { isRefreshingOllama = false }
+        do {
+            let models = try await dependencies.modelRepository.list(forceRefresh: force)
+            ollamaModels = models.filter { $0.provider == "ollama" }
         } catch {
             self.error = error.localizedDescription
         }

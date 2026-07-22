@@ -202,7 +202,10 @@ as model providers without becoming model choices. It does not project the
 loaded `AuthState` into a duplicate summary hero. Each provider uses one compact
 credential card whose header owns a trailing add/login menu, eliminating a
 separate action-button row. Provider-specific details such as Google Cloud OAuth
-configuration remain in their own subordinate card. OAuth login
+configuration remain in their own subordinate card. Ollama is the explicit
+credential-free exception: its subordinate card owns the validated endpoint,
+reachability, installed-model facts from server discovery, refresh, and
+actionable start/pull guidance; it does not install or control Ollama. OAuth login
 buttons are hidden when the provider already has a usable or refreshable OAuth
 account, and reappear for expired non-refreshable accounts. API-key-only
 providers use the same native Add API Key alert and collect a label plus the

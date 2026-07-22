@@ -80,6 +80,8 @@ private extension SettingsMutation {
             return ServerSettingsUpdate(server: .init(defaultWorkspace: workspace))
         case .defaultModel(let model):
             return ServerSettingsUpdate(server: .init(defaultModel: model))
+        case .ollamaBaseUrl(let baseUrl):
+            return ServerSettingsUpdate(api: .init(ollama: .init(baseUrl: baseUrl)))
         case .compactionTriggerTokenThreshold(let threshold):
             return ServerSettingsUpdate(context: .init(compactor: .init(triggerTokenThreshold: threshold)))
         case .compactionPreserveRecentCount(let count):

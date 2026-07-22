@@ -31,6 +31,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
+    let ollamaBaseUrl: String
     let compactionPreserveRecentCount: Int
     let compactionTriggerTokenThreshold: Double
 
@@ -38,12 +39,14 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         defaultModel: String,
         defaultWorkspace: String?,
         tailscaleIp: String?,
+        ollamaBaseUrl: String,
         compactionPreserveRecentCount: Int,
         compactionTriggerTokenThreshold: Double
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
         self.tailscaleIp = tailscaleIp
+        self.ollamaBaseUrl = ollamaBaseUrl
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
     }
@@ -53,6 +56,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             defaultModel: settings.defaultModel,
             defaultWorkspace: settings.defaultWorkspace,
             tailscaleIp: settings.tailscaleIp,
+            ollamaBaseUrl: settings.ollamaBaseUrl,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
             compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold
         )
@@ -64,6 +68,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 enum SettingsMutation {
     case defaultWorkspace(String)
     case defaultModel(String)
+    case ollamaBaseUrl(String)
     case compactionTriggerTokenThreshold(Double)
     case compactionPreserveRecentCount(Int)
 }

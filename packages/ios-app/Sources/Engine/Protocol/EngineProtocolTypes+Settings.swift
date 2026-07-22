@@ -11,11 +11,20 @@ struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
+    let ollamaBaseUrl: String
 
     let compaction: CompactionSettings
 
     private enum CodingKeys: String, CodingKey {
-        case server, context
+        case api, server, context
+    }
+
+    private enum ApiKeys: String, CodingKey {
+        case ollama
+    }
+
+    private enum OllamaKeys: String, CodingKey {
+        case baseUrl
     }
 
     private enum ServerKeys: String, CodingKey {
@@ -33,6 +42,9 @@ struct ServerSettings: Decodable {
         defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
         defaultWorkspace = try serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
         tailscaleIp = try serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
+        let apiContainer = try container.nestedContainer(keyedBy: ApiKeys.self, forKey: .api)
+        let ollamaContainer = try apiContainer.nestedContainer(keyedBy: OllamaKeys.self, forKey: .ollama)
+        ollamaBaseUrl = try ollamaContainer.decode(String.self, forKey: .baseUrl)
         let contextContainer = try container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context)
         compaction = try contextContainer.decode(CompactionSettings.self, forKey: .compactor)
     }
@@ -59,8 +71,17 @@ struct ServerSettings: Decodable {
 }
 
 struct ServerSettingsUpdate: Encodable {
+    var api: ApiUpdate?
     var server: ServerUpdate?
     var context: ContextUpdate?
+
+    struct ApiUpdate: Encodable {
+        var ollama: OllamaUpdate?
+
+        struct OllamaUpdate: Encodable {
+            var baseUrl: String?
+        }
+    }
 
     struct ServerUpdate: Encodable {
         var defaultModel: String?

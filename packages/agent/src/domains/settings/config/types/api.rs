@@ -19,9 +19,8 @@ pub struct ApiSettings {
     /// Kimi API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kimi: Option<KimiApiSettings>,
-    /// Ollama API settings (optional — absent if not configured).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ollama: Option<OllamaApiSettings>,
+    /// Ollama API settings.
+    pub ollama: OllamaApiSettings,
 }
 
 /// Anthropic model-provider settings.
@@ -95,6 +94,33 @@ impl Default for OllamaApiSettings {
         Self {
             base_url: "http://localhost:11434".to_string(),
         }
+    }
+}
+
+impl OllamaApiSettings {
+    /// Validate an endpoint before it enters the live provider snapshot.
+    pub fn validate_strict(&self) -> crate::domains::settings::Result<()> {
+        let endpoint = url::Url::parse(self.base_url.trim()).map_err(|error| {
+            crate::domains::settings::SettingsError::InvalidValue(format!(
+                "api.ollama.baseUrl must be an absolute HTTP(S) URL: {error}"
+            ))
+        })?;
+        if !matches!(endpoint.scheme(), "http" | "https") {
+            return Err(crate::domains::settings::SettingsError::InvalidValue(
+                "api.ollama.baseUrl must use http or https".to_owned(),
+            ));
+        }
+        if endpoint.cannot_be_a_base() || endpoint.host_str().is_none() {
+            return Err(crate::domains::settings::SettingsError::InvalidValue(
+                "api.ollama.baseUrl must include a host".to_owned(),
+            ));
+        }
+        if endpoint.query().is_some() || endpoint.fragment().is_some() {
+            return Err(crate::domains::settings::SettingsError::InvalidValue(
+                "api.ollama.baseUrl cannot include a query or fragment".to_owned(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -237,9 +263,9 @@ mod tests {
     }
 
     #[test]
-    fn api_settings_ollama_optional() {
+    fn api_settings_ollama_defaults_are_present() {
         let api = ApiSettings::default();
-        assert!(api.ollama.is_none());
+        assert_eq!(api.ollama.base_url, "http://localhost:11434");
     }
 
     #[test]
@@ -251,14 +277,27 @@ mod tests {
             }
         });
         let api: ApiSettings = serde_json::from_value(json).unwrap();
-        assert!(api.ollama.is_some());
-        assert_eq!(api.ollama.unwrap().base_url, "http://192.168.1.100:11434");
+        assert_eq!(api.ollama.base_url, "http://192.168.1.100:11434");
     }
 
     #[test]
     fn ollama_defaults() {
         let o = OllamaApiSettings::default();
         assert_eq!(o.base_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn ollama_endpoint_validation_rejects_non_http_and_ambiguous_urls() {
+        for invalid in [
+            "localhost:11434",
+            "file:///tmp/ollama.sock",
+            "http://localhost:11434?model=secret",
+        ] {
+            let settings = OllamaApiSettings {
+                base_url: invalid.to_owned(),
+            };
+            assert!(settings.validate_strict().is_err(), "accepted {invalid}");
+        }
     }
 
     #[test]

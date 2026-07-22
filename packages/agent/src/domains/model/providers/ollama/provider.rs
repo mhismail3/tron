@@ -82,11 +82,8 @@ impl OllamaProvider {
 
     /// Get the target `num_ctx` for this model.
     fn target_num_ctx(&self) -> u32 {
-        get_ollama_model(&self.config.model).map_or(DEFAULT_NUM_CTX, |m| {
-            // Use the model's full context window, capped at 64K.
-            // 64K ≈ 1.9 GB KV cache on E4B — comfortable on 24GB machines.
-            (m.context_window as u32).min(65_536)
-        })
+        get_ollama_model(&self.config.model)
+            .map_or(DEFAULT_NUM_CTX, |model| model.context_window as u32)
     }
 
     /// Calculate `max_tokens`: options → config → model registry default.
@@ -129,6 +126,10 @@ impl OllamaProvider {
             },
         });
 
+        if get_ollama_model(&self.config.model).is_some_and(|model| model.supports_thinking) {
+            body["think"] = Value::Bool(options.enable_thinking.unwrap_or(true));
+        }
+
         // System message goes first in the messages array
         let mut api_messages: Vec<Value> = Vec::new();
         if let Some(system) = Self::build_system_prompt(context) {
@@ -152,14 +153,14 @@ impl OllamaProvider {
     }
 
     /// Map reqwest connection errors to actionable Ollama-specific messages.
-    fn map_connection_error(err: reqwest::Error, _model: &str) -> ProviderError {
+    fn map_connection_error(err: reqwest::Error, endpoint: &str) -> ProviderError {
         if err.is_connect() || err.is_timeout() {
             ProviderError::Api {
                 status: 503,
                 message: format!(
                     "Ollama is not running — start it with 'brew services start ollama' \
                      (attempted to reach {}). Original error: {err}",
-                    DEFAULT_BASE_URL
+                    endpoint
                 ),
                 code: None,
                 retryable: true,
@@ -231,7 +232,7 @@ impl OllamaProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| Self::map_connection_error(e, &self.config.model))?;
+            .map_err(|e| Self::map_connection_error(e, self.base_url()))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -261,6 +262,10 @@ impl Provider for OllamaProvider {
 
     fn model(&self) -> &str {
         &self.config.model
+    }
+
+    fn context_window(&self) -> u64 {
+        u64::from(self.target_num_ctx())
     }
 
     fn audit_payload(
@@ -596,12 +601,29 @@ mod tests {
         assert_eq!(body["options"]["num_predict"], 8_192);
     }
 
+    #[test]
+    fn request_body_enables_separate_thinking_for_gemma4() {
+        let provider = OllamaProvider::new(test_config());
+        let body =
+            provider.build_request_body(&Context::default(), &ProviderStreamOptions::default());
+        assert_eq!(body["think"], true);
+
+        let disabled = provider.build_request_body(
+            &Context::default(),
+            &ProviderStreamOptions {
+                enable_thinking: Some(false),
+                ..ProviderStreamOptions::default()
+            },
+        );
+        assert_eq!(disabled["think"], false);
+    }
+
     // ── Context window (target_num_ctx) ───────────────────────────────
 
     #[test]
     fn target_num_ctx_known_model() {
         let provider = OllamaProvider::new(test_config());
-        // E4B has 65K context window
+        // Gemma 4 supports more, but Tron uses an explicit 64K local runtime ceiling.
         assert_eq!(provider.target_num_ctx(), 65_536);
     }
 

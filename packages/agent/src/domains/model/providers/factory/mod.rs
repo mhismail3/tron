@@ -69,7 +69,7 @@ impl DefaultProviderFactory {
             },
             minimax_base_url: settings.minimax.as_ref().map(|m| m.base_url.clone()),
             kimi_base_url: settings.kimi.as_ref().map(|k| k.base_url.clone()),
-            ollama_base_url: settings.ollama.as_ref().map(|o| o.base_url.clone()),
+            ollama_base_url: Some(settings.ollama.base_url.clone()),
             http_client,
         }
     }

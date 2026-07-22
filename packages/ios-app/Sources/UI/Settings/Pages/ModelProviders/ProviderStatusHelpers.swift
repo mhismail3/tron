@@ -16,7 +16,8 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
     var id: String { title }
 
     static func items(for provider: ProviderInfo) -> [Self] {
-        provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
+        guard provider.supportsCredentials else { return [] }
+        return provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
     }
 
     static func visibleItems(for provider: ProviderInfo, providerAuth: ProviderAuthSnapshot?) -> [Self] {

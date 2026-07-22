@@ -13,7 +13,13 @@ pub(crate) async fn list_models(deps: &Deps) -> Result<Value, ToolError> {
     let auth_path =
         crate::domains::auth::credentials::openai::infer_auth_path(&deps.auth_path, None)
             .unwrap_or(OpenAIAuthPath::ChatGptCodex);
-    Ok(json!({ "models": model_catalog::known_models(auth_path).await }))
+    let snapshot = deps.settings_runtime.current();
+    Ok(json!({
+        "models": model_catalog::known_models(
+            auth_path,
+            &snapshot.settings.api.ollama.base_url,
+        ).await
+    }))
 }
 
 pub(crate) async fn switch_model(payload: &Value, deps: &Deps) -> Result<Value, ToolError> {

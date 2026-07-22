@@ -36,7 +36,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct TronSettings {
-    /// API provider settings (Anthropic, `OpenAI`, Google).
+    /// Model-provider runtime settings. Credentials remain auth-domain state;
+    /// this projection currently admits the configurable Ollama endpoint.
     pub api: ApiSettings,
     /// Retry configuration for API calls.
     pub retry: RetrySettings,
@@ -63,7 +64,8 @@ impl Default for TronSettings {
 impl TronSettings {
     /// Validate invariants that cannot be repaired safely.
     pub fn validate_strict(&self) -> crate::domains::settings::Result<()> {
-        self.server.validate_strict()
+        self.server.validate_strict()?;
+        self.api.ollama.validate_strict()
     }
 
     /// Clamp ratio fields to [0.0, 1.0] and correct invalid invariants.

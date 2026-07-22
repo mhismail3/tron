@@ -28,6 +28,7 @@ final class SettingsParityTests: XCTestCase {
         "defaultModel",
         "quickSessionWorkspace",
         "tailscaleIp",
+        "ollamaBaseUrl",
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
@@ -57,7 +58,7 @@ final class SettingsParityTests: XCTestCase {
     }
 
     func testEveryDecodedSettingsFieldProjectsIntoSnapshot() throws {
-        let json = #"{"server":{"defaultWorkspace":"/parity-workspace","tailscaleIp":"100.64.0.7"},"context":{"compactor":{"preserveRecentCount":7,"triggerTokenThreshold":0.55}}}"#
+        let json = #"{"api":{"ollama":{"baseUrl":"http://192.168.1.5:11434"}},"server":{"defaultWorkspace":"/parity-workspace","tailscaleIp":"100.64.0.7"},"context":{"compactor":{"preserveRecentCount":7,"triggerTokenThreshold":0.55}}}"#
         let settings = try JSONDecoder().decode(
             ServerSettings.self,
             from: try ServerSettingsFixture.data(json)
@@ -65,7 +66,7 @@ final class SettingsParityTests: XCTestCase {
 
         XCTAssertEqual(
             Set(Mirror(reflecting: settings).children.compactMap(\.label)),
-            Set(["defaultModel", "defaultWorkspace", "tailscaleIp", "compaction"])
+            Set(["defaultModel", "defaultWorkspace", "tailscaleIp", "ollamaBaseUrl", "compaction"])
         )
         XCTAssertEqual(
             Set(Mirror(reflecting: settings.compaction).children.compactMap(\.label)),
@@ -77,6 +78,7 @@ final class SettingsParityTests: XCTestCase {
             defaultModel: "claude-sonnet-4-6",
             defaultWorkspace: "/parity-workspace",
             tailscaleIp: "100.64.0.7",
+            ollamaBaseUrl: "http://192.168.1.5:11434",
             compactionPreserveRecentCount: 7,
             compactionTriggerTokenThreshold: 0.55
         ))

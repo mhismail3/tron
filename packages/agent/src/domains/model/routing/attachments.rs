@@ -164,6 +164,9 @@ pub(crate) fn for_model(
             false,
         ));
     }
+    if model_id.starts_with("ollama/") {
+        return Some(AttachmentPolicy::for_provider("ollama", false, false));
+    }
     None
 }
 
@@ -203,5 +206,17 @@ mod tests {
         assert_eq!(policy.max_image_bytes, 0);
         assert!(policy.supported_image_mime_types.is_empty());
         assert_eq!(policy.max_document_bytes, TEXT_DOCUMENT_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn unknown_explicit_ollama_model_is_text_only_until_discovered() {
+        let policy = for_model(
+            "ollama/example-local:8b",
+            OpenAIAuthPath::ChatGptCodex,
+        )
+        .expect("explicit Ollama provider policy");
+        assert_eq!(policy.max_image_bytes, 0);
+        assert!(policy.supported_image_mime_types.is_empty());
+        assert!(!policy.supports_pdf_content);
     }
 }

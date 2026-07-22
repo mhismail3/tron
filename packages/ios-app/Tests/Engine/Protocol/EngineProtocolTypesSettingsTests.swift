@@ -9,7 +9,10 @@ struct ServerSettingsTests {
     func fullSettingsResponseProjectsMobileSettings() throws {
         let json = """
         {
-            "api": { "anthropic": { "authUrl": "https://example.invalid" } },
+            "api": {
+                "anthropic": { "authUrl": "https://example.invalid" },
+                "ollama": { "baseUrl": "http://192.168.1.5:11434" }
+            },
             "retry": { "maxRetries": 3 },
             "agent": { "maxTurns": 250 },
             "server": {
@@ -31,6 +34,7 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.tailscaleIp == "100.64.0.7")
+        #expect(settings.ollamaBaseUrl == "http://192.168.1.5:11434")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
     }
@@ -41,6 +45,7 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.tailscaleIp == nil)
+        #expect(settings.ollamaBaseUrl == "http://localhost:11434")
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
     }
@@ -109,6 +114,15 @@ struct ServerSettingsTests {
         #expect(json["observability"] == nil)
         #expect(json["storage"] == nil)
         #expect(json["transcription"] == nil)
+
+        let ollamaUpdate = ServerSettingsUpdate(
+            api: .init(ollama: .init(baseUrl: "http://192.168.1.8:11434"))
+        )
+        let ollamaData = try JSONEncoder().encode(ollamaUpdate)
+        let ollamaJson = try JSONSerialization.jsonObject(with: ollamaData) as! [String: Any]
+        let api = ollamaJson["api"] as? [String: Any]
+        let ollama = api?["ollama"] as? [String: Any]
+        #expect(ollama?["baseUrl"] as? String == "http://192.168.1.8:11434")
     }
 
 }

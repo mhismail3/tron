@@ -122,6 +122,14 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let available: Bool?
     /// Human-readable reason why the model is unavailable (e.g., install instructions)
     let unavailableReason: String?
+    /// Whether the configured Ollama endpoint answered discovery.
+    let providerReachable: Bool?
+    /// Whether this exact model exists on the configured Ollama endpoint.
+    let installed: Bool?
+    /// Capability evidence source, such as `ollama-show` or `conservative`.
+    let metadataSource: String?
+    let parameterSize: String?
+    let quantizationLevel: String?
 
     enum CodingKeys: String, CodingKey {
         case id, canonicalModelId, name, provider, apiEndpoint, authPaths, aliasIds
@@ -138,7 +146,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case providerDisplayName, providerSortOrder
         case inputCostPerMillion, outputCostPerMillion
         case modelDescription = "description"
-        case available, unavailableReason
+        case available, unavailableReason, providerReachable, installed
+        case metadataSource, parameterSize, quantizationLevel
     }
 
     /// Explicit initializer used by tests and non-wire construction sites.
@@ -188,7 +197,12 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         providerDisplayName: String? = nil,
         providerSortOrder: Int? = nil,
         available: Bool? = nil,
-        unavailableReason: String? = nil
+        unavailableReason: String? = nil,
+        providerReachable: Bool? = nil,
+        installed: Bool? = nil,
+        metadataSource: String? = nil,
+        parameterSize: String? = nil,
+        quantizationLevel: String? = nil
     ) {
         self.id = id
         self.canonicalModelId = canonicalModelId
@@ -231,6 +245,11 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.providerSortOrder = providerSortOrder
         self.available = available
         self.unavailableReason = unavailableReason
+        self.providerReachable = providerReachable
+        self.installed = installed
+        self.metadataSource = metadataSource
+        self.parameterSize = parameterSize
+        self.quantizationLevel = quantizationLevel
     }
 
     // MARK: - Formatted Display Helpers

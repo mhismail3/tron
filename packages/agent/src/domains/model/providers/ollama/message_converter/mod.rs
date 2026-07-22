@@ -30,6 +30,9 @@ pub struct ChatMessage {
     /// Text content for Ollama's native `/api/chat` endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Prior thinking is replayed only on tool-call turns, as Gemma 4 requires.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
     /// Base64-encoded image payloads for multimodal Ollama models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<String>>,
@@ -120,6 +123,7 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
         UserMessageContent::Text(text) => ChatMessage {
             role: "user".into(),
             content: Some(text.clone()),
+            thinking: None,
             images: None,
             tool_calls: None,
             tool_name: None,
@@ -138,6 +142,7 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
             ChatMessage {
                 role: "user".into(),
                 content: Some(text_parts.join("\n\n")),
+                thinking: None,
                 images: (!images.is_empty()).then_some(images),
                 tool_calls: None,
                 tool_name: None,
@@ -184,6 +189,7 @@ fn convert_assistant_message(
     id_mapping: &HashMap<String, String>,
 ) -> Option<ChatMessage> {
     let mut text_parts = Vec::new();
+    let mut thinking_parts = Vec::new();
     let mut tool_calls = Vec::new();
 
     for block in content {
@@ -207,8 +213,7 @@ fn convert_assistant_message(
                     },
                 });
             }
-            // Thinking blocks are output-only, not replayed
-            AssistantContent::Thinking { .. } => {}
+            AssistantContent::Thinking { thinking, .. } => thinking_parts.push(thinking.clone()),
         }
     }
 
@@ -231,6 +236,12 @@ fn convert_assistant_message(
     Some(ChatMessage {
         role: "assistant".into(),
         content: text,
+        // Gemma 4 says ordinary historical thoughts must be omitted, while
+        // tool-call turns retain them so the model can complete the tool loop.
+        thinking: tool_calls_opt
+            .as_ref()
+            .filter(|calls| !calls.is_empty())
+            .and_then(|_| (!thinking_parts.is_empty()).then(|| thinking_parts.join(""))),
         images: None,
         tool_calls: tool_calls_opt,
         tool_name: None,
@@ -259,6 +270,7 @@ fn convert_tool_result(tool_name: &str, content: &ToolResultMessageContent) -> C
     ChatMessage {
         role: "tool".into(),
         content: Some(text),
+        thinking: None,
         images: None,
         tool_calls: None,
         tool_name: Some(tool_name.to_string()),

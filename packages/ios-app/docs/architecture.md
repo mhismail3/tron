@@ -370,7 +370,10 @@ after the core exposes real production operations for them.
 the explicit product projection in `ServerSettings`.
 
 The admitted product settings are the default model, optional workspace,
-read-only Tailscale address, and context-compaction threshold/recent-turn count.
+read-only Tailscale address, context-compaction threshold/recent-turn count,
+and the credential-free Ollama endpoint. The endpoint is server-validated as
+an absolute HTTP(S) URL and follows the same decode, state, reset,
+server-switch, mutation, and UI ownership path as every editable mobile field.
 Worker-first execution is unconditional server architecture and therefore has
 no settings DTO, client state, mutation, reset path, or toggle.
 
@@ -379,8 +382,11 @@ model window and durable context boundary. A worker contract may own its own
 input, output, timeout, and execution policy, but it must not redefine the
 conversation compactor shared by every model and tool call.
 
-No server-only provider, retry, or runtime field may drift into only
-one Swift layer. `SettingsParityTests` guard the admitted projection.
+No other server-only provider, retry, or runtime field may drift into only one
+Swift layer. `SettingsParityTests` guard the admitted projection. The Providers
+page reads model availability from server `model.list`: Ollama renders endpoint
+reachability, installed-model metadata, and pull/start guidance but never asks
+the app or server to manage the operator-owned Ollama service.
 
 ## Notification Boundary
 

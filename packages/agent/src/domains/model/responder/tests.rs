@@ -291,9 +291,9 @@ async fn long_lived_factory_projects_api_settings_per_create_call() {
     let factory = DefaultModelResponderFactory::new();
     for (index, server) in [&first_server, &second_server].into_iter().enumerate() {
         let mut api_settings = crate::domains::settings::ApiSettings::default();
-        api_settings.ollama = Some(crate::domains::settings::OllamaApiSettings {
+        api_settings.ollama = crate::domains::settings::OllamaApiSettings {
             base_url: server.uri(),
-        });
+        };
         let responder = factory
             .create_for_model("gemma4:e4b", &api_settings)
             .await

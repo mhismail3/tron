@@ -7,6 +7,7 @@ struct ProviderInfo: Identifiable {
     let systemIcon: String?
     let color: Color
     let supportsOAuth: Bool
+    let supportsCredentials: Bool
 
     init(
         id: String,
@@ -14,7 +15,8 @@ struct ProviderInfo: Identifiable {
         assetIcon: String = "",
         systemIcon: String? = nil,
         color: Color,
-        supportsOAuth: Bool
+        supportsOAuth: Bool,
+        supportsCredentials: Bool = true
     ) {
         self.id = id
         self.displayName = displayName
@@ -22,6 +24,7 @@ struct ProviderInfo: Identifiable {
         self.systemIcon = systemIcon
         self.color = color
         self.supportsOAuth = supportsOAuth
+        self.supportsCredentials = supportsCredentials
     }
 
     static let modelProviders: [ProviderInfo] = [
@@ -30,6 +33,7 @@ struct ProviderInfo: Identifiable {
         ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan, supportsOAuth: true),
         ProviderInfo(id: "minimax", displayName: "MiniMax", assetIcon: "IconMiniMax", color: .tronRose, supportsOAuth: false),
         ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo, supportsOAuth: false),
+        ProviderInfo(id: "ollama", displayName: "Ollama", assetIcon: "IconOllama", color: .tronAmber, supportsOAuth: false, supportsCredentials: false),
     ]
 
     /// Search credentials share the provider credential store but are not
@@ -51,10 +55,10 @@ struct ProviderInfo: Identifiable {
         ),
     ]
 
-    static let credentialProviders = modelProviders + searchProviders
+    static let credentialProviders = modelProviders.filter(\.supportsCredentials) + searchProviders
 
     static func displayName(for id: String) -> String {
-        credentialProviders.first { $0.id == id }?.displayName ?? id
+        (modelProviders + searchProviders).first { $0.id == id }?.displayName ?? id
     }
 
     static func settingsOptions(including currentProvider: String) -> [(value: String, label: String)] {

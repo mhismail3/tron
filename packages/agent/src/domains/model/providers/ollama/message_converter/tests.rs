@@ -128,6 +128,7 @@ fn convert_assistant_thinking_blocks_skipped() {
     let result = convert_messages(&messages, true);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].content, Some("The answer is 42".into()));
+    assert!(result[0].thinking.is_none());
 }
 
 #[test]
@@ -700,7 +701,8 @@ fn assistant_thinking_text_and_tool_calls() {
     }];
     let result = convert_messages(&messages, true);
     assert_eq!(result.len(), 1);
-    // Thinking is dropped
+    // Gemma 4 requires thinking to be retained on tool-call turns.
+    assert_eq!(result[0].thinking, Some("Let me plan this...".into()));
     assert_eq!(result[0].content, Some("I'll search for that.".into()));
     // Tool call preserved with object arguments
     let tc = result[0].tool_calls.as_ref().unwrap();
