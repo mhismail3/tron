@@ -25,6 +25,9 @@ impl ModelResponder for JsonResponder {
             .expect("serialize agent worker prompt context");
         assert!(context.contains("idempotencyKey"), "{context}");
         assert!(context.contains("trace-agent"), "{context}");
+        assert!(context.contains("Output JSON Schema"), "{context}");
+        assert!(context.contains("kernel rejects"), "{context}");
+        assert!(context.contains("answer"), "{context}");
         let text = "{\"answer\":\"agent-runner\"}";
         let events = vec![
             Ok(StreamEvent::Start),

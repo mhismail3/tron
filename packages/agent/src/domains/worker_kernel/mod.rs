@@ -133,8 +133,13 @@
 //! reports every truncation cause. An agent abort or server shutdown therefore
 //! cannot be held indefinitely by a home-directory search.
 //! The fixed `session_set_title` operation owns only durable mutation and live
-//! projection. Title generation, eligibility, prompting, and normalization are
-//! worker policy and do not run implicitly in the agent prompt lifecycle.
+//! projection. Its target defaults to the current causal session, so models do
+//! not invent a synthetic "current" identifier. Title generation, eligibility,
+//! prompting, and normalization are worker policy and do not run implicitly in
+//! the agent prompt lifecycle.
+//! Raw web fetches default to 128 KiB and 30 seconds, expose explicit larger
+//! ceilings, and hash the retained bytes. HTML interpretation, crawling, and
+//! evidence policy remain worker behavior rather than growing the primitive.
 //! Executable child I/O is concurrent and bounded. Unix process groups make
 //! cancellation kill descendants; trusted-local `PATH` restores conventional
 //! host tools hidden by service launchers. Details belong to `process`.
@@ -175,6 +180,9 @@
 //! An agent-runner drop guard aborts its child on timeout, stop, disable, or
 //! shutdown. Causal depth survives the child hop, and pre-admission event
 //! subscription preserves even an immediate provider failure's terminal error.
+//! The child prompt carries the immutable output schema verbatim and explains
+//! that the kernel will validate it, so typed execution never asks a model to
+//! satisfy a hidden contract.
 //! Core proposal diffs retain exact text/newlines; purge removes live state
 //! only after creating a verified recovery archive, while retirement remains
 //! directly reversible from retained versions.

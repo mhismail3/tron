@@ -279,6 +279,41 @@ fn direct_text_search_contract_exposes_shutdown_safe_ceilings() {
 }
 
 #[test]
+fn web_fetch_defaults_protect_context_and_current_session_is_implicit() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let fetch = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::web_fetch")
+        .expect("web fetch contract");
+    let fetch_schema = fetch.request_schema.as_ref().expect("fetch request schema");
+    assert_eq!(fetch_schema["properties"]["maxBytes"]["default"], 131_072);
+    assert_eq!(fetch_schema["properties"]["timeoutSeconds"]["default"], 30);
+    assert!(fetch.description.contains("128 KiB"));
+    assert!(
+        fetch
+            .response_schema
+            .as_ref()
+            .expect("fetch response schema")["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("contentSha256"))
+    );
+
+    let title = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::session_set_title")
+        .expect("session title contract");
+    let title_schema = title.request_schema.as_ref().expect("title request schema");
+    assert_eq!(title_schema["required"], json!(["title"]));
+    assert!(
+        title_schema["properties"]["sessionId"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("current causal session")
+    );
+}
+
+#[test]
 fn mutation_checksum_contract_rejects_empty_or_inapplicable_preconditions() {
     let definitions = function_definitions().expect("worker-kernel contracts");
     let schema_for = |function_id: &str| {

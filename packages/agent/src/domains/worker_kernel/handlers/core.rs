@@ -16,10 +16,32 @@ pub(super) async fn session_set_title(
 ) -> Result<Value, String> {
     deps.runtime
         .set_session_title(
-            required_string(&invocation.payload, "sessionId")?,
+            title_target_session_id(
+                &invocation.payload,
+                invocation.causal_context.session_id.as_deref(),
+            )?,
             required_string(&invocation.payload, "title")?,
         )
         .await
+}
+
+fn title_target_session_id(
+    payload: &Value,
+    causal_session_id: Option<&str>,
+) -> Result<String, String> {
+    match payload.get("sessionId") {
+        Some(Value::String(session_id)) if !session_id.trim().is_empty() => {
+            Ok(session_id.trim().to_owned())
+        }
+        Some(_) => Err("sessionId must be a nonempty string when provided".to_owned()),
+        None => causal_session_id
+            .map(str::trim)
+            .filter(|session_id| !session_id.is_empty())
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| {
+                "sessionId is required when no current causal session is available".to_owned()
+            }),
+    }
 }
 
 pub(super) async fn core_proposal_create(
@@ -137,6 +159,33 @@ pub(super) async fn worker_relevance(
         "workerVersion":execution.worker_version,
         "rankings":rankings,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_title_targets_the_causal_session_without_a_synthetic_current_id() {
+        assert_eq!(
+            title_target_session_id(&json!({"title":"Useful title"}), Some("sess_current"))
+                .unwrap(),
+            "sess_current"
+        );
+        assert_eq!(
+            title_target_session_id(
+                &json!({"sessionId":"sess_explicit","title":"Useful title"}),
+                Some("sess_current")
+            )
+            .unwrap(),
+            "sess_explicit"
+        );
+        assert!(
+            title_target_session_id(&json!({"title":"Useful title"}), None)
+                .unwrap_err()
+                .contains("no current causal session")
+        );
+    }
 }
 
 pub(super) async fn core_proposal_list(

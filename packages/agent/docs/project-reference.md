@@ -94,10 +94,12 @@ A fixed model tool is admitted only when it passes one of two tests:
    improves model success and runtime reliability. The filesystem primitives
    add bounded reads/listing/search, exact stale-write detection, atomic
    publication, and closed evidence. `web_fetch` adds URL validation, response
-   ceilings, and source provenance. `session_set_title` is the narrow durable
-   session-metadata actuator needed for workers to replace hardcoded title
-   policy. These are ergonomic or state-custody primitives, not new semantic
-   product policy.
+   ceilings, retained-content checksums, and source provenance. Its default is
+   intentionally context-safe rather than the maximum supported response.
+   `session_set_title` is the narrow durable session-metadata actuator needed
+   for workers to replace hardcoded title policy; it derives the current target
+   from causal context unless an explicit session is named. These are ergonomic
+   or state-custody primitives, not new semantic product policy.
 
 This admits the current 8/16/4 grouping without pretending the smallest
 possible tool count is the objective. It rejects fixed web search providers,
@@ -415,6 +417,12 @@ their durable prompt contract, and to resident services as `X-Tron-*` headers.
 Every run records its pinned version, timestamps, input, output or error, and
 inbox result.
 
+An agent runner's durable child prompt includes the invocation input and the
+immutable worker output schema verbatim. The child is told that the kernel will
+reject nonconforming terminal output, and the ordinary post-run validator still
+enforces that boundary. Typed agent execution therefore does not depend on a
+worker author redundantly paraphrasing a hidden schema inside its instructions.
+
 The causal ledger stores trace roots, maximum observed depth, invocation and
 suppression counts, and the unique worker/trigger/idempotency deliveries seen in
 that trace. Repeated deliveries are returned idempotently without another
@@ -553,8 +561,8 @@ client payload.
 | `filesystem_write` | `worker_kernel::filesystem_write` | Same-directory atomic full write with optional checksum/absence precondition |
 | `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
-| `web_fetch` | `worker_kernel::web_fetch` | Explicit HTTP(S) fetch that stops reading at its content ceiling and returns provenance |
-| `session_set_title` | `worker_kernel::session_set_title` | Durable title update for the current session |
+| `web_fetch` | `worker_kernel::web_fetch` | Explicit raw UTF-8 HTTP(S) fetch with a 128 KiB/30-second default, explicit larger ceilings, redirect/status metadata, truncation evidence, and retained-content SHA-256 |
+| `session_set_title` | `worker_kernel::session_set_title` | Durable title update whose omitted target resolves to the current causal session |
 
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing

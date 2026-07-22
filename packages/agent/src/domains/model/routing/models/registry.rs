@@ -654,9 +654,7 @@ mod tests {
         assert!(!model_supports_images(model));
         assert_eq!(
             model_context_window(model),
-            u64::from(
-                crate::domains::model::providers::ollama::types::DEFAULT_NUM_CTX
-            )
+            u64::from(crate::domains::model::providers::ollama::types::DEFAULT_NUM_CTX)
         );
     }
 

@@ -405,8 +405,10 @@ impl WorkerRuntime {
         self.store
             .set_agent_session_id(&invocation.invocation_id, &session_id)?;
         let state_dir = self.store.state_dir(&worker.summary.worker_id)?;
+        let output_schema = serde_json::to_string_pretty(&worker.bundle.output_schema)
+            .map_err(|error| format!("encode agent worker output schema: {error}"))?;
         let prompt = format!(
-            "You are executing persistent worker '{}'. Follow its durable contract exactly.\n\n{}\n\nInvocation metadata (preserve the idempotency key when deduplicating side effects):\n{}\n\nInput JSON:\n{}\n\nDurable worker-owned state is at {}. This path survives worker updates, rollback, disable, retirement, and server restart. Named secrets, when configured, are available as files under {}. Never reveal their values or copy them into worker state. Return only the result required by the output schema.",
+            "You are executing persistent worker '{}'. Follow its durable contract exactly.\n\n{}\n\nInvocation metadata (preserve the idempotency key when deduplicating side effects):\n{}\n\nInput JSON:\n{}\n\nOutput JSON Schema:\n{}\n\nThe kernel rejects a terminal result that does not match this exact schema. Return only one JSON value matching it; do not wrap the value in prose or Markdown.\n\nDurable worker-owned state is at {}. This path survives worker updates, rollback, disable, retirement, and server restart. Named secrets, when configured, are available as files under {}. Never reveal their values or copy them into worker state.",
             worker.summary.name,
             instructions,
             serde_json::to_string_pretty(&json!({
@@ -418,6 +420,7 @@ impl WorkerRuntime {
             }))
             .map_err(|error| error.to_string())?,
             serde_json::to_string_pretty(&invocation.input).map_err(|error| error.to_string())?,
+            output_schema,
             state_dir.display(),
             secret_dir.display(),
         );

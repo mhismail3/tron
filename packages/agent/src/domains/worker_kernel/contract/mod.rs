@@ -111,15 +111,15 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::web_fetch",
         EffectClass::ExternalSideEffect,
         RiskLevel::Medium,
-        json!({"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":4194304}}}),
-        "Fetch one explicit HTTP or HTTPS URL directly and return bounded source content with provenance.",
+        json!({"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":4194304,"default":131072},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":120,"default":30}}}),
+        "Fetch one explicit HTTP or HTTPS URL directly and return bounded raw UTF-8 source content, redirect/status metadata, and a retained-content checksum. The context-safe default retains 128 KiB; request a larger ceiling only when needed.",
     )?);
     specs.push(spec(
         "worker_kernel::session_set_title",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
-        json!({"type":"object","additionalProperties":false,"required":["sessionId","title"],"properties":{"sessionId":{"type":"string","minLength":1},"title":{"type":"string","minLength":1,"maxLength":160}}}),
-        "Set an explicit durable session title and publish the canonical live session update. Adaptive title policy belongs in workers.",
+        json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"sessionId":{"type":"string","minLength":1,"description":"Optional explicit target. Omit to update the current causal session."},"title":{"type":"string","minLength":1,"maxLength":160}}}),
+        "Set an explicit durable title for the current causal session, or an explicitly named session, and publish the canonical live update. Adaptive title policy belongs in workers.",
     )?);
     specs.push(spec(
         "worker_kernel::core_proposal_create",

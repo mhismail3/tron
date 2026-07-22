@@ -28,8 +28,8 @@ pub(super) fn response_schema(function: &str) -> Value {
         }),
         "worker_kernel::web_fetch" => json!({
             "type":"object","additionalProperties":false,
-            "required":["url","status","contentType","contentLength","observedBytes","retainedBytes","truncated","content"],
-            "properties":{"url":{"type":"string"},"status":{"type":"integer"},"contentType":{},"contentLength":{},"observedBytes":{"type":"integer"},"retainedBytes":{"type":"integer"},"truncated":{"type":"boolean"},"content":{"type":"string"}}
+            "required":["url","status","contentType","contentLength","observedBytes","retainedBytes","contentSha256","truncated","content"],
+            "properties":{"url":{"type":"string"},"status":{"type":"integer"},"contentType":{},"contentLength":{},"observedBytes":{"type":"integer"},"retainedBytes":{"type":"integer"},"contentSha256":{"type":"string"},"truncated":{"type":"boolean"},"content":{"type":"string"}}
         }),
         "worker_kernel::session_set_title" => json!({
             "type":"object","additionalProperties":false,

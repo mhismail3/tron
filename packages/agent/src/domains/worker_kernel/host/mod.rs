@@ -4,7 +4,9 @@
 //! Their constraints are reliability ceilings, not an application sandbox:
 //! blocking filesystem work stays off the async executor, reads and traversal
 //! are bounded, process trees have bounded I/O and deadlines, and mutations
-//! publish through a same-directory atomic rename.
+//! publish through a same-directory atomic rename. Raw web retrieval defaults
+//! to a context-safe 128 KiB/30-second budget and hashes retained content;
+//! semantic extraction and crawling remain worker-owned behavior.
 //!
 //! ## Ownership
 //!
