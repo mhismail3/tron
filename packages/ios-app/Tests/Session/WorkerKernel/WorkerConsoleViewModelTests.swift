@@ -216,6 +216,14 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         return invocation(id: "new-run", output: ["accepted": true])
     }
 
+    func enqueueWorker(
+        workerId: String,
+        input: AnyCodable,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWorker(workerId: workerId, input: input, idempotencyKey: idempotencyKey)
+    }
+
     func cancelWorkerInvocation(
         invocationId: String,
         idempotencyKey: EngineIdempotencyKey

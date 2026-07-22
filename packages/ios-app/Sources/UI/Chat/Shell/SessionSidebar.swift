@@ -180,7 +180,11 @@ struct SessionSidebar: View {
                 viewModel: workerConsole,
                 repository: dependencies.workerKernelRepository,
                 connectionState: dependencies.connectionRepository.connectionState,
-                sessionId: dashboardSessionId
+                sessionId: dashboardSessionId,
+                onOpenSession: { sessionId in
+                    showWorkerConsole = false
+                    NotificationCenter.default.post(name: .switchToSession, object: sessionId)
+                }
             )
         }
     }

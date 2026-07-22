@@ -44,14 +44,16 @@ final class WorkerKernelClient: EngineDomainClient {
     func invokeWorker(
         workerId: String,
         input: AnyCodable,
-        idempotencyKey: EngineIdempotencyKey
+        idempotencyKey: EngineIdempotencyKey,
+        mode: WorkerInvocationMode = .wait
     ) async throws -> WorkerInvocationDTO {
         try await invokeWrite(
             "worker_kernel::invoke",
             WorkerInvokeRequestDTO(
                 workerId: workerId,
                 input: input,
-                idempotencyKey: idempotencyKey.rawValue
+                idempotencyKey: idempotencyKey.rawValue,
+                mode: mode
             ),
             idempotencyKey: idempotencyKey
         )

@@ -129,10 +129,16 @@ struct WorkerRunsRequestDTO: Codable, Equatable, Sendable {
     let detail: String
 }
 
+enum WorkerInvocationMode: String, Codable, Equatable, Sendable {
+    case wait
+    case enqueue
+}
+
 struct WorkerInvokeRequestDTO: Codable, Equatable, Sendable {
     let workerId: String
     let input: AnyCodable
     let idempotencyKey: String
+    let mode: WorkerInvocationMode
 }
 
 struct WorkerCancelRequestDTO: Codable, Equatable, Sendable {

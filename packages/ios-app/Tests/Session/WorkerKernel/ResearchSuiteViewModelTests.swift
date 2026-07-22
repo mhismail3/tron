@@ -237,6 +237,7 @@ private final class ResearchSuiteMockRepository: WorkerKernelRepository {
     func workers(includeRetired: Bool) async throws -> WorkerListResultDTO { throw MockError.unused }
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO { throw MockError.unused }
     func invokeWorker(workerId: String, input: AnyCodable, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerInvocationDTO { throw MockError.unused }
+    func enqueueWorker(workerId: String, input: AnyCodable, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerInvocationDTO { throw MockError.unused }
     func cancelWorkerInvocation(invocationId: String, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerInvocationDTO { throw MockError.unused }
     func setWorkerEnabled(_ enabled: Bool, workerId: String, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerSummaryDTO { throw MockError.unused }
     func stopWorker(workerId: String, idempotencyKey: EngineIdempotencyKey) async throws -> WorkerSummaryDTO { throw MockError.unused }

@@ -166,6 +166,7 @@ struct WorkerKernelClientTests {
                 let request = try #require(payload as? WorkerInvokeRequestDTO)
                 #expect(request.workerId == "research")
                 #expect(request.idempotencyKey == key.rawValue)
+                #expect(request.mode == (functions.count == 1 ? .wait : .enqueue))
                 return WorkerInvocationDTO(
                     invocationId: "run-1",
                     workerId: "research",
@@ -221,12 +222,19 @@ struct WorkerKernelClientTests {
             input: AnyCodable(["query": "Tron"]),
             idempotencyKey: key
         )
+        _ = try await client.invokeWorker(
+            workerId: "research",
+            input: AnyCodable(["query": "Tron"]),
+            idempotencyKey: key,
+            mode: .enqueue
+        )
         _ = try await client.cancelWorkerInvocation(invocationId: "run-1", idempotencyKey: key)
         _ = try await client.stopWorker(workerId: "research", idempotencyKey: key)
         _ = try await client.setWorkerEnabled(false, workerId: "research", idempotencyKey: key)
         _ = try await client.setWorkersStopped(true, idempotencyKey: key)
 
         #expect(functions == [
+            "worker_kernel::invoke",
             "worker_kernel::invoke",
             "worker_kernel::cancel",
             "worker_kernel::stop",

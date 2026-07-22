@@ -286,6 +286,11 @@ protocol WorkerKernelRepository: AnyObject {
         input: AnyCodable,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO
+    func enqueueWorker(
+        workerId: String,
+        input: AnyCodable,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
     func cancelWorkerInvocation(
         invocationId: String,
         idempotencyKey: EngineIdempotencyKey

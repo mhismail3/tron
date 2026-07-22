@@ -113,6 +113,7 @@ struct WorkerConsoleSheet: View {
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
     let sessionId: String?
+    let onOpenSession: (String) -> Void
 
     @State private var confirmStopAll = false
     @State private var selectedSection: EngineDashboardSection = .overview
@@ -169,6 +170,13 @@ struct WorkerConsoleSheet: View {
                             consoleViewModel: viewModel,
                             repository: repository,
                             connectionState: connectionState
+                        )
+                    case .delegation:
+                        DelegationSheet(
+                            consoleViewModel: viewModel,
+                            repository: repository,
+                            connectionState: connectionState,
+                            onOpenSession: onOpenSession
                         )
                     case .genericConsole:
                         WorkerDetailSheet(

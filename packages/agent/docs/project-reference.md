@@ -1299,8 +1299,23 @@ to the accepted version while health and routing stayed enabled. General
 Delegate is therefore accepted for single-task typed delegation, durable
 enqueue, child-session evidence, precise cancellation, restart recovery,
 idempotent replay, malformed-input rejection, retained-version recovery, and
-generic-console operation. Its dedicated native Delegation experience is the
-remaining presentation step for this guided capability.
+generic-console operation.
+
+iOS now recognizes only the exact primary `general-delegate` presentation
+contract version 1 as the native Delegation experience. The sheet reads full
+inspection, bounded runs, inbox outcomes, and linked child-session evidence
+from their existing server owners; it does not invent a delegation ledger.
+Typed submissions use durable enqueue, cancellation targets one invocation,
+retry creates a distinct invocation from the original input, and child-session
+navigation performs the ordinary authoritative session sync before opening an
+uncached child. The experience exposes task, deliverable, optional context and
+files, constraints, deadline, effort budget, and caller JSON Schema, then
+presents deliverables, evidence, constraint observations, artifacts, unresolved
+work, attempts, causality, model, tokens, cost, and timing. Unknown bindings and
+malformed results fall back or surface errors rather than becoming local truth.
+This closes the implemented General Delegate UI slice; physical-device field
+review remains an operator acceptance step before the broader field-confidence
+gate.
 
 ### Prior inventory coverage evidence
 

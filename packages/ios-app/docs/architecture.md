@@ -202,7 +202,8 @@ invalidation/change-feed contract only.
 
 - list and inspect;
 - runs and inbox;
-- typed invoke;
+- typed invocation with an explicit `wait` mode for request/response actions and
+  an explicit `enqueue` mode for durable background work;
 - cancel one queued or running invocation while preserving the worker route;
 - stop current work while preserving enabled routing, plus enable/disable;
 - rollback;
@@ -333,6 +334,26 @@ changes to the parent worker/run projection trigger a bounded suite refresh so
 the native view converges on current server truth. Unknown contract versions,
 secondary suite members, and missing bindings retain the generic-console
 fallback.
+
+The third supported contract is the primary `general-delegate` version 1
+entrypoint. `DelegationViewModel` binds only to the exact `general-delegate`
+worker id and immutable `delegation` suite metadata, loads its full inspection,
+bounded run history, and inbox from the server, and decodes only canonical
+`delegation.result.v1` outputs. Task submission uses durable `enqueue` rather
+than holding a client request open for agent execution. Retry creates a new
+invocation with the original typed input; cancellation targets exactly one
+queued or running invocation.
+
+The Delegation sheet provides active/completed/attention summaries, typed task,
+deliverable, context, file, constraint, deadline, effort, and optional JSON
+Schema input, plus durable task and activity views. Run detail presents the
+deliverable, evidence, constraint observations, artifacts, unresolved work,
+attempt and causal evidence, and model/token/cost/timing data from the linked
+child session when that session is locally available. Opening a child session
+uses the ordinary deep-link coordinator, including authoritative session sync
+when the child is not yet in the local session list. Technical worker detail
+remains available from the sheet; malformed outputs and unsupported bindings
+remain visible and fall back safely instead of becoming client-owned truth.
 
 ## Chat Flow
 

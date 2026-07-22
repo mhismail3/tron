@@ -3,6 +3,7 @@ import Foundation
 enum WorkerExperienceRoute: Equatable {
     case workLedger
     case researchSuite
+    case delegation
     case genericConsole
 
     static func resolve(_ worker: WorkerSummaryDTO) -> Self {
@@ -11,10 +12,20 @@ enum WorkerExperienceRoute: Equatable {
               presentation.primary else {
             return .genericConsole
         }
-        switch presentation.experienceId {
-        case "work-ledger": return .workLedger
-        case "research-suite": return .researchSuite
-        default: return .genericConsole
+        switch (
+            worker.workerId,
+            presentation.experienceId,
+            presentation.suiteId,
+            presentation.componentRole
+        ) {
+        case ("work-ledger", "work-ledger", "work-ledger", "primary"):
+            return .workLedger
+        case ("research-coordinator", "research-suite", "research-suite", "coordinator"):
+            return .researchSuite
+        case ("general-delegate", "general-delegate", "delegation", "primary"):
+            return .delegation
+        default:
+            return .genericConsole
         }
     }
 }

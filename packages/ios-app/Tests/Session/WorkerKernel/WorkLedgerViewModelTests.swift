@@ -9,7 +9,8 @@ struct WorkLedgerViewModelTests {
     func experienceRoutingFallsBackForUnknownContracts() {
         #expect(WorkerExperienceRoute.resolve(Self.worker(contractVersion: 1)) == .workLedger)
         #expect(WorkerExperienceRoute.resolve(Self.worker(contractVersion: 2)) == .genericConsole)
-        #expect(WorkerExperienceRoute.resolve(Self.worker(experienceId: "research-suite")) == .researchSuite)
+        #expect(WorkerExperienceRoute.resolve(Self.worker(experienceId: "research-suite")) == .genericConsole)
+        #expect(WorkerExperienceRoute.resolve(Self.worker(experienceId: "general-delegate")) == .genericConsole)
         #expect(WorkerExperienceRoute.resolve(Self.worker(primary: false)) == .genericConsole)
     }
 
@@ -166,6 +167,14 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
             ? WorkLedgerViewModelTests.snapshotOutput
             : ["ok": true, "action": action ?? "unknown"]
         return invocation(output: output)
+    }
+
+    func enqueueWorker(
+        workerId: String,
+        input: AnyCodable,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWorker(workerId: workerId, input: input, idempotencyKey: idempotencyKey)
     }
 
     func engineSurfaceSnapshot(

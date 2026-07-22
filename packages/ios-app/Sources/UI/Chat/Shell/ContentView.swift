@@ -117,7 +117,13 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .switchToSession)) { notification in
                 if let sessionId = notification.object as? String {
-                    selectedSessionId = sessionId
+                    coordinator?.handleDeepLink(
+                        sessionId: sessionId,
+                        scrollTarget: .bottom
+                    ) { sessionId, scrollTarget in
+                        selectedSessionId = sessionId
+                        currentScrollTarget = scrollTarget
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pendingShareContent)) { _ in
