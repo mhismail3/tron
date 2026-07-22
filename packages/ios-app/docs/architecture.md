@@ -287,6 +287,28 @@ confirmation; ordinary stop/disable controls explain their durable-state
 semantics. Webhook credentials are shown only from the mutation response that
 created or rotated them.
 
+### Native worker experiences
+
+Immutable worker presentation metadata may route a supported contract from the
+generic console into a native product experience. Routing is exact: the client
+matches the stable experience id, contract version, and primary-entrypoint flag.
+Missing metadata, an unknown version, or a secondary suite component always
+falls back to `WorkerDetailSheet`; a worker can never download or execute UI
+code. The technical worker detail remains reachable from every native
+experience so schemas, versions, runs, inbox, audit, and lifecycle controls do
+not fork into a second client-owned truth plane.
+
+The first supported contract is `work-ledger` version 1. `WorkLedgerViewModel`
+invokes the worker's single typed `snapshot` action to load goals, questions,
+decisions, aggregate status, and bounded recent history. It never reads the
+worker's SQLite state directly. Mutations use the same flat worker tool contract
+as agents and then refresh one authoritative snapshot. The native sheet
+provides status summaries, goal/question filters, goal/question/decision detail
+sheets, creation and editing, completion/cancellation, answer/resolution, linked
+record context, empty/offline/error states, and recent durable activity. The
+generic console remains the export/import, dependency/link, operational, and
+recovery surface until real use justifies additional native controls.
+
 ## Chat Flow
 
 ```text

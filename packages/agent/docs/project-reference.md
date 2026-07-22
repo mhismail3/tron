@@ -876,6 +876,50 @@ evidence, endpoint settings parity, and provider UI status are present. The
 provider/model prerequisite is therefore closed before guided Work Ledger
 authoring.
 
+### Guided Work Ledger proof
+
+The first restoration capability was authored by Tron from a natural-language
+request in an ordinary `gpt-5.5` session; it is profile state, not a
+repository-managed built-in. Tron researched the live worker contracts, wrote
+and smoke-tested a command-runner bundle, activated it with `worker_upsert`, and
+used the newly projected `worker_work_ledger` direct tool in the same session.
+The current profile retains three immutable versions; each update named the
+same predecessor and preserved mutable state. The current contract has one
+flat, typed action discriminator and explicit optional action fields rather
+than an opaque parameter bag. Its bounded `snapshot` action returns goals,
+questions, decisions, aggregate counts, and recent global history in one run
+for clients.
+
+The worker owns a WAL-backed SQLite database under its kernel-provided state
+directory and supports durable goal/question/decision lifecycle, dependencies,
+links, typed JSON plus Markdown export, and duplicate-safe validated import.
+Reminders and schedules remain out of scope. Activation uses isolated temporary
+state; the active database is not part of an immutable version hash.
+
+Acceptance evidence on the fresh restoration profile covers:
+
+- same-session direct-tool projection and useful goal/question creation;
+- atomic worker improvement with state preserved across every version switch;
+- create, inspect, update, complete, cancel, answer, resolve, decision,
+  dependency, and link paths;
+- a malformed import returning typed `ok: false` output without a nonzero
+  process exit or automatic worker disable;
+- exact invocation replay for a repeated idempotency key and duplicate-free
+  repeated import;
+- JSON/Markdown export, immutable rollback to the first version and restoration
+  to the corrected version, plus server-restart state recovery;
+- healthy bundle verification, direct routing, durable run/inbox evidence, and
+  continued generic-console access.
+
+iOS recognizes only immutable `work-ledger` presentation contract version 1 as
+the native Work Ledger experience. It uses the worker contract rather than
+reading worker storage, offers summaries, filters, creation/editing and record
+lifecycle, linked detail, empty/error/offline states, and recent activity, and
+keeps the generic technical console one tap away. Unknown contract versions
+fall back to the generic console. Work Ledger is therefore ready for ordinary
+field use; the next guided capability is the Research suite, not an additional
+kernel abstraction.
+
 ### Prior inventory coverage evidence
 
 The following detail is retained only to cross-check the family map above.

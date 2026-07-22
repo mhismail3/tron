@@ -156,11 +156,20 @@ struct WorkerConsoleSheet: View {
                 }
             }
             .sheet(isPresented: selectedWorkerPresented) {
-                WorkerDetailSheet(
-                    viewModel: viewModel,
-                    repository: repository,
-                    connectionState: connectionState
-                )
+                if let worker = viewModel.selectedWorker,
+                   WorkerExperienceRoute.resolve(worker) == .workLedger {
+                    WorkLedgerSheet(
+                        consoleViewModel: viewModel,
+                        repository: repository,
+                        connectionState: connectionState
+                    )
+                } else {
+                    WorkerDetailSheet(
+                        viewModel: viewModel,
+                        repository: repository,
+                        connectionState: connectionState
+                    )
+                }
             }
             .sheet(item: $selectedCoreTool) { tool in
                 EngineCoreToolDetailSheet(tool: tool)
