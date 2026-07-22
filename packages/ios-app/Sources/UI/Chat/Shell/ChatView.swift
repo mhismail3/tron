@@ -335,8 +335,9 @@ struct ChatView: View {
 
     // MARK: - Chat Core Content (extracted to reduce body complexity for type-checker)
 
+    @ViewBuilder
     private var chatCoreContent: some View {
-        messagesScrollView
+        let content = messagesScrollView
             .overlay {
                 EmptyView()
             }
@@ -353,8 +354,16 @@ struct ChatView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .tronScreenBackground()
             .navigationBarTitleDisplayMode(.inline)
+
+        if presentationMode == .workerAudit {
+            // A worker transcript is presented inside a detented sheet. Keep
+            // its content transparent so the presentation owns the medium
+            // Liquid Glass and large opaque surfaces.
+            content
+        } else {
+            content.tronScreenBackground()
+        }
     }
 }
 

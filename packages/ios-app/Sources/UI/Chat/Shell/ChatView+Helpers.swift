@@ -112,21 +112,21 @@ extension ChatView {
             return
         }
 
-        // Worker sessions are audit artifacts, not resumable conversations.
-        // Their useful reading order starts with the task and proceeds forward.
-        // Reusing the interactive chat bottom-settle path can place a medium
-        // sheet below its transcript until the user manually scrolls upward.
+        // Worker sessions are read-only audit artifacts with no keyboard or
+        // composer. Native bottom anchoring establishes the initial viewport;
+        // two bounded passes account for LazyVStack materialization without
+        // inheriting interactive chat's long keyboard-aware settling loop.
         if presentationMode == .workerAudit {
-            positionScrollAtTop()
+            scrollToBottom()
             guard await layoutDelay(milliseconds: 50) else { return }
             guard isCurrent(ticket), !Task.isCancelled else { return }
-            positionScrollAtTop()
+            scrollToBottom()
             guard await layoutDelay(milliseconds: 50) else { return }
             guard isCurrent(ticket), !Task.isCancelled else { return }
             viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
             initialLoadComplete = true
             logger.debug(
-                "[INIT] Worker audit loaded with \(viewModel.messages.count) top-aligned messages",
+                "[INIT] Worker audit loaded with \(viewModel.messages.count) bottom-anchored messages",
                 category: .session
             )
             return
@@ -255,16 +255,6 @@ extension ChatView {
             animated: animated,
             animation: animation
         )
-    }
-
-    private func positionScrollAtTop() {
-        guard let scrollProxy else { return }
-        scrollCoordinator.appWillPositionScroll()
-        var transaction = Transaction(animation: nil)
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            scrollProxy.scrollTo("top", anchor: .top)
-        }
     }
 
     private func positionScrollAtBottom(

@@ -92,12 +92,6 @@ extension ChatView {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        // A stable first-content target lets read-only worker
-                        // transcripts opt out of interactive chat's bottom reveal.
-                        Color.clear
-                            .frame(height: 1)
-                            .id("top")
-
                         if viewModel.hasMoreMessages {
                             topAutoloadSentinel
                                 .id("topAutoloadSentinel")
@@ -139,12 +133,19 @@ extension ChatView {
                     .padding()
                 }
                 .accessibilityIdentifier("chat-message-scroll-view")
-                // NOTE: We intentionally do NOT use .defaultScrollAnchor(.bottom) here.
-                // It causes content to jump off-screen when keyboard appears with long content,
-                // because it tries to re-anchor when container size changes.
-                // Undersized transcripts align to the top; overflow is positioned manually.
+                // Interactive chat keeps undersized content top-aligned and positions overflow
+                // manually so keyboard resizing cannot repeatedly re-anchor the transcript.
+                // Worker audits are read-only and have no composer, so native bottom alignment
+                // is stable there and makes the latest evidence visible as the sheet opens.
                 .coordinateSpace(name: ChatMessageScrollCoordinateSpace.name)
-                .defaultScrollAnchor(.top, for: .alignment)
+                .defaultScrollAnchor(
+                    presentationMode == .workerAudit ? .bottom : .top,
+                    for: .alignment
+                )
+                .defaultScrollAnchor(
+                    presentationMode == .workerAudit ? .bottom : .top,
+                    for: .initialOffset
+                )
                 .scrollPosition($transcriptScrollPosition)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height

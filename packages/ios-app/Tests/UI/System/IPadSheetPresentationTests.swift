@@ -39,6 +39,14 @@ final class IPadSheetPresentationTests: XCTestCase {
             "Existing adaptive callers should keep their established iPhone background branch by default"
         )
         XCTAssertTrue(
+            content.contains("phoneSelectedDetent == .large"),
+            "Detented iPhone sheets should use their opaque app surface whenever they reach the large detent"
+        )
+        XCTAssertFalse(
+            content.contains("phoneSelectedDetent == .large && colorScheme == .light"),
+            "Large detent opacity must not disappear in dark mode"
+        )
+        XCTAssertTrue(
             content.contains("enum AdaptiveIPadPresentationBackground"),
             "The helper needs an iPad background policy so full-bleed sheets can opt out of material backing"
         )

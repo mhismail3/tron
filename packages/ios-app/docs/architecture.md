@@ -294,8 +294,11 @@ owns both navigation and every evidence renderer. It provides:
   sheets, and bounded load-more
   access to the complete profile ledger;
 - a read-only worker-session transcript sheet launched from run-detail toolbar
-  actions; audit transcripts deterministically reveal from their first message
-  instead of inheriting interactive chat's bottom-opening policy, while
+  actions; audit transcripts use a read-only native bottom anchor plus a
+  bounded LazyVStack settling pass so the newest evidence is visible when the
+  sheet opens without inheriting interactive chat's keyboard-aware scroll loop;
+  the transcript content stays transparent so the canonical sheet presentation
+  is Liquid Glass at medium height and an opaque app surface at large height, while
   reserved worker child sessions remain excluded from ordinary Home navigation
   and the active interactive session remains unchanged;
 - stop current work without disabling the worker, enable/disable, retirement,

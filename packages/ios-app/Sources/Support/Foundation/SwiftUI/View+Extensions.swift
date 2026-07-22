@@ -330,7 +330,6 @@ private struct AdaptivePresentationModifier: ViewModifier {
     let phoneBackground: AdaptivePhonePresentationBackground
     let dragIndicator: Visibility
     @State private var selectedDetent: PresentationDetent
-    @Environment(\.colorScheme) private var colorScheme
 
     init(
         detents: Set<PresentationDetent>,
@@ -361,7 +360,7 @@ private struct AdaptivePresentationModifier: ViewModifier {
     }
 
     private var needsOpaquePhoneBackground: Bool {
-        phoneSelectedDetent == .large && colorScheme == .light
+        phoneSelectedDetent == .large
     }
 
     private var phoneSelectedDetent: PresentationDetent {
