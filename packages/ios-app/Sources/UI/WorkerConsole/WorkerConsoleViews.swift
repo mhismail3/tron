@@ -532,16 +532,16 @@ private struct WorkerConsoleRow: View {
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
-                    Label(
+                    compactMetadataLabel(
                         WorkerConsolePresentation.runnerLabel(worker.runnerKind),
                         systemImage: "cpu"
                     )
-                    Label(
+                    compactMetadataLabel(
                         WorkerConsolePresentation.triggerLabel(worker.triggerCount),
                         systemImage: "alarm"
                     )
                     if let surface {
-                        Label(
+                        compactMetadataLabel(
                             WorkerConsolePresentation.completedRunLabel(surface.completedRuns),
                             systemImage: "checkmark.circle"
                         )
@@ -588,5 +588,12 @@ private struct WorkerConsoleRow: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .glassEffect(.regular.tint(color.opacity(0.14)), in: .capsule)
+    }
+
+    private func compactMetadataLabel(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
     }
 }

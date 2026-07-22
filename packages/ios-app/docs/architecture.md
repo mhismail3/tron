@@ -273,7 +273,8 @@ owns both navigation and every evidence renderer. It provides:
   leaking unnamed session promotion or queryless relevance diagnostics;
 - engine stop-all/resume with an explanation that queued work remains durable;
 - worker list with explicit runner type, health, active hash prefix, trigger
-  count, and successful-run evidence;
+  count, and successful-run evidence; compact metadata groups retain clear
+  separation while keeping each icon visually attached to its text;
 - bounded provenance tags with full accessible source labels;
 - one generic worker workflow split into Overview, Run, Activity, and Manage;
 - native-experience technical detail limited to Contract and Manage so domain

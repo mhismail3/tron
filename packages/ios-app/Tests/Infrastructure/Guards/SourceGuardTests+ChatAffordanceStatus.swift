@@ -75,6 +75,8 @@ extension SourceGuardTests {
         #expect(!viewModel.contains("currentSessionId"))
         #expect(console.contains("Available to agents"))
         #expect(console.contains("runnerLabel(worker.runnerKind)"))
+        #expect(console.contains("private func compactMetadataLabel"))
+        #expect(console.contains("HStack(spacing: 3)"))
         #expect(!console.contains("\"This session\""))
         #expect(!console.contains("\"Promoted\""))
         #expect(!console.contains("routingEvidence"))
