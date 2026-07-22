@@ -120,6 +120,7 @@ struct WorkerListRequestDTO: Codable, Equatable, Sendable {
 
 struct WorkerInspectRequestDTO: Codable, Equatable, Sendable {
     let workerId: String
+    let detail: String
 }
 
 struct WorkerRunsRequestDTO: Codable, Equatable, Sendable {

@@ -137,7 +137,99 @@ pub(super) async fn list(invocation: &Invocation, deps: &Deps) -> Result<Value, 
 }
 
 pub(super) async fn inspect(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
-    deps.runtime
+    let detail = invocation
+        .payload
+        .get("detail")
+        .and_then(Value::as_str)
+        .unwrap_or("contract");
+    let inspection = deps
+        .runtime
         .store()
-        .inspect(&required_string(&invocation.payload, "workerId")?)
+        .inspect(&required_string(&invocation.payload, "workerId")?)?;
+    project_inspection(inspection, detail)
+}
+
+fn project_inspection(mut inspection: Value, detail: &str) -> Result<Value, String> {
+    let object = inspection
+        .as_object_mut()
+        .ok_or_else(|| "worker inspection must be an object".to_owned())?;
+    match detail {
+        "full" => {
+            object.insert("detail".to_owned(), json!("full"));
+        }
+        "contract" => {
+            let bundle = object
+                .get_mut("bundle")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| "worker inspection bundle must be an object".to_owned())?;
+            bundle.retain(|key, _| {
+                matches!(
+                    key.as_str(),
+                    "schemaVersion"
+                        | "workerId"
+                        | "name"
+                        | "description"
+                        | "toolName"
+                        | "inputSchema"
+                        | "outputSchema"
+                        | "runner"
+                        | "routing"
+                        | "provenance"
+                        | "presentation"
+                        | "secretBindings"
+                        | "engineHooks"
+                        | "triggers"
+                )
+            });
+            object.remove("healthHistory");
+            object.remove("audit");
+            object.insert("detail".to_owned(), json!("contract"));
+        }
+        _ => return Err("detail must be contract or full".to_owned()),
+    }
+    Ok(inspection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contract_inspection_excludes_source_and_operational_history() {
+        let inspection = json!({
+            "worker":{"workerId":"research"},
+            "bundle":{
+                "schemaVersion":"worker.bundle.v1",
+                "workerId":"research",
+                "inputSchema":{"type":"object"},
+                "outputSchema":{"type":"object"},
+                "runner":{"kind":"command"},
+                "provenance":[],
+                "files":[{"path":"large.py","content":"large source"}],
+                "smokeTests":[{"command":["python3","test.py"]}],
+                "healthChecks":[{"command":["python3","health.py"]}],
+                "dependencies":[{"name":"large dependency"}]
+            },
+            "route":null,
+            "versions":[],
+            "triggers":[],
+            "healthHistory":[{"details":"large output"}],
+            "audit":[{"details":"large audit"}],
+            "versionDirectory":"/workers/research/v1"
+        });
+
+        let projected = project_inspection(inspection.clone(), "contract").unwrap();
+        assert_eq!(projected["detail"], "contract");
+        assert!(projected.get("audit").is_none());
+        assert!(projected.get("healthHistory").is_none());
+        assert!(projected["bundle"].get("files").is_none());
+        assert!(projected["bundle"].get("smokeTests").is_none());
+        assert_eq!(projected["bundle"]["inputSchema"]["type"], "object");
+
+        let full = project_inspection(inspection, "full").unwrap();
+        assert_eq!(full["detail"], "full");
+        assert!(full["audit"].is_array());
+        assert!(full["healthHistory"].is_array());
+        assert!(full["bundle"]["files"].is_array());
+    }
 }

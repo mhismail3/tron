@@ -456,3 +456,32 @@ fn worker_history_defaults_to_compact_bounded_observations() {
     );
     assert_eq!(inbox["properties"]["seen"]["type"], "boolean");
 }
+
+#[test]
+fn worker_inspection_defaults_to_the_context_safe_contract_projection() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    let inspect = definitions
+        .iter()
+        .find(|definition| definition.id.as_str() == "worker_kernel::inspect")
+        .expect("worker inspection contract");
+    let request = inspect.request_schema.as_ref().expect("request schema");
+    assert_eq!(request["properties"]["detail"]["default"], "contract");
+    assert_eq!(
+        request["properties"]["detail"]["enum"],
+        json!(["contract", "full"])
+    );
+    assert!(inspect.description.contains("context-safe default"));
+    let response = inspect.response_schema.as_ref().expect("response schema");
+    assert!(
+        response["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("detail"))
+    );
+    assert!(
+        !response["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("audit"))
+    );
+}

@@ -176,9 +176,12 @@ worker metadata from the client. The server supplies internal causal context.
   per-worker stop, rollback, stop-all, archive-backed purge, and webhook token
   rotation.
 
-Worker history reads include `detail: "full"` explicitly and request at most 20
-records. The server still applies per-value byte ceilings and reports truncation;
-provider tools omit this field to receive the compact summary projection.
+Worker inspection explicitly requests `detail: "full"` because the operator
+detail sheet renders immutable source metadata and audit history; provider tools
+omit it and receive the context-safe behavioral-contract projection. Worker
+history reads likewise include `detail: "full"` explicitly and request at most
+20 records. The server still applies per-value byte ceilings and reports
+truncation; provider tools omit that field to receive compact summaries.
 
 The bundle remains `[String: AnyCodable]` because its JSON schemas, runner, and
 routing metadata are intentionally extensible. Stable operational fields are

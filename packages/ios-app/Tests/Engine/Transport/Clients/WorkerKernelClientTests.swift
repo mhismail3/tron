@@ -42,6 +42,17 @@ struct WorkerKernelClientTests {
             case "worker_kernel::list":
                 #expect((payload as? WorkerListRequestDTO)?.includeRetired == true)
                 return WorkerListResultDTO(workers: [worker()], stopAll: false)
+            case "worker_kernel::inspect":
+                #expect((payload as? WorkerInspectRequestDTO)?.workerId == "research")
+                #expect((payload as? WorkerInspectRequestDTO)?.detail == "full")
+                return WorkerInspectResultDTO(
+                    worker: worker(),
+                    bundle: [:],
+                    versions: [],
+                    triggers: [],
+                    audit: [],
+                    versionDirectory: "/workers/research/v1"
+                )
             case "worker_kernel::runs":
                 #expect((payload as? WorkerRunsRequestDTO)?.limit == 25)
                 #expect((payload as? WorkerRunsRequestDTO)?.detail == "full")
@@ -56,11 +67,13 @@ struct WorkerKernelClientTests {
         }
 
         _ = try await client.workers()
+        _ = try await client.inspectWorker("research")
         _ = try await client.workerRuns(workerId: "research", limit: 25)
         _ = try await client.workerInbox(workerId: "research", limit: 10)
 
         #expect(functions == [
             "worker_kernel::list",
+            "worker_kernel::inspect",
             "worker_kernel::runs",
             "worker_kernel::inbox",
         ])

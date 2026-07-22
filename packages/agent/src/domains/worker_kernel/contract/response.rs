@@ -58,8 +58,8 @@ pub(super) fn response_schema(function: &str) -> Value {
         }),
         "worker_kernel::inspect" => json!({
             "type":"object","additionalProperties":false,
-            "required":["worker","bundle","route","versions","triggers","healthHistory","audit","versionDirectory"],
-            "properties":{"worker":worker_summary_response_schema(),"bundle":{"type":"object"},"route":{},"versions":{"type":"array"},"triggers":{"type":"array"},"healthHistory":{"type":"array"},"audit":{"type":"array"},"versionDirectory":{"type":"string"}}
+            "required":["detail","worker","bundle","route","versions","triggers","versionDirectory"],
+            "properties":{"detail":{"type":"string","enum":["contract","full"]},"worker":worker_summary_response_schema(),"bundle":{"type":"object"},"route":{},"versions":{"type":"array"},"triggers":{"type":"array"},"healthHistory":{"type":"array"},"audit":{"type":"array"},"versionDirectory":{"type":"string"}}
         }),
         "worker_kernel::invoke" => invocation_response_schema(),
         "worker_kernel::cancel" => invocation_response_schema(),

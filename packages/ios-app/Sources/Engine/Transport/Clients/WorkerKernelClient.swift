@@ -23,7 +23,7 @@ final class WorkerKernelClient: EngineDomainClient {
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO {
         try await invokeRead(
             "worker_kernel::inspect",
-            WorkerInspectRequestDTO(workerId: workerId)
+            WorkerInspectRequestDTO(workerId: workerId, detail: "full")
         )
     }
 

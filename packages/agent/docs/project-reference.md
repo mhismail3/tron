@@ -606,6 +606,14 @@ holding one provider call open for the worker's two-hour execution ceiling.
 `worker_cancel` targets one durable invocation id. It is intentionally distinct
 from per-worker `worker_stop` and profile-wide `worker_stop_all`.
 
+`worker_inspect` defaults to `detail=contract`: the active input/output schemas,
+runner contract, routing, provenance, presentation, bindings, triggers, route,
+and immutable version summaries. It omits source-file payloads, smoke/health
+commands, audit, and health history so ordinary discovery does not consume
+model context with operator evidence. `detail=full` returns the complete
+immutable bundle metadata and bounded operational history; operator clients
+request that mode explicitly.
+
 Every enabled worker is also registered as a stable direct typed tool using the
 bundle's `toolName`, input schema, output schema, description, routing metadata,
 provenance, version, and recent success evidence.

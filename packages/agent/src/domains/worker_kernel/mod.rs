@@ -143,6 +143,10 @@
 //! Raw web fetches default to 128 KiB and 30 seconds, expose explicit larger
 //! ceilings, and hash the retained bytes. HTML interpretation, crawling, and
 //! evidence policy remain worker behavior rather than growing the primitive.
+//! Worker inspection defaults to the active behavioral contract and strips
+//! source-file payloads plus operational history. Operator clients can request
+//! bounded full detail explicitly, preventing routine model discovery from
+//! spending context on audit and source data it did not ask to review.
 //! Executable child I/O is concurrent and bounded. Unix process groups make
 //! cancellation kill descendants; trusted-local `PATH` restores conventional
 //! host tools hidden by service launchers. Details belong to `process`.

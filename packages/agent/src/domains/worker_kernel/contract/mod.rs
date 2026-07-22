@@ -181,8 +181,8 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::inspect",
         EffectClass::PureRead,
         RiskLevel::Low,
-        worker_id_schema(false),
-        "Inspect one worker's active bundle, provenance, triggers, and version history.",
+        json!({"type":"object","additionalProperties":false,"required":["workerId"],"properties":{"workerId":{"type":"string"},"detail":{"type":"string","enum":["contract","full"],"default":"contract","description":"contract returns the active behavioral contract without source files or operational history; full includes the immutable source manifest and bounded history for operator clients."}}}),
+        "Inspect one worker. The context-safe default returns its active typed contract, provenance, triggers, and versions; request detail=full only for immutable source metadata and operational history.",
     )?);
     specs.push(spec(
         "worker_kernel::invoke",
