@@ -52,7 +52,7 @@ const TOKEN_BYTE_LEN: usize = 32;
 /// a multiple of 4.
 const ENCODED_TOKEN_LEN: usize = 43;
 
-/// Default file path for the bearer token: `~/.tron/profiles/auth.json`.
+/// Default file path for the bearer token: `~/.tron/auth.json`.
 pub fn bearer_token_path() -> PathBuf {
     crate::shared::foundation::paths::auth_path()
 }
@@ -370,15 +370,16 @@ mod tests {
         barrier.wait();
 
         let mut concurrent = load_auth_storage(&path).unwrap().unwrap();
-        concurrent
-            .extra
-            .insert("concurrentMarker".into(), serde_json::json!("preserved"));
+        concurrent.providers.insert(
+            "concurrent-test".into(),
+            serde_json::json!({"marker":"preserved"}),
+        );
         save_auth_storage(&path, &mut concurrent).unwrap();
         drop(lock);
 
         let rotated = writer.join().unwrap();
         let stored = load_auth_storage(&path).unwrap().unwrap();
-        assert_eq!(stored.extra["concurrentMarker"], "preserved");
+        assert_eq!(stored.providers["concurrent-test"]["marker"], "preserved");
         assert_eq!(stored.bearer_token.as_deref(), Some(rotated.as_str()));
     }
 
@@ -434,13 +435,12 @@ mod tests {
     // ── Path helpers ──
 
     #[test]
-    fn bearer_token_path_lives_under_profiles_dir() {
+    fn bearer_token_path_is_root_auth_file() {
         let p = bearer_token_path();
         let s = p.to_string_lossy();
-        assert!(s.ends_with("/auth.json"), "got: {s}");
         assert!(
-            s.contains("/.tron/profiles/"),
-            "must live under ~/.tron/profiles/, got: {s}"
+            s.ends_with("/.tron/auth.json"),
+            "must be the canonical ~/.tron/auth.json file, got: {s}"
         );
     }
 }

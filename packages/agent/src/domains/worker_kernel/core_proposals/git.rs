@@ -85,6 +85,35 @@ pub(super) async fn cleanup_failed_worktree(
     }
 }
 
+/// Remove the temporary worktree after its tested commit has been captured.
+/// The proposal branch remains as the durable Git owner of that commit until
+/// the proposal is applied or explicitly discarded.
+pub(super) async fn cleanup_prepared_worktree(
+    repository: &Path,
+    worktree: &Path,
+) -> Result<(), String> {
+    run_git(
+        repository,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            worktree.to_string_lossy().as_ref(),
+        ],
+        None,
+    )
+    .await?;
+    run_git(repository, &["worktree", "prune"], None).await?;
+    let registered = run_git(repository, &["worktree", "list", "--porcelain"], None).await?;
+    if worktree.exists() || worktree_is_registered(&registered, worktree) {
+        return Err(format!(
+            "prepared core proposal worktree still exists at {}",
+            worktree.display()
+        ));
+    }
+    Ok(())
+}
+
 fn worktree_is_registered(list: &str, worktree: &Path) -> bool {
     let expected = worktree.to_string_lossy();
     list.lines()

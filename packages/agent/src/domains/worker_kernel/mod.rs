@@ -15,7 +15,7 @@
 //! | `handlers` | Model/client operation bindings |
 //! | `host` | Bounded trusted-local filesystem, process, and network primitives |
 //! | `persistence` | Canonical bundles, index reconstruction, and durable operational ledgers |
-//! | `core_proposals` | Isolated Git worktree proposals, bounded test evidence, and recorded conversational approval |
+//! | `core_proposals` | Temporary isolated Git worktrees, durable tested commits, bounded evidence, and recorded conversational approval |
 //! | `process` | Bounded child-process I/O and isolated process-tree lifecycle shared by tools and runners |
 //! | `retrieval` | Shared deterministic worker ranking and semantic-router recovery |
 //! | `runtime` | Activation, runners, lifecycle, dispatch, dynamic tools, semantic engine hooks, supervision, and primitive session-metadata actuation |
@@ -153,6 +153,9 @@
 //! defaults, request keys override them, and no engine wrapper is injected.
 //! Unseen inbox attachment uses an internal runtime identity with session/trace
 //! provenance; it never requires or fabricates an agent grant.
+//! Core proposal worktrees exist only while a patch is authored and tested.
+//! Successful creation removes the worktree and retains the branch/commit plus
+//! proposal evidence, so idle proposals do not duplicate an entire source tree.
 //! An agent-runner drop guard aborts its child on timeout, stop, disable, or
 //! shutdown. Causal depth survives the child hop, and pre-admission event
 //! subscription preserves even an immediate provider failure's terminal error.

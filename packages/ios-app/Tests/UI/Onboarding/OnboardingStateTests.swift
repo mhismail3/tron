@@ -36,7 +36,6 @@ struct OnboardingStateTests {
             .anthropic,
             .openAI,
             .providers,
-            .services,
             .model,
         ])
     }
@@ -51,7 +50,6 @@ struct OnboardingStateTests {
         #expect(OnboardingState.Step.anthropic.toolbarTitle == "Anthropic")
         #expect(OnboardingState.Step.openAI.toolbarTitle == "OpenAI")
         #expect(OnboardingState.Step.providers.toolbarTitle == "Other providers")
-        #expect(OnboardingState.Step.services.toolbarTitle == "Search services")
         #expect(OnboardingState.Step.model.toolbarTitle == "Default model")
     }
 
@@ -447,9 +445,6 @@ struct OnboardingStateTests {
               "hasClientSecret": true,
               "projectId": "tron-project"
             }
-          },
-          "services": {
-            "brave": {"hasApiKey": true, "apiKeyHint": "BSA...abc"}
           }
         }
         """.utf8))
@@ -470,9 +465,6 @@ struct OnboardingStateTests {
         #expect(snapshot.providerSummary(for: "openai-codex")?.keyPreview == nil)
         #expect(snapshot.providerSummary(for: "google")?.title == "Google Cloud configured")
         #expect(snapshot.providerSummary(for: "google")?.detail == "tron-project")
-        #expect(snapshot.serviceSummary(for: "brave")?.title == "API key saved")
-        #expect(snapshot.serviceSummary(for: "brave")?.detail == "BSA...abc")
-        #expect(snapshot.serviceSummary(for: "brave")?.keyPreview == "BSA...abc")
         #expect(snapshot.preferredApiKeyLabel(for: "anthropic") == "work")
         #expect(snapshot.preferredApiKeyLabel(for: "minimax") == "Default")
     }
@@ -488,7 +480,7 @@ struct OnboardingStateTests {
           }
         }
         """))
-        let emptyAuth = try JSONDecoder().decode(AuthState.self, from: Data(#"{"providers":{},"services":{}}"#.utf8))
+        let emptyAuth = try JSONDecoder().decode(AuthState.self, from: Data(#"{"providers":{}}"#.utf8))
         let refreshedAuth = try JSONDecoder().decode(AuthState.self, from: Data("""
         {
           "providers": {
@@ -497,9 +489,6 @@ struct OnboardingStateTests {
               "accounts": [{"label": "work", "expiresAt": 1800000000, "isExpired": false}],
               "activeCredential": {"type": "oauth", "label": "work"}
             }
-          },
-          "services": {
-            "exa": {"hasApiKey": true, "apiKeyHint": "exa...123"}
           }
         }
         """.utf8))
@@ -519,9 +508,6 @@ struct OnboardingStateTests {
         #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.detail == "work")
         #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.credentialLabel == "work")
         #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.keyPreview == nil)
-        #expect(state.setupSnapshot.serviceSummary(for: "exa")?.title == "API key saved")
-        #expect(state.setupSnapshot.serviceSummary(for: "exa")?.detail == "exa...123")
-        #expect(state.setupSnapshot.serviceSummary(for: "exa")?.keyPreview == "exa...123")
         #expect(state.setupSnapshot.authLoadError == nil)
     }
 

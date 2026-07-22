@@ -73,10 +73,10 @@ struct TronPathsTests {
         #expect(TronPaths.launchAgentLabel(environment: [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]) == "com.tron.server.dev")
     }
 
-    @Test("auth.json lives in profiles/")
+    @Test("auth.json lives at the Tron home root")
     func bearerTokenShape() {
         let tok = TronPaths.bearerTokenPath.path
-        #expect(tok.hasSuffix("/profiles/auth.json"))
+        #expect(tok.hasSuffix("/.tron/auth.json"))
     }
 
     @Test("onboarded sentinel lives in internal/run/")

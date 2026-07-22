@@ -7,7 +7,9 @@ use serde_json::Value;
 
 use crate::domains::session::event_store::EventStore;
 
-use self::git::{cleanup_failed_worktree, git_state_path, run_command, run_git};
+use self::git::{
+    cleanup_failed_worktree, cleanup_prepared_worktree, git_state_path, run_command, run_git,
+};
 
 mod git;
 
@@ -20,7 +22,6 @@ pub struct CoreProposal {
     pub title: String,
     pub intent: String,
     pub repository_path: String,
-    pub worktree_path: String,
     pub branch: String,
     pub commit: String,
     pub test_command: Vec<String>,
@@ -44,7 +45,6 @@ impl CoreProposalService {
         let root = home
             .join(crate::shared::foundation::paths::dirs::WORKSPACE)
             .join("core-proposals");
-        fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         Ok(Self { root, event_store })
     }
 
@@ -133,12 +133,19 @@ impl CoreProposalService {
                 return Err(with_cleanup_evidence(error, cleanup));
             }
         };
+        if let Err(error) = cleanup_prepared_worktree(&repository, &worktree).await {
+            let cleanup =
+                cleanup_failed_worktree(&repository, &proposal_dir, &worktree, &branch).await;
+            return Err(with_cleanup_evidence(
+                format!("retire prepared core proposal worktree: {error}"),
+                cleanup,
+            ));
+        }
         let proposal = CoreProposal {
             proposal_id: proposal_id.clone(),
             title,
             intent,
             repository_path: repository.display().to_string(),
-            worktree_path: worktree.display().to_string(),
             branch,
             commit,
             test_command,
@@ -156,7 +163,12 @@ impl CoreProposalService {
 
     pub fn list(&self) -> Result<Vec<CoreProposal>, String> {
         let mut proposals = Vec::new();
-        for entry in fs::read_dir(&self.root).map_err(|error| error.to_string())? {
+        let entries = match fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(proposals),
+            Err(error) => return Err(error.to_string()),
+        };
+        for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path().join("proposal.json");
             if path.is_file() {
@@ -427,9 +439,20 @@ mod tests {
             fs::read_to_string(repository.path().join("value.txt")).unwrap(),
             "before\n"
         );
+        assert!(
+            !home
+                .path()
+                .join("workspace/core-proposals")
+                .join(&proposal.proposal_id)
+                .join("worktree")
+                .exists()
+        );
         assert_eq!(
-            fs::read_to_string(Path::new(&proposal.worktree_path).join("value.txt")).unwrap(),
-            "after\n"
+            git(
+                repository.path(),
+                &["show", &format!("{}:value.txt", proposal.branch)]
+            ),
+            "after"
         );
         assert!(
             service

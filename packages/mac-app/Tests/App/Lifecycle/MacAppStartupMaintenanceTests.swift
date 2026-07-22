@@ -22,7 +22,7 @@ struct MacAppStartupMaintenanceTests {
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
-            bearerTokenPath: tmp.appendingPathComponent("profiles/auth.json", isDirectory: false),
+            bearerTokenPath: tmp.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: tmp.appendingPathComponent("internal/run/.onboarded", isDirectory: false),
             settingsPath: tmp.appendingPathComponent("settings.toml", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),

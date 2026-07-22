@@ -340,12 +340,14 @@ impl StorageRuntime {
     pub fn open_connection(&self) -> Result<Connection> {
         let conn = Connection::open(&self.path)
             .with_context(|| format!("failed to open {}", self.path.display()))?;
+        crate::shared::foundation::home::set_private_file_permissions(&self.path)
+            .with_context(|| format!("failed to secure {}", self.path.display()))?;
         apply_runtime_pragmas(&conn)?;
         ensure_storage_schema(&conn)?;
         Ok(conn)
     }
 
-    /// Run a truncating WAL checkpoint and record it in storage metadata.
+    /// Run a truncating WAL checkpoint and return its result.
     pub fn checkpoint(&self) -> Result<StorageCheckpointReport> {
         checkpoint_database(&self.path)
     }

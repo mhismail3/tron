@@ -151,6 +151,8 @@ pub(crate) fn init_database(
     let pool =
         crate::domains::session::event_store::new_file(&db_str, &ConnectionConfig::default())
             .context("Failed to open database")?;
+    crate::shared::foundation::home::set_private_file_permissions(&db_path)
+        .context("Failed to secure unified database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
         // Catch WAL-recovery-hiding-corruption before any writes
@@ -165,7 +167,7 @@ pub(crate) fn init_database(
         let _ = crate::domains::session::event_store::ensure_schema(&conn)
             .context("Failed to install current schema")?;
         crate::shared::storage::ensure_storage_schema(&conn)
-            .context("Failed to initialize storage metadata schema")?;
+            .context("Failed to initialize payload storage schema")?;
     }
     Ok((pool, db_path, db_lock))
 }

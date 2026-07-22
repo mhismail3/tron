@@ -17,6 +17,8 @@ use super::{
 pub fn checkpoint_database(path: &Path) -> Result<StorageCheckpointReport> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    crate::shared::foundation::home::set_private_file_permissions(path)
+        .with_context(|| format!("failed to secure {}", path.display()))?;
     apply_runtime_pragmas(&conn)?;
     ensure_storage_schema(&conn)?;
     let (busy, log_pages, checkpointed_pages): (i64, i64, i64) = conn
@@ -26,19 +28,6 @@ pub fn checkpoint_database(path: &Path) -> Result<StorageCheckpointReport> {
         .context("failed to checkpoint WAL")?;
     let wal_bytes = file_len(&wal_path(path));
     let checkpointed_at = Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO storage_checkpoints
-         (checkpointed_at, mode, busy, log_pages, checkpointed_pages, wal_bytes)
-         VALUES (?1, 'truncate', ?2, ?3, ?4, ?5)",
-        params![
-            checkpointed_at,
-            busy,
-            log_pages,
-            checkpointed_pages,
-            wal_bytes
-        ],
-    )
-    .context("failed to record storage checkpoint")?;
     Ok(StorageCheckpointReport {
         database_path: path.to_path_buf(),
         mode: "truncate".to_owned(),
@@ -72,6 +61,8 @@ pub fn export_snapshot(
     }
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    crate::shared::foundation::home::set_private_file_permissions(path)
+        .with_context(|| format!("failed to secure {}", path.display()))?;
     apply_runtime_pragmas(&conn)?;
     ensure_storage_schema(&conn)?;
     let _ =
@@ -82,16 +73,6 @@ pub fn export_snapshot(
         .with_context(|| format!("failed to export snapshot {}", snapshot_path.display()))?;
     let exported_at = Utc::now().to_rfc3339();
     let snapshot_bytes = file_len(snapshot_path);
-    conn.execute(
-        "INSERT INTO storage_exports (exported_at, snapshot_path, snapshot_bytes)
-         VALUES (?1, ?2, ?3)",
-        params![
-            exported_at,
-            snapshot_path.to_string_lossy().as_ref(),
-            snapshot_bytes
-        ],
-    )
-    .context("failed to record storage export")?;
     Ok(StorageExportReport {
         source_path: path.to_path_buf(),
         snapshot_path: snapshot_path.to_path_buf(),
@@ -108,6 +89,8 @@ pub(super) fn retention_run(
 ) -> Result<StorageRetentionReport> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    crate::shared::foundation::home::set_private_file_permissions(path)
+        .with_context(|| format!("failed to secure {}", path.display()))?;
     apply_runtime_pragmas(&conn)?;
     ensure_storage_schema(&conn)?;
     let started_at = Utc::now().to_rfc3339();
@@ -169,21 +152,6 @@ pub(super) fn retention_run(
             .context("failed to delete unowned storage blobs")?;
         }
         let finished_at = Utc::now().to_rfc3339();
-        tx.execute(
-            "INSERT INTO storage_retention_runs
-             (started_at, finished_at, dry_run, rows_deleted, blobs_deleted, notes)
-             VALUES (?1, ?2, 0, ?3, ?4, ?5)",
-            params![
-                started_at,
-                finished_at,
-                rows_deleted,
-                blobs_deleted,
-                format!(
-                    "diagnostic_retention_days={diagnostic_retention_days};expired_refs_deleted={expired_refs_deleted}"
-                )
-            ],
-        )
-        .context("failed to record storage retention run")?;
         tx.commit()
             .context("failed to commit storage retention transaction")?;
         let _ =

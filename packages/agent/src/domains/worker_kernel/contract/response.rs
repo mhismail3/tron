@@ -140,8 +140,8 @@ fn webhook_credential_response_schema() -> Value {
 fn core_proposal_response_schema() -> Value {
     json!({
         "type":"object","additionalProperties":false,
-        "required":["proposalId","title","intent","repositoryPath","worktreePath","branch","commit","testCommand","testOutput","status","createdAt","appliedAt","appliedCommit","approvalSessionId","approvalMessageId"],
-        "properties":{"proposalId":{"type":"string"},"title":{"type":"string"},"intent":{"type":"string"},"repositoryPath":{"type":"string"},"worktreePath":{"type":"string"},"branch":{"type":"string"},"commit":{"type":"string"},"testCommand":{"type":"array"},"testOutput":{"type":"string"},"status":{"type":"string"},"createdAt":{"type":"string"},"appliedAt":{},"appliedCommit":{},"approvalSessionId":{},"approvalMessageId":{}}
+        "required":["proposalId","title","intent","repositoryPath","branch","commit","testCommand","testOutput","status","createdAt","appliedAt","appliedCommit","approvalSessionId","approvalMessageId"],
+        "properties":{"proposalId":{"type":"string"},"title":{"type":"string"},"intent":{"type":"string"},"repositoryPath":{"type":"string"},"branch":{"type":"string"},"commit":{"type":"string"},"testCommand":{"type":"array"},"testOutput":{"type":"string"},"status":{"type":"string"},"createdAt":{"type":"string"},"appliedAt":{},"appliedCommit":{},"approvalSessionId":{},"approvalMessageId":{}}
     })
 }
 

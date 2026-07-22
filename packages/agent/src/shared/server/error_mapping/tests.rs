@@ -418,7 +418,7 @@ fn auth_malformed_provider_auth_is_not_configured() {
 #[test]
 fn auth_malformed_auth_file_is_sanitized_storage_error() {
     let mapped = map_auth_error(A::MalformedAuthFile {
-        path: "/Users/local-secret/.tron/profiles/auth.json".into(),
+        path: "/Users/local-secret/.tron/auth.json".into(),
         details: "unknown field `services`".into(),
     });
     let details = assert_embedded_failure(

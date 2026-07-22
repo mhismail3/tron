@@ -78,11 +78,9 @@ pub fn deep_health_check(
             tron_home,
         )),
         // 3. Auth
-        check_auth(
-            &tron_home
-                .join(crate::shared::foundation::paths::dirs::PROFILES)
-                .join(crate::shared::foundation::paths::files::AUTH_JSON),
-        ),
+        check_auth(&crate::shared::foundation::paths::auth_path_for_home(
+            tron_home,
+        )),
         // 4. Binary
         check_binary(&crate::shared::foundation::paths::tron_binary_path()),
         // 5. Disk

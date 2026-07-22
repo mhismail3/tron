@@ -878,7 +878,7 @@ cmd_uninstall() {
                 echo ""
                 echo "Removes the LaunchAgent, CLI entrypoint, runtime bundles, and Mac onboarding marker."
                 echo "Preserves ~/.tron/internal/database and ~/.tron/workspace. Optional flags remove"
-                echo "~/.tron/settings.toml and/or ~/.tron/profiles/auth.json."
+                echo "~/.tron/settings.toml and/or ~/.tron/auth.json."
                 return 0
                 ;;
             *)

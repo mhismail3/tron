@@ -15,11 +15,6 @@ struct ProviderInfo: Identifiable {
         ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo, supportsOAuth: false),
     ]
 
-    static let services: [ProviderInfo] = [
-        ProviderInfo(id: "brave", displayName: "Brave Search", assetIcon: "", color: .tronAmber, supportsOAuth: false),
-        ProviderInfo(id: "exa", displayName: "Exa", assetIcon: "", color: .tronAmber, supportsOAuth: false),
-    ]
-
     static func displayName(for id: String) -> String {
         modelProviders.first { $0.id == id }?.displayName ?? id
     }
@@ -31,13 +26,5 @@ struct ProviderInfo: Identifiable {
             options.append((value: trimmed, label: trimmed))
         }
         return options
-    }
-
-    var serviceSystemIcon: String {
-        switch id {
-        case "brave": return "magnifyingglass"
-        case "exa": return "doc.text.magnifyingglass"
-        default: return "key"
-        }
     }
 }

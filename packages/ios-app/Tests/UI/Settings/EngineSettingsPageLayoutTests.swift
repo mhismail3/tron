@@ -151,11 +151,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
         XCTAssertTrue(
             content.contains("ProviderInfo.modelProviders.dropFirst(3)"),
-            "The right providers column should keep remaining providers and services visible"
-        )
-        XCTAssertTrue(
-            content.contains("ForEach(ProviderInfo.services)"),
-            "Services must stay visible in the Providers landscape projection"
+            "The right providers column should keep remaining providers visible"
         )
     }
 

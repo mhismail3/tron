@@ -188,7 +188,7 @@ pub struct ServerRuntimeContext {
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     /// Server origin (e.g. `"localhost:9847"`).
     pub origin: String,
-    /// Path to auth JSON file (`~/.tron/profiles/auth.json`).
+    /// Path to auth JSON file (`~/.tron/auth.json`).
     pub auth_path: PathBuf,
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
     pub oauth_flows: Arc<

@@ -1,6 +1,5 @@
 use super::*;
 mod credentials;
-mod extra_fields;
 mod google;
 use tempfile::TempDir;
 
@@ -18,8 +17,8 @@ fn make_tokens() -> OAuthTokens {
 
 #[test]
 fn auth_file_path_construction() {
-    let p = auth_file_path(Path::new("/home/user/.tron/profiles"));
-    assert_eq!(p, PathBuf::from("/home/user/.tron/profiles/auth.json"));
+    let p = auth_file_path(Path::new("/home/user/.tron"));
+    assert_eq!(p, PathBuf::from("/home/user/.tron/auth.json"));
 }
 
 #[test]
@@ -74,6 +73,25 @@ fn load_partial_non_empty_object_returns_malformed_error() {
 }
 
 #[test]
+fn load_rejects_unknown_top_level_auth_sections() {
+    let dir = TempDir::new().unwrap();
+    let path = test_path(&dir);
+    std::fs::write(
+        &path,
+        r#"{
+            "version": 1,
+            "providers": {},
+            "services": {},
+            "lastUpdated": "2026-07-21T00:00:00Z"
+        }"#,
+    )
+    .unwrap();
+
+    let error = load_auth_storage(&path).expect_err("retired auth sections must fail closed");
+    assert!(error.to_string().contains("services"), "{error}");
+}
+
+#[test]
 fn save_and_load_roundtrip() {
     let dir = TempDir::new().unwrap();
     let path = test_path(&dir);
@@ -84,35 +102,6 @@ fn save_and_load_roundtrip() {
     assert_eq!(loaded.version, 1);
     let restored = loaded.get_provider_auth("anthropic").unwrap();
     assert_eq!(restored.api_keys.as_ref().unwrap()[0].key, "sk-123");
-}
-
-#[test]
-fn load_service_with_unknown_field_surfaces_error() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-    std::fs::write(
-        &path,
-        r#"{
-                "version": 1,
-                "providers": {},
-                "services": {
-                    "example": { "unexpectedKey": "value" }
-                },
-                "lastUpdated": "2026-04-22T00:00:00Z"
-            }"#,
-    )
-    .unwrap();
-
-    let err = load_auth_storage(&path)
-        .expect_err("unknown service-auth fields must surface as a hard error");
-    assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
-    let msg = err.to_string();
-    assert!(
-        msg.contains("unknown field")
-            || msg.contains("unexpectedKey")
-            || msg.contains("missing field"),
-        "error must name the offending field. got: {msg}"
-    );
 }
 
 /// Regression guard: a parse failure must NOT be silently absorbed by
@@ -331,21 +320,6 @@ fn save_account_oauth_tokens_updates_existing() {
 }
 
 #[test]
-fn get_service_api_keys_from_file() {
-    let dir = TempDir::new().unwrap();
-    let path = test_path(&dir);
-
-    let mut storage = AuthStorage::new();
-    let mut services = std::collections::HashMap::new();
-    let _ = services.insert("brave".to_string(), ServiceAuth::from_single("key1"));
-    storage.services = Some(services);
-    save_auth_storage(&path, &mut storage).unwrap();
-
-    let keys = get_service_api_keys(&path, "brave").unwrap();
-    assert_eq!(keys, vec!["key1"]);
-}
-
-#[test]
 fn clear_provider_auth_removes_one() {
     let dir = TempDir::new().unwrap();
     let path = test_path(&dir);
@@ -407,9 +381,9 @@ fn lock_path_for(auth_path: &Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn auth_lock_for_profile_auth_lives_under_internal_run() {
+fn auth_lock_for_root_auth_lives_under_internal_run() {
     let dir = TempDir::new().unwrap();
-    let auth_path = dir.path().join(".tron/profiles/auth.json");
+    let auth_path = dir.path().join(".tron/auth.json");
 
     assert_eq!(
         lock_path_for(&auth_path),

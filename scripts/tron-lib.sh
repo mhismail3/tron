@@ -46,7 +46,7 @@ ONBOARDED_MARKER_PATH="$RUN_DIR/.onboarded"
 DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 
 # OAuth
-AUTH_FILE="$TRON_HOME/profiles/auth.json"
+AUTH_FILE="$TRON_HOME/auth.json"
 
 #=============================================================================
 # COLORS & PRINT HELPERS

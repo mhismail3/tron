@@ -14,7 +14,7 @@ scrolling is disabled at the medium detent, the app hides native sheet drag
 handles, and content only scrolls once the sheet is large. The sheet is a paged
 flow: welcome, install
 Tailscale on iPhone, install Tron Server on Mac, connect, then a short settings
-setup flow for workspace, credentials, services, and default model.
+setup flow for workspace, model-provider credentials, and default model.
 Setup pages are locked until the Mac connection succeeds. The sheet follows the
 app's standard Liquid Glass chrome: principal toolbar title, Back/Next controls
 in the top sheet toolbar for paged navigation, and a compact
@@ -172,9 +172,6 @@ host and port.
   `API key saved` plus the masked key preview into a right-aligned status
   column. These quick rows save the key under the `Default` label unless the
   user later renames it from Settings.
-- **Search services** exposes API-key rows for Brave Search and Exa.
-  Saved service keys use the same right-aligned masked preview layout as
-  optional model providers.
 - **Default model** reuses `ModelPickerSheet`, then writes
   `server.defaultModel`. Provider routing is inferred from the selected model.
 
@@ -183,15 +180,15 @@ server before the setup pages unlock. Existing server preferences from
 `settings.get` prefill workspace and model choices, so pairing a forgotten but
 still-running Mac can be completed by reviewing each page and using Next or the
 page gesture to advance.
-Existing provider and service credentials from `auth.get` are shown
+Existing provider credentials from `auth.get` are shown
 only as server-returned labels and masked hints; secrets are never copied into
 iOS storage. If `auth.get` fails after `settings.get` succeeds, onboarding
 still proceeds with the settings snapshot and shows an inline credential-status
 warning instead of blocking setup.
 
 Every credential write in the setup pages consumes the fresh `AuthState`
-returned by the server. OAuth completion, named provider API-key saves, and
-service API-key saves all refresh the same in-memory snapshot immediately, so
+returned by the server. OAuth completion and named provider API-key saves
+refresh the same in-memory snapshot immediately, so
 the current page swaps from empty entry state to a saved credential card with
 the masked label/hint before the user moves forward. The OAuth sheet also
 reports its returned `AuthState` to callers; Settings uses the same callback so
@@ -206,15 +203,12 @@ provider-specific details such as Google Cloud OAuth configuration, followed
 by leading-aligned OAuth/API-key buttons. OAuth login
 buttons are hidden when the provider already has a usable or refreshable OAuth
 account, and reappear for expired non-refreshable accounts. API-key-only
-providers and search services use the same native Add API Key alert: provider
-alerts collect a label plus the key, while service alerts collect only the
-single service key. Failed saves re-present the alert with the draft intact so
+providers use the same native Add API Key alert and collect a label plus the
+key. Failed saves re-present the alert with the draft intact so
 typed secrets are not lost. Masked server-returned hints never share a
 container with unsaved secret entry fields. Credential status cards keep OAuth
 state and masked key hints in the trailing monospace slot next to an explicit
-small red X icon button. The Services group uses a stronger spaced header than
-individual provider rows so the sheet reads as two clear sections: model
-providers first, then search services.
+small red X icon button.
 
 Provider credentials are written through `auth.*` engine invocations, so secrets land in
 `auth.json`, not engine settings.

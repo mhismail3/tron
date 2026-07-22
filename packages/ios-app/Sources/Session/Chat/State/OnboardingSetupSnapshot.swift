@@ -122,17 +122,6 @@ struct OnboardingSetupSnapshot {
         return nil
     }
 
-    func serviceSummary(for serviceId: String) -> OnboardingCredentialSummary? {
-        guard let info = authState?.services[serviceId], info.hasApiKey else { return nil }
-        return OnboardingCredentialSummary(
-            title: "API key saved",
-            detail: info.apiKeyHint ?? "Saved on this server",
-            isExpired: false,
-            kind: .apiKey,
-            keyPreview: info.apiKeyHint
-        )
-    }
-
     func preferredApiKeyLabel(for providerId: String) -> String {
         guard let info = authState?.providers[providerId] else { return Self.defaultApiKeyLabel }
         if let active = info.activeCredential, active.isApiKey {

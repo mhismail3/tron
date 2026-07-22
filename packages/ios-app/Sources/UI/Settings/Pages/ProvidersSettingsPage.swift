@@ -1,8 +1,8 @@
 import SwiftUI
 
 // ARCHITECTURE: ~115 lines coordinator. Provider list, auth state, engine invocations,
-// OAuth sheet, and error alert live here; per-provider/service UI lives under
-// ModelProviders/ (ModelProviderSection, ProviderServiceCard, ...).
+// OAuth sheet, and error alert live here; per-provider UI lives under
+// ModelProviders/.
 
 struct ProvidersSettingsPage: View {
     @Environment(\.dependencies) private var dependencies
@@ -37,12 +37,6 @@ struct ProvidersSettingsPage: View {
         ForEach(ProviderInfo.modelProviders) { provider in
             modelProviderSection(provider)
         }
-
-        ProvidersServicesSectionHeader()
-
-        ForEach(ProviderInfo.services) { service in
-            providerServiceCard(service)
-        }
     }
 
     private var landscapeContent: some View {
@@ -58,12 +52,6 @@ struct ProvidersSettingsPage: View {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(ProviderInfo.modelProviders.dropFirst(3))) { provider in
                         modelProviderSection(provider)
-                    }
-
-                    ProvidersServicesSectionHeader()
-
-                    ForEach(ProviderInfo.services) { service in
-                        providerServiceCard(service)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -82,15 +70,6 @@ struct ProvidersSettingsPage: View {
             onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) },
             onSaveProvider: { params in await saveProvider(params) },
             onClear: { await clearProvider(provider.id) }
-        )
-    }
-
-    private func providerServiceCard(_ service: ProviderInfo) -> some View {
-        ProviderServiceCard(
-            service: service,
-            serviceAuth: authState?.services[service.id],
-            onSave: { params in await saveProvider(params) },
-            onClear: { await clearService(service.id) }
         )
     }
 
@@ -163,15 +142,6 @@ struct ProvidersSettingsPage: View {
         }
     }
 
-    private func clearService(_ serviceId: String) async -> ProviderAuthActionResult {
-        await performAuthAction {
-            try await authRepository.clear(
-                .service(serviceId),
-                idempotencyKey: .userAction("auth.clear")
-            )
-        }
-    }
-
     private func performAuthAction(_ action: () async throws -> AuthSnapshot) async -> ProviderAuthActionResult {
         do {
             authState = try await action()
@@ -180,22 +150,5 @@ struct ProvidersSettingsPage: View {
             self.error = error.localizedDescription
             return .failed
         }
-    }
-}
-
-enum ProvidersServicesSectionHeaderStyle {
-    static let fontSize = TronTypography.sizeBody
-    static let topPadding: CGFloat = 26
-    static let bottomPadding: CGFloat = 4
-}
-
-private struct ProvidersServicesSectionHeader: View {
-    var body: some View {
-        Text("Services")
-            .font(TronTypography.sans(size: ProvidersServicesSectionHeaderStyle.fontSize, weight: .semibold))
-            .foregroundStyle(.tronTextSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, ProvidersServicesSectionHeaderStyle.topPadding)
-            .padding(.bottom, ProvidersServicesSectionHeaderStyle.bottomPadding)
     }
 }

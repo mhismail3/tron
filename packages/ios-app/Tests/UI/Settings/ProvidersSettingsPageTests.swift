@@ -32,13 +32,6 @@ struct ProvidersSettingsPageTests {
         #expect(!ProviderAuthActionResult.failed.shouldCommitLocalFormChanges)
     }
 
-    @Test("services section header is a stronger boundary than provider headers")
-    func servicesSectionHeaderIsStrongerBoundaryThanProviderHeaders() {
-        #expect(ProvidersServicesSectionHeaderStyle.fontSize > TronTypography.sizeBodySM)
-        #expect(ProvidersServicesSectionHeaderStyle.topPadding > ProvidersServicesSectionHeaderStyle.bottomPadding)
-        #expect(ProvidersServicesSectionHeaderStyle.bottomPadding < 8)
-    }
-
     @Test("credential row ids are stable and credential-type scoped")
     func credentialRowIdsAreStableAndCredentialTypeScoped() {
         let oauth = ProviderCredentialRowItem(kind: .oauth, label: "work")
@@ -53,12 +46,6 @@ struct ProvidersSettingsPageTests {
     func providerArrayShape() {
         let ids = ProviderInfo.modelProviders.map(\.id)
         #expect(ids == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
-    }
-
-    @Test("services array contains Brave and Exa")
-    func serviceArrayShape() {
-        let ids = ProviderInfo.services.map(\.id)
-        #expect(ids == ["brave", "exa"])
     }
 
     @Test("only Anthropic, OpenAI, and Google support OAuth")
@@ -117,11 +104,4 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderAuthActionButtonsLayout.alignment == .leading)
     }
 
-    @Test("service system icon dispatches by id")
-    func serviceSystemIcons() {
-        let brave = ProviderInfo.services.first { $0.id == "brave" }!
-        let exa = ProviderInfo.services.first { $0.id == "exa" }!
-        #expect(brave.serviceSystemIcon == "magnifyingglass")
-        #expect(exa.serviceSystemIcon == "doc.text.magnifyingglass")
-    }
 }

@@ -144,7 +144,7 @@ fn initialization_creates_runtime_roots_without_inert_auth_state() {
         "internal/run/ holds runtime locks that normal server startup may create"
     );
     assert!(
-        !home.join("profiles/auth.json").exists(),
+        !home.join("auth.json").exists(),
         "bearer-token startup owns first auth-state creation"
     );
     assert!(

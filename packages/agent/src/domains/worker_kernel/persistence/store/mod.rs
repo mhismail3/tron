@@ -71,9 +71,13 @@ impl WorkerStore {
             .join(crate::shared::foundation::paths::dirs::DB)
             .join("workers.sqlite");
         fs::create_dir_all(&root).map_err(|error| format!("create worker root: {error}"))?;
+        crate::shared::foundation::home::set_private_directory_permissions(&root)
+            .map_err(|error| format!("secure worker root: {error}"))?;
         if let Some(parent) = database.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("create worker database directory: {error}"))?;
+            crate::shared::foundation::home::set_private_directory_permissions(parent)
+                .map_err(|error| format!("secure worker database directory: {error}"))?;
         }
         let store = Self {
             home,
@@ -94,8 +98,12 @@ impl WorkerStore {
             .join(crate::shared::foundation::paths::dirs::DB)
             .join("workers.sqlite");
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        crate::shared::foundation::home::set_private_directory_permissions(&root)
+            .map_err(|error| error.to_string())?;
         if let Some(parent) = database.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            crate::shared::foundation::home::set_private_directory_permissions(parent)
+                .map_err(|error| error.to_string())?;
         }
         let store = Self {
             home,
@@ -113,6 +121,8 @@ impl WorkerStore {
     fn connection(&self) -> Result<Connection, String> {
         let connection = Connection::open(&self.database)
             .map_err(|error| format!("open worker database: {error}"))?;
+        crate::shared::foundation::home::set_private_file_permissions(&self.database)
+            .map_err(|error| format!("secure worker database: {error}"))?;
         connection
             .busy_timeout(Duration::from_secs(5))
             .map_err(|error| format!("configure worker database timeout: {error}"))?;

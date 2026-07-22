@@ -87,26 +87,17 @@ enum ProviderApiKeyPrompt {
 
 enum ProviderApiKeyPromptScope: Equatable, Sendable {
     case provider(id: String, displayName: String)
-    case service(id: String, displayName: String)
 
     var title: String {
         "Add \(displayName) API Key"
     }
 
     var displayName: String {
-        switch self {
-        case .provider(_, let displayName), .service(_, let displayName):
-            return displayName
-        }
+        switch self { case .provider(_, let displayName): return displayName }
     }
 
     var showsLabelField: Bool {
-        switch self {
-        case .provider:
-            return true
-        case .service:
-            return false
-        }
+        true
     }
 }
 

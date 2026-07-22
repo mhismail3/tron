@@ -166,7 +166,7 @@ if [ "$offenders_total" -gt 0 ]; then
     echo ""
     echo "❌ FAIL — $offenders_total personal-info offender(s) found."
     echo ""
-    echo "User-specific values belong in MEMORY.md or ~/.tron/ runtime files,"
+    echo "User-specific values belong in ~/.tron runtime state,"
     echo "not the source tree. See packages/agent/src/shared/foundation/paths/"
     echo "for the regression-guard pattern that catches Rust offenders at test time."
     exit 1

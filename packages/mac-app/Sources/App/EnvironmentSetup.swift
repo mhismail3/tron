@@ -22,7 +22,7 @@ struct EnvironmentSetup: Sendable {
     /// Returns true if the on-disk first-run sentinel exists.
     var onboardedSentinelExists: @Sendable () -> Bool
 
-    /// Reads the bearer token from `~/.tron/profiles/auth.json`.
+    /// Reads the bearer token from `~/.tron/auth.json`.
     /// Returns nil if missing/unreadable.
     var readBearerToken: @Sendable () -> String?
 

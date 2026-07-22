@@ -182,10 +182,9 @@ The repo's regression guards (`paths.rs:workspace_has_no_personal_info_literals`
   configuration.
 - Encoded forms of the same (`-Users-<my-username>-…` from Claude-Code-style paths).
 
-User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded
-into every session) or `~/.tron/memory/rules/`. Skill-owned secrets go through
-the `vault` skill at `~/.tron/workspace/vault/`; Tron-owned provider auth lives
-in `~/.tron/profiles/auth.json`. Never paste secrets anywhere in the tree.
+User-specific values belong in runtime state outside the repository. Worker-owned
+secrets go through `~/.tron/workspace/vault/`; Tron-owned provider and transport
+credentials live in `~/.tron/auth.json`. Never paste secrets anywhere in the tree.
 
 Tests that need identity-shaped data must use synthetic, nonpersonal fixtures;
 personal literals are not allowlisted into the repository.

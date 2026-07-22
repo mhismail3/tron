@@ -44,8 +44,7 @@ pub(crate) fn test_settings_path(home: &Path) -> PathBuf {
 }
 
 pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
-    home.join(crate::shared::foundation::paths::dirs::PROFILES)
-        .join(crate::shared::foundation::paths::files::AUTH_JSON)
+    crate::shared::foundation::paths::auth_path_for_home(home)
 }
 
 pub(crate) fn test_settings_runtime(home: &Path) -> Arc<crate::domains::settings::SettingsRuntime> {

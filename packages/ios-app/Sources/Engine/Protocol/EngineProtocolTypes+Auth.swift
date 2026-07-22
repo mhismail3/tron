@@ -4,7 +4,6 @@ import Foundation
 
 struct AuthState: Decodable {
     let providers: [String: ProviderAuthInfo]
-    let services: [String: ServiceAuthInfo]
 }
 
 struct ProviderAuthInfo: Decodable {
@@ -65,26 +64,10 @@ struct AccountInfo: Decodable {
     }
 }
 
-struct ServiceAuthInfo: Decodable {
-    let hasApiKey: Bool
-    let apiKeyHint: String?
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        hasApiKey = (try? container.decode(Bool.self, forKey: .hasApiKey)) ?? false
-        apiKeyHint = try? container.decodeIfPresent(String.self, forKey: .apiKeyHint)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case hasApiKey, apiKeyHint
-    }
-}
-
 // MARK: - Auth Update Params (Encodable)
 
 struct AuthUpdateParams: Encodable {
     var provider: String?
-    var service: String?
     var apiKey: AnyCodableOptional?
 
     // OAuth fields (for provider updates)
@@ -121,8 +104,7 @@ struct OAuthInput: Encodable {
 // MARK: - Auth Clear Params (Encodable)
 
 struct AuthClearParams: Encodable {
-    var provider: String?
-    var service: String?
+    let provider: String
 }
 
 // MARK: - OAuth Flow Types

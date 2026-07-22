@@ -6,7 +6,6 @@ import Foundation
 enum TronPaths {
     private enum HomeComponent {
         static let internalDir = "internal"
-        static let profilesDir = "profiles"
         static let runDir = "run"
         static let databaseDir = "database"
         static let authFile = "auth.json"
@@ -46,7 +45,6 @@ enum TronPaths {
     }
 
     static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
-    static var profilesDir: URL { tronHome.appendingPathComponent(HomeComponent.profilesDir, isDirectory: true) }
     static var runDir: URL { internalDir.appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
     static var databaseLockPath: URL {
             internalDir
@@ -71,7 +69,7 @@ enum TronPaths {
     }
 
     static var bearerTokenPath: URL {
-        profilesDir.appendingPathComponent(HomeComponent.authFile, isDirectory: false)
+        tronHome.appendingPathComponent(HomeComponent.authFile, isDirectory: false)
     }
 
     static var onboardedMarkerPath: URL {

@@ -1,8 +1,7 @@
 //! Auth workflow operations.
 use super::{KNOWN_PROVIDERS, acquire_auth_file_lock, clear_provider_auth, map_auth_error};
 use super::{
-    build_masked_state, clear_service_auth, publish_auth_updated, update_google_provider,
-    update_service, update_standard_provider,
+    build_masked_state, publish_auth_updated, update_google_provider, update_standard_provider,
 };
 use crate::domains::auth::Deps;
 use crate::engine::Invocation;
@@ -22,11 +21,9 @@ pub(crate) async fn auth_get(deps: &Deps) -> Result<Value, ToolError> {
 pub(crate) async fn auth_update(invocation: &Invocation, deps: &Deps) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
-    let service = opt_string(Some(payload), "service");
-
-    if provider.is_none() && service.is_none() {
+    if provider.is_none() {
         return Err(ToolError::InvalidParams {
-            message: "Missing required parameter: provider or service".into(),
+            message: "Missing required parameter: provider".into(),
         });
     }
 
@@ -48,8 +45,6 @@ pub(crate) async fn auth_update(invocation: &Invocation, deps: &Deps) -> Result<
             } else {
                 update_standard_provider(&auth_path, provider, Some(&payload))?;
             }
-        } else if let Some(ref service) = service {
-            update_service(&auth_path, service, Some(&payload))?;
         }
 
         build_masked_state(&auth_path).map_err(map_auth_error)
@@ -63,11 +58,9 @@ pub(crate) async fn auth_update(invocation: &Invocation, deps: &Deps) -> Result<
 pub(crate) async fn auth_clear(invocation: &Invocation, deps: &Deps) -> Result<Value, ToolError> {
     let payload = &invocation.payload;
     let provider = opt_string(Some(payload), "provider");
-    let service = opt_string(Some(payload), "service");
-
-    if provider.is_none() && service.is_none() {
+    if provider.is_none() {
         return Err(ToolError::InvalidParams {
-            message: "Missing required parameter: provider or service".into(),
+            message: "Missing required parameter: provider".into(),
         });
     }
 
@@ -79,8 +72,6 @@ pub(crate) async fn auth_clear(invocation: &Invocation, deps: &Deps) -> Result<V
 
         if let Some(ref provider) = provider {
             clear_provider_auth(&auth_path, provider).map_err(map_auth_error)?;
-        } else if let Some(ref service) = service {
-            clear_service_auth(&auth_path, service).map_err(map_auth_error)?;
         }
 
         build_masked_state(&auth_path).map_err(map_auth_error)

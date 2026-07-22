@@ -90,7 +90,7 @@ fn shutdown_signal_surface_includes_process_manager_stop_signal() {
 // goal is twofold: (a) the clap parse tree exists exactly as documented,
 // and (b) the dispatch helper writes a fresh token to disk and prints
 // it on stdout. The end-to-end path uses the public `onboarding`
-// helpers, so the on-disk side effect lands in `~/.tron/profiles/`; the
+// helpers, so the on-disk side effect lands in `~/.tron/auth.json`; the
 // tests below avoid that by exercising the helper directly with a temp
 // path. The clap layer is tested in isolation.
 
@@ -132,8 +132,8 @@ fn cli_auth_unknown_action_fails() {
 
 #[test]
 fn run_subcommand_auth_rotate_writes_token_to_default_path() {
-    // The default path for `auth.json` is under `~/.tron/profiles/`,
-    // which would clobber the user's real token on a dev machine. The
+    // The default path is `~/.tron/auth.json`, which would clobber the
+    // user's real token on a dev machine. The
     // test writes through the lower-level `rotate_bearer_token` helper
     // with a temp path instead — same code path the dispatch hits, just
     // with the path injected. The clap dispatch test above guarantees

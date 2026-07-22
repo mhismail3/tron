@@ -1,6 +1,6 @@
 //! Core authentication types.
 //!
-//! Mirrors the TypeScript `AuthStorage` schema stored in `~/.tron/profiles/auth.json`.
+//! Owns the provider and transport credential schema stored in `~/.tron/auth.json`.
 
 use std::collections::HashMap;
 
@@ -176,55 +176,9 @@ impl<'de> Deserialize<'de> for GoogleProviderAuth {
     }
 }
 
-/// API key auth for external services.
-///
-/// INVARIANT: `api_keys` is non-empty. An entry with zero keys is
-/// indistinguishable from an unconfigured service and is rejected at
-/// deserialization time via `deserialize_non_empty_keys`.
+/// Top-level auth storage schema (`~/.tron/auth.json`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ServiceAuth {
-    /// Configured API keys. The provider selects the first key by default
-    /// and rotates on rate-limit / auth failures.
-    #[serde(deserialize_with = "deserialize_non_empty_keys")]
-    pub api_keys: Vec<String>,
-}
-
-impl ServiceAuth {
-    /// Build a `ServiceAuth` from a single key. Panics if `key` is empty —
-    /// callers should validate before construction.
-    pub fn from_single(key: impl Into<String>) -> Self {
-        let key = key.into();
-        assert!(
-            !key.is_empty(),
-            "ServiceAuth::from_single requires a non-empty key"
-        );
-        Self {
-            api_keys: vec![key],
-        }
-    }
-}
-
-fn deserialize_non_empty_keys<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Error as _;
-    let keys = Vec::<String>::deserialize(deserializer)?;
-    if keys.is_empty() {
-        return Err(D::Error::custom(
-            "apiKeys must contain at least one key; remove the service entry to clear it",
-        ));
-    }
-    if keys.iter().any(String::is_empty) {
-        return Err(D::Error::custom("apiKeys entries must be non-empty"));
-    }
-    Ok(keys)
-}
-
-/// Top-level auth storage schema (`~/.tron/profiles/auth.json`).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AuthStorage {
     /// Schema version (always 1).
     pub version: u32,
@@ -233,14 +187,8 @@ pub struct AuthStorage {
     pub bearer_token: Option<String>,
     /// Per-provider auth configuration.
     pub providers: HashMap<String, serde_json::Value>,
-    /// Per-service API key configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub services: Option<HashMap<String, ServiceAuth>>,
     /// ISO 8601 timestamp of last update.
     pub last_updated: String,
-    /// Preserves unknown top-level keys through load/save round-trips.
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
 }
 
 impl AuthStorage {
@@ -250,9 +198,7 @@ impl AuthStorage {
             version: 1,
             bearer_token: None,
             providers: HashMap::new(),
-            services: None,
             last_updated: chrono::Utc::now().to_rfc3339(),
-            extra: HashMap::new(),
         }
     }
 
@@ -322,21 +268,6 @@ impl AuthStorage {
     pub fn set_google_auth(&mut self, auth: &GoogleProviderAuth) {
         if let Ok(v) = serde_json::to_value(auth) {
             let _ = self.providers.insert("google".to_string(), v);
-        }
-    }
-
-    /// Get service auth for a given service ID.
-    pub fn get_service_auth(&self, service: &str) -> Option<&ServiceAuth> {
-        self.services.as_ref()?.get(service)
-    }
-
-    /// Get API keys for a service. Returns the stored `api_keys` vec, or
-    /// an empty vec if the service isn't configured. Deserialization
-    /// enforces non-empty keys so a present service always has ≥1 key.
-    pub fn get_service_api_keys(&self, service: &str) -> Vec<String> {
-        match self.get_service_auth(service) {
-            Some(svc) => svc.api_keys.clone(),
-            None => Vec::new(),
         }
     }
 }

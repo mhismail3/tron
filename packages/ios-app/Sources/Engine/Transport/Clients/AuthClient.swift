@@ -6,7 +6,7 @@ final class AuthClient: EngineDomainClient {
 
     // MARK: - Auth Methods
 
-    /// Get masked auth state for all providers and services.
+    /// Get masked auth state for all model providers.
     func get() async throws -> AuthState {
         let result: AuthState = try await invokeRead(
             "auth::get",

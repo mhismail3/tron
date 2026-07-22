@@ -1,6 +1,6 @@
 //! Auth storage file I/O.
 //!
-//! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions
+//! Reads and writes `~/.tron/auth.json` with secure file permissions
 //! (`0o600`). A missing file is a legitimate first-write case. Present files
 //! must match the current strict schema.
 
@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use super::errors::AuthError;
 use super::types::{
     ActiveCredential, ApiKeyEntry, AuthStorage, GoogleProviderAuth, OAuthTokens, ProviderAuth,
-    ServiceAuth,
 };
 
 /// Default auth file name.
@@ -142,22 +141,6 @@ pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProvider
         return Ok(None);
     };
     storage.try_get_google_auth()
-}
-
-/// Get service auth from storage file.
-pub fn get_service_auth(path: &Path, service: &str) -> Result<Option<ServiceAuth>, AuthError> {
-    Ok(load_auth_storage(path)?.and_then(|s| s.get_service_auth(service).cloned()))
-}
-
-/// Get service API keys from storage file.
-///
-/// Returns an empty vec when the file is missing or the service is not
-/// configured; propagates [`AuthError::MalformedAuthFile`] when the file
-/// exists but fails to parse.
-pub fn get_service_api_keys(path: &Path, service: &str) -> Result<Vec<String>, AuthError> {
-    Ok(load_auth_storage(path)?
-        .map(|s| s.get_service_api_keys(service))
-        .unwrap_or_default())
 }
 
 /// Save OAuth tokens for a named account.
@@ -461,22 +444,7 @@ fn auth_file_lock_path(auth_path: &Path) -> std::path::PathBuf {
     let Some(parent) = auth_path.parent() else {
         return auth_path.with_extension("lock");
     };
-
-    if parent.file_name().and_then(|name| name.to_str()) == Some("profiles")
-        && let Some(home) = parent.parent()
-    {
-        return crate::shared::foundation::paths::auth_lock_path_for_home(home);
-    }
-
-    if parent.file_name().and_then(|name| name.to_str()) == Some("vault")
-        && let Some(workspace) = parent.parent()
-        && workspace.file_name().and_then(|name| name.to_str()) == Some("workspace")
-        && let Some(home) = workspace.parent()
-    {
-        return crate::shared::foundation::paths::auth_lock_path_for_home(home);
-    }
-
-    parent.join("run/auth.lock")
+    crate::shared::foundation::paths::auth_lock_path_for_home(parent)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -144,8 +144,6 @@ final class DefaultAuthRepository: AuthRepository {
 private extension AuthMutation {
     func toAuthUpdateParams() -> AuthUpdateParams {
         switch self {
-        case .serviceApiKey(let service, let key):
-            return AuthUpdateParams(service: service, apiKey: .value(key))
         case .googleCloud(let provider, let clientId, let clientSecret, let projectId):
             var params = AuthUpdateParams(provider: provider)
             params.clientId = clientId
@@ -161,8 +159,6 @@ private extension AuthClearTarget {
         switch self {
         case .provider(let provider):
             return AuthClearParams(provider: provider)
-        case .service(let service):
-            return AuthClearParams(service: service)
         }
     }
 }

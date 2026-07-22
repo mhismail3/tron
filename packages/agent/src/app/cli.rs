@@ -58,7 +58,7 @@ pub(crate) enum Command {
 #[derive(clap::Subcommand, Debug)]
 pub(crate) enum AuthAction {
     /// Generate a fresh bearer token, persist it to
-    /// `~/.tron/profiles/auth.json` as `bearerToken` (atomic, 0o600), and print it
+    /// `~/.tron/auth.json` as `bearerToken` (atomic, 0o600), and print it
     /// to stdout. After this completes, every paired iOS device must
     /// re-pair (their cached token is invalidated).
     ///
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn oauth_save_rereads_after_canonical_auth_lock() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
+        let path = dir.path().join("auth.json");
         initialized_auth(&path);
 
         let lock = crate::domains::auth::credentials::acquire_auth_file_lock(&path).unwrap();
@@ -357,14 +357,14 @@ mod tests {
 
         let mut concurrent = load_auth_storage(&path).unwrap().unwrap();
         concurrent
-            .extra
-            .insert("concurrentMarker".into(), json!("preserved"));
+            .providers
+            .insert("concurrent-test".into(), json!({"marker":"preserved"}));
         save_auth_storage(&path, &mut concurrent).unwrap();
         drop(lock);
         writer.join().unwrap();
 
         let stored = load_auth_storage(&path).unwrap().unwrap();
-        assert_eq!(stored.extra["concurrentMarker"], "preserved");
+        assert_eq!(stored.providers["concurrent-test"]["marker"], "preserved");
         assert_eq!(stored.bearer_token.as_deref(), Some("existing-bearer"));
         let provider = stored.get_provider_auth("anthropic").unwrap();
         assert_eq!(provider.accounts.unwrap()[0].label, "shell-login");
@@ -373,7 +373,7 @@ mod tests {
     #[tokio::test]
     async fn oauth_completion_requires_matching_state_before_exchange() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
+        let path = dir.path().join("auth.json");
         initialized_auth(&path);
 
         let error = complete_oauth_from_reader_at(
@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn oauth_save_requires_server_initialized_auth() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("profiles/auth.json");
+        let path = dir.path().join("auth.json");
         let mut storage = AuthStorage::new();
         save_auth_storage(&path, &mut storage).unwrap();
 

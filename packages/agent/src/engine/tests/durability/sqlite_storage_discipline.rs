@@ -8,7 +8,7 @@ fn assert_shared_storage_schema(path: &std::path::Path) {
     let conn = Connection::open(path).unwrap();
     let table_exists: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_checkpoints')",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_payload_refs')",
             [],
             |row| row.get(0),
         )
@@ -19,8 +19,14 @@ fn assert_shared_storage_schema(path: &std::path::Path) {
 fn drifted_storage_path(dir: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
     let path = dir.path().join(name);
     let conn = Connection::open(&path).unwrap();
-    conn.execute_batch("CREATE TABLE storage_checkpoints (id INTEGER PRIMARY KEY);")
-        .unwrap();
+    conn.execute_batch(
+        "CREATE TABLE blobs (
+            id TEXT PRIMARY KEY,
+            hash TEXT NOT NULL UNIQUE,
+            ref_count INTEGER NOT NULL DEFAULT 1
+         );",
+    )
+    .unwrap();
     path
 }
 

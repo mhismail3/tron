@@ -69,7 +69,7 @@ extension SourceGuardTests {
                 for needle in needles {
                     #expect(
                         !content.contains(needle),
-                        "\(url.lastPathComponent) contains personal-info literal `\(needle)` - route user info through MEMORY.md on the server"
+                        "\(url.lastPathComponent) contains personal-info literal `\(needle)` - route user info through runtime state"
                     )
                 }
             }

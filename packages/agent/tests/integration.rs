@@ -81,9 +81,7 @@ async fn boot_server_with_config_and_autonomy(
     let session_manager = Arc::new(SessionManager::new(Arc::clone(&event_store)));
     let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
     let settings_path = tron::shared::foundation::paths::settings_path_for_home(&home);
-    let auth_path = home
-        .join(tron::shared::foundation::paths::dirs::PROFILES)
-        .join(tron::shared::foundation::paths::files::AUTH_JSON);
+    let auth_path = tron::shared::foundation::paths::auth_path_for_home(&home);
     if autonomous_workers {
         tron::domains::settings::config::SettingsStore::new(&settings_path)
             .update(json!({"autonomousWorkers": true}))

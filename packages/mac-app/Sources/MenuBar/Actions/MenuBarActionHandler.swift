@@ -211,7 +211,7 @@ final class MenuBarActionHandler {
             target: nil,
             action: nil
         )
-        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/profiles/auth.json. The database is never removed."
+        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/auth.json. The database is never removed."
 
         resetSettingsCheckbox.sizeToFit()
         resetCredentialsCheckbox.sizeToFit()

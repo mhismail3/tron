@@ -7,7 +7,7 @@
 3. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
 4. **Use `@self-inspect` skill** to investigate issues. Query `~/.tron/internal/database/` directly — don't guess.
 5. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
-6. **User info lives in `MEMORY.md`, secrets in vault.** Never hardcode personal info (names, emails, handles, domains) anywhere in code, tests, or skill docs. User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded into every session) or detail files under `~/.tron/memory/rules/`. Skill-owned secrets go in `~/.tron/workspace/vault/` through the `vault` skill; Tron-owned provider auth lives in `~/.tron/profiles/auth.json`. Regression-guarded by `workspace_has_no_personal_info_literals` in `packages/agent/src/shared/foundation/paths/`.
+6. **Personal data stays out of source; secrets stay in owned stores.** Never hardcode personal info (names, emails, handles, domains) anywhere in code, tests, or skill docs. User-specific values belong in runtime state outside the repository. Worker-owned secrets go in `~/.tron/workspace/vault/`; Tron-owned provider and transport credentials live in `~/.tron/auth.json`. Regression-guarded by `workspace_has_no_personal_info_literals` in `packages/agent/src/shared/foundation/paths/`.
 7. **Production behavior justifies production code.** A schema field, wrapper,
    helper, branch, or subsystem referenced only by its own tests/docs is not a
    reason to retain it. Keep test hooks behind `cfg(test)`; delete speculative

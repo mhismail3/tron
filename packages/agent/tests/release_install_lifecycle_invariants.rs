@@ -495,7 +495,7 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         "Shared contributor-shell paths and functions",
         "Rust foundation owners define the complete runtime home layout",
         "RUN_DIR=\"$TRON_HOME/internal/run\"",
-        "AUTH_FILE=\"$TRON_HOME/profiles/auth.json\"",
+        "AUTH_FILE=\"$TRON_HOME/auth.json\"",
         "DEPLOY_UPDATE_FILE=\"$RUN_DIR/deploy.in-progress\"",
     ] {
         assert!(tron_lib.contains(required), "tron-lib missing {required}");
@@ -718,8 +718,8 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     );
 
     let bundle = read_repo_file("scripts/tron.d/bundle.sh");
-    assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
-    assert!(!bundle.contains("$script_dir/AppIcon.icns"));
+    assert!(bundle.contains("$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns"));
+    assert!(!bundle.contains("$CONTRIBUTOR_DIR/AppIcon.icns"));
     assert!(bundle.contains("\"$SCRIPT_DIR/tron-version\" print"));
     assert!(bundle.contains("TRON_APPLE_MARKETING_VERSION)"));
     assert!(bundle.contains("TRON_APPLE_BUILD)"));

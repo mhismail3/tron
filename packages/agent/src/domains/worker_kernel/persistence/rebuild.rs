@@ -9,39 +9,14 @@ use std::fs;
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Serialize;
-use serde_json::{Value, json};
 
 use super::super::types::{WorkerBundle, WorkerState, WorkerTrigger};
-use super::filesystem::{read_json, tree_version, write_json_atomic};
+use super::filesystem::{read_json, tree_version};
 use super::store::validate_bundle;
-
-const REBUILD_FORMAT: &str = "tron.worker_index_rebuild.v1";
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RebuildReport {
-    format: &'static str,
-    rebuilt_at: String,
-    workers_indexed: usize,
-    versions_indexed: usize,
-    disabled_webhooks_requiring_rotation: Vec<String>,
-    invalid_bundles: Vec<Value>,
-    removed_stale_indexes: Vec<String>,
-}
 
 pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String> {
     let mut connection = Connection::open(database)
         .map_err(|error| format!("open worker index for reconstruction: {error}"))?;
-    let mut report = RebuildReport {
-        format: REBUILD_FORMAT,
-        rebuilt_at: chrono::Utc::now().to_rfc3339(),
-        workers_indexed: 0,
-        versions_indexed: 0,
-        disabled_webhooks_requiring_rotation: Vec::new(),
-        invalid_bundles: Vec::new(),
-        removed_stale_indexes: Vec::new(),
-    };
     let mut filesystem_ids = BTreeSet::new();
 
     for entry in fs::read_dir(root).map_err(|error| format!("scan worker root: {error}"))? {
@@ -55,17 +30,15 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
         let state = match read_json::<WorkerState>(&worker_dir.join("worker.json")) {
             Ok(state) if state.worker_id == worker_id => state,
             Ok(_) => {
-                report.invalid_bundles.push(json!({
-                    "workerId": worker_id,
-                    "reason": "worker.json identity does not match its directory",
-                }));
+                tracing::warn!(
+                    worker_id,
+                    "worker index rebuild ignored mismatched worker identity"
+                );
                 disable_existing_index(&connection, &worker_id, "corrupt")?;
                 continue;
             }
             Err(error) => {
-                report
-                    .invalid_bundles
-                    .push(json!({"workerId":worker_id,"reason":error}));
+                tracing::warn!(worker_id, %error, "worker index rebuild ignored invalid worker state");
                 disable_existing_index(&connection, &worker_id, "corrupt")?;
                 continue;
             }
@@ -86,21 +59,18 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
                 {
                     Ok(bundle) => bundle,
                     Err(error) => {
-                        report.invalid_bundles.push(json!({
-                            "workerId": worker_id,
-                            "version": version,
-                            "reason": error,
-                        }));
+                        tracing::warn!(worker_id, version, %error, "worker index rebuild ignored invalid bundle");
                         continue;
                     }
                 };
                 let expected = tree_version(&version_dir)?;
                 if expected != version {
-                    report.invalid_bundles.push(json!({
-                        "workerId": worker_id,
-                        "version": version,
-                        "reason": format!("content hash resolves to {expected}"),
-                    }));
+                    tracing::warn!(
+                        worker_id,
+                        version,
+                        expected,
+                        "worker index rebuild ignored bundle with mismatched content hash"
+                    );
                     continue;
                 }
                 versions.push((version, bundle));
@@ -110,11 +80,11 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
             .iter()
             .find(|(version, _)| version == &state.active_version)
         else {
-            report.invalid_bundles.push(json!({
-                "workerId": worker_id,
-                "version": state.active_version,
-                "reason": "canonical active version is absent or invalid",
-            }));
+            tracing::warn!(
+                worker_id,
+                version = state.active_version,
+                "worker index rebuild disabled worker with absent or invalid active version"
+            );
             disable_existing_index(&connection, &worker_id, "corrupt")?;
             continue;
         };
@@ -200,7 +170,7 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
                 )
                 .map_err(|error| format!("rebuild worker health '{worker_id}': {error}"))?;
         }
-        prune_stale_version_indexes(&transaction, &worker_id, &versions, &mut report)?;
+        prune_stale_version_indexes(&transaction, &worker_id, &versions)?;
         for (version, bundle) in &versions {
             transaction
                 .execute(
@@ -216,18 +186,11 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
                     ],
                 )
                 .map_err(|error| format!("rebuild worker version '{worker_id}@{version}': {error}"))?;
-            report.versions_indexed += 1;
         }
-        rebuild_triggers(
-            &transaction,
-            &worker_id,
-            &active_bundle.triggers,
-            &mut report,
-        )?;
+        rebuild_triggers(&transaction, &worker_id, &active_bundle.triggers)?;
         transaction
             .commit()
             .map_err(|error| format!("commit worker reconstruction: {error}"))?;
-        report.workers_indexed += 1;
     }
 
     let indexed_ids = {
@@ -245,17 +208,15 @@ pub(super) fn rebuild_indexes(root: &Path, database: &Path) -> Result<(), String
             connection
                 .execute("DELETE FROM workers WHERE worker_id=?1", [&worker_id])
                 .map_err(|error| format!("remove stale worker index: {error}"))?;
-            report.removed_stale_indexes.push(worker_id);
         }
     }
-    write_json_atomic(&root.join("index-rebuild-report.json"), &report)
+    Ok(())
 }
 
 fn prune_stale_version_indexes(
     transaction: &rusqlite::Transaction<'_>,
     worker_id: &str,
     versions: &[(String, WorkerBundle)],
-    report: &mut RebuildReport,
 ) -> Result<(), String> {
     let placeholders = (0..versions.len())
         .map(|_| "?")
@@ -267,7 +228,7 @@ fn prune_stale_version_indexes(
             .iter()
             .map(|(version, _)| rusqlite::types::Value::Text(version.clone())),
     );
-    let removed = transaction
+    transaction
         .execute(
             &format!(
                 "DELETE FROM worker_versions WHERE worker_id=? AND version NOT IN ({placeholders})"
@@ -275,18 +236,12 @@ fn prune_stale_version_indexes(
             rusqlite::params_from_iter(values),
         )
         .map_err(|error| format!("remove stale worker version indexes: {error}"))?;
-    if removed > 0 {
-        report
-            .removed_stale_indexes
-            .push(format!("{worker_id}:worker_versions:{removed}"));
-    }
     Ok(())
 }
 fn rebuild_triggers(
     transaction: &rusqlite::Transaction<'_>,
     worker_id: &str,
     triggers: &[WorkerTrigger],
-    report: &mut RebuildReport,
 ) -> Result<(), String> {
     let prior = {
         let mut statement = transaction
@@ -352,9 +307,6 @@ fn rebuild_triggers(
             });
         let stream_cursor = old.map_or(0, |(_, _, cursor, _)| *cursor);
         let enabled = if matches!(trigger, WorkerTrigger::Webhook { .. }) && token_hash.is_none() {
-            report
-                .disabled_webhooks_requiring_rotation
-                .push(format!("{worker_id}:{}", trigger.id()));
             0
         } else {
             old.map_or(1, |(_, _, _, enabled)| *enabled)

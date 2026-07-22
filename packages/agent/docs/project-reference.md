@@ -225,8 +225,9 @@ least one non-empty provenance source record.
 The SQLite worker database is rebuildable for routes, bundle discovery, and
 trigger configuration but durable for operational history. Startup reconstructs
 the catalog from valid filesystem bundles, disables invalid entries, marks each
-interrupted delivery attempt `interrupted`, resets its `running` invocation to
-`queued`, and writes an index-rebuild report. Webhook hashes cannot be
+interrupted delivery attempt `interrupted`, and resets its `running` invocation
+to `queued`. Invalid bundle details are emitted as bounded runtime warnings
+instead of accumulating another state file. Webhook hashes cannot be
 reconstructed, so rebuilt webhook triggers remain disabled until token
 rotation.
 
@@ -603,7 +604,7 @@ Engine settings are one sparse strict document at `~/.tron/settings.toml` over
 compiled typed defaults. Named profiles, inheritance, `active.toml`, profile
 classes, and the compiled auth registry do not exist in the running engine.
 Provider credentials remain separately protected in
-`~/.tron/profiles/auth.json`. Home-directory recovery creates only required
+`~/.tron/auth.json`. Home-directory recovery creates only required
 directories; bearer-token startup atomically creates the auth document on first
 use instead of seeding an inert `{}` file.
 
@@ -676,7 +677,7 @@ through a process-local refresh mutex and then an auth-file `flock`. Refreshes
 re-read `auth.json` after the lock and fail the refresh if persistence fails.
 Model providers receive ephemeral token copies rather than owning credential files.
 
-Provider credentials live in `~/.tron/profiles/auth.json`. Worker secrets live
+Provider credentials live in `~/.tron/auth.json`. Worker secrets live
 under `~/.tron/workspace/vault/` and enter a worker only through declared
 logical bindings. Bundle validation rejects likely secret material; runtime
 injection uses environment variables, and redaction covers persisted inputs,
@@ -874,10 +875,7 @@ indexes and durable operational history.
 | `events` | session event log |
 | `logs` | structured session logs |
 | `sessions` | session metadata |
-| `storage_checkpoints` | storage maintenance checkpoints |
-| `storage_exports` | storage export evidence |
 | `storage_payload_refs` | payload ownership references |
-| `storage_retention_runs` | retention-run evidence |
 | `workspaces` | workspace metadata |
 
 ### Worker database

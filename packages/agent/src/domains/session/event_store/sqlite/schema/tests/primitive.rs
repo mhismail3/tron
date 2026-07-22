@@ -26,10 +26,7 @@ fn fresh_schema_contains_only_primitive_tables() {
             "events",
             "logs",
             "sessions",
-            "storage_checkpoints",
-            "storage_exports",
             "storage_payload_refs",
-            "storage_retention_runs",
             "workspaces",
         ]
     );

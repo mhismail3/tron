@@ -63,29 +63,35 @@ fn owned_payload_refs_inline_small_and_blob_large_payloads() {
 }
 
 #[test]
-fn storage_schema_drift_fails_closed_without_mutating_the_existing_table() {
+fn payload_schema_drift_fails_closed_without_mutating_the_existing_table() {
     let conn = Connection::open_in_memory().unwrap();
     apply_runtime_pragmas(&conn).unwrap();
-    conn.execute_batch("CREATE TABLE storage_checkpoints (id INTEGER PRIMARY KEY);")
-        .unwrap();
+    conn.execute_batch(
+        "CREATE TABLE blobs (
+            id TEXT PRIMARY KEY,
+            hash TEXT NOT NULL UNIQUE,
+            ref_count INTEGER NOT NULL DEFAULT 1
+         );",
+    )
+    .unwrap();
 
     let error = ensure_storage_schema(&conn).unwrap_err();
 
     assert!(
-        error.to_string().contains(
-            "storage schema drift: table storage_checkpoints missing column checkpointed_at"
-        ),
+        error
+            .to_string()
+            .contains("storage schema drift: table blobs missing column content"),
         "unexpected error: {error:#}"
     );
-    let checkpoints: i64 = conn
+    let blobs: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'storage_checkpoints'",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'blobs'",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(
-        checkpoints, 1,
+        blobs, 1,
         "schema verification must preserve the preexisting table"
     );
 }
@@ -221,14 +227,8 @@ fn retention_prunes_expired_payload_refs_and_their_now_unowned_blobs() {
     let blobs: i64 = conn
         .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
         .unwrap();
-    let retention_runs: i64 = conn
-        .query_row("SELECT COUNT(*) FROM storage_retention_runs", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
     assert_eq!(refs, 0);
     assert_eq!(blobs, 0);
-    assert_eq!(retention_runs, 1);
 }
 
 #[test]

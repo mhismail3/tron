@@ -85,18 +85,13 @@ protocol SettingsRepository: AnyObject {
 
 struct AuthSnapshot: Equatable {
     let providers: [String: ProviderAuthSnapshot]
-    let services: [String: ServiceAuthSnapshot]
 
-    init(providers: [String: ProviderAuthSnapshot], services: [String: ServiceAuthSnapshot]) {
+    init(providers: [String: ProviderAuthSnapshot]) {
         self.providers = providers
-        self.services = services
     }
 
     init(_ state: AuthState) {
-        self.init(
-            providers: state.providers.mapValues(ProviderAuthSnapshot.init),
-            services: state.services.mapValues(ServiceAuthSnapshot.init)
-        )
+        self.init(providers: state.providers.mapValues(ProviderAuthSnapshot.init))
     }
 }
 
@@ -189,20 +184,6 @@ struct ProviderApiKeySnapshot: Equatable, Identifiable {
     }
 }
 
-struct ServiceAuthSnapshot: Equatable {
-    let hasApiKey: Bool
-    let apiKeyHint: String?
-
-    init(hasApiKey: Bool, apiKeyHint: String?) {
-        self.hasApiKey = hasApiKey
-        self.apiKeyHint = apiKeyHint
-    }
-
-    init(_ info: ServiceAuthInfo) {
-        self.init(hasApiKey: info.hasApiKey, apiKeyHint: info.apiKeyHint)
-    }
-}
-
 struct AuthCredentialSelection: Equatable, Sendable {
     enum Kind: String, Equatable, Sendable {
         case oauth
@@ -227,13 +208,11 @@ struct AuthCredentialSelection: Equatable, Sendable {
 }
 
 enum AuthMutation: Equatable, Sendable {
-    case serviceApiKey(service: String, key: String)
     case googleCloud(provider: String, clientId: String?, clientSecret: String?, projectId: String?)
 }
 
 enum AuthClearTarget: Equatable, Sendable {
     case provider(String)
-    case service(String)
 }
 
 struct OAuthBeginSnapshot: Equatable, Sendable {

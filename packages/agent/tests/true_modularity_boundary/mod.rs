@@ -237,7 +237,6 @@ fn ios_ui_uses_repositories_not_engine_transport() {
         "OAuthBeginResponse",
         "ActiveCredentialParam",
         "ProviderAuthInfo",
-        "ServiceAuthInfo",
         "AccountInfo",
         "ApiKeyInfo",
         "ActiveCredentialInfo",

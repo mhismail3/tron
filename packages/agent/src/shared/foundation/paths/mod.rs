@@ -25,8 +25,6 @@ pub mod dirs {
 
     /// Tron-owned runtime machinery: databases, locks, journals, caches.
     pub const INTERNAL: &str = "internal";
-    /// Protected provider and transport credentials.
-    pub const PROFILES: &str = "profiles";
     /// Active work, generated artifacts, plans, reports, and experiments.
     pub const WORKSPACE: &str = "workspace";
 
@@ -200,9 +198,14 @@ pub fn settings_path_for_home(home: &Path) -> PathBuf {
     home.join(files::SETTINGS_TOML)
 }
 
-/// `~/.tron/profiles/auth.json`
+/// `~/.tron/auth.json`
 pub fn auth_path() -> PathBuf {
-    tron_home().join(dirs::PROFILES).join(files::AUTH_JSON)
+    auth_path_for_home(&tron_home())
+}
+
+/// `<home>/auth.json`
+pub fn auth_path_for_home(home: &Path) -> PathBuf {
+    home.join(files::AUTH_JSON)
 }
 
 /// `<home>/internal/run/auth.lock` — auth file serialization lock.

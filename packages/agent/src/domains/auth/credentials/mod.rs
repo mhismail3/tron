@@ -4,7 +4,7 @@
 //! - **API key**: Direct key-based auth
 //! - **OAuth**: Token-based auth with auto-refresh (Anthropic, Google, `OpenAI`)
 //!
-//! Auth state is created on first use at `~/.tron/profiles/auth.json` with
+//! Auth state is created on first use at `~/.tron/auth.json` with
 //! secure file permissions. Every present file must match the current schema;
 //! malformed auth files are hard errors so real credentials are never silently
 //! overwritten.
@@ -66,13 +66,12 @@ pub(crate) use types::calculate_expires_at;
 pub use types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleProviderAuth,
     OAuthConfig, OAuthTokenRefreshResponse, OAuthTokens, OpenAIAuthPath, ProviderAuth, ServerAuth,
-    ServiceAuth, now_ms, should_refresh,
+    now_ms, should_refresh,
 };
 
 pub(crate) const DEFAULT_API_KEY_LABEL: &str = "Default";
 pub(crate) const KNOWN_PROVIDERS: &[&str] =
     &["anthropic", "openai-codex", "google", "minimax", "kimi"];
-pub(crate) const KNOWN_SERVICES: &[&str] = &["brave", "exa"];
 
 // ─── Credential resolution ──────────────────────────────────────────────────
 

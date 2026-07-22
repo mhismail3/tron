@@ -20,7 +20,7 @@ struct AuthClientTests {
         transport.engineConnection = nil
         let client = AuthClient(transport: transport)
         await #expect(throws: EngineClientError.self) {
-            try await client.update(AuthUpdateParams(), idempotencyKey: .userAction("auth.update.test"))
+            try await client.update(AuthUpdateParams(provider: "anthropic"), idempotencyKey: .userAction("auth.update.test"))
         }
     }
 
@@ -30,7 +30,7 @@ struct AuthClientTests {
         transport.engineConnection = nil
         let client = AuthClient(transport: transport)
         await #expect(throws: EngineClientError.self) {
-            try await client.clear(AuthClearParams(), idempotencyKey: .userAction("auth.clear.test"))
+            try await client.clear(AuthClearParams(provider: "anthropic"), idempotencyKey: .userAction("auth.clear.test"))
         }
     }
 

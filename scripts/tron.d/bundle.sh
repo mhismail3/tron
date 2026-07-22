@@ -65,8 +65,12 @@ create_app_bundle() {
 </plist>
 PLIST
 
-    cp "$CONTRIBUTOR_DIR/AppIcon.icns" \
-        "$bundle_path/Contents/Resources/AppIcon.icns"
+    local app_icon="$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns"
+    if [ ! -f "$app_icon" ] || [ -L "$app_icon" ]; then
+        print_error "Canonical Mac app icon is missing: $app_icon"
+        return 1
+    fi
+    cp "$app_icon" "$bundle_path/Contents/Resources/AppIcon.icns"
 
     cp "$binary_src" "$bundle_path/Contents/MacOS/tron"
     chmod +x "$bundle_path/Contents/MacOS/tron"

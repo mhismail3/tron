@@ -105,27 +105,21 @@ struct ProviderStatusHelpersTests {
         #expect(ProviderApiKeyPrompt.saveButtonTitle == "Save")
     }
 
-    @Test("API key prompt scopes require labels only for model providers")
-    func apiKeyPromptScopesRequireLabelsOnlyForModelProviders() {
+    @Test("API key prompt scope requires a model-provider label")
+    func apiKeyPromptScopeRequiresProviderLabel() {
         let providerScope = ProviderApiKeyPromptScope.provider(id: "anthropic", displayName: "Anthropic")
-        let serviceScope = ProviderApiKeyPromptScope.service(id: "brave", displayName: "Brave Search")
 
         #expect(providerScope.title == "Add Anthropic API Key")
         #expect(providerScope.showsLabelField)
-        #expect(serviceScope.title == "Add Brave Search API Key")
-        #expect(!serviceScope.showsLabelField)
     }
 
-    @Test("API key prompt drafts validate trimmed provider labels and service keys")
+    @Test("API key prompt drafts validate trimmed provider labels")
     func apiKeyPromptDraftsValidateByScope() {
         let providerScope = ProviderApiKeyPromptScope.provider(id: "anthropic", displayName: "Anthropic")
-        let serviceScope = ProviderApiKeyPromptScope.service(id: "brave", displayName: "Brave Search")
 
         #expect(!ProviderApiKeyPromptDraft(label: "  ", apiKey: "sk-test").isValid(for: providerScope))
         #expect(!ProviderApiKeyPromptDraft(label: "work", apiKey: "").isValid(for: providerScope))
         #expect(ProviderApiKeyPromptDraft(label: " work ", apiKey: "sk-test").isValid(for: providerScope))
-        #expect(ProviderApiKeyPromptDraft(label: "", apiKey: "BSA0-test").isValid(for: serviceScope))
-        #expect(ProviderApiKeyPromptDraft(label: "ignored", apiKey: "BSA0-test").saveLabel(for: serviceScope) == "")
         #expect(ProviderApiKeyPromptDraft(label: " work ", apiKey: "sk-test").saveLabel(for: providerScope) == "work")
     }
 

@@ -104,7 +104,7 @@ fn primitive_top_level_dirs_stay_under_tron_home() {
 #[test]
 fn settings_and_auth_have_distinct_canonical_paths() {
     assert!(settings_path().ends_with(files::SETTINGS_TOML));
-    assert!(auth_path().ends_with(format!("{}/{}", dirs::PROFILES, files::AUTH_JSON)));
+    assert!(auth_path().ends_with(format!(".tron/{}", files::AUTH_JSON)));
     assert_ne!(settings_path(), auth_path());
 }
 

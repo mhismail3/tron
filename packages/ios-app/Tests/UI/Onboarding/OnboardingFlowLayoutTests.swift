@@ -144,7 +144,7 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             "The flow should move form-heavy setup pages to their preferred detent instead of clipping them at the bottom edge"
         )
         XCTAssertTrue(
-            flow.contains("case .workspace, .anthropic, .openAI, .providers, .services, .model:"),
+            flow.contains("case .workspace, .anthropic, .openAI, .providers, .model:"),
             "Post-pairing setup pages should be treated as large-detent form pages"
         )
         XCTAssertTrue(
