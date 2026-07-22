@@ -30,12 +30,12 @@ struct TronSegmentedControl<T: Hashable>: View {
                             .padding(.vertical, 7)
                             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(
-                        .regular
-                            .tint(accent.opacity(isSelected ? 0.28 : 0.08))
-                            .interactive(),
-                        in: .rect(cornerRadius: 8)
+                    .buttonStyle(
+                        TronGlassSelectionButtonStyle(
+                            isSelected: isSelected,
+                            accent: accent,
+                            shape: .roundedRectangle(radius: 8)
+                        )
                     )
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }

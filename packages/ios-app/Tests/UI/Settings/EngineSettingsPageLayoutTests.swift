@@ -134,6 +134,10 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
 
     func testProvidersSettingsUsesIPadLandscapeColumns() throws {
         let content = try settingsPageSource(named: "ProvidersSettingsPage.swift")
+        let modelRepository = try source(pathComponents: [
+            "Sources", "Engine", "Transport", "Clients", "Repositories",
+            "Defaults", "DefaultModelRepository.swift",
+        ])
 
         XCTAssertTrue(
             content.contains("SettingsAdaptiveLayout.usesIPadLandscapeLayout"),
@@ -147,6 +151,17 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             content.contains("ProviderInfo.searchProviders"),
             "Search credentials should be visible alongside model providers"
         )
+        XCTAssertTrue(
+            content.contains("refreshOllamaModels(force: false)"),
+            "Opening Providers should reuse the prefetched model catalog"
+        )
+        XCTAssertTrue(
+            content.contains("dependencies.modelRepository.invalidateCache()"),
+            "Changing the Ollama endpoint must invalidate the prior endpoint catalog"
+        )
+        XCTAssertTrue(modelRepository.contains("private var refreshTask: Task<[ModelInfo], Error>?"))
+        XCTAssertTrue(modelRepository.contains("if let refreshTask"))
+        XCTAssertTrue(modelRepository.contains("refreshTask?.cancel()"))
     }
 
     func testProviderActionsLiveInCompactCredentialCardHeaders() throws {

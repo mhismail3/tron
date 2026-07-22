@@ -264,7 +264,10 @@ worker-detail workflow, reusable worker evidence components, and compiled-engine
 cards are separate files under the same feature owner; no all-in-one view file
 owns both navigation and every evidence renderer. It provides:
 
-- Overview, Core, Workers, and Activity modes in one compact cockpit;
+- Core, Workers, and Activity modes in one compact cockpit; the always-visible
+  summary owns profile-wide fixed/worker/issue counts and any active
+  worker-owned engine-policy hooks instead of duplicating them in an Overview
+  tab;
 - the compiled kernel/product-boundary component map and profile-wide fixed and
   published worker-tool counts;
 - every fixed tool shown immediately under host, worker-control, and core-change
@@ -487,7 +490,17 @@ No other server-only provider, retry, or runtime field may drift into only one
 Swift layer. `SettingsParityTests` guard the admitted projection. The Providers
 page reads model availability from server `model.list`: Ollama renders endpoint
 reachability, installed-model metadata, and pull/start guidance but never asks
-the app or server to manage the operator-owned Ollama service.
+the app or server to manage the operator-owned Ollama service. Settings
+prefetch, model pickers, and Providers share the repository's five-minute
+catalog cache and one coalesced in-flight request. Opening Providers therefore
+does not repeat live Ollama discovery; explicit refresh still bypasses cached
+truth, while endpoint changes cancel and disown any prior-endpoint request
+before loading the new endpoint.
+
+Compact mutually exclusive controls use one shared liquid-glass button style.
+Dashboard tabs, color-mode choices, and text/code font choices share selected
+contrast, material tint, shapes, accessibility selection state, and press
+feedback rather than maintaining separate solid-button implementations.
 
 ## Notification Boundary
 

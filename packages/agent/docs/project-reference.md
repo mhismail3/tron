@@ -544,9 +544,15 @@ input, and a 32K retained Ollama context. Tron never installs, pulls, starts,
 stops, or removes Ollama or its models.
 
 The iOS Providers page shows endpoint reachability and installed-model evidence
-alongside model-provider credentials. Brave Search and Exa remain separate
-named API-key providers because Research workers consume `provider-brave` and
-`provider-exa` secret bindings; neither becomes a model choice.
+alongside model-provider credentials. Its shared model repository retains the
+catalog for five minutes and coalesces concurrent Settings, Providers, and
+model-picker reads, so opening Providers does not duplicate the bounded live
+Ollama discovery already in flight. Explicit refresh still requests current
+endpoint truth, and changing the endpoint cancels/disowns any in-flight prior
+request before invalidating its catalog. Brave
+Search and Exa remain separate named API-key providers because Research workers
+consume `provider-brave` and `provider-exa` secret bindings; neither becomes a
+model choice.
 
 ## Model-Facing Tools
 
@@ -1575,8 +1581,9 @@ The iOS Engine Dashboard is backed by `WorkerKernelClient`,
 `WorkerKernelRepository`, `WorkerConsoleViewModel`, and `UI/WorkerConsole`.
 It exposes:
 
-- a profile-level Overview of fixed and published worker-tool availability,
-  current operational state, and active worker-owned engine hooks;
+- an always-visible profile summary of fixed and published worker-tool
+  availability, current operational state, issue count, and active
+  worker-owned engine hooks, followed by Core, Workers, and Activity tabs;
 - a Core inventory of all fixed host, worker-control, and core-change tools,
   including schemas and current exposure;
 - published workers with explicit profile-global availability to agents;

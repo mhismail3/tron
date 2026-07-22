@@ -19,7 +19,6 @@ enum WorkerVersionAction: Equatable {
     }
 }
 private enum EngineDashboardSection: String, CaseIterable {
-    case overview = "Overview"
     case core = "Core"
     case workers = "Workers"
     case activity = "Activity"
@@ -114,7 +113,7 @@ struct WorkerConsoleSheet: View {
     let connectionState: ConnectionState
 
     @State private var confirmStopAll = false
-    @State private var selectedSection: EngineDashboardSection = .overview
+    @State private var selectedSection: EngineDashboardSection = .core
     @State private var selectedCoreTool: EngineSurfaceToolDTO?
 
     var body: some View {
@@ -214,8 +213,6 @@ struct WorkerConsoleSheet: View {
     @ViewBuilder
     private var dashboardContent: some View {
         switch selectedSection {
-        case .overview:
-            overviewContent
         case .core:
             coreContent
         case .workers:
@@ -252,6 +249,18 @@ struct WorkerConsoleSheet: View {
                 summaryMetric(value: viewModel.attentionCount, label: "Issues")
             }
 
+            if !viewModel.activeEngineHooks.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                        .foregroundStyle(.tronPurple)
+                    Text(engineHookSummary)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
+                }
+            }
+
             Button {
                 if viewModel.stopAll {
                     Task { await setStopped(false) }
@@ -278,31 +287,6 @@ struct WorkerConsoleSheet: View {
         }
         .padding(14)
         .sectionFill(consoleStatus.color, cornerRadius: 12, subtle: true, interactive: false)
-    }
-
-    private var overviewContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            WorkerConsoleSectionHeader(
-                title: "Engine availability",
-                detail: "Profile-wide primitives and persistent worker tools available for agent selection."
-            )
-            EngineSurfaceCard(viewModel: viewModel)
-
-            if let issue = viewModel.activityInbox.first(where: {
-                ["error", "critical", "warning"].contains(
-                    WorkerConsolePresentation.normalized($0.severity)
-                )
-            }) {
-                WorkerConsoleSectionHeader(
-                    title: "Needs attention",
-                    detail: "Most recent durable worker issue."
-                )
-                WorkerInboxCard(
-                    item: issue,
-                    workerName: viewModel.workerName(for: issue.workerId)
-                )
-            }
-        }
     }
 
     private var coreContent: some View {
@@ -456,6 +440,13 @@ struct WorkerConsoleSheet: View {
             return ("Core ready", "The fixed engine is active; create workers conversationally with Tron.", "bolt.horizontal.circle", .tronEmerald)
         }
         return ("Engine ready", "Core primitives and the persistent worker runtime are active.", "checkmark.seal", .tronEmerald)
+    }
+
+    private var engineHookSummary: String {
+        let labels = viewModel.activeEngineHooks.map {
+            WorkerConsolePresentation.displayLabel($0.hook)
+        }
+        return "Worker-owned engine policy: \(labels.joined(separator: ", "))"
     }
 
     private func summaryMetric(value: Int, label: String) -> some View {

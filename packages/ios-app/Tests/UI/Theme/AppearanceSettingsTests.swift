@@ -5,6 +5,29 @@ import SwiftUI
 @MainActor
 struct AppearanceSettingsTests {
 
+    @Test func compactChoicesUseSharedLiquidGlassStyle() throws {
+        let root = iosAppRoot()
+        let appearance = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Settings/Pages/AppearanceSettingsPage.swift"),
+            encoding: .utf8
+        )
+        let tabs = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Components/TronSegmentedControl.swift"),
+            encoding: .utf8
+        )
+        let style = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Components/TronGlassSelectionButtonStyle.swift"),
+            encoding: .utf8
+        )
+
+        #expect(appearance.contains("TronGlassSelectionButtonStyle("))
+        #expect(appearance.contains("GlassEffectContainer(spacing: 4)"))
+        #expect(appearance.contains("GlassEffectContainer(spacing: 6)"))
+        #expect(!appearance.contains(".fill(isSelected ? Color.tronEmerald"))
+        #expect(tabs.contains("TronGlassSelectionButtonStyle("))
+        #expect(style.contains(".glassEffect("))
+    }
+
     // MARK: - AppearanceMode
 
     @Test func modeRawValues() {
@@ -40,6 +63,14 @@ struct AppearanceSettingsTests {
             let parsed = AppearanceMode(rawValue: mode.rawValue)
             #expect(parsed == mode)
         }
+    }
+
+    private func iosAppRoot(filePath: String = #filePath) -> URL {
+        URL(fileURLWithPath: filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 
     // MARK: - AppearanceSettings Persistence

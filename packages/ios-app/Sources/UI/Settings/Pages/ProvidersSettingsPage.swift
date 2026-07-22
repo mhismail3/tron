@@ -31,7 +31,7 @@ struct ProvidersSettingsPage: View {
             }
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
-        .task(id: settingsState.ollamaBaseUrl) { await refreshOllamaModels(force: true) }
+        .task(id: settingsState.ollamaBaseUrl) { await refreshOllamaModels(force: false) }
         .tronErrorAlert(message: $error)
     }
 
@@ -62,6 +62,8 @@ struct ProvidersSettingsPage: View {
                     models: ollamaModels,
                     isRefreshing: isRefreshingOllama,
                     onSaveEndpoint: { endpoint in
+                        dependencies.modelRepository.invalidateCache()
+                        ollamaModels = []
                         updateServerSetting(.ollamaBaseUrl(endpoint))
                     },
                     onRefresh: { await refreshOllamaModels(force: true) }

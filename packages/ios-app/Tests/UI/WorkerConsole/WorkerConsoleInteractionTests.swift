@@ -40,6 +40,10 @@ struct WorkerConsoleInteractionTests {
             contentsOf: root.appendingPathComponent("Sources/UI/Components/TronSegmentedControl.swift"),
             encoding: .utf8
         )
+        let selectionStyle = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Components/TronGlassSelectionButtonStyle.swift"),
+            encoding: .utf8
+        )
         let action = try String(
             contentsOf: root.appendingPathComponent("Sources/UI/Components/TronPrimaryActionButton.swift"),
             encoding: .utf8
@@ -54,12 +58,32 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(tabs.contains("GlassEffectContainer"))
-        #expect(tabs.contains(".glassEffect("))
+        #expect(tabs.contains("TronGlassSelectionButtonStyle("))
+        #expect(selectionStyle.contains(".glassEffect("))
         #expect(action.contains(".glassEffect("))
         #expect(workerDetail.contains("TronPrimaryActionButton("))
         #expect(delegation.contains("TronPrimaryActionButton("))
         #expect(!workerDetail.contains(".background(Color.tronEmerald"))
         #expect(!delegation.contains(".background(Color.tronPurple"))
+    }
+
+    @Test("Engine summary owns availability without a redundant Overview tab")
+    func engineSummaryReplacesOverviewTab() throws {
+        let root = iosAppRoot()
+        let shell = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/WorkerConsoleViews.swift"),
+            encoding: .utf8
+        )
+        let dashboard = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/WorkerConsole/EngineDashboardViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!shell.contains("case overview = \"Overview\""))
+        #expect(shell.contains("selectedSection: EngineDashboardSection = .core"))
+        #expect(shell.contains("engineHookSummary"))
+        #expect(!shell.contains("overviewContent"))
+        #expect(!dashboard.contains("struct EngineSurfaceCard"))
     }
 
     @Test("Worker sessions stay read only and inside dashboard sheets")
