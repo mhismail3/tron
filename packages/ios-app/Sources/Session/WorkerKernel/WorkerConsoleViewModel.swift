@@ -17,11 +17,14 @@ final class WorkerConsoleViewModel {
     var isRefreshing = false
     var isLoadingSelection = false
     var isMutating = false
+    var isLoadingMoreActivity = false
     var hasLoaded = false
     var stopAll = false
     var lastError: String?
     var monitoringError: String?
     private(set) var currentSessionId: String?
+    private(set) var activityRunsNextOffset: UInt64?
+    private(set) var activityInboxNextOffset: UInt64?
 
     var selectedWorker: WorkerSummaryDTO? {
         workers.first { $0.workerId == selectedWorkerId }
@@ -92,6 +95,8 @@ final class WorkerConsoleViewModel {
             workers = []
             activityRuns = []
             activityInbox = []
+            activityRunsNextOffset = nil
+            activityInboxNextOffset = nil
             inspection = nil
             runs = []
             inbox = []
@@ -115,6 +120,8 @@ final class WorkerConsoleViewModel {
             stopAll = snapshot.dispatchStopped
             activityRuns = globalRuns.runs
             activityInbox = globalInbox.items
+            activityRunsNextOffset = globalRuns.nextOffset
+            activityInboxNextOffset = globalInbox.nextOffset
             if let selectedWorkerId,
                workers.contains(where: { $0.workerId == selectedWorkerId }) {
                 try await loadWorker(selectedWorkerId, repository: repository)
@@ -124,6 +131,42 @@ final class WorkerConsoleViewModel {
                 runs = []
                 inbox = []
             }
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func loadOlderActivityRuns(repository: any WorkerKernelRepository) async {
+        guard let offset = activityRunsNextOffset, !isLoadingMoreActivity else { return }
+        isLoadingMoreActivity = true
+        defer { isLoadingMoreActivity = false }
+        do {
+            let page = try await repository.workerRuns(
+                workerId: nil,
+                limit: 20,
+                offset: offset
+            )
+            Self.appendUnique(page.runs, to: &activityRuns, id: \.invocationId)
+            activityRunsNextOffset = page.nextOffset
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func loadOlderActivityInbox(repository: any WorkerKernelRepository) async {
+        guard let offset = activityInboxNextOffset, !isLoadingMoreActivity else { return }
+        isLoadingMoreActivity = true
+        defer { isLoadingMoreActivity = false }
+        do {
+            let page = try await repository.workerInbox(
+                workerId: nil,
+                limit: 20,
+                offset: offset
+            )
+            Self.appendUnique(page.items, to: &activityInbox, id: \.inboxId)
+            activityInboxNextOffset = page.nextOffset
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -366,5 +409,14 @@ final class WorkerConsoleViewModel {
             return String(describing: value.value)
         }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func appendUnique<Element>(
+        _ incoming: [Element],
+        to existing: inout [Element],
+        id: KeyPath<Element, String>
+    ) {
+        var identifiers = Set(existing.map { $0[keyPath: id] })
+        existing.append(contentsOf: incoming.filter { identifiers.insert($0[keyPath: id]).inserted })
     }
 }

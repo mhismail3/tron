@@ -551,7 +551,7 @@ impl Orchestrator {
             .has_pending(invocation_id)
     }
 
-    /// Graceful shutdown — cancel runtime work and end all unarchived durable sessions.
+    /// Graceful shutdown — cancel runtime work and release reconstructed session caches.
     #[instrument(skip(self))]
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         info!("orchestrator shutdown initiated");
@@ -583,7 +583,7 @@ impl Orchestrator {
         self.sequence_counters.clear();
         self.compaction_handlers.clear();
 
-        self.session_manager.end_unarchived_sessions_for_shutdown();
+        self.session_manager.clear_cache_for_shutdown();
 
         Ok(())
     }

@@ -182,14 +182,16 @@ struct WorkerConsoleSheet: View {
                         WorkerDetailSheet(
                             viewModel: viewModel,
                             repository: repository,
-                            connectionState: connectionState
+                            connectionState: connectionState,
+                            onOpenSession: onOpenSession
                         )
                     }
                 } else {
                     WorkerDetailSheet(
                         viewModel: viewModel,
                         repository: repository,
-                        connectionState: connectionState
+                        connectionState: connectionState,
+                        onOpenSession: onOpenSession
                     )
                 }
             }
@@ -331,6 +333,11 @@ struct WorkerConsoleSheet: View {
                 LazyVStack(spacing: 9) {
                     ForEach(viewModel.activityInbox) { WorkerInboxCard(item: $0) }
                 }
+                if viewModel.activityInboxNextOffset != nil {
+                    activityLoadMoreButton("Load older results") {
+                        await viewModel.loadOlderActivityInbox(repository: repository)
+                    }
+                }
             }
 
             WorkerConsoleSectionHeader(
@@ -344,10 +351,42 @@ struct WorkerConsoleSheet: View {
                 )
             } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.activityRuns) { WorkerRunCard(run: $0) }
+                    ForEach(viewModel.activityRuns) { run in
+                        WorkerRunCard(run: run, onOpenSession: onOpenSession)
+                    }
+                }
+                if viewModel.activityRunsNextOffset != nil {
+                    activityLoadMoreButton("Load older runs") {
+                        await viewModel.loadOlderActivityRuns(repository: repository)
+                    }
                 }
             }
         }
+    }
+
+    private func activityLoadMoreButton(
+        _ title: String,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button {
+            Task { await action() }
+        } label: {
+            HStack(spacing: 7) {
+                if viewModel.isLoadingMoreActivity {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                Text(title)
+            }
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isLoadingMoreActivity)
     }
 
     @ViewBuilder

@@ -412,6 +412,7 @@ fn worker_history_defaults_to_compact_bounded_observations() {
             .unwrap_or_else(|| panic!("missing {function_id}"));
         let request = definition.request_schema.as_ref().expect("request schema");
         assert_eq!(request["properties"]["limit"]["maximum"], 20);
+        assert_eq!(request["properties"]["offset"]["minimum"], 0);
         assert_eq!(request["properties"]["detail"]["default"], "summary");
         assert_eq!(
             request["properties"]["detail"]["enum"],
@@ -434,6 +435,12 @@ fn worker_history_defaults_to_compact_bounded_observations() {
                 .as_array()
                 .unwrap()
                 .contains(&json!("contentTruncated"))
+        );
+        assert!(
+            response["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("nextOffset"))
         );
     }
     let runs = definitions

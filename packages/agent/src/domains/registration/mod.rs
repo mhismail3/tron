@@ -46,6 +46,13 @@ pub(crate) struct DomainLifecycleActivation {
 }
 
 impl DomainLifecycleActivation {
+    #[cfg(test)]
+    pub(crate) fn into_worker_kernel_without_activation(
+        self,
+    ) -> std::sync::Arc<worker_kernel::WorkerRuntime> {
+        self.worker_kernel
+    }
+
     pub(crate) fn activate(self) {
         let shutdown_coordinator = self.shutdown_coordinator;
         let runtime = self.worker_kernel;

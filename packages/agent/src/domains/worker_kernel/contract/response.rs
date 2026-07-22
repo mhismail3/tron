@@ -80,12 +80,12 @@ pub(super) fn response_schema(function: &str) -> Value {
             "properties":{"workerId":{"type":"string"},"purged":{"type":"boolean"},"archivePath":{"type":"string"},"archiveSha256":{"type":"string"}}
         }),
         "worker_kernel::inbox" => json!({
-            "type":"object","additionalProperties":false,"required":["detail","items","returned","truncated","contentTruncated"],
-            "properties":{"detail":{"type":"string","enum":["summary","full"]},"items":{"type":"array"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"contentTruncated":{"type":"boolean"}}
+            "type":"object","additionalProperties":false,"required":["detail","items","returned","truncated","nextOffset","contentTruncated"],
+            "properties":{"detail":{"type":"string","enum":["summary","full"]},"items":{"type":"array"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::runs" => json!({
-            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","returned","truncated","contentTruncated"],
-            "properties":{"detail":{"type":"string","enum":["summary","full"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"contentTruncated":{"type":"boolean"}}
+            "type":"object","additionalProperties":false,"required":["detail","runs","attempts","traces","returned","truncated","nextOffset","contentTruncated"],
+            "properties":{"detail":{"type":"string","enum":["summary","full"]},"runs":{"type":"array","items":invocation_response_schema()},"attempts":{"type":"object"},"traces":{"type":"object"},"returned":{"type":"integer"},"truncated":{"type":"boolean"},"nextOffset":{},"contentTruncated":{"type":"boolean"}}
         }),
         "worker_kernel::webhook_rotate" => webhook_credential_response_schema(),
         "worker_kernel::stop_all" => json!({

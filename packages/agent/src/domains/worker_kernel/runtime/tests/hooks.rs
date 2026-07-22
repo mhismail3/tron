@@ -338,6 +338,7 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
             .unwrap()
             .is_empty()
     );
+
     let hook_output = serde_json::to_string(&json!({
         "consumedInboxIds":[inbox_id],
         "narrative":"The background report is ready."
@@ -463,7 +464,7 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("worker_kernel::inspect").unwrap(),
-            json!({"workerId":"inbox-narrator"}),
+            json!({"workerId":"inbox-narrator","detail":"full"}),
             actor().with_idempotency_key("inspect-invalid-inbox-hook"),
         ))
         .await
@@ -471,4 +472,96 @@ async fn inbox_context_worker_selects_claims_and_narrates_unseen_results() {
         .unwrap();
     assert_eq!(inspection["worker"]["enabled"], false);
     assert_eq!(inspection["healthHistory"][0]["status"], "failed");
+}
+
+#[tokio::test]
+async fn worker_run_and_inbox_history_pages_remain_fully_auditable() {
+    let context = crate::shared::server::test_support::make_test_context();
+    let actor = || {
+        CausalContext::new(
+            ActorId::new("agent:history-page-test").unwrap(),
+            ActorKind::Agent,
+            TraceId::generate(),
+        )
+        .with_session_id("history-page-test")
+    };
+    let bundle = json!({
+        "schemaVersion":"tron.worker_bundle.v1",
+        "workerId":"history-page-worker",
+        "name":"History Page Worker",
+        "description":"Produces deterministic audit records",
+        "inputSchema":{"type":"object","additionalProperties":false},
+        "outputSchema":{
+            "type":"object","additionalProperties":false,"required":["ok"],
+            "properties":{"ok":{"type":"boolean"}}
+        },
+        "runner":{"kind":"command","command":["printf","{\"ok\":true}"]},
+        "provenance":[{"source":"test:history-pages"}]
+    });
+    let upsert = context
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("worker_kernel::upsert").unwrap(),
+            json!({"bundle":bundle}),
+            actor().with_idempotency_key("upsert-history-page-worker"),
+        ))
+        .await;
+    assert_eq!(upsert.error, None);
+
+    for sequence in 1..=2 {
+        let invocation = context
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("worker_kernel::invoke").unwrap(),
+                json!({
+                    "workerId":"history-page-worker",
+                    "input":{},
+                    "mode":"wait",
+                    "idempotencyKey":format!("history-page-run-{sequence}")
+                }),
+                actor().with_idempotency_key(format!("invoke-history-page-{sequence}")),
+            ))
+            .await;
+        assert_eq!(invocation.error, None);
+    }
+
+    let read_page = |function_id: &'static str, offset: u64, key: &'static str| {
+        let context = &context;
+        let actor = actor();
+        async move {
+            context
+                .engine_host
+                .invoke(Invocation::new_sync(
+                    FunctionId::new(function_id).unwrap(),
+                    json!({
+                        "workerId":"history-page-worker",
+                        "limit":1,
+                        "offset":offset,
+                        "detail":"full"
+                    }),
+                    actor.with_idempotency_key(key),
+                ))
+                .await
+                .value
+                .unwrap()
+        }
+    };
+
+    let first_runs = read_page("worker_kernel::runs", 0, "read-history-runs-1").await;
+    let second_runs = read_page("worker_kernel::runs", 1, "read-history-runs-2").await;
+    assert_eq!(first_runs["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(first_runs["nextOffset"], 1);
+    assert_eq!(second_runs["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(second_runs["nextOffset"], Value::Null);
+    assert_ne!(
+        first_runs["runs"][0]["invocationId"],
+        second_runs["runs"][0]["invocationId"]
+    );
+
+    let first_inbox = read_page("worker_kernel::inbox", 0, "read-history-inbox-1").await;
+    let second_inbox = read_page("worker_kernel::inbox", 1, "read-history-inbox-2").await;
+    assert_eq!(first_inbox["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first_inbox["nextOffset"], 1);
+    assert_eq!(second_inbox["items"].as_array().unwrap().len(), 1);
+    assert_eq!(second_inbox["nextOffset"], Value::Null);
 }

@@ -92,6 +92,18 @@ struct WorkerInvocationDTO: Codable, Equatable, Identifiable, Sendable {
 
 struct WorkerRunsResultDTO: Codable, Equatable, Sendable {
     let runs: [WorkerInvocationDTO]
+    let truncated: Bool?
+    let nextOffset: UInt64?
+
+    init(
+        runs: [WorkerInvocationDTO],
+        truncated: Bool? = nil,
+        nextOffset: UInt64? = nil
+    ) {
+        self.runs = runs
+        self.truncated = truncated
+        self.nextOffset = nextOffset
+    }
 }
 
 struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
@@ -108,6 +120,18 @@ struct WorkerInboxItemDTO: Codable, Equatable, Identifiable, Sendable {
 
 struct WorkerInboxResultDTO: Codable, Equatable, Sendable {
     let items: [WorkerInboxItemDTO]
+    let truncated: Bool?
+    let nextOffset: UInt64?
+
+    init(
+        items: [WorkerInboxItemDTO],
+        truncated: Bool? = nil,
+        nextOffset: UInt64? = nil
+    ) {
+        self.items = items
+        self.truncated = truncated
+        self.nextOffset = nextOffset
+    }
 }
 
 struct WorkerIdRequestDTO: Codable, Equatable, Sendable {
@@ -126,6 +150,7 @@ struct WorkerInspectRequestDTO: Codable, Equatable, Sendable {
 struct WorkerRunsRequestDTO: Codable, Equatable, Sendable {
     let workerId: String?
     let limit: UInt64
+    let offset: UInt64?
     let detail: String
 }
 

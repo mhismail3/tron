@@ -36,7 +36,10 @@
 //! one bounded batch query rather than one query per session. Its
 //! user-visible filter intentionally hides abandoned chat drafts
 //! that contain only the root `session.start` event, while preserving direct
-//! reconstruction and export by session ID.
+//! reconstruction and export by session ID. Worker-owned agent sessions use
+//! the same durable event custody with a reserved system tag: ordinary listings
+//! exclude them, while exact reads remain available from worker-run audit links.
+//! Graceful process shutdown never archives or ends retained sessions.
 
 pub(crate) mod contract;
 pub mod event_store;

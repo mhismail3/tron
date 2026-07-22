@@ -279,8 +279,16 @@ protocol WorkerKernelRepository: AnyObject {
     ) async throws -> EngineIntrospectionSnapshotDTO
     func workers(includeRetired: Bool) async throws -> WorkerListResultDTO
     func inspectWorker(_ workerId: String) async throws -> WorkerInspectResultDTO
-    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO
-    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO
+    func workerRuns(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerInboxResultDTO
     func invokeWorker(
         workerId: String,
         input: AnyCodable,
@@ -329,6 +337,16 @@ protocol WorkerKernelRepository: AnyObject {
     /// Polls historical worker topic events after an explicit cursor. Topic polling is
     /// replay, not live subscription, so the transport must never omit the cursor.
     func pollWorkerEvents(topic: String, cursor: EngineStreamCursor) async throws -> EngineStreamPage
+}
+
+extension WorkerKernelRepository {
+    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
+        try await workerRuns(workerId: workerId, limit: limit, offset: nil)
+    }
+
+    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
+        try await workerInbox(workerId: workerId, limit: limit, offset: nil)
+    }
 }
 
 // MARK: - Chat Session Services

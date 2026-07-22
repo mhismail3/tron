@@ -94,6 +94,22 @@ struct WorkerConsoleViewModelTests {
         #expect(repository.polledCursors.prefix(2).allSatisfy { $0.cursor == 0 })
         #expect(viewModel.monitoringError == nil)
     }
+
+    @Test("Activity history loads every bounded page without duplicating runs")
+    func activityHistoryPaginates() async {
+        let repository = MockWorkerKernelRepository()
+        repository.pagedActivity = true
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+        #expect(viewModel.activityRuns.map(\.invocationId) == ["prior-run"])
+        #expect(viewModel.activityRunsNextOffset == 1)
+
+        await viewModel.loadOlderActivityRuns(repository: repository)
+        #expect(viewModel.activityRuns.map(\.invocationId) == ["prior-run", "older-run"])
+        #expect(viewModel.activityRunsNextOffset == nil)
+        #expect(repository.runOffsets == [nil, 1])
+    }
 }
 
 @MainActor
@@ -110,6 +126,8 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var snapshotSessionIds: [String?] = []
     var runLimits: [UInt64] = []
     var inboxLimits: [UInt64] = []
+    var runOffsets: [UInt64?] = []
+    var pagedActivity = false
 
     private var worker: WorkerSummaryDTO {
         WorkerSummaryDTO(
@@ -186,12 +204,35 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
-    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
+    func workerRuns(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
         runLimits.append(limit)
+        runOffsets.append(offset)
+        if pagedActivity, workerId == nil {
+            if offset == nil {
+                return WorkerRunsResultDTO(
+                    runs: [invocation(id: "prior-run", output: ["prior": true])],
+                    truncated: true,
+                    nextOffset: 1
+                )
+            }
+            return WorkerRunsResultDTO(
+                runs: [invocation(id: "older-run", output: ["older": true])],
+                truncated: false,
+                nextOffset: nil
+            )
+        }
         return WorkerRunsResultDTO(runs: [invocation(id: "prior-run", output: ["prior": true])])
     }
 
-    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerInboxResultDTO {
         inboxLimits.append(limit)
         return WorkerInboxResultDTO(items: [
             WorkerInboxItemDTO(

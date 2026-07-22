@@ -66,17 +66,11 @@ fn test_runtime_at(
     home: &Path,
     responder: Option<Arc<dyn ModelResponderFactory>>,
 ) -> Arc<WorkerRuntime> {
-    let context = crate::shared::server::test_support::make_test_context_with_responder(responder);
-    let store = WorkerStore::open_without_snapshot(home.to_path_buf()).unwrap();
-    WorkerRuntime::new(
-        store,
-        context.engine_host.clone(),
-        context.orchestrator.clone(),
-        context.session_manager.clone(),
-        context.event_store.clone(),
-        context.settings_runtime.clone(),
-    )
-    .unwrap()
+    let (_context, runtime) =
+        crate::shared::server::test_support::make_test_context_and_worker_runtime_at(
+            home, responder,
+        );
+    runtime
 }
 
 fn last30days_bundle(source_url: &str) -> WorkerBundle {

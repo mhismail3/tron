@@ -15,6 +15,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::Result;
 use crate::domains::session::event_store::identity::SessionIdentity;
+use crate::domains::session::event_store::sqlite::row_types::WORKER_SESSION_TAG;
 
 mod projections;
 #[cfg(test)]
@@ -51,6 +52,10 @@ pub struct ListSessionsOptions<'a> {
     pub working_directory: Option<&'a str>,
     /// Filter by ended state.
     pub ended: Option<bool>,
+    /// Include worker-owned child sessions in this listing.
+    ///
+    /// Exact ID reads remain available regardless of this projection filter.
+    pub include_worker_sessions: bool,
     /// Maximum results.
     pub limit: Option<i64>,
     /// Skip results.
@@ -184,6 +189,14 @@ impl SessionRepo {
             } else {
                 sql.push_str(" AND ended_at IS NULL");
             }
+        }
+        if !opts.include_worker_sessions {
+            let parameter = param_values.len() + 1;
+            let _ = write!(
+                sql,
+                " AND NOT EXISTS (SELECT 1 FROM json_each(sessions.tags) WHERE json_each.value = ?{parameter})"
+            );
+            param_values.push(Box::new(WORKER_SESSION_TAG.to_owned()));
         }
         if let Some(snapshot_created_at) = opts.snapshot_created_at {
             let _ = write!(

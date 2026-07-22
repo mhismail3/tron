@@ -281,7 +281,13 @@ creates a child session through the existing model loop, waits for terminal
 session truth, extracts the final assistant result, normalizes JSON, validates
 the output schema, and records the result. It subscribes before prompt admission
 so even an immediately rejected provider startup yields its concrete terminal
-error instead of a false missing-result diagnosis. The child is aborted if its
+error instead of a false missing-result diagnosis. Worker child sessions live
+in the canonical session event store and carry the reserved
+`tron.system.worker-session` tag. Ordinary `session::list` pages exclude that
+classification so worker internals do not become chat projects; an exact
+session ID from the invocation record remains resumable for Engine audit.
+Server shutdown clears only reconstructed process-local cache and never marks
+retained user or worker sessions archived. The child is aborted if its
 parent invocation is dropped by timeout, disable, stop-all, or shutdown. Worker
 causal depth survives the agent hop and is attached to every nested direct tool
 call.
@@ -460,15 +466,17 @@ tool activation, trigger materialization, and resident supervision participate
 in the same one-time attachment path even though they have no invocation row;
 manual results remain explicitly inspectable.
 
-`worker_runs` and `worker_inbox` return compact observations by default: at most
-20 records, with inputs, outputs, and results represented by 512-byte JSON
-previews and no expanded attempt or trace maps. Runs filter directly by status;
+`worker_runs` and `worker_inbox` return compact observations by default: pages
+contain at most 20 records, with inputs, outputs, and results represented by
+512-byte JSON previews and no expanded attempt or trace maps. Runs filter directly by status;
 inbox reads filter directly by seen state and severity, so routine health checks
 do not move irrelevant history into model context. `detail: "full"` is an
 explicit operator path capped at 20 records and 8 KiB per retained value; the
-response reports both record truncation and content truncation. Durable state
-remains complete in canonical storage—these are bounded read projections, not
-retention limits.
+response reports content truncation and a `nextOffset` when older records remain.
+The Engine Activity UI follows those bounded pages on demand, so the complete
+run/inbox ledger remains inspectable without one unbounded transport response.
+Durable state remains complete in canonical storage—these are bounded read
+projections, not retention limits.
 
 ## Failure and Recovery
 
@@ -1569,6 +1577,8 @@ It exposes:
 - worker list, health, runner, active content version, provenance, and triggers;
 - JSON-schema-aware typed invocation;
 - engine-wide Activity plus per-worker runs, durable inbox, and audit history;
+  Activity can load every bounded history page, and any agent-runner row opens
+  its exact hidden child session for detailed inspection;
 - stop current work without disabling future dispatch, enable/disable, rollback,
   retained-version restoration after retirement, purge, webhook rotation, and
   stop-all;
@@ -1578,8 +1588,10 @@ It exposes:
 Conversational creation remains the authoring interface; the client does not
 contain a bundle editor. The Mac package is a server supervisor/pairing shell,
 so iOS is the only current operational engine client requiring the console.
-The Dashboard explicitly requests the bounded 20-record detail projection for
-runs and inbox items; model calls retain the compact default.
+The Dashboard explicitly requests bounded 20-record detail pages for runs and
+inbox items and follows server-issued offsets on demand; model calls retain the
+compact default. Worker child sessions never appear in the ordinary home list,
+but remain reachable from their run cards and native Delegation detail.
 
 Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token

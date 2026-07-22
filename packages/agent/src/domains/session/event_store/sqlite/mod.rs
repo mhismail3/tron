@@ -17,6 +17,11 @@
 //! - **[`row_types`]**: Raw database row structs for `rusqlite` row mapping.
 //! - **[`repositories`]**: Stateless repository structs — each method takes
 //!   `&Connection` and executes SQL. No shared mutable state.
+//!
+//! Worker-owned agent sessions use the same durable event model and are marked
+//! with one reserved system tag. Default session-list projections exclude that
+//! tag so user conversation lists remain clean; exact-ID reads remain the audit
+//! path and do not depend on a second session store.
 
 pub mod connection;
 pub mod contention;

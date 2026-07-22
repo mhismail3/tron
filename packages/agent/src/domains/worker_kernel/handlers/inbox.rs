@@ -63,16 +63,29 @@ fn history_limit(invocation: &Invocation, detail: HistoryDetail) -> (u32, bool) 
     )
 }
 
+fn history_offset(invocation: &Invocation) -> u32 {
+    invocation
+        .payload
+        .get("offset")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        .min(u64::from(u32::MAX)) as u32
+}
+
 pub(super) async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     let detail = HistoryDetail::parse(invocation)?;
     let (limit, request_truncated) = history_limit(invocation, detail);
+    let offset = history_offset(invocation);
     let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
     let seen = invocation.payload.get("seen").and_then(Value::as_bool);
     let severity = optional_enum(invocation, "severity", &["info", "error"])?;
-    let mut items =
-        deps.runtime
-            .store()
-            .inbox_filtered(worker_id, seen, severity, limit.saturating_add(1))?;
+    let mut items = deps.runtime.store().inbox_filtered_page(
+        worker_id,
+        seen,
+        severity,
+        limit.saturating_add(1),
+        offset,
+    )?;
     let has_more = items.len() > limit as usize;
     items.truncate(limit as usize);
     let mut content_truncated = false;
@@ -85,11 +98,13 @@ pub(super) async fn inbox(invocation: &Invocation, deps: &Deps) -> Result<Value,
         content_truncated |= truncated;
     }
     let returned = items.len();
+    let next_offset = has_more.then_some(offset.saturating_add(returned as u32));
     Ok(json!({
         "detail":detail.as_str(),
         "items":items,
         "returned":returned,
         "truncated":request_truncated || has_more,
+        "nextOffset":next_offset,
         "contentTruncated":content_truncated,
     }))
 }
@@ -208,16 +223,19 @@ fn deterministic_inbox_context(items: &[Value]) -> String {
 pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, String> {
     let detail = HistoryDetail::parse(invocation)?;
     let (limit, request_truncated) = history_limit(invocation, detail);
+    let offset = history_offset(invocation);
     let worker_id = invocation.payload.get("workerId").and_then(Value::as_str);
     let status = optional_enum(
         invocation,
         "status",
-        &["queued", "running", "completed", "failed"],
+        &["queued", "running", "completed", "failed", "cancelled"],
     )?;
-    let mut runs =
-        deps.runtime
-            .store()
-            .runs_filtered(worker_id, status, limit.saturating_add(1))?;
+    let mut runs = deps.runtime.store().runs_filtered_page(
+        worker_id,
+        status,
+        limit.saturating_add(1),
+        offset,
+    )?;
     let has_more = runs.len() > limit as usize;
     runs.truncate(limit as usize);
     let mut attempts = serde_json::Map::new();
@@ -240,6 +258,7 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
         .map(|run| project_invocation(run, detail))
         .unzip();
     let returned = runs.len();
+    let next_offset = has_more.then_some(offset.saturating_add(returned as u32));
     Ok(json!({
         "detail":detail.as_str(),
         "runs":runs,
@@ -247,6 +266,7 @@ pub(super) async fn runs(invocation: &Invocation, deps: &Deps) -> Result<Value, 
         "traces":traces,
         "returned":returned,
         "truncated":request_truncated || has_more,
+        "nextOffset":next_offset,
         "contentTruncated":content_truncated.into_iter().any(|truncated| truncated),
     }))
 }

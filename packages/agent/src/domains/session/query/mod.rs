@@ -4,8 +4,10 @@
 //! over immutable creation/session-ID keys beneath one server-issued
 //! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
 //! and clients can assemble a generous bounded snapshot without one unbounded
-//! database read. Row lookups and bounded listing read `EventStore` directly;
-//! within this query path, `SessionManager` remains only for resume/cache data.
+//! database read. Ordinary listings exclude worker-owned child sessions, while
+//! exact-ID audit reads and resume remain available. Row lookups and bounded
+//! listing read `EventStore` directly; within this query path, `SessionManager`
+//! remains only for resume/cache data.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -95,6 +97,7 @@ impl SessionQueryService {
                 } else {
                     Some(false)
                 },
+                include_worker_sessions: false,
                 #[allow(clippy::cast_possible_wrap)]
                 limit: Some(fetch_limit as i64),
                 #[allow(clippy::cast_possible_wrap)]
@@ -590,6 +593,44 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["sessionId"].as_str().unwrap(), first);
         assert_ne!(sessions[0]["sessionId"].as_str().unwrap(), second);
+    }
+
+    #[tokio::test]
+    async fn ordinary_list_hides_worker_sessions_while_exact_audit_reads_remain_available() {
+        let ctx = make_test_context();
+        let user_session = ctx
+            .session_manager
+            .create_session("m", "/tmp/user", Some("User conversation"))
+            .unwrap();
+        let worker_session = ctx
+            .session_manager
+            .create_worker_session("m", "/tmp/worker", Some("Worker child"))
+            .unwrap();
+
+        let result = SessionQueryService::list(
+            &Deps::from_test_context(&ctx),
+            true,
+            Some(20),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let ids = result["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|session| session["sessionId"].as_str())
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&user_session.as_str()));
+        assert!(!ids.contains(&worker_session.as_str()));
+
+        let state =
+            SessionQueryService::get_state(&Deps::from_test_context(&ctx), worker_session.clone())
+                .await
+                .unwrap();
+        assert_eq!(state["sessionId"], worker_session);
     }
 
     #[tokio::test]

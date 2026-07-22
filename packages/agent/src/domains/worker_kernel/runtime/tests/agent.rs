@@ -447,6 +447,23 @@ async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
     .await
     .expect("agent invocation never linked its running child session");
 
+    let child_session_id = run.agent_session_id.as_deref().unwrap();
+    let child_session = runtime
+        .event_store
+        .get_session(child_session_id)
+        .unwrap()
+        .unwrap();
+    assert!(child_session.is_worker_session());
+    assert!(
+        runtime
+            .event_store
+            .list_sessions(&Default::default())
+            .unwrap()
+            .iter()
+            .all(|session| session.id != child_session_id),
+        "ordinary conversation listings must hide worker-owned child sessions"
+    );
+
     let cancelled = runtime.cancel_invocation(&run.invocation_id).await.unwrap();
     assert_eq!(cancelled.status, "cancelled");
     assert_eq!(cancelled.agent_session_id, run.agent_session_id);
@@ -455,6 +472,16 @@ async fn cancelling_one_agent_invocation_aborts_only_its_child_session() {
         .expect("cancelled agent invocation did not terminate")
         .unwrap();
     assert_eq!(joined.status, "cancelled", "{joined:?}");
+    assert!(
+        runtime
+            .event_store
+            .get_session(child_session_id)
+            .unwrap()
+            .unwrap()
+            .ended_at
+            .is_none(),
+        "worker child sessions remain reconstructable audit evidence"
+    );
     tokio::time::timeout(Duration::from_secs(5), async {
         while runtime.orchestrator.active_run_count() != 0 {
             tokio::time::sleep(Duration::from_millis(10)).await;

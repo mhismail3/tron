@@ -333,23 +333,37 @@ impl WorkerStore {
             .map_err(|error| error.to_string())
     }
 
+    #[cfg(test)]
     pub fn runs_filtered(
         &self,
         worker_id: Option<&str>,
         status: Option<&str>,
         limit: u32,
     ) -> Result<Vec<InvocationRecord>, String> {
+        self.runs_filtered_page(worker_id, status, limit, 0)
+    }
+
+    pub fn runs_filtered_page(
+        &self,
+        worker_id: Option<&str>,
+        status: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<InvocationRecord>, String> {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(&format!(
                 "{} WHERE (?1 IS NULL OR worker_id=?1)
                     AND (?2 IS NULL OR status=?2)
-                    ORDER BY created_at DESC LIMIT ?3",
+                    ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
                 invocation_select_base()
             ))
             .map_err(|error| error.to_string())?;
         statement
-            .query_map(params![worker_id, status, limit.min(500)], row_invocation)
+            .query_map(
+                params![worker_id, status, limit.min(500), offset],
+                row_invocation,
+            )
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())
@@ -486,12 +500,24 @@ impl WorkerStore {
             .map_err(|error| format!("load worker causal trace: {error}"))
     }
 
+    #[cfg(test)]
     pub fn inbox_filtered(
         &self,
         worker_id: Option<&str>,
         seen: Option<bool>,
         severity: Option<&str>,
         limit: u32,
+    ) -> Result<Vec<Value>, String> {
+        self.inbox_filtered_page(worker_id, seen, severity, limit, 0)
+    }
+
+    pub fn inbox_filtered_page(
+        &self,
+        worker_id: Option<&str>,
+        seen: Option<bool>,
+        severity: Option<&str>,
+        limit: u32,
+        offset: u32,
     ) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
         let mut statement = connection
@@ -500,12 +526,18 @@ impl WorkerStore {
                  FROM worker_inbox WHERE (?1 IS NULL OR worker_id=?1)
                     AND (?2 IS NULL OR seen=?2)
                     AND (?3 IS NULL OR severity=?3)
-                 ORDER BY created_at DESC LIMIT ?4",
+                 ORDER BY created_at DESC LIMIT ?4 OFFSET ?5",
             )
             .map_err(|error| error.to_string())?;
         statement
             .query_map(
-                params![worker_id, seen.map(i64::from), severity, limit.min(500)],
+                params![
+                    worker_id,
+                    seen.map(i64::from),
+                    severity,
+                    limit.min(500),
+                    offset
+                ],
                 |row| {
                     let result: String = row.get(4)?;
                     Ok(json!({

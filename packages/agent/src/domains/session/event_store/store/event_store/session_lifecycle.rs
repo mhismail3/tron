@@ -10,6 +10,7 @@ use crate::domains::session::event_store::sqlite::repositories::session::{
     CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
+use crate::domains::session::event_store::sqlite::row_types::WORKER_SESSION_TAG;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::shared::protocol::events::ActivitySummaryLine;
@@ -22,6 +23,7 @@ pub(super) struct CreateSessionInTxOptions<'a> {
     pub workspace_path: &'a str,
     pub title: Option<&'a str>,
     pub provider: Option<&'a str>,
+    pub tags: Option<&'a [String]>,
 }
 
 /// Core session-creation primitive: workspace get-or-create, sessions row
@@ -52,7 +54,7 @@ pub(super) fn create_session_in_tx_with_identity(
             model: opts.model,
             working_directory: opts.workspace_path,
             title: opts.title,
-            tags: None,
+            tags: opts.tags,
             parent_session_id: None,
             fork_from_event_id: None,
         },
@@ -148,11 +150,43 @@ impl EventStore {
                     workspace_path,
                     title,
                     provider,
+                    tags: None,
                 },
             )?;
 
             tx.commit()?;
             tracing::debug!(session_id = %result.session.id, "session created");
+            Ok(result)
+        })
+    }
+
+    /// Create a model session owned by one worker invocation.
+    ///
+    /// Worker sessions share the normal event/reconstruction machinery, but a
+    /// reserved durable tag keeps them out of ordinary user-session listings.
+    pub(crate) fn create_worker_session(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        provider: Option<&str>,
+    ) -> Result<CreateSessionResult> {
+        let tags = vec![WORKER_SESSION_TAG.to_owned()];
+        self.with_global_write_lock(|| {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let result = create_session_in_tx(
+                &tx,
+                &CreateSessionInTxOptions {
+                    model,
+                    workspace_path,
+                    title,
+                    provider,
+                    tags: Some(&tags),
+                },
+            )?;
+            tx.commit()?;
+            tracing::debug!(session_id = %result.session.id, "worker session created");
             Ok(result)
         })
     }
@@ -181,6 +215,7 @@ impl EventStore {
                     workspace_path,
                     title,
                     provider,
+                    tags: None,
                 },
                 identity.clone(),
             )?;
@@ -219,6 +254,8 @@ impl EventStore {
                 .ok_or_else(|| EventStoreError::SessionNotFound(source_event.session_id.clone()))?;
 
             let model = opts.model.unwrap_or(&source_session.latest_model);
+            let source_tags =
+                serde_json::from_str::<Vec<String>>(&source_session.tags).unwrap_or_default();
             let session = SessionRepo::create_with_identity(
                 &tx,
                 &CreateSessionOptions {
@@ -226,7 +263,7 @@ impl EventStore {
                     model,
                     working_directory: &source_session.working_directory,
                     title: opts.title,
-                    tags: None,
+                    tags: Some(&source_tags),
                     parent_session_id: Some(&source_session.id),
                     fork_from_event_id: Some(from_event_id),
                 },

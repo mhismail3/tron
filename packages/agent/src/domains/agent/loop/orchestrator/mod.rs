@@ -21,8 +21,9 @@
 //! - [`core::Orchestrator`] coordinates sessions, runs, and stream broadcast.
 //! - [`session_manager::SessionManager`] owns the reconstructed-state cache and
 //!   delegates durable session lifecycle mutation to the event store;
-//!   query owners read rows from the event store directly, while shutdown uses
-//!   one cache-aware bulk-end operation.
+//!   query owners read rows from the event store directly. Shutdown clears only
+//!   reconstructed cache state, leaving every durable user and worker session
+//!   resumable until an explicit archive or delete operation.
 //! - The runtime reconstruction projection contains only execution inputs used
 //!   on resume; prompt-request and agent-construction owners retain configuration
 //!   policy.

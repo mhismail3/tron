@@ -4,6 +4,7 @@ struct WorkerDetailSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
+    var onOpenSession: ((String) -> Void)?
 
     @State private var confirmRetire = false
     @State private var confirmPurge = false
@@ -372,7 +373,7 @@ struct WorkerDetailSheet: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(viewModel.runs.prefix(20)) { run in
-                        WorkerRunCard(run: run) {
+                        WorkerRunCard(run: run, onOpenSession: onOpenSession) {
                             Task {
                                 await viewModel.cancel(
                                     run,

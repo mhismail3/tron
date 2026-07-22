@@ -179,9 +179,10 @@ worker metadata from the client. The server supplies internal causal context.
 Worker inspection explicitly requests `detail: "full"` because the operator
 detail sheet renders immutable source metadata and audit history; provider tools
 omit it and receive the context-safe behavioral-contract projection. Worker
-history reads likewise include `detail: "full"` explicitly and request at most
-20 records. The server still applies per-value byte ceilings and reports
-truncation; provider tools omit that field to receive compact summaries.
+history reads likewise include `detail: "full"` explicitly and request bounded
+20-record pages. The server still applies per-value byte ceilings and returns a
+`nextOffset` when older records exist; Activity loads subsequent pages only on
+operator request. Provider tools omit full detail to receive compact summaries.
 
 The bundle remains `[String: AnyCodable]` because its JSON schemas, runner, and
 routing metadata are intentionally extensible. Stable operational fields are
@@ -276,7 +277,10 @@ owns both navigation and every evidence renderer. It provides:
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
 - recent runs with delivery-attempt counts and disclosed input/output, durable
-  inbox results, and progressively disclosed audit history;
+  inbox results, progressively disclosed audit history, and bounded load-more
+  access to the complete profile ledger;
+- exact “Open audit session” navigation for agent-runner rows, while reserved
+  worker child sessions remain excluded from the ordinary Home session list;
 - stop current work without disabling the worker, enable/disable, retirement,
   exact run cancellation, and confirmation-backed archive-then-purge whose
   result retains the recovery archive path and checksum.
@@ -351,7 +355,9 @@ deliverable, evidence, constraint observations, artifacts, unresolved work,
 attempt and causal evidence, and model/token/cost/timing data from the linked
 child session when that session is locally available. Opening a child session
 uses the ordinary deep-link coordinator, including authoritative session sync
-when the child is not yet in the local session list. Technical worker detail
+when the child is intentionally absent from the ordinary session list. The
+server resolves that exact ID from canonical session storage; no duplicate
+client or delegation session database exists. Technical worker detail
 remains available from the sheet; malformed outputs and unsupported bindings
 remain visible and fall back safely instead of becoming client-owned truth.
 

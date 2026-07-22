@@ -83,14 +83,14 @@ struct WorkerKernelDTOTests {
           "agentSessionId":"sess_worker_child",
           "triggerKind":"manual","attemptCount":2,"createdAt":"2026-07-19T12:00:00Z",
           "startedAt":"2026-07-19T12:00:01Z","completedAt":"2026-07-19T12:00:02Z"
-        }]}
+        }],"truncated":true,"nextOffset":20}
         """#
         let inboxJSON = #"""
         {"items":[{
           "inboxId":"inbox-1","invocationId":"run-1","workerId":"recent-research",
           "severity":"info","result":{"items":[1,2]},"seen":false,
           "createdAt":"2026-07-19T12:00:02Z"
-        }]}
+        }],"truncated":false,"nextOffset":null}
         """#
 
         let runs = try JSONDecoder().decode(WorkerRunsResultDTO.self, from: Data(runJSON.utf8))
@@ -100,7 +100,10 @@ struct WorkerKernelDTOTests {
         #expect(runs.runs.first?.attemptCount == 2)
         #expect(runs.runs.first?.agentSessionId == "sess_worker_child")
         #expect(runs.runs.first?.output != nil)
+        #expect(runs.truncated == true)
+        #expect(runs.nextOffset == 20)
         #expect(inbox.items.first?.seen == false)
+        #expect(inbox.nextOffset == nil)
         let result = try #require(inbox.items.first?.result.value as? [String: Any])
         #expect((result["items"] as? [Any])?.count == 2)
     }

@@ -396,7 +396,7 @@ impl WorkerRuntime {
             .clone();
         let session_id = self
             .session_manager
-            .create_session(
+            .create_worker_session(
                 model.unwrap_or(&default_model),
                 &workdir.display().to_string(),
                 Some(&format!("Worker: {}", worker.summary.name)),

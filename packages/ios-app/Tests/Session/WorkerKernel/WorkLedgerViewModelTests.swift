@@ -192,11 +192,19 @@ private final class WorkLedgerMockRepository: WorkerKernelRepository {
         throw EngineConnectionError.invalidResponse
     }
 
-    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
+    func workerRuns(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
         WorkerRunsResultDTO(runs: [])
     }
 
-    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerInboxResultDTO {
         WorkerInboxResultDTO(items: [])
     }
 

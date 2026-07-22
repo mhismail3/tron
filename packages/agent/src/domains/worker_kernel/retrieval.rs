@@ -470,7 +470,7 @@ mod tests {
             .engine_host
             .invoke(Invocation::new_sync(
                 FunctionId::new("worker_kernel::inspect").unwrap(),
-                json!({"workerId":"semantic-router"}),
+                json!({"workerId":"semantic-router","detail":"full"}),
                 CausalContext::new(
                     ActorId::new("agent:retrieval-test").unwrap(),
                     ActorKind::Agent,

@@ -249,15 +249,15 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::inbox",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"seen":{"type":"boolean"},"severity":{"type":"string","enum":["info","error"]},"limit":{"type":"integer","minimum":1,"maximum":20},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
-        "Read durable worker results and failures, optionally filtered by seen state or severity. Omit workerId to query the entire profile. Compact summaries are the default; explicit full detail is bounded to 20 records and 8 KiB per result.",
+        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"seen":{"type":"boolean"},"severity":{"type":"string","enum":["info","error"]},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
+        "Read a bounded page of durable worker results and failures, optionally filtered by seen state or severity. Omit workerId to query the entire profile; continue with nextOffset when present. Compact summaries are the default; explicit full detail is bounded to 20 records and 8 KiB per result.",
     )?);
     specs.push(spec(
         "worker_kernel::runs",
         EffectClass::PureRead,
         RiskLevel::Low,
-        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"status":{"type":"string","enum":["queued","running","completed","failed","cancelled"]},"limit":{"type":"integer","minimum":1,"maximum":20},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
-        "List durable worker invocations, optionally filtered by execution status. Omit workerId to query the entire profile. Compact summaries omit attempt and trace expansion by default; explicit full detail is bounded to 20 records and 8 KiB per input or output.",
+        json!({"type":"object","additionalProperties":false,"properties":{"workerId":{"type":"string"},"status":{"type":"string","enum":["queued","running","completed","failed","cancelled"]},"limit":{"type":"integer","minimum":1,"maximum":20},"offset":{"type":"integer","minimum":0},"detail":{"type":"string","enum":["summary","full"],"default":"summary"}}}),
+        "List a bounded page of durable worker invocations, optionally filtered by execution status. Omit workerId to query the entire profile; continue with nextOffset when present. Compact summaries omit attempt and trace expansion by default; explicit full detail is bounded to 20 records and 8 KiB per input or output.",
     )?);
     specs.push(spec(
         "worker_kernel::webhook_rotate",

@@ -224,12 +224,20 @@ private final class DelegationMockRepository: WorkerKernelRepository {
         )
     }
 
-    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
+    func workerRuns(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
         runWorkerIds.append(workerId ?? "all")
         return WorkerRunsResultDTO(runs: storedRuns)
     }
 
-    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerInboxResultDTO {
         inboxWorkerIds.append(workerId ?? "all")
         return WorkerInboxResultDTO(items: [])
     }

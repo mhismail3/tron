@@ -59,45 +59,15 @@ async fn resume_already_active() {
 }
 
 #[test]
-fn end_session() {
+fn create_worker_session_is_durably_classified() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"))
+        .create_worker_session("test-model", "/tmp", Some("worker"))
         .unwrap();
 
-    mgr.end_session(&sid).unwrap();
-    assert!(!mgr.is_cached(&sid));
-}
-
-/// Anchors the wire contract that `session.end` is an actively emitted
-/// event. This test guards against any future change that accidentally
-/// stops emitting the event (e.g. refactoring `end_session` to skip
-/// the append) because the iOS display layer treats the event as current.
-#[test]
-fn end_session_emits_session_end_event() {
-    use crate::domains::session::event_store::ListEventsOptions;
-
-    let mgr = make_manager();
-    let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"))
-        .unwrap();
-
-    mgr.end_session(&sid).unwrap();
-
-    let events = mgr
-        .event_store
-        .get_events_by_session(&sid, &ListEventsOptions::default())
-        .unwrap();
-    let end_event = events
-        .iter()
-        .find(|e| e.event_type == EventType::SessionEnd.as_str())
-        .expect("end_session must persist a session.end event");
-    let payload: serde_json::Value = serde_json::from_str(&end_event.payload).unwrap();
-    assert_eq!(
-        payload.get("reason").and_then(|r| r.as_str()),
-        Some("completed"),
-        "session.end payload must carry reason=completed"
-    );
+    let row = mgr.event_store.get_session(&sid).unwrap().unwrap();
+    assert!(row.is_worker_session());
+    assert!(row.ended_at.is_none());
 }
 
 #[tokio::test]
@@ -123,24 +93,45 @@ async fn delete_session() {
 }
 
 #[tokio::test]
-async fn shutdown_ends_unarchived_sessions_and_clears_cache() {
+async fn shutdown_preserves_resumable_sessions_and_clears_cache() {
     let mgr = make_manager();
     let first = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
-    let second = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
+    let worker = mgr
+        .create_worker_session("model-b", "/tmp/b", Some("worker"))
+        .unwrap();
     let archived = mgr
         .create_session("model-c", "/tmp/c", Some("archived"))
         .unwrap();
     mgr.archive_session(&archived).unwrap();
 
-    mgr.end_unarchived_sessions_for_shutdown();
+    let first_event_count = mgr.event_store.count_events(&first).unwrap();
+    let worker_event_count = mgr.event_store.count_events(&worker).unwrap();
+    mgr.clear_cache_for_shutdown();
 
-    for session_id in [first, second] {
+    for session_id in [&first, &worker] {
         let session = mgr.event_store.get_session(&session_id).unwrap().unwrap();
-        assert!(session.ended_at.is_some());
-        assert!(!mgr.is_cached(&session_id));
+        assert!(session.ended_at.is_none());
+        assert!(!mgr.is_cached(session_id));
     }
 
+    assert_eq!(
+        mgr.event_store.count_events(&first).unwrap(),
+        first_event_count
+    );
+    assert_eq!(
+        mgr.event_store.count_events(&worker).unwrap(),
+        worker_event_count
+    );
+    assert_eq!(mgr.cached_count(), 0);
     assert_eq!(mgr.event_store.count_events(&archived).unwrap(), 1);
+    assert!(
+        mgr.event_store
+            .get_session(&archived)
+            .unwrap()
+            .unwrap()
+            .ended_at
+            .is_some()
+    );
 }
 
 #[tokio::test]

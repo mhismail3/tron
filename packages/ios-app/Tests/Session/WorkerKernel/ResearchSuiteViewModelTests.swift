@@ -201,7 +201,11 @@ private final class ResearchSuiteMockRepository: WorkerKernelRepository {
         self.reportOutput = reportOutput
     }
 
-    func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
+    func workerRuns(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerRunsResultDTO {
         guard let workerId else { return WorkerRunsResultDTO(runs: []) }
         runWorkerIds.append(workerId)
         guard workerId == "research-coordinator" else { return WorkerRunsResultDTO(runs: []) }
@@ -227,7 +231,11 @@ private final class ResearchSuiteMockRepository: WorkerKernelRepository {
         ])
     }
 
-    func workerInbox(workerId: String?, limit: UInt64) async throws -> WorkerInboxResultDTO {
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64,
+        offset: UInt64?
+    ) async throws -> WorkerInboxResultDTO {
         guard let workerId else { return WorkerInboxResultDTO(items: []) }
         inboxWorkerIds.append(workerId)
         return WorkerInboxResultDTO(items: [])

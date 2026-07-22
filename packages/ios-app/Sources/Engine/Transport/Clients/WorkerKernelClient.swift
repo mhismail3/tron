@@ -27,17 +27,35 @@ final class WorkerKernelClient: EngineDomainClient {
         )
     }
 
-    func workerRuns(workerId: String?, limit: UInt64 = 20) async throws -> WorkerRunsResultDTO {
+    func workerRuns(
+        workerId: String?,
+        limit: UInt64 = 20,
+        offset: UInt64? = nil
+    ) async throws -> WorkerRunsResultDTO {
         try await invokeRead(
             "worker_kernel::runs",
-            WorkerRunsRequestDTO(workerId: workerId, limit: limit, detail: "full")
+            WorkerRunsRequestDTO(
+                workerId: workerId,
+                limit: limit,
+                offset: offset,
+                detail: "full"
+            )
         )
     }
 
-    func workerInbox(workerId: String?, limit: UInt64 = 20) async throws -> WorkerInboxResultDTO {
+    func workerInbox(
+        workerId: String?,
+        limit: UInt64 = 20,
+        offset: UInt64? = nil
+    ) async throws -> WorkerInboxResultDTO {
         try await invokeRead(
             "worker_kernel::inbox",
-            WorkerRunsRequestDTO(workerId: workerId, limit: limit, detail: "full")
+            WorkerRunsRequestDTO(
+                workerId: workerId,
+                limit: limit,
+                offset: offset,
+                detail: "full"
+            )
         )
     }
 

@@ -215,6 +215,7 @@ struct WorkerVersionRow: View {
 
 struct WorkerRunCard: View {
     let run: WorkerInvocationDTO
+    var onOpenSession: ((String) -> Void)?
     var onCancel: (() -> Void)?
 
     private var color: Color {
@@ -256,6 +257,18 @@ struct WorkerRunCard: View {
             Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
                 .font(TronTypography.code(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
+
+            if let sessionId = run.agentSessionId, let onOpenSession {
+                Button {
+                    onOpenSession(sessionId)
+                } label: {
+                    Label("Open audit session", systemImage: "text.bubble")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronPurple)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("worker-run-open-session-\(run.invocationId)")
+            }
 
             if let error = run.error {
                 Label(error, systemImage: "exclamationmark.circle")
