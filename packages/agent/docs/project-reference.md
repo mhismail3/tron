@@ -366,9 +366,11 @@ Immutable worker code and mutable worker data have separate custody:
 Command and resident-service runners receive that owner-only directory as
 `TRON_WORKER_STATE_DIR`; agent runners receive its resolved path in their
 durable instruction contract, and host processes launched by that worker
-automatically inherit the same binding. Each worker owns its file or SQLite
-schema and transactional migrations. The kernel does not interpret higher-level
-worker records. Candidate smoke and health tests receive a temporary isolated state
+automatically inherit the same binding. The originating worker identity remains
+causal evidence across engine-owned internal agent hops, while those hops retain
+their internal system identity. Each worker owns its file or SQLite schema and
+transactional migrations. The kernel does not interpret higher-level worker
+records. Candidate smoke and health tests receive a temporary isolated state
 directory, so activation cannot mutate live data. Update, rollback, disable,
 and retirement preserve state.
 

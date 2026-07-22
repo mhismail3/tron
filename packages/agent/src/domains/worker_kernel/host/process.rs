@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::engine::{ActorKind, Invocation};
+use crate::engine::Invocation;
 
 use super::super::process::{
     MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
@@ -75,13 +75,7 @@ pub(in crate::domains::worker_kernel) async fn process_run(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if invocation.causal_context.actor_kind == ActorKind::Worker
-        && let Some(worker_id) = invocation
-            .causal_context
-            .actor_id
-            .as_str()
-            .strip_prefix("worker:")
-    {
+    if let Some(worker_id) = invocation.causal_context.origin_worker_id() {
         process.env(
             "TRON_WORKER_STATE_DIR",
             runtime.store().state_dir(worker_id)?,
@@ -134,7 +128,11 @@ mod tests {
         .unwrap()
     }
 
-    fn environment_probe(home: &std::path::Path, actor_id: &str, kind: ActorKind) -> Invocation {
+    fn environment_probe(
+        home: &std::path::Path,
+        actor_id: &str,
+        kind: crate::engine::ActorKind,
+    ) -> Invocation {
         Invocation::new_sync(
             FunctionId::new("worker_kernel::process_run").unwrap(),
             json!({
@@ -155,7 +153,11 @@ mod tests {
         let runtime = test_runtime(home.path());
 
         let result = process_run(
-            &environment_probe(home.path(), "worker:durable-helper", ActorKind::Worker),
+            &environment_probe(
+                home.path(),
+                "worker:durable-helper",
+                crate::engine::ActorKind::Worker,
+            ),
             &runtime,
         )
         .await
@@ -170,12 +172,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn engine_owned_agent_hops_retain_worker_state_binding() {
+        let home = tempfile::tempdir().unwrap();
+        let runtime = test_runtime(home.path());
+        let mut invocation = environment_probe(
+            home.path(),
+            "system:agent-runtime",
+            crate::engine::ActorKind::System,
+        );
+        invocation.causal_context = invocation
+            .causal_context
+            .clone()
+            .with_origin_worker_id("durable-helper".to_owned());
+
+        let result = process_run(&invocation, &runtime).await.unwrap();
+        let expected = home
+            .path()
+            .join("workspace/worker-state/durable-helper")
+            .display()
+            .to_string();
+        assert_eq!(result["stdout"], format!("{expected}\n"));
+    }
+
+    #[tokio::test]
     async fn non_worker_processes_do_not_receive_worker_state() {
         let home = tempfile::tempdir().unwrap();
         let runtime = test_runtime(home.path());
 
         let result = process_run(
-            &environment_probe(home.path(), "agent:ordinary", ActorKind::Agent),
+            &environment_probe(
+                home.path(),
+                "agent:ordinary",
+                crate::engine::ActorKind::Agent,
+            ),
             &runtime,
         )
         .await

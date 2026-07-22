@@ -309,6 +309,9 @@ fn trusted_agent_internal_child_context(
     if let Some(working_directory) = parent.working_directory() {
         context = context.with_working_directory(working_directory);
     }
+    if let Some(worker_id) = parent.origin_worker_id() {
+        context = context.with_origin_worker_id(worker_id.to_owned());
+    }
     context
 }
 
@@ -379,6 +382,7 @@ mod tests {
         assert_eq!(child.session_id.as_deref(), Some("session-a"));
         assert_eq!(child.workspace_id.as_deref(), Some("workspace-a"));
         assert_eq!(child.working_directory(), Some("/tmp/session-a"));
+        assert_eq!(child.origin_worker_id(), None);
         assert_eq!(child.trigger_depth(), 3);
         assert_eq!(child.advertised_function_revision(), None);
         assert_eq!(child.advertised_worker_version(), None);
@@ -388,6 +392,26 @@ mod tests {
                 .as_deref()
                 .is_some_and(|key| key.starts_with("agent::prompt_apply:"))
         );
+    }
+
+    #[test]
+    fn hidden_prompt_child_context_preserves_worker_origin_as_causal_evidence() {
+        let parent = Invocation::new_sync(
+            FunctionId::new("agent::prompt").expect("function id"),
+            json!({"sessionId": "worker-child", "prompt": "run"}),
+            CausalContext::new(
+                ActorId::new("worker:research-coordinator").expect("actor id"),
+                ActorKind::Worker,
+                TraceId::new("worker-prompt-parent").expect("trace id"),
+            )
+            .with_session_id("worker-child"),
+        );
+
+        let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
+
+        assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
+        assert_eq!(child.actor_kind, ActorKind::System);
+        assert_eq!(child.origin_worker_id(), Some("research-coordinator"));
     }
 
     #[test]

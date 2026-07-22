@@ -66,16 +66,7 @@ pub(super) async fn discover(invocation: &Invocation, deps: &Deps) -> Result<Val
         let _ = payloads.insert(worker.worker_id.clone(), (worker, active.bundle, evidence));
     }
     let include_unmatched = retrieval::query_is_empty(Some(&query));
-    let origin_worker_id = (invocation.causal_context.actor_kind
-        == crate::engine::ActorKind::Worker)
-        .then(|| {
-            invocation
-                .causal_context
-                .actor_id
-                .as_str()
-                .strip_prefix("worker:")
-        })
-        .flatten();
+    let origin_worker_id = invocation.causal_context.origin_worker_id();
     let ranked = retrieval::rank_workers_with_hook(
         deps.runtime.host(),
         invocation

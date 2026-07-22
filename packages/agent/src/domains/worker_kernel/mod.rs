@@ -167,7 +167,9 @@
 //! `workspace/worker-state/<worker-id>/`. Command and resident runners receive
 //! it as `TRON_WORKER_STATE_DIR`; agent runners receive the resolved path in
 //! their instruction contract, and host processes they launch inherit that
-//! same binding automatically. Activation checks use a temporary isolated
+//! same binding automatically. Worker origin survives the engine-owned hidden
+//! agent transport hops without granting those hops worker authority.
+//! Activation checks use a temporary isolated
 //! state root, so a candidate cannot mutate the active worker's data before it
 //! publishes. Update, rollback, disable, and retirement preserve state.
 //! Every worker schema transition first creates one verified owner-only profile

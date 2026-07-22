@@ -30,6 +30,9 @@ pub struct CausalContext {
     pub idempotency_key: Option<String>,
     /// Trusted session directory used to resolve relative host paths.
     working_directory: Option<String>,
+    /// Persistent worker that owns an agent execution crossing engine-owned
+    /// internal transport hops.
+    origin_worker_id: Option<String>,
     /// Function revision advertised to the model that produced this call.
     advertised_function_revision: Option<FunctionRevision>,
     /// Immutable worker version advertised with the projected worker tool.
@@ -51,6 +54,7 @@ impl CausalContext {
             workspace_id: None,
             idempotency_key: None,
             working_directory: None,
+            origin_worker_id: None,
             advertised_function_revision: None,
             advertised_worker_version: None,
             trigger_depth: 0,
@@ -96,6 +100,23 @@ impl CausalContext {
     #[must_use]
     pub fn working_directory(&self) -> Option<&str> {
         self.working_directory.as_deref()
+    }
+
+    /// Preserve the persistent worker that owns a delegated agent execution.
+    #[must_use]
+    pub fn with_origin_worker_id(mut self, worker_id: impl Into<String>) -> Self {
+        self.origin_worker_id = Some(worker_id.into());
+        self
+    }
+
+    /// Resolve the persistent worker that owns this causal chain.
+    #[must_use]
+    pub fn origin_worker_id(&self) -> Option<&str> {
+        self.origin_worker_id.as_deref().or_else(|| {
+            (self.actor_kind == ActorKind::Worker)
+                .then(|| self.actor_id.as_str().strip_prefix("worker:"))
+                .flatten()
+        })
     }
 
     /// Pin execution to the exact function and worker versions advertised to
