@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::engine::Invocation;
+use crate::engine::{ActorKind, Invocation};
 
 use super::super::process::{
     MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
@@ -18,7 +18,7 @@ const MAX_PROCESS_INPUT_BYTES: usize = 4 * 1_048_576;
 
 pub(in crate::domains::worker_kernel) async fn process_run(
     invocation: &Invocation,
-    _runtime: &WorkerRuntime,
+    runtime: &WorkerRuntime,
 ) -> Result<Value, String> {
     let command = invocation
         .payload
@@ -75,6 +75,18 @@ pub(in crate::domains::worker_kernel) async fn process_run(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if invocation.causal_context.actor_kind == ActorKind::Worker
+        && let Some(worker_id) = invocation
+            .causal_context
+            .actor_id
+            .as_str()
+            .strip_prefix("worker:")
+    {
+        process.env(
+            "TRON_WORKER_STATE_DIR",
+            runtime.store().state_dir(worker_id)?,
+        );
+    }
     let child =
         ProcessTree::spawn(&mut process).map_err(|error| format!("start process: {error}"))?;
     let output = wait_with_bounded_output(
@@ -101,4 +113,74 @@ pub(in crate::domains::worker_kernel) async fn process_run(
         "stdoutTruncated": output.stdout_truncated,
         "stderrTruncated": output.stderr_truncated,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::worker_kernel::persistence::WorkerStore;
+    use crate::engine::{ActorId, CausalContext, FunctionId, TraceId};
+
+    fn test_runtime(home: &std::path::Path) -> std::sync::Arc<WorkerRuntime> {
+        let context = crate::shared::server::test_support::make_test_context();
+        WorkerRuntime::new(
+            WorkerStore::open_without_snapshot(home.to_path_buf()).unwrap(),
+            context.engine_host.clone(),
+            context.orchestrator.clone(),
+            context.session_manager.clone(),
+            context.event_store.clone(),
+            context.settings_runtime.clone(),
+        )
+        .unwrap()
+    }
+
+    fn environment_probe(home: &std::path::Path, actor_id: &str, kind: ActorKind) -> Invocation {
+        Invocation::new_sync(
+            FunctionId::new("worker_kernel::process_run").unwrap(),
+            json!({
+                "command": [
+                    "python3",
+                    "-c",
+                    "import os; print(os.environ.get('TRON_WORKER_STATE_DIR', 'missing'))"
+                ]
+            }),
+            CausalContext::new(ActorId::new(actor_id).unwrap(), kind, TraceId::generate())
+                .with_working_directory(home.display().to_string()),
+        )
+    }
+
+    #[tokio::test]
+    async fn worker_actor_processes_receive_their_durable_state_directory() {
+        let home = tempfile::tempdir().unwrap();
+        let runtime = test_runtime(home.path());
+
+        let result = process_run(
+            &environment_probe(home.path(), "worker:durable-helper", ActorKind::Worker),
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        let expected = home
+            .path()
+            .join("workspace/worker-state/durable-helper")
+            .display()
+            .to_string();
+        assert_eq!(result["stdout"], format!("{expected}\n"));
+    }
+
+    #[tokio::test]
+    async fn non_worker_processes_do_not_receive_worker_state() {
+        let home = tempfile::tempdir().unwrap();
+        let runtime = test_runtime(home.path());
+
+        let result = process_run(
+            &environment_probe(home.path(), "agent:ordinary", ActorKind::Agent),
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["stdout"], "missing\n");
+    }
 }

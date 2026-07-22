@@ -166,7 +166,8 @@
 //! Mutable worker-owned state lives outside immutable versions under
 //! `workspace/worker-state/<worker-id>/`. Command and resident runners receive
 //! it as `TRON_WORKER_STATE_DIR`; agent runners receive the resolved path in
-//! their instruction contract. Activation checks use a temporary isolated
+//! their instruction contract, and host processes they launch inherit that
+//! same binding automatically. Activation checks use a temporary isolated
 //! state root, so a candidate cannot mutate the active worker's data before it
 //! publishes. Update, rollback, disable, and retirement preserve state.
 //! Every worker schema transition first creates one verified owner-only profile
