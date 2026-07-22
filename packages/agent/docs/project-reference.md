@@ -1235,6 +1235,73 @@ This closes the implemented Research UI slice; physical-device field review of
 the presentation remains an operator acceptance step before the broader
 field-confidence gate.
 
+### Guided General Delegate proof
+
+The third guided capability was created and then improved by Tron through two
+ordinary `gpt-5.5` turns rather than installed from repository-owned worker
+source. The profile-owned `general-delegate` agent worker projects
+`worker_general_delegate`, uses presentation contract `general-delegate` version
+1 as the primary `delegation` entrypoint, declares no secrets or persistent
+state, and retains only a manual trigger. It accepts one bounded task, requested
+deliverable plus optional JSON Schema, relevant context and file paths,
+constraints, optional deadline, and a low/standard/high effort budget. Kernel
+idempotency, causality, cancellation, session linkage, model evidence, tokens,
+cost, routing, and authority are deliberately absent from that public contract.
+
+The first immutable version,
+`36568f4a56101e83011a34324520012bc60ba2a1ca9ad9419abbe04feaa86eb6`,
+passed activation smoke and health checks and completed a real read-only
+inventory of `/Users/moose/Workspace/testspace`. Durable invocation
+`worker_run_019f8a08-1154-7821-921e-2d1f08b8bcd7` linked child session
+`sess_019f8a08-115e-7f52-8694-b1e735fce4bd`, returned the requested closed
+four-field deliverable, preserved three explicit constraint observations, and
+created no artifact. The child session records `openai/gpt-5.5`, three turns,
+36,868 input tokens, 1,250 output tokens, 22,528 cache-read tokens, and
+`$0.120464` total cost; this evidence remains ordinary session custody rather
+than being copied into a delegation database.
+
+Field acceptance then exercised the kernel boundaries around that worker:
+
+- semantic surface resolution projected `worker_general_delegate` in the same
+  session with the active immutable version and relevance evidence;
+- a deliberately long invocation was durably enqueued, linked to child session
+  `sess_019f8a0c-45a8-7192-9026-67baf46c35b9`, and cancelled precisely through
+  `worker_cancel`; the worker remained enabled, healthy, and available;
+- after rebuilding and restarting the dev server, a new invocation completed
+  and an identical idempotency key returned its original invocation and child
+  session instead of creating another row; and
+- malformed nested input was rejected before dispatch and created no invocation
+  record. That test exposed the transport misclassifying a selected worker's
+  schema violation as internal. Nested worker input is now a typed admission
+  boundary: schema and known-secret violations return actionable
+  `INVALID_PARAMS`, while canonical contract-loading failures remain internal.
+
+Inspection of the first deterministic guard exposed two worker-specific gaps,
+which Tron corrected through one ordinary update and one atomic `worker_upsert`.
+Active version
+`d10c5970c2a1d319ac01fd8dfc8a28f03ac1753e80671a57ff30d15f0b7d8c69`
+requires exact one-to-one, order-preserving coverage of every caller constraint;
+a completed result requires every constraint to be observed and no unresolved
+items. Its caller-supplied deliverable schema is fail-closed rather than a
+decorative object. The guard supports `type` (including unions), `const`,
+`enum`, `required`, `properties`, `additionalProperties`, `items`, item and
+string bounds, `pattern`, numeric bounds, and `oneOf`/`anyOf`/`allOf`; any other
+keyword produces an actionable validation error. Smoke and health evidence
+covers baseline success, omitted/duplicate/invented constraints, false
+constraints reported as complete, unresolved completed work, valid partial
+work, nested-schema success and failure, and unsupported schema keywords.
+
+The updated version then completed a real file-inspection task against
+`test1.txt`. It returned the exact 21-character, one-line result, preserved all
+three constraints in order, cited the actual file read, and produced no writes.
+The active pointer was rolled back to the first retained version and restored
+to the accepted version while health and routing stayed enabled. General
+Delegate is therefore accepted for single-task typed delegation, durable
+enqueue, child-session evidence, precise cancellation, restart recovery,
+idempotent replay, malformed-input rejection, retained-version recovery, and
+generic-console operation. Its dedicated native Delegation experience is the
+remaining presentation step for this guided capability.
+
 ### Prior inventory coverage evidence
 
 The following detail is retained only to cross-check the family map above.
