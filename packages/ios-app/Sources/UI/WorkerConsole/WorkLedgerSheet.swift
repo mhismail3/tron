@@ -92,15 +92,29 @@ struct WorkLedgerSheet: View {
                     .accessibilityLabel("Open worker contract and controls")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        createKind = defaultCreateKind
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(.tronEmerald)
+                    if selectedSection == .activity {
+                        Menu {
+                            ForEach(WorkLedgerCreateKind.allCases) { kind in
+                                Button(kind.rawValue) { createKind = kind }
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                .foregroundStyle(.tronEmerald)
+                        }
+                        .accessibilityLabel("Add to Work Ledger")
+                        .disabled(viewModel.isMutating || !connectionState.isConnected)
+                    } else {
+                        Button {
+                            createKind = defaultCreateKind
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                .foregroundStyle(.tronEmerald)
+                        }
+                        .accessibilityLabel("Add \(defaultCreateKind.rawValue)")
+                        .disabled(viewModel.isMutating || !connectionState.isConnected)
                     }
-                    .disabled(viewModel.isMutating || !connectionState.isConnected)
-                    .accessibilityLabel("Add to Work Ledger")
                     SheetDismissButton(color: .tronEmerald)
                 }
             }

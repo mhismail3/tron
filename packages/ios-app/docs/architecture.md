@@ -322,7 +322,8 @@ provides status summaries, goal/question filters, goal/question/decision detail
 sheets, creation and editing, completion/cancellation, answer/resolution, linked
 record context, empty/offline/error states, and recent durable activity. Its
 single top-bar plus action creates the record kind for the selected domain tab;
-the info action opens Contract and Manage. The generic console remains the
+from Activity it offers Goal, Question, and Decision explicitly. The info
+action opens Contract and Manage. The generic console remains the
 export/import, dependency/link, operational, and recovery surface until real
 use justifies additional native controls.
 
