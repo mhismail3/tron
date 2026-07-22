@@ -149,7 +149,6 @@ struct WorkerTriggerCard: View {
                 HStack {
                     Label("Configuration", systemImage: "slider.horizontal.3")
                     Spacer()
-                    Image(systemName: "chevron.right")
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(color)
@@ -261,9 +260,6 @@ struct WorkerRunCard: View {
                             .font(TronTypography.sans(size: TronTypography.sizeSM))
                             .foregroundStyle(.tronTextMuted)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
                 }
 
                 Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
@@ -371,9 +367,6 @@ struct WorkerInboxCard: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
             }
             .contentShape(Rectangle())
         }
@@ -412,9 +405,6 @@ struct WorkerAuditCard: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
             }
             .contentShape(Rectangle())
         }

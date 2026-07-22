@@ -221,7 +221,6 @@ struct ResearchSuiteSheet: View {
                             systemImage: "clock.badge.exclamationmark"
                         )
                         Spacer()
-                        Image(systemName: "chevron.right")
                     }
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronWarning)
@@ -345,10 +344,6 @@ private struct ResearchComponentCard: View {
                     .font(TronTypography.sans(size: TronTypography.sizeSM))
                     .foregroundStyle(.tronTextMuted)
                 }
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.top, 4)
             }
             .padding(12)
             .sectionFill(status.color, cornerRadius: 11, subtle: true, interactive: true)
@@ -407,10 +402,6 @@ private struct ResearchReportRow: View {
                 }
             }
             Spacer(minLength: 6)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 4)
         }
         .padding(12)
         .sectionFill(.tronCyan, cornerRadius: 11, subtle: true, interactive: true)

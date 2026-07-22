@@ -60,10 +60,6 @@ struct WorkerConsoleDashboardBand: View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(summaryColor)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
                 }
             }
             .padding(.horizontal, SessionListLayout.rowContentHorizontalPadding)
@@ -550,12 +546,7 @@ private struct WorkerConsoleRow: View {
                 .lineLimit(1)
             }
 
-            Spacer(minLength: 6)
-
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 5)
+            Spacer(minLength: 0)
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)

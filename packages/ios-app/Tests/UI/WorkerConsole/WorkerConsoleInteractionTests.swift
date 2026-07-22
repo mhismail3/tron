@@ -3,6 +3,23 @@ import Testing
 @testable import TronMobile
 
 struct WorkerConsoleInteractionTests {
+    @Test("Engine containers do not use trailing navigation chevrons")
+    func engineContainersOmitTrailingChevrons() throws {
+        let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
+        let files = try FileManager.default.contentsOfDirectory(
+            at: workerRoot,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "swift" }
+
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            #expect(
+                !source.contains("chevron.right"),
+                "\(file.lastPathComponent) must keep Engine containers free of trailing chevrons"
+            )
+        }
+    }
+
     @Test("Unbounded worker detail uses sheets instead of inline disclosure")
     func unboundedWorkerDetailUsesSheets() throws {
         let root = iosAppRoot()

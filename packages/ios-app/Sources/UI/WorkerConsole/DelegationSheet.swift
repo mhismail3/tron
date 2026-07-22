@@ -217,9 +217,7 @@ struct DelegationSheet: View {
                                 .foregroundStyle(.tronTextMuted)
                         }
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.tronTextMuted)
+                    Spacer(minLength: 0)
                 }
                 .padding(12)
                 .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: true)
@@ -266,7 +264,6 @@ struct DelegationSheet: View {
                         Text("\(optionalGuidanceCount) set")
                             .foregroundStyle(.tronTextMuted)
                     }
-                    Image(systemName: "chevron.right")
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronPurple)
@@ -503,10 +500,6 @@ private struct DelegationRunRow: View {
                         .lineLimit(3)
                 }
             }
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 3)
         }
         .padding(12)
         .sectionFill(statusColor, cornerRadius: 11, subtle: true, interactive: true)

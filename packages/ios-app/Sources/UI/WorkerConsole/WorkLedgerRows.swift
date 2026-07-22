@@ -31,11 +31,7 @@ struct WorkLedgerGoalRow: View {
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
             }
-            Spacer(minLength: 6)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 5)
+            Spacer(minLength: 0)
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -74,11 +70,7 @@ struct WorkLedgerQuestionRow: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(WorkLedgerPresentation.statusColor(question.status))
             }
-            Spacer(minLength: 6)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 5)
+            Spacer(minLength: 0)
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -116,11 +108,7 @@ struct WorkLedgerDecisionRow: View {
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 6)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .padding(.top, 5)
+            Spacer(minLength: 0)
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)

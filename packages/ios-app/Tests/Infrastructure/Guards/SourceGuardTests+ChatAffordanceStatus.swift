@@ -46,6 +46,20 @@ extension SourceGuardTests {
         #expect(source.contains(".accessibilityLabel(notification.textContent)"))
     }
 
+    @Test("Compact session reopening always creates a fresh chat presentation")
+    func testCompactSessionReopeningUsesFreshPresentationIdentity() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent("Sources/UI/Chat/Shell/ContentView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("@State private var compactSessionRoute: CompactSessionRoute?"))
+        #expect(source.contains(".navigationDestination(item: $compactSessionRoute)"))
+        #expect(source.contains(".id(route.presentationId)"))
+        #expect(source.contains("selectedSessionId: sidebarSessionSelection"))
+        #expect(!source.contains(".navigationDestination(item: $selectedSessionId)"))
+    }
+
     @Test("Engine Dashboard is the single profile-level high-signal engine surface")
     func testEngineDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()

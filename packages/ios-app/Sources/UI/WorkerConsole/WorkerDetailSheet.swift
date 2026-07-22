@@ -216,7 +216,6 @@ struct WorkerDetailSheet: View {
                         HStack {
                             Label("Source details", systemImage: "doc.text.magnifyingglass")
                             Spacer()
-                            Image(systemName: "chevron.right")
                         }
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronInfo)
@@ -267,7 +266,6 @@ struct WorkerDetailSheet: View {
                         HStack {
                             Label("Raw input schema", systemImage: "curlybraces.square")
                             Spacer()
-                            Image(systemName: "chevron.right")
                         }
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronInfo)

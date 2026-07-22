@@ -50,11 +50,7 @@ private struct EngineCoreToolRow: View {
                 .foregroundStyle(.tronTextPrimary)
                 .lineLimit(1)
 
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)

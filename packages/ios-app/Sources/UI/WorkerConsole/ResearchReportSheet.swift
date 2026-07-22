@@ -264,8 +264,6 @@ private struct ResearchClaimCard: View {
                     Text("\(citations.count) cite\(citations.count == 1 ? "" : "s")")
                         .font(TronTypography.sans(size: TronTypography.sizeSM))
                         .foregroundStyle(.tronTextMuted)
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.tronTextMuted)
                 }
                 Text(claim.text)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -298,8 +296,6 @@ private struct ResearchSourceCard: View {
                         .foregroundStyle(.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.tronTextMuted)
                 }
                 HStack(spacing: 8) {
                     if let domain = source.domain { Text(domain) }

@@ -5,6 +5,22 @@ struct PendingSessionDeepLink: Equatable {
     let scrollTarget: ScrollTarget?
 }
 
+/// One compact-width presentation of a session.
+///
+/// `sessionId` is durable selection state, while `presentationId` is deliberately
+/// fresh for every explicit open. Keeping them separate prevents SwiftUI from
+/// reusing a popped `navigationDestination` for the same session without
+/// starting the replacement `ChatView` lifecycle.
+struct CompactSessionRoute: Hashable {
+    let sessionId: String
+    let presentationId: UUID
+
+    init(sessionId: String, presentationId: UUID = UUID()) {
+        self.sessionId = sessionId
+        self.presentationId = presentationId
+    }
+}
+
 struct ServerOnboardingLaunchRequest: Equatable {
     let prefill: PairedServer?
 }
@@ -38,6 +54,11 @@ func shouldPresentSelectedSession(
     return knownSessionIds.contains(selectedSessionId)
 }
 
+func makeCompactSessionRoute(sessionId: String?) -> CompactSessionRoute? {
+    guard let sessionId else { return nil }
+    return CompactSessionRoute(sessionId: sessionId)
+}
+
 // MARK: - Content View
 
 struct ContentView: View {
@@ -55,6 +76,7 @@ struct ContentView: View {
 
     @State private var coordinator: ContentViewCoordinator?
     @State private var selectedSessionId: String?
+    @State private var compactSessionRoute: CompactSessionRoute?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
@@ -100,7 +122,7 @@ struct ContentView: View {
                 // Restore last active session
                 if let activeId = eventStoreManager.activeSessionId,
                    eventStoreManager.sessionExists(activeId) {
-                    selectedSessionId = activeId
+                    presentSession(activeId)
                 }
                 // Refresh session list via the central coordinator — it coalesces duplicates
                 // across call sites and handles the disconnected/connected/reconnecting cases
@@ -129,8 +151,7 @@ struct ContentView: View {
                         sessionId: sessionId,
                         scrollTarget: .bottom
                     ) { sessionId, scrollTarget in
-                        selectedSessionId = sessionId
-                        currentScrollTarget = scrollTarget
+                        presentSession(sessionId, scrollTarget: scrollTarget)
                     }
                 }
             }
@@ -140,6 +161,11 @@ struct ContentView: View {
             .onChange(of: selectedSessionId) { _, newValue in
                 guard let newValue else { return }
                 eventStoreManager.setActiveSession(newValue)
+            }
+            .onChange(of: compactSessionRoute) { oldValue, newValue in
+                guard oldValue != nil, newValue == nil else { return }
+                selectedSessionId = nil
+                currentScrollTarget = nil
             }
             .onChange(of: deepLinkSessionId) { _, _ in
                 processPendingDeepLinkSession()
@@ -183,8 +209,9 @@ struct ContentView: View {
             // modifier too late, causing the default back button to flash.
             NavigationStack {
                 sidebarContent
-                    .navigationDestination(item: $selectedSessionId) { sessionId in
-                        chatViewForSession(sessionId)
+                    .navigationDestination(item: $compactSessionRoute) { route in
+                        chatViewForSession(route.sessionId)
+                            .id(route.presentationId)
                     }
             }
             .tint(.tronEmerald)
@@ -204,7 +231,7 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarContent: some View {
         SessionSidebar(
-            selectedSessionId: $selectedSessionId,
+            selectedSessionId: sidebarSessionSelection,
             onNewSession: { showNewSessionSheet = true },
             onDeleteSession: { sessionId in
                 deleteSession(sessionId)
@@ -259,7 +286,7 @@ struct ContentView: View {
                         logger.error("cacheNewSession failed: \(error)", category: .session)
                     }
                 }
-                selectedSessionId = created.sessionId
+                presentSession(created.sessionId)
                 showNewSessionSheet = false
             }
         )
@@ -325,13 +352,13 @@ struct ContentView: View {
 
     private func deleteSession(_ sessionId: String) {
         coordinator?.deleteSession(sessionId, isSelected: selectedSessionId == sessionId) { nextId in
-            selectedSessionId = nextId
+            presentSession(nextId)
         }
     }
 
     private func createQuickSession() {
         coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
-            selectedSessionId = newId
+            presentSession(newId)
         }
     }
 
@@ -342,7 +369,7 @@ struct ContentView: View {
         guard let payload = shared.buildSharePrompt() else { return }
 
         coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
-            selectedSessionId = newId
+            presentSession(newId)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(500))
                 NotificationCenter.default.post(
@@ -363,8 +390,7 @@ struct ContentView: View {
             sessionId: pending.sessionId,
             scrollTarget: pending.scrollTarget
         ) { sessionId, scrollTarget in
-            selectedSessionId = sessionId
-            currentScrollTarget = scrollTarget
+            presentSession(sessionId, scrollTarget: scrollTarget)
         }
         deepLinkSessionId = nil
         deepLinkScrollTarget = nil
@@ -373,6 +399,27 @@ struct ContentView: View {
     private func launchDeferredServerOnboardingIfNeeded() {
         guard let request = deferredServerOnboardingLaunch.consume() else { return }
         ServerOnboardingLauncher.post(prefill: request.prefill)
+    }
+
+    private var sidebarSessionSelection: Binding<String?> {
+        Binding(
+            get: { selectedSessionId },
+            set: { presentSession($0) }
+        )
+    }
+
+    /// Opens a durable session selection through a fresh compact presentation.
+    /// A repeated tap on the same session must rebuild `ChatView` and restart its
+    /// reconstruction task after the previous presentation was popped.
+    private func presentSession(
+        _ sessionId: String?,
+        scrollTarget: ScrollTarget? = nil
+    ) {
+        selectedSessionId = sessionId
+        currentScrollTarget = scrollTarget
+        if horizontalSizeClass == .compact {
+            compactSessionRoute = makeCompactSessionRoute(sessionId: sessionId)
+        }
     }
 }
 

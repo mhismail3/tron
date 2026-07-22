@@ -262,7 +262,10 @@ schemas, durable payloads, run details, evidence collections, and editable
 advanced forms open stable detail sheets. The dashboard shell,
 worker-detail workflow, reusable worker evidence components, and compiled-engine
 cards are separate files under the same feature owner; no all-in-one view file
-owns both navigation and every evidence renderer. It provides:
+owns both navigation and every evidence renderer. Engine cards use their glass
+fill and press response as the navigation affordance; trailing chevrons are
+intentionally omitted throughout the dashboard and its nested sheets. It
+provides:
 
 - Core, Workers, and Activity modes in one compact cockpit; the always-visible
   summary owns profile-wide fixed/worker/issue counts and any active
@@ -435,6 +438,13 @@ Initial restoration measures this boundary while content is hidden, revealing a
 short transcript at the top and a long transcript at its latest content. This
 prevents repeated streaming scroll requests from moving an undersized message
 stack between incompatible anchors.
+
+Compact-width session navigation separates the durable selected session ID from
+the transient presentation identity. Every explicit open receives a fresh
+presentation identity, including a second tap on the same session after
+returning Home. Popping the destination clears compact selection. This ensures
+the replacement `ChatView` always begins a new reconstruction and live-stream
+lifecycle instead of reusing a cancelled destination shell.
 
 ## Composer and Attachments
 

@@ -64,6 +64,23 @@ final class PendingSessionDeepLinkTests: XCTestCase {
     }
 }
 
+// MARK: - Compact Session Presentation
+
+final class CompactSessionRouteTests: XCTestCase {
+    func testNilSessionHasNoRoute() {
+        XCTAssertNil(makeCompactSessionRoute(sessionId: nil))
+    }
+
+    func testRepeatedOpenGetsFreshPresentationIdentity() throws {
+        let first = try XCTUnwrap(makeCompactSessionRoute(sessionId: "sess_repeat"))
+        let second = try XCTUnwrap(makeCompactSessionRoute(sessionId: "sess_repeat"))
+
+        XCTAssertEqual(first.sessionId, second.sessionId)
+        XCTAssertNotEqual(first.presentationId, second.presentationId)
+        XCTAssertNotEqual(first, second)
+    }
+}
+
 // MARK: - resolveQuickSessionWorkspace (Pure Function Tests)
 
 /// Tests for the workspace resolution logic used by createQuickSession.

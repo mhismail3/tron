@@ -78,7 +78,6 @@ struct DelegationRunDetailSheet: View {
             HStack {
                 Label("Original task contract", systemImage: "doc.text")
                 Spacer()
-                Image(systemName: "chevron.right")
             }
             .contentShape(Rectangle())
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
