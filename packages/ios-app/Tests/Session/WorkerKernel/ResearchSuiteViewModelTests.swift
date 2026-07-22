@@ -55,6 +55,7 @@ struct ResearchSuiteViewModelTests {
         #expect(viewModel.reports.map(\.reportId) == ["rr-20260722T130645Z-d480507abb3e"])
         #expect(viewModel.healthyComponentCount == 4)
         #expect(viewModel.lastError == nil)
+        #expect(viewModel.reportIssues.isEmpty)
     }
 
     @Test("Malformed coordinator outputs are omitted without replacing valid durable history")
@@ -73,8 +74,8 @@ struct ResearchSuiteViewModelTests {
         #expect(viewModel.lastError == nil)
     }
 
-    @Test("Malformed canonical report output is visible as a partial refresh error")
-    func malformedCanonicalReportIsVisible() async {
+    @Test("Malformed canonical history is isolated from worker refresh health")
+    func malformedCanonicalReportIsIsolated() async {
         let repository = ResearchSuiteMockRepository(reportOutput: ["schema": "research.report.v1"])
         let viewModel = ResearchSuiteViewModel()
 
@@ -85,7 +86,9 @@ struct ResearchSuiteViewModelTests {
         )
 
         #expect(viewModel.reports.isEmpty)
-        #expect(viewModel.lastError?.contains("Coordinator run run-1") == true)
+        #expect(viewModel.lastError == nil)
+        #expect(viewModel.reportIssues.count == 1)
+        #expect(viewModel.reportIssues.first?.contains("Coordinator run run-1") == true)
     }
 
     private static func worker(

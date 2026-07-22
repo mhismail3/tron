@@ -30,6 +30,11 @@ final class WorkerConsoleViewModel {
         workers.first { $0.workerId == selectedWorkerId }
     }
 
+    func workerName(for workerId: String) -> String {
+        workers.first { $0.workerId == workerId }?.name
+            ?? WorkerConsolePresentation.displayLabel(workerId)
+    }
+
     var healthyCount: Int {
         workers.filter { $0.enabled && $0.health == "healthy" }.count
     }

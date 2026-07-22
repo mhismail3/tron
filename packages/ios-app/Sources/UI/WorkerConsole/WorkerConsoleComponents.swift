@@ -215,6 +215,7 @@ struct WorkerVersionRow: View {
 
 struct WorkerRunCard: View {
     let run: WorkerInvocationDTO
+    var workerName: String?
     var onOpenSession: ((String) -> Void)?
     var onCancel: (() -> Void)?
 
@@ -234,10 +235,10 @@ struct WorkerRunCard: View {
                     .foregroundStyle(color)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(WorkerConsolePresentation.displayLabel(run.status))
+                    Text(workerName ?? WorkerConsolePresentation.displayLabel(run.status))
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
-                    Text("\(WorkerConsolePresentation.displayLabel(run.triggerKind)) · \(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")")
+                    Text(runMetadata)
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                 }
@@ -257,6 +258,13 @@ struct WorkerRunCard: View {
             Text(WorkerConsolePresentation.compactIdentifier(run.invocationId, length: 16))
                 .font(TronTypography.code(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
+
+            if let summary = WorkerConsolePresentation.runSummary(run) {
+                Text(summary)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(2)
+            }
 
             if let sessionId = run.agentSessionId, let onOpenSession {
                 Button {
@@ -306,6 +314,15 @@ struct WorkerRunCard: View {
         run.status == "queued" || run.status == "running"
     }
 
+    private var runMetadata: String {
+        let status = WorkerConsolePresentation.displayLabel(run.status)
+        let trigger = WorkerConsolePresentation.displayLabel(run.triggerKind)
+        let attempt = "\(run.attemptCount) attempt\(run.attemptCount == 1 ? "" : "s")"
+        return workerName == nil
+            ? "\(trigger) · \(attempt)"
+            : "\(status) · \(trigger) · \(attempt)"
+    }
+
     private var statusSymbol: String {
         switch WorkerConsolePresentation.normalized(run.status) {
         case "completed", "succeeded": "checkmark.circle.fill"
@@ -319,6 +336,7 @@ struct WorkerRunCard: View {
 
 struct WorkerInboxCard: View {
     let item: WorkerInboxItemDTO
+    var workerName: String?
 
     private var color: Color {
         switch WorkerConsolePresentation.normalized(item.severity) {
@@ -329,28 +347,44 @@ struct WorkerInboxCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 9) {
+        DisclosureGroup {
+            WorkerJSONBlock(value: item.result, accent: color)
+                .padding(.top, 9)
+        } label: {
+            HStack(alignment: .top, spacing: 9) {
                 Image(systemName: item.seen ? "tray" : "tray.full.fill")
                     .foregroundStyle(color)
                     .frame(width: 20)
-                Text(WorkerConsolePresentation.displayLabel(item.severity))
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                if !item.seen {
-                    Text("New")
-                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                        .foregroundStyle(color)
-                }
-                Spacer()
-                if let timestamp = WorkerConsolePresentation.timestamp(item.createdAt) {
-                    Text(timestamp)
-                        .font(TronTypography.sans(size: TronTypography.sizeSM))
-                        .foregroundStyle(.tronTextMuted)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(workerName ?? WorkerConsolePresentation.displayLabel(item.severity))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronTextPrimary)
+                            .lineLimit(1)
+                        if workerName != nil {
+                            Text(WorkerConsolePresentation.displayLabel(item.severity))
+                                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                                .foregroundStyle(color)
+                        }
+                        if !item.seen {
+                            Text("New")
+                                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                                .foregroundStyle(color)
+                        }
+                    }
+                    Text(WorkerConsolePresentation.inboxSummary(item))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
+                    if let timestamp = WorkerConsolePresentation.timestamp(item.createdAt) {
+                        Text(timestamp)
+                            .font(TronTypography.sans(size: TronTypography.sizeSM))
+                            .foregroundStyle(.tronTextMuted)
+                    }
                 }
             }
-            WorkerJSONBlock(value: item.result, accent: color)
         }
+        .tint(color)
         .padding(11)
         .sectionFill(color, cornerRadius: 10, subtle: true, interactive: false)
     }

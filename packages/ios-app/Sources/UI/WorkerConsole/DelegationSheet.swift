@@ -93,7 +93,8 @@ struct DelegationSheet: View {
                 WorkerDetailSheet(
                     viewModel: technicalViewModel,
                     repository: repository,
-                    connectionState: connectionState
+                    connectionState: connectionState,
+                    mode: .technical
                 )
             }
             .task { await refresh() }
@@ -170,15 +171,10 @@ struct DelegationSheet: View {
 
     private var tasksContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .bottom) {
-                WorkerConsoleSectionHeader(
-                    title: "Delegated tasks",
-                    detail: "Server-owned status, child-session linkage, result previews, and timing."
-                )
-                Spacer(minLength: 8)
-                Button("New task") { selectedSection = .newTask }
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-            }
+            WorkerConsoleSectionHeader(
+                title: "Delegated tasks",
+                detail: "Server-owned status, child-session linkage, result previews, and timing."
+            )
             if viewModel.runs.isEmpty {
                 WorkerConsoleEmptyState(
                     symbol: "person.crop.circle.badge.plus",
@@ -346,26 +342,6 @@ struct DelegationSheet: View {
                 }
             }
 
-            WorkerConsoleSectionHeader(
-                title: "Execution evidence",
-                detail: "Attempts and causal identifiers remain attached to each durable invocation."
-            )
-            if viewModel.runs.isEmpty {
-                WorkerConsoleInlineEmptyState(symbol: "waveform.path", text: "No Delegation runs.")
-            } else {
-                LazyVStack(spacing: 9) {
-                    ForEach(viewModel.runs) { run in
-                        Button { selectedRun = run } label: {
-                            DelegationRunRow(
-                                run: run,
-                                result: viewModel.resultsByInvocation[run.invocationId],
-                                session: cachedSession(for: run)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
         }
     }
 

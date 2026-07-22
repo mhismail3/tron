@@ -28,6 +28,20 @@ struct WorkerProvenancePresentation: Equatable, Identifiable, Sendable {
     let revision: String?
 
     var id: String { "\(source):\(revision ?? "")" }
+
+    var compactLabel: String {
+        let sourceTail = source
+            .split(whereSeparator: { ":/".contains($0) })
+            .last
+            .map(String.init) ?? source
+        let shortSource = WorkerConsolePresentation.compactText(sourceTail, maxLength: 18)
+        guard let revision, !revision.isEmpty else { return shortSource }
+        return "\(shortSource) · \(WorkerConsolePresentation.compactText(revision, maxLength: 8))"
+    }
+
+    var fullLabel: String {
+        revision.map { "\(source) · \($0)" } ?? source
+    }
 }
 
 /// Human-readable projection for the Worker Console. The server remains the
@@ -70,6 +84,25 @@ enum WorkerConsolePresentation {
     static func compactIdentifier(_ value: String, length: Int = 10) -> String {
         guard value.count > length else { return value }
         return String(value.prefix(length))
+    }
+
+    static func compactText(_ value: String, maxLength: Int = 80) -> String {
+        let collapsed = value
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard collapsed.count > maxLength, maxLength > 1 else { return collapsed }
+        return String(collapsed.prefix(maxLength - 1)) + "…"
+    }
+
+    static func runSummary(_ run: WorkerInvocationDTO) -> String? {
+        summaryValue(from: run.input, preferredKeys: ["task", "question", "query", "action", "title"])
+    }
+
+    static func inboxSummary(_ item: WorkerInboxItemDTO) -> String {
+        summaryValue(
+            from: item.result,
+            preferredKeys: ["error", "message", "summary", "status", "question", "task"]
+        ) ?? (normalized(item.severity) == "error" ? "Worker execution failed" : "Durable worker result")
     }
 
     static func timestamp(_ value: String?) -> String? {
@@ -155,6 +188,32 @@ enum WorkerConsolePresentation {
 
     static func normalized(_ value: String) -> String {
         value.lowercased().filter(\.isLetter)
+    }
+
+    private static func summaryValue(
+        from value: AnyCodable,
+        preferredKeys: [String]
+    ) -> String? {
+        func find(_ candidate: Any, depth: Int) -> String? {
+            guard depth <= 3 else { return nil }
+            if let text = candidate as? String, !text.isEmpty {
+                return compactText(text)
+            }
+            if let dictionary = AnyCodable(candidate).dictionaryValue {
+                for key in preferredKeys {
+                    if let nested = dictionary[key], let result = find(nested, depth: depth + 1) {
+                        return result
+                    }
+                }
+                for key in ["output", "result", "deliverable"] {
+                    if let nested = dictionary[key], let result = find(nested, depth: depth + 1) {
+                        return result
+                    }
+                }
+            }
+            return nil
+        }
+        return find(value.value, depth: 0)
     }
 
     private static func exampleValue(for type: String) -> Any {

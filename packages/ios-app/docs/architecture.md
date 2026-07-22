@@ -270,14 +270,18 @@ owns both navigation and every evidence renderer. It provides:
   projection, and explicit promotion;
 - engine stop-all/resume with an explanation that queued work remains durable;
 - worker list with runner, health, active hash prefix, and trigger count;
-- detail overview with tool identity and provenance;
+- bounded provenance tags with full accessible source labels;
+- one generic worker workflow split into Overview, Run, Activity, and Manage;
+- native-experience technical detail limited to Contract and Manage so domain
+  tasks, reports, runs, and inbox results have one presentation owner;
 - readable schema fields, progressively disclosed raw schema, generated valid
   JSON input, inline syntax admission, and typed invocation results;
 - trigger status and webhook rotation;
 - retained versions, rollback, and restoration of a retired worker from any
   retained version (including its last active version);
-- recent runs with delivery-attempt counts and disclosed input/output, durable
-  inbox results, progressively disclosed audit history, and bounded load-more
+- recent runs with delivery-attempt counts and disclosed input/output, compact
+  inbox summaries whose full payloads expand on demand, progressively disclosed
+  audit history, and bounded load-more
   access to the complete profile ledger;
 - exact “Open audit session” navigation for agent-runner rows, while reserved
   worker child sessions remain excluded from the ordinary Home session list;
@@ -293,7 +297,8 @@ rows become Restore actions that reactivate canonical server state. Stop-all,
 retirement, and archive-backed purge use explicit destructive affordances and
 confirmation; ordinary stop/disable controls explain their durable-state
 semantics. Webhook credentials are shown only from the mutation response that
-created or rotated them.
+created or rotated them. Every Worker Console sheet offers medium height first
+and can expand to large; worker subtype does not alter the initial detent.
 
 ### Native worker experiences
 
@@ -303,8 +308,10 @@ matches the stable experience id, contract version, and primary-entrypoint flag.
 Missing metadata, an unknown version, or a secondary suite component always
 falls back to `WorkerDetailSheet`; a worker can never download or execute UI
 code. The technical worker detail remains reachable from every native
-experience so schemas, versions, runs, inbox, audit, and lifecycle controls do
-not fork into a second client-owned truth plane.
+experience, but it owns only the immutable contract, triggers, retained
+versions, and lifecycle controls. The native experience owns its tasks/reports
+and activity, preventing duplicate invocation, run, and inbox entrypoints while
+preserving a single server truth plane.
 
 The first supported contract is `work-ledger` version 1. `WorkLedgerViewModel`
 invokes the worker's single typed `snapshot` action to load goals, questions,
@@ -313,9 +320,11 @@ worker's SQLite state directly. Mutations use the same flat worker tool contract
 as agents and then refresh one authoritative snapshot. The native sheet
 provides status summaries, goal/question filters, goal/question/decision detail
 sheets, creation and editing, completion/cancellation, answer/resolution, linked
-record context, empty/offline/error states, and recent durable activity. The
-generic console remains the export/import, dependency/link, operational, and
-recovery surface until real use justifies additional native controls.
+record context, empty/offline/error states, and recent durable activity. Its
+single top-bar plus action creates the record kind for the selected domain tab;
+the info action opens Contract and Manage. The generic console remains the
+export/import, dependency/link, operational, and recovery surface until real
+use justifies additional native controls.
 
 The second supported contract is the primary `research-suite` version 1
 entrypoint. Its four workers remain independently versioned and independently
@@ -325,8 +334,9 @@ worker inventory by the immutable suite contract, reads bounded full-detail
 runs and inbox rows for every component, and decodes only exact
 `research.report.v1` coordinator outputs. It does not read the coordinator's
 state directory or reconstruct reports from client caches. Malformed canonical
-outputs are visible partial-refresh errors; unrelated outputs are not mistaken
-for reports.
+outputs remain visible as compact, disclosed historical compatibility issues;
+they do not falsely mark a successful worker/catalog refresh as failed.
+Unrelated outputs are not mistaken for reports.
 
 The Research sheet provides aggregate suite health and versions, coordinator
 and specialist run/query history, durable inbox failures, report history,
@@ -354,10 +364,13 @@ Schema input, plus durable task and activity views. Run detail presents the
 deliverable, evidence, constraint observations, artifacts, unresolved work,
 attempt and causal evidence, and model/token/cost/timing data from the linked
 child session when that session is locally available. Opening a child session
-uses the ordinary deep-link coordinator, including authoritative session sync
-when the child is intentionally absent from the ordinary session list. The
-server resolves that exact ID from canonical session storage; no duplicate
-client or delegation session database exists. Technical worker detail
+uses a dedicated audit route that admits the exact server-owned ID without
+requiring the reserved worker session to appear in the ordinary Home list.
+Chat reconstruction still resolves that exact ID from canonical session
+storage; no duplicate client or delegation session database exists. Task
+detail includes the original typed input, invocation/version, idempotency key,
+trigger, causal depth, trace, timestamps, model/token/cost evidence, and child
+session ID. Technical worker detail
 remains available from the sheet; malformed outputs and unsupported bindings
 remain visible and fall back safely instead of becoming client-owned truth.
 

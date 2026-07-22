@@ -63,7 +63,8 @@ struct ResearchSuiteSheet: View {
                 WorkerDetailSheet(
                     viewModel: technicalViewModel,
                     repository: repository,
-                    connectionState: connectionState
+                    connectionState: connectionState,
+                    mode: .technical
                 )
             }
             .task { await refresh() }
@@ -204,6 +205,29 @@ struct ResearchSuiteSheet: View {
 
     private var activityContent: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if !viewModel.reportIssues.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(viewModel.reportIssues, id: \.self) { issue in
+                            Text(issue)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Label(
+                        "\(viewModel.reportIssues.count) older report\(viewModel.reportIssues.count == 1 ? "" : "s") need review",
+                        systemImage: "clock.badge.exclamationmark"
+                    )
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronWarning)
+                }
+                .tint(.tronWarning)
+                .padding(12)
+                .sectionFill(.tronWarning, cornerRadius: 11, subtle: true, interactive: false)
+            }
+
             WorkerConsoleSectionHeader(
                 title: "Suite runs",
                 detail: "Coordinator and specialist invocations, including their exact server status and query when available."
@@ -226,14 +250,19 @@ struct ResearchSuiteSheet: View {
                 WorkerConsoleInlineEmptyState(symbol: "tray", text: "No Research inbox results.")
             } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.inbox) { WorkerInboxCard(item: $0) }
+                    ForEach(viewModel.inbox) { item in
+                        WorkerInboxCard(
+                            item: item,
+                            workerName: viewModel.workerName(for: item.workerId)
+                        )
+                    }
                 }
             }
         }
     }
 
     private var issueCount: Int {
-        viewModel.attentionCount + viewModel.inbox.count { item in
+        viewModel.attentionCount + viewModel.reportIssues.count + viewModel.inbox.count { item in
             ["error", "critical", "warning"].contains(
                 WorkerConsolePresentation.normalized(item.severity)
             )

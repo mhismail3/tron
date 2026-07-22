@@ -183,7 +183,10 @@ struct SessionSidebar: View {
                 sessionId: dashboardSessionId,
                 onOpenSession: { sessionId in
                     showWorkerConsole = false
-                    NotificationCenter.default.post(name: .switchToSession, object: sessionId)
+                    NotificationCenter.default.post(
+                        name: .openWorkerAuditSession,
+                        object: sessionId
+                    )
                 }
             )
         }

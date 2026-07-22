@@ -20,6 +20,34 @@ final class ForkNavigationTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    func testWorkerAuditSessionNotificationHasADistinctRoute() {
+        XCTAssertEqual(
+            Notification.Name.openWorkerAuditSession.rawValue,
+            "tron.openWorkerAuditSession"
+        )
+        XCTAssertNotEqual(
+            Notification.Name.openWorkerAuditSession,
+            Notification.Name.switchToSession
+        )
+    }
+
+    func testWorkerAuditSessionCanPresentWithoutAppearingInHome() {
+        XCTAssertTrue(
+            shouldPresentSelectedSession(
+                selectedSessionId: "worker-session-123",
+                knownSessionIds: ["ordinary-session"],
+                workerAuditSessionId: "worker-session-123"
+            )
+        )
+        XCTAssertFalse(
+            shouldPresentSelectedSession(
+                selectedSessionId: "missing-session",
+                knownSessionIds: ["ordinary-session"],
+                workerAuditSessionId: nil
+            )
+        )
+    }
+
     func testSwitchToSessionNotificationNotPostedOnForkFailure() {
         let expectation = expectation(forNotification: .switchToSession, object: nil)
         expectation.isInverted = true

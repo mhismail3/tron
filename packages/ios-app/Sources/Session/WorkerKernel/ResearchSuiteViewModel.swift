@@ -285,6 +285,7 @@ final class ResearchSuiteViewModel {
     var runs: [WorkerInvocationDTO] = []
     var inbox: [WorkerInboxItemDTO] = []
     var reports: [ResearchReport] = []
+    var reportIssues: [String] = []
     var isLoading = false
     var hasLoaded = false
     var lastError: String?
@@ -309,6 +310,7 @@ final class ResearchSuiteViewModel {
             runs = []
             inbox = []
             reports = []
+            reportIssues = []
             hasLoaded = true
             lastError = connectionState.displayText
             return
@@ -348,7 +350,7 @@ final class ResearchSuiteViewModel {
         inbox = loadedInbox.sorted { $0.createdAt > $1.createdAt }
         let decoded = Self.decodeReports(from: runs)
         reports = decoded.reports
-        errors += decoded.errors
+        reportIssues = decoded.errors
         lastError = errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 

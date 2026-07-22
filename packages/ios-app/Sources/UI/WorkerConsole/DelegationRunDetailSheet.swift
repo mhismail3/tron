@@ -18,6 +18,7 @@ struct DelegationRunDetailSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     summaryCard
                     if let result { resultContent(result) }
+                    requestContent
                     executionContent
                     actions
                 }
@@ -46,6 +47,20 @@ struct DelegationRunDetailSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronPurple)
+    }
+
+    private var requestContent: some View {
+        DisclosureGroup {
+            WorkerJSONBlock(value: run.input, accent: .tronPurple)
+                .padding(.top, 9)
+        } label: {
+            Label("Original task contract", systemImage: "doc.text")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronPurple)
+        }
+        .tint(.tronPurple)
+        .padding(12)
+        .sectionFill(.tronPurple, cornerRadius: 11, subtle: true, interactive: false)
     }
 
     private var summaryCard: some View {
@@ -207,6 +222,12 @@ struct DelegationRunDetailSheet: View {
                 detailRow("Attempt", "\(run.attemptCount)")
                 Divider().overlay(Color.tronBorder.opacity(0.45))
                 detailRow("Causal depth", "\(run.causalDepth)")
+                Divider().overlay(Color.tronBorder.opacity(0.45))
+                detailRow("Trigger", WorkerConsolePresentation.displayLabel(run.triggerKind))
+                if let created = WorkerConsolePresentation.timestamp(run.createdAt) {
+                    Divider().overlay(Color.tronBorder.opacity(0.45))
+                    detailRow("Created", created)
+                }
                 if let model {
                     Divider().overlay(Color.tronBorder.opacity(0.45))
                     detailRow("Model", ModelNameFormatter.format(model, style: .full))
@@ -223,6 +244,18 @@ struct DelegationRunDetailSheet: View {
                 }
                 Divider().overlay(Color.tronBorder.opacity(0.45))
                 VStack(alignment: .leading, spacing: 4) {
+                    Text("Idempotency")
+                        .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                        .foregroundStyle(.tronTextMuted)
+                    Text(run.idempotencyKey)
+                        .font(TronTypography.code(size: TronTypography.sizeSM))
+                        .foregroundStyle(.tronTextSecondary)
+                        .textSelection(.enabled)
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Divider().overlay(Color.tronBorder.opacity(0.45))
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Trace")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(.tronTextMuted)
@@ -233,6 +266,20 @@ struct DelegationRunDetailSheet: View {
                 }
                 .padding(11)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                if let sessionId = run.agentSessionId {
+                    Divider().overlay(Color.tronBorder.opacity(0.45))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Child session")
+                            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                            .foregroundStyle(.tronTextMuted)
+                        Text(sessionId)
+                            .font(TronTypography.code(size: TronTypography.sizeSM))
+                            .foregroundStyle(.tronTextSecondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .sectionFill(.tronSlate, cornerRadius: 11, subtle: true, interactive: false)
 

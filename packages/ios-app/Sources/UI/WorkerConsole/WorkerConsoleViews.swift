@@ -302,7 +302,10 @@ struct WorkerConsoleSheet: View {
                     title: "Needs attention",
                     detail: "Most recent durable worker issue."
                 )
-                WorkerInboxCard(item: issue)
+                WorkerInboxCard(
+                    item: issue,
+                    workerName: viewModel.workerName(for: issue.workerId)
+                )
             }
         }
     }
@@ -331,7 +334,12 @@ struct WorkerConsoleSheet: View {
                 )
             } else {
                 LazyVStack(spacing: 9) {
-                    ForEach(viewModel.activityInbox) { WorkerInboxCard(item: $0) }
+                    ForEach(viewModel.activityInbox) { item in
+                        WorkerInboxCard(
+                            item: item,
+                            workerName: viewModel.workerName(for: item.workerId)
+                        )
+                    }
                 }
                 if viewModel.activityInboxNextOffset != nil {
                     activityLoadMoreButton("Load older results") {
@@ -352,7 +360,11 @@ struct WorkerConsoleSheet: View {
             } else {
                 LazyVStack(spacing: 9) {
                     ForEach(viewModel.activityRuns) { run in
-                        WorkerRunCard(run: run, onOpenSession: onOpenSession)
+                        WorkerRunCard(
+                            run: run,
+                            workerName: viewModel.workerName(for: run.workerId),
+                            onOpenSession: onOpenSession
+                        )
                     }
                 }
                 if viewModel.activityRunsNextOffset != nil {

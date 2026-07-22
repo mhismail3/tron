@@ -1,14 +1,28 @@
 import SwiftUI
 
+enum WorkerDetailMode {
+    case operational
+    case technical
+}
+
+private enum WorkerDetailSection: Hashable {
+    case overview
+    case run
+    case activity
+    case manage
+}
+
 struct WorkerDetailSheet: View {
     @Bindable var viewModel: WorkerConsoleViewModel
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
     var onOpenSession: ((String) -> Void)?
+    var mode: WorkerDetailMode = .operational
 
     @State private var confirmRetire = false
     @State private var confirmPurge = false
     @State private var schemaExpanded = false
+    @State private var selectedSection = WorkerDetailSection.overview
 
     var body: some View {
         NavigationStack {
@@ -18,14 +32,12 @@ struct WorkerDetailSheet: View {
                         WorkerConsoleLoadingState(title: "Loading worker")
                     } else if let worker = viewModel.selectedWorker,
                               let inspection = viewModel.inspection {
-                        overview(worker, inspection: inspection)
-                        invocation(worker, inspection: inspection)
-                        triggers(inspection)
-                        versions(worker, inspection: inspection)
-                        recentRuns
-                        inbox
-                        audit(inspection)
-                        lifecycle(worker)
+                        TronSegmentedControl(
+                            options: sectionOptions,
+                            selection: $selectedSection,
+                            accent: .tronEmerald
+                        )
+                        detailContent(worker, inspection: inspection)
                     } else {
                         WorkerConsoleEmptyState(
                             symbol: "exclamationmark.triangle",
@@ -84,8 +96,39 @@ struct WorkerDetailSheet: View {
                 Text("Tron verifies a local recovery archive, then removes the retired worker and its live state. Restoring the archive is a manual operator action.")
             }
         }
-        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
+    }
+
+    private var sectionOptions: [(String, WorkerDetailSection)] {
+        switch mode {
+        case .operational:
+            [("Overview", .overview), ("Run", .run), ("Activity", .activity), ("Manage", .manage)]
+        case .technical:
+            [("Contract", .overview), ("Manage", .manage)]
+        }
+    }
+
+    @ViewBuilder
+    private func detailContent(
+        _ worker: WorkerSummaryDTO,
+        inspection: WorkerInspectResultDTO
+    ) -> some View {
+        switch selectedSection {
+        case .overview:
+            overview(worker, inspection: inspection)
+            invocation(worker, inspection: inspection, allowsInvocation: false)
+            triggers(inspection)
+        case .run:
+            invocation(worker, inspection: inspection, allowsInvocation: true)
+        case .activity:
+            recentRuns
+            inbox
+            audit(inspection)
+        case .manage:
+            versions(worker, inspection: inspection)
+            lifecycle(worker)
+        }
     }
 
     private func overview(_ worker: WorkerSummaryDTO, inspection: WorkerInspectResultDTO) -> some View {
@@ -142,14 +185,34 @@ struct WorkerDetailSheet: View {
                         .foregroundStyle(.tronTextMuted)
                     FlowLayout(spacing: 6) {
                         ForEach(provenance) { item in
-                            Text(item.revision.map { "\(item.source) · \($0)" } ?? item.source)
+                            Text(item.compactLabel)
                                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                                 .foregroundStyle(.tronInfo)
+                                .lineLimit(1)
+                                .frame(maxWidth: 190)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)
                                 .glassEffect(.regular.tint(Color.tronInfo.opacity(0.15)), in: .capsule)
+                                .accessibilityLabel(item.fullLabel)
                         }
                     }
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 7) {
+                            ForEach(provenance) { item in
+                                Text(item.fullLabel)
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(.top, 7)
+                    } label: {
+                        Text("Source details")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(.tronInfo)
+                    }
+                    .tint(.tronInfo)
                 }
             }
         }
@@ -159,14 +222,17 @@ struct WorkerDetailSheet: View {
 
     private func invocation(
         _ worker: WorkerSummaryDTO,
-        inspection: WorkerInspectResultDTO
+        inspection: WorkerInspectResultDTO,
+        allowsInvocation: Bool
     ) -> some View {
         let schema = inspection.bundle["inputSchema"]
         let fields = WorkerConsolePresentation.schemaFields(from: schema)
 
         return WorkerConsoleSection(
-            title: "Typed invocation",
-            detail: "Call the provider-facing tool with input validated by this worker's schema.",
+            title: allowsInvocation ? "New invocation" : "Input contract",
+            detail: allowsInvocation
+                ? "Run this worker with typed input validated by its immutable schema."
+                : "The immutable typed input accepted by this worker's direct tool.",
             accent: .tronEmerald
         ) {
             VStack(alignment: .leading, spacing: 13) {
@@ -198,7 +264,8 @@ struct WorkerDetailSheet: View {
                     .tint(.tronInfo)
                 }
 
-                VStack(alignment: .leading, spacing: 7) {
+                if allowsInvocation {
+                    VStack(alignment: .leading, spacing: 7) {
                     HStack {
                         Text("JSON input")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -235,42 +302,41 @@ struct WorkerDetailSheet: View {
                                     lineWidth: 0.5
                                 )
                         }
-                }
-
-                Button {
-                    Task {
-                        await viewModel.invoke(
-                            repository: repository,
-                            connectionState: connectionState
-                        )
                     }
-                } label: {
-                    HStack(spacing: 7) {
-                        if viewModel.isMutating {
-                            ProgressView().controlSize(.small).tint(.tronSurface)
-                        } else {
-                            Image(systemName: "play.fill")
+
+                    Button {
+                        Task {
+                            await viewModel.invoke(
+                                repository: repository,
+                                connectionState: connectionState
+                            )
                         }
-                        Text("Invoke \(worker.toolName)")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                    } label: {
+                        HStack(spacing: 7) {
+                            if viewModel.isMutating {
+                                ProgressView().controlSize(.small).tint(.tronSurface)
+                            } else {
+                                Image(systemName: "play.fill")
+                            }
+                            Text("Run worker")
+                        }
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronSurface)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(Color.tronEmerald, in: Capsule())
                     }
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(.tronSurface)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .background(Color.tronEmerald, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canInvokeSelectedWorker)
-                .opacity(viewModel.canInvokeSelectedWorker ? 1 : 0.45)
+                    .buttonStyle(.plain)
+                    .disabled(!viewModel.canInvokeSelectedWorker)
+                    .opacity(viewModel.canInvokeSelectedWorker ? 1 : 0.45)
 
-                if let result = viewModel.invocationResult {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Label("Invocation accepted", systemImage: "checkmark.circle.fill")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronSuccess)
-                        WorkerCodeBlock(text: result, accent: .tronSuccess)
+                    if let result = viewModel.invocationResult {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Label("Invocation accepted", systemImage: "checkmark.circle.fill")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(.tronSuccess)
+                            WorkerCodeBlock(text: result, accent: .tronSuccess)
+                        }
                     }
                 }
             }

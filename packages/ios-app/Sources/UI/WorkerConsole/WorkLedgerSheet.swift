@@ -85,11 +85,11 @@ struct WorkLedgerSheet: View {
                     Button {
                         showTechnicalDetails = true
                     } label: {
-                        Image(systemName: "wrench.and.screwdriver")
+                        Image(systemName: "info.circle")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .foregroundStyle(.tronEmerald)
                     }
-                    .accessibilityLabel("Open worker details")
+                    .accessibilityLabel("Open worker contract and controls")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -117,7 +117,8 @@ struct WorkLedgerSheet: View {
                 WorkerDetailSheet(
                     viewModel: consoleViewModel,
                     repository: repository,
-                    connectionState: connectionState
+                    connectionState: connectionState,
+                    mode: .technical
                 )
             }
             .sheet(isPresented: goalPresented) {
@@ -210,8 +211,7 @@ struct WorkLedgerSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
                 title: "Goals",
-                detail: "Useful outcomes and their durable lifecycle.",
-                addKind: .goal
+                detail: "Useful outcomes and their durable lifecycle."
             )
             TronSegmentedControl(
                 options: WorkLedgerGoalFilter.allCases.map { ($0.rawValue, $0) },
@@ -244,8 +244,7 @@ struct WorkLedgerSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
                 title: "Questions",
-                detail: "Open decisions and answers attached to the work that raised them.",
-                addKind: .question
+                detail: "Open decisions and answers attached to the work that raised them."
             )
             TronSegmentedControl(
                 options: WorkLedgerQuestionFilter.allCases.map { ($0.rawValue, $0) },
@@ -278,8 +277,7 @@ struct WorkLedgerSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
                 title: "Decisions",
-                detail: "Durable choices and the rationale behind them.",
-                addKind: .decision
+                detail: "Durable choices and the rationale behind them."
             )
             if viewModel.snapshot.decisions.isEmpty {
                 WorkerConsoleEmptyState(
@@ -327,23 +325,9 @@ struct WorkLedgerSheet: View {
 
     private func sectionHeader(
         title: String,
-        detail: String,
-        addKind: WorkLedgerCreateKind
+        detail: String
     ) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            WorkerConsoleSectionHeader(title: title, detail: detail)
-            Spacer(minLength: 0)
-            Button { createKind = addKind } label: {
-                Label("Add", systemImage: "plus")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronEmerald)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)).interactive(), in: .capsule)
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isMutating)
-        }
+        WorkerConsoleSectionHeader(title: title, detail: detail)
     }
 
     private var filteredGoals: [WorkLedgerGoal] {

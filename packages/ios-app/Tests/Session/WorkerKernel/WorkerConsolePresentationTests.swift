@@ -55,6 +55,28 @@ struct WorkerConsolePresentationTests {
         #expect(provenance.count == 1)
         #expect(provenance.first?.source == "Field:agent Runner Scenario")
         #expect(provenance.first?.revision == "2-authenticated-model")
+        #expect(provenance.first?.compactLabel == "agent Runner Scen… · 2-authe…")
+        #expect(provenance.first?.compactLabel.count ?? 0 <= 30)
+        #expect(provenance.first?.fullLabel.contains("2-authenticated-model") == true)
+    }
+
+    @Test("Activity summaries prefer useful nested fields and remain bounded")
+    func activitySummaryProjection() {
+        let item = WorkerInboxItemDTO(
+            inboxId: "inbox-1",
+            invocationId: "run-1",
+            workerId: "delegate",
+            severity: "info",
+            result: AnyCodable([
+                "output": [
+                    "summary": String(repeating: "useful result ", count: 20),
+                ],
+            ]),
+            seen: false,
+            createdAt: "2026-07-22T13:06:45Z"
+        )
+        #expect(WorkerConsolePresentation.inboxSummary(item).hasSuffix("…"))
+        #expect(WorkerConsolePresentation.inboxSummary(item).count == 80)
     }
 
     @Test("Engine primitive groups and projection reasons use stable operator language")

@@ -208,6 +208,25 @@ final class IPadSheetPresentationTests: XCTestCase {
         )
     }
 
+    func testWorkerConsoleSheetsAlwaysOfferMediumFirst() throws {
+        let sourceRoot = try projectRoot()
+            .appendingPathComponent("Sources/UI/WorkerConsole")
+        let files = try swiftFiles(under: sourceRoot)
+        let offenders = try files.flatMap { file -> [String] in
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return adaptivePresentationCalls(in: content).compactMap { call in
+                call.text.contains("[.medium, .large]")
+                    ? nil
+                    : "\(relativePath(file, under: sourceRoot)):\(call.line)"
+            }
+        }
+
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Worker sheets must open at medium and remain expandable: \(offenders.joined(separator: ", "))"
+        )
+    }
+
     func testPresentationBackgroundStylingStaysCentralized() throws {
         let sourceRoot = try projectRoot()
             .appendingPathComponent("Sources")
