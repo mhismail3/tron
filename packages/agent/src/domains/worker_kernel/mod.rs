@@ -135,8 +135,9 @@
 //! reports every truncation cause. An agent abort or server shutdown therefore
 //! cannot be held indefinitely by a home-directory search.
 //! The fixed `session_set_title` operation owns only durable mutation and live
-//! projection. Its target defaults to the current causal session, so models do
-//! not invent a synthetic "current" identifier. Title generation, eligibility,
+//! projection. Its only input is the title; the target is always the current
+//! causal session, so models cannot invent a synthetic "current" identifier or
+//! mutate an unrelated session. Title generation, eligibility,
 //! prompting, and normalization are worker policy and do not run implicitly in
 //! the agent prompt lifecycle.
 //! Raw web fetches default to 128 KiB and 30 seconds, expose explicit larger

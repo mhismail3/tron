@@ -305,11 +305,13 @@ fn web_fetch_defaults_protect_context_and_current_session_is_implicit() {
         .expect("session title contract");
     let title_schema = title.request_schema.as_ref().expect("title request schema");
     assert_eq!(title_schema["required"], json!(["title"]));
-    assert!(
-        title_schema["properties"]["sessionId"]["description"]
-            .as_str()
+    assert_eq!(
+        title_schema["properties"]
+            .as_object()
             .unwrap()
-            .contains("current causal session")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["title"]
     );
 }
 

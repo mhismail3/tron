@@ -118,8 +118,8 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         "worker_kernel::session_set_title",
         EffectClass::IdempotentWrite,
         RiskLevel::Medium,
-        json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"sessionId":{"type":"string","minLength":1,"description":"Optional explicit target. Omit to update the current causal session."},"title":{"type":"string","minLength":1,"maxLength":160}}}),
-        "Set an explicit durable title for the current causal session, or an explicitly named session, and publish the canonical live update. Adaptive title policy belongs in workers.",
+        json!({"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string","minLength":1,"maxLength":160}}}),
+        "Set an explicit durable title for the current causal session and publish the canonical live update. Adaptive title policy belongs in workers.",
     )?);
     specs.push(spec(
         "worker_kernel::core_proposal_create",

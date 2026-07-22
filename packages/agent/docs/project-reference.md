@@ -565,7 +565,7 @@ client payload.
 | `filesystem_edit` | `worker_kernel::filesystem_edit` | Exact occurrence-checked UTF-8 replacements with optional checksum and atomic publication |
 | `process_run` | `worker_kernel::process_run` | Local process with bounded output/timeout |
 | `web_fetch` | `worker_kernel::web_fetch` | Explicit raw UTF-8 HTTP(S) fetch with a 128 KiB/30-second default, explicit larger ceilings, redirect/status metadata, truncation evidence, and retained-content SHA-256 |
-| `session_set_title` | `worker_kernel::session_set_title` | Durable title update whose omitted target resolves to the current causal session |
+| `session_set_title` | `worker_kernel::session_set_title` | Durable title update for the current causal session; the model supplies only the title |
 
 Filesystem reads, listings, searches, writes, and edits execute off the async
 runtime thread. Reads never load the remainder of a truncated file; listing
@@ -1000,9 +1000,9 @@ exact output schema in every agent worker's durable execution contract. The raw
 fetch primitive remains deliberately non-semantic, but defaults to a 128-KiB
 response ceiling, accepts a bounded timeout, and records a digest of retained
 content so workers can reason about truncation and provenance without pushing
-unbounded pages into model context. `session_set_title` also defaults to the
-causal session, removing an unrelated session-id ceremony uncovered by the
-same ordinary authoring session.
+unbounded pages into model context. `session_set_title` now accepts only the
+title and derives its target from the causal session, removing an unrelated
+session-id ceremony uncovered by ordinary authoring sessions.
 
 The corrected worker keeps semantic extraction in worker custody. Its
 dependency-free `fetch_extract.py` helper performs bounded HTTP retrieval,
