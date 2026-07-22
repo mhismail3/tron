@@ -20,6 +20,12 @@
 //! - The v1beta API is strict about unknown fields; the converter
 //!   serialises only the documented schema. Adding a request feature
 //!   requires editing both converter and the Gemini API docs reference.
+//! - Gemini 3 uses lowercase discrete thinking levels and omits deprecated
+//!   sampling parameters. Provider request assembly removes a trailing model
+//!   prefill before transmission. Gemini 2.5 maps shared reasoning levels to
+//!   documented budgets and preserves the provider's dynamic/off defaults.
+//! - Stable IDs are picker rows; moving `*-latest` aliases resolve persisted
+//!   settings and requests without creating duplicate rows.
 //! - Streaming errors map to `ProviderError`
 //!   ([`crate::domains::model::providers::shared::provider`]) before reaching the orchestrator;
 //!   provider-specific wire errors never leak past [`stream_handler`].

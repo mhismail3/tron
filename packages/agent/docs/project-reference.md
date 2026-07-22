@@ -816,8 +816,23 @@ and accurate dedicated/declarative UI before its family advances.
 The kernel foundation for this program is present: mutable worker-owned state,
 isolated activation state, invocation-specific cancellation, durable child-
 agent session linkage, initial immutable presentation/suite bindings, verified
-profile snapshots/restoration, and archive-before-purge. Provider/model refresh
-is the next prerequisite before guided Work Ledger authoring.
+profile snapshots/restoration, and archive-before-purge.
+
+The cloud-model refresh is also present. OpenAI's registry leads with GPT-5.6
+Sol/Terra/Luna and keeps auth-path-specific limits; Anthropic leads with Claude
+Fable 5, Opus 4.8, and Sonnet 5 and encodes their current adaptive-thinking
+behavior; Google leads with Gemini 3.6 Flash and includes stable 3.5/3.1
+variants, current retirement state, and non-duplicating moving aliases. The
+Gemini adapter omits deprecated Gemini 3 sampling parameters, rejects trailing
+model prefills at request assembly, emits current lowercase thinking levels,
+and restores documented Gemini 2.5 dynamic/off budget defaults. The compiled
+default for a new profile is Claude Sonnet 5; an explicit model already stored
+in a profile always wins over that refreshed default. Catalog facts are checked
+against the providers' official [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model),
+[Anthropic model overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+and [Gemini model documentation](https://ai.google.dev/gemini-api/docs/latest-model).
+Ollama/Gemma discovery, local capability evidence, and provider UI status are
+the remaining provider prerequisite before guided Work Ledger authoring.
 
 ### Prior inventory coverage evidence
 

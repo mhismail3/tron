@@ -10,9 +10,9 @@ pub const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 /// Default base URL for the `OpenAI` Platform API.
 pub const DEFAULT_PLATFORM_BASE_URL: &str = "https://api.openai.com";
 
-/// Default model.
+/// Balanced default model for new OpenAI configurations.
 #[cfg(test)]
-pub const DEFAULT_MODEL: &str = "gpt-5.5";
+pub const DEFAULT_MODEL: &str = "gpt-5.6-terra";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API Endpoint

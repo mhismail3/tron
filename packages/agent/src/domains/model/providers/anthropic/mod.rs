@@ -25,6 +25,10 @@
 //!   `tool_result` shape; internal messages keep Tron tool-invocation names.
 //! - v1beta (ApiKey) rejects unknown fields; v1internal (OAuth / SDK)
 //!   tolerates them. Request builders branch on auth type.
+//! - The picker orders Claude Fable 5, Opus 4.8, and Sonnet 5 ahead of older
+//!   generations while retaining dated/short aliases only for resolution.
+//!   Fable always uses adaptive thinking; Sonnet 5 defaults to adaptive
+//!   thinking but honors an explicit disable request.
 
 pub mod cache_pruning;
 pub mod message_converter;

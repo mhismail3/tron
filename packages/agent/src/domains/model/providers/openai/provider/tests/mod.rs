@@ -442,6 +442,16 @@ fn reasoning_effort_options_overrides_config() {
 }
 
 #[test]
+fn reasoning_effort_max_is_preserved_for_gpt_56() {
+    let provider = OpenAIProvider::new(oauth_config("gpt-5.6-terra"));
+    let options = ProviderStreamOptions {
+        reasoning_effort: Some(ReasoningEffort::Max),
+        ..Default::default()
+    };
+    assert_eq!(provider.resolve_reasoning_effort(&options), "max");
+}
+
+#[test]
 fn reasoning_effort_config_overrides_settings() {
     let mut config = test_config();
     config.reasoning_effort = Some("high".into());

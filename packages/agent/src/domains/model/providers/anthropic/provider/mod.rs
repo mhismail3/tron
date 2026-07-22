@@ -192,15 +192,20 @@ impl AnthropicProvider {
 
     /// Build thinking configuration.
     fn build_thinking_config(&self, options: &ProviderStreamOptions) -> Option<Value> {
-        if options.enable_thinking != Some(true) {
-            return None;
-        }
-
         let model_info = get_claude_model(&self.config.model);
 
         // Model must support thinking (e.g., claude-3-haiku does not).
         if !model_info.is_some_and(|m| m.supports_thinking) {
             return None;
+        }
+
+        let is_fable_5 = self.config.model == "claude-fable-5";
+        let is_sonnet_5 = self.config.model == "claude-sonnet-5";
+        match options.enable_thinking {
+            Some(false) if is_sonnet_5 => return Some(json!({ "type": "disabled" })),
+            Some(false) if !is_fable_5 => return None,
+            None if !is_fable_5 && !is_sonnet_5 => return None,
+            _ => {}
         }
 
         if model_info.is_some_and(|m| m.supports_adaptive_thinking) {

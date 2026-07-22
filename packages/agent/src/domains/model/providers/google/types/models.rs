@@ -3,6 +3,9 @@ use std::sync::LazyLock;
 
 use super::GeminiThinkingLevel;
 
+const THINKING_MINIMAL_TO_HIGH: &[&str] = &["minimal", "low", "medium", "high"];
+const THINKING_LOW_TO_HIGH: &[&str] = &["low", "medium", "high"];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Model registry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +59,78 @@ pub struct GeminiModelInfo {
 pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert(
+        "gemini-3.6-flash",
+        GeminiModelInfo {
+            short_name: "Gemini 3.6 Flash",
+            context_window: 1_048_576,
+            max_output: 65_536,
+            supports_tools: true,
+            supports_images: true,
+            supports_thinking: true,
+            tier: "flash",
+            preview: false,
+            default_thinking_level: Some(GeminiThinkingLevel::Medium),
+            input_cost_per_million: 1.50,
+            output_cost_per_million: 7.50,
+            family: "Gemini 3.6",
+            description: "Gemini 3.6 Flash — Google's current balance of speed and intelligence for agentic and multimodal work.",
+            sort_order: 0,
+            recommended: true,
+            is_retired_generation: false,
+            is_retired: false,
+            deprecation_date: None,
+            supported_thinking_levels: THINKING_MINIMAL_TO_HIGH,
+        },
+    );
+    m.insert(
+        "gemini-3.5-flash",
+        GeminiModelInfo {
+            short_name: "Gemini 3.5 Flash",
+            context_window: 1_048_576,
+            max_output: 65_536,
+            supports_tools: true,
+            supports_images: true,
+            supports_thinking: true,
+            tier: "flash",
+            preview: false,
+            default_thinking_level: Some(GeminiThinkingLevel::Medium),
+            input_cost_per_million: 1.50,
+            output_cost_per_million: 9.00,
+            family: "Gemini 3.5",
+            description: "Gemini 3.5 Flash — sustained frontier performance for agentic coding and long-horizon tasks.",
+            sort_order: 1,
+            recommended: false,
+            is_retired_generation: true,
+            is_retired: false,
+            deprecation_date: None,
+            supported_thinking_levels: THINKING_MINIMAL_TO_HIGH,
+        },
+    );
+    m.insert(
+        "gemini-3.5-flash-lite",
+        GeminiModelInfo {
+            short_name: "Gemini 3.5 Flash-Lite",
+            context_window: 1_048_576,
+            max_output: 65_536,
+            supports_tools: true,
+            supports_images: true,
+            supports_thinking: true,
+            tier: "flash-lite",
+            preview: false,
+            default_thinking_level: Some(GeminiThinkingLevel::Minimal),
+            input_cost_per_million: 0.30,
+            output_cost_per_million: 2.50,
+            family: "Gemini 3.5",
+            description: "Gemini 3.5 Flash-Lite — low-cost, high-throughput agent and structured-data execution.",
+            sort_order: 2,
+            recommended: false,
+            is_retired_generation: false,
+            is_retired: false,
+            deprecation_date: None,
+            supported_thinking_levels: THINKING_MINIMAL_TO_HIGH,
+        },
+    );
+    m.insert(
         "gemini-3.1-pro-preview",
         GeminiModelInfo {
             short_name: "Gemini 3.1 Pro",
@@ -67,16 +142,40 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "pro",
             preview: true,
             default_thinking_level: Some(GeminiThinkingLevel::High),
-            input_cost_per_million: 1.25,
-            output_cost_per_million: 10.0,
-            family: "Gemini 3",
+            input_cost_per_million: 2.0,
+            output_cost_per_million: 12.0,
+            family: "Gemini 3.1",
             description: "Gemini 3.1 Pro (Preview) — optimized for software engineering and agentic workflows.",
-            sort_order: 0,
-            recommended: true,
+            sort_order: 3,
+            recommended: false,
             is_retired_generation: false,
             is_retired: false,
             deprecation_date: None,
-            supported_thinking_levels: &["low", "medium", "high"],
+            supported_thinking_levels: THINKING_LOW_TO_HIGH,
+        },
+    );
+    m.insert(
+        "gemini-3.1-flash-lite",
+        GeminiModelInfo {
+            short_name: "Gemini 3.1 Flash-Lite",
+            context_window: 1_048_576,
+            max_output: 65_536,
+            supports_tools: true,
+            supports_images: true,
+            supports_thinking: true,
+            tier: "flash-lite",
+            preview: false,
+            default_thinking_level: Some(GeminiThinkingLevel::Minimal),
+            input_cost_per_million: 0.25,
+            output_cost_per_million: 1.50,
+            family: "Gemini 3.1",
+            description: "Gemini 3.1 Flash-Lite — efficient multimodal execution for lightweight tasks at scale.",
+            sort_order: 4,
+            recommended: false,
+            is_retired_generation: true,
+            is_retired: false,
+            deprecation_date: None,
+            supported_thinking_levels: THINKING_MINIMAL_TO_HIGH,
         },
     );
     m.insert(
@@ -91,16 +190,16 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "pro",
             preview: true,
             default_thinking_level: Some(GeminiThinkingLevel::High),
-            input_cost_per_million: 1.25,
-            output_cost_per_million: 5.0,
-            family: "Gemini 3",
+            input_cost_per_million: 2.0,
+            output_cost_per_million: 12.0,
+            family: "Gemini 3.1",
             description: "Gemini 3 Pro (Preview) — retired, replaced by Gemini 3.1 Pro.",
-            sort_order: 1,
+            sort_order: 10,
             recommended: false,
-            is_retired_generation: false,
+            is_retired_generation: true,
             is_retired: true,
             deprecation_date: Some("2026-03-09"),
-            supported_thinking_levels: &["low", "medium", "high"],
+            supported_thinking_levels: &["low", "high"],
         },
     );
     m.insert(
@@ -111,20 +210,20 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             max_output: 65_536,
             supports_tools: true,
             supports_images: true,
-            supports_thinking: false,
+            supports_thinking: true,
             tier: "flash-lite",
             preview: true,
-            default_thinking_level: None,
+            default_thinking_level: Some(GeminiThinkingLevel::Minimal),
             input_cost_per_million: 0.25,
             output_cost_per_million: 1.50,
-            family: "Gemini 3",
-            description: "Gemini 3.1 Flash Lite (Preview) — cost-optimized for high-volume agentic tasks.",
-            sort_order: 3,
+            family: "Gemini 3.1",
+            description: "Gemini 3.1 Flash-Lite (Preview) — shut down; use a stable Flash-Lite model.",
+            sort_order: 11,
             recommended: false,
-            is_retired_generation: false,
-            is_retired: false,
-            deprecation_date: None,
-            supported_thinking_levels: &[],
+            is_retired_generation: true,
+            is_retired: true,
+            deprecation_date: Some("2026-05-25"),
+            supported_thinking_levels: THINKING_MINIMAL_TO_HIGH,
         },
     );
     m.insert(
@@ -135,44 +234,44 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             max_output: 65_536,
             supports_tools: true,
             supports_images: true,
-            supports_thinking: false,
+            supports_thinking: true,
             tier: "flash",
             preview: true,
-            default_thinking_level: None,
-            input_cost_per_million: 0.075,
-            output_cost_per_million: 0.3,
+            default_thinking_level: Some(GeminiThinkingLevel::High),
+            input_cost_per_million: 0.50,
+            output_cost_per_million: 3.0,
             family: "Gemini 3",
-            description: "Gemini 3 Flash (Preview) — flash tier (preview)",
-            sort_order: 2,
+            description: "Gemini 3 Flash (Preview) — active preview; Gemini 3.6 Flash is the stable replacement.",
+            sort_order: 12,
             recommended: false,
-            is_retired_generation: false,
+            is_retired_generation: true,
             is_retired: false,
             deprecation_date: None,
-            supported_thinking_levels: &[],
+            supported_thinking_levels: THINKING_MINIMAL_TO_HIGH,
         },
     );
     m.insert(
         "gemini-2.5-pro",
         GeminiModelInfo {
             short_name: "Gemini 2.5 Pro",
-            context_window: 2_097_152,
-            max_output: 16_384,
+            context_window: 1_048_576,
+            max_output: 65_536,
             supports_tools: true,
             supports_images: true,
             supports_thinking: true,
             tier: "pro",
             preview: false,
-            default_thinking_level: Some(GeminiThinkingLevel::High),
+            default_thinking_level: None,
             input_cost_per_million: 1.25,
-            output_cost_per_million: 5.0,
+            output_cost_per_million: 10.0,
             family: "Gemini 2.5",
             description: "Gemini 2.5 Pro — pro tier",
-            sort_order: 4,
+            sort_order: 20,
             recommended: false,
-            is_retired_generation: false,
+            is_retired_generation: true,
             is_retired: false,
             deprecation_date: None,
-            supported_thinking_levels: &["low", "medium", "high"],
+            supported_thinking_levels: THINKING_LOW_TO_HIGH,
         },
     );
     m.insert(
@@ -180,23 +279,23 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
         GeminiModelInfo {
             short_name: "Gemini 2.5 Flash",
             context_window: 1_048_576,
-            max_output: 16_384,
+            max_output: 65_536,
             supports_tools: true,
             supports_images: true,
             supports_thinking: true,
             tier: "flash",
             preview: false,
-            default_thinking_level: Some(GeminiThinkingLevel::Low),
-            input_cost_per_million: 0.075,
-            output_cost_per_million: 0.3,
+            default_thinking_level: None,
+            input_cost_per_million: 0.30,
+            output_cost_per_million: 2.50,
             family: "Gemini 2.5",
             description: "Gemini 2.5 Flash — flash tier",
-            sort_order: 5,
+            sort_order: 21,
             recommended: false,
-            is_retired_generation: false,
+            is_retired_generation: true,
             is_retired: false,
             deprecation_date: None,
-            supported_thinking_levels: &["minimal", "low", "medium", "high"],
+            supported_thinking_levels: THINKING_LOW_TO_HIGH,
         },
     );
     m.insert(
@@ -204,38 +303,57 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
         GeminiModelInfo {
             short_name: "Gemini 2.5 Flash Lite",
             context_window: 1_048_576,
-            max_output: 8_192,
+            max_output: 65_536,
             supports_tools: true,
             supports_images: true,
-            supports_thinking: false,
+            supports_thinking: true,
             tier: "flash-lite",
             preview: false,
             default_thinking_level: None,
-            input_cost_per_million: 0.037_5,
-            output_cost_per_million: 0.15,
+            input_cost_per_million: 0.10,
+            output_cost_per_million: 0.40,
             family: "Gemini 2.5",
             description: "Gemini 2.5 Flash Lite — flash-lite tier",
-            sort_order: 6,
+            sort_order: 22,
             recommended: false,
-            is_retired_generation: false,
+            is_retired_generation: true,
             is_retired: false,
             deprecation_date: None,
-            supported_thinking_levels: &[],
+            supported_thinking_levels: THINKING_LOW_TO_HIGH,
         },
     );
     m
 });
 
+/// Provider aliases resolve for persisted settings and API requests but do not
+/// create duplicate rows in the model picker.
+pub static GEMINI_MODEL_ALIASES: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("gemini-flash-latest", "gemini-3.5-flash"),
+            ("gemini-flash-lite-latest", "gemini-3.1-flash-lite"),
+            ("gemini-pro-latest", "gemini-3.1-pro-preview"),
+        ])
+    });
+
 /// Look up a Gemini model by ID.
 #[must_use]
 pub fn get_gemini_model(model_id: &str) -> Option<&'static GeminiModelInfo> {
-    GEMINI_MODELS.get(model_id)
+    GEMINI_MODELS.get(model_id).or_else(|| {
+        GEMINI_MODEL_ALIASES
+            .get(model_id)
+            .and_then(|canonical| GEMINI_MODELS.get(canonical))
+    })
 }
 
 /// Get all known model IDs.
 #[must_use]
 pub fn all_gemini_model_ids() -> Vec<&'static str> {
-    GEMINI_MODELS.keys().copied().collect()
+    GEMINI_MODELS
+        .keys()
+        .chain(GEMINI_MODEL_ALIASES.keys())
+        .copied()
+        .collect()
 }
 
 impl GeminiModelInfo {
@@ -303,5 +421,8 @@ pub fn all_gemini_models_api_json() -> Vec<serde_json::Value> {
 /// Check if a model ID is a Gemini 3 model (uses `thinkingLevel` instead of `thinkingBudget`).
 #[must_use]
 pub fn is_gemini_3_model(model: &str) -> bool {
-    model.contains("gemini-3")
+    get_gemini_model(model).map_or_else(
+        || model.contains("gemini-3"),
+        |info| info.family.starts_with("Gemini 3"),
+    )
 }

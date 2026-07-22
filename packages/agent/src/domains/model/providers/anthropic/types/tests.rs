@@ -19,9 +19,9 @@ fn get_claude_model_opus_46() {
     assert!(info.supports_adaptive_thinking);
     assert!(info.supports_effort);
     assert!(info.supports_tools);
-    // 4.6 is no longer the recommended Opus (4.7 took the spot).
+    // 4.6 is no longer the recommended Opus.
     assert!(!info.recommended);
-    assert!(!info.retired_generation);
+    assert!(info.retired_generation);
 }
 
 #[test]
@@ -37,8 +37,8 @@ fn get_claude_model_sonnet_46() {
     assert_float_eq(info.input_cost_per_million, 3.0);
     assert_float_eq(info.output_cost_per_million, 15.0);
     assert_float_eq(info.cache_read_cost_per_million, 0.3);
-    assert!(info.recommended);
-    assert!(!info.retired_generation);
+    assert!(!info.recommended);
+    assert!(info.retired_generation);
 }
 
 #[test]
@@ -48,7 +48,8 @@ fn get_claude_model_opus_45() {
     assert!(info.supports_thinking);
     assert!(info.supports_thinking_beta_headers);
     assert!(!info.supports_adaptive_thinking);
-    assert!(!info.supports_effort);
+    assert!(info.supports_effort);
+    assert_eq!(info.reasoning_levels.unwrap(), ["low", "medium", "high"]);
     assert_eq!(info.max_output, 64_000);
 }
 
@@ -87,13 +88,51 @@ fn get_claude_model_unknown_returns_none() {
 #[test]
 fn all_claude_model_ids_contains_expected() {
     let ids = all_claude_model_ids();
+    assert!(ids.contains(&"claude-fable-5"));
+    assert!(ids.contains(&"claude-opus-4-8"));
+    assert!(ids.contains(&"claude-sonnet-5"));
     assert!(ids.contains(&"claude-opus-4-7"));
     assert!(ids.contains(&"claude-opus-4-6"));
     assert!(ids.contains(&"claude-sonnet-4-6"));
     assert!(ids.contains(&"claude-opus-4-5-20251101"));
     assert!(ids.contains(&"claude-sonnet-4-5-20250929"));
     assert!(ids.contains(&"claude-3-haiku-20240307"));
-    assert_eq!(ids.len(), 11); // 11 models total
+    assert!(ids.contains(&"claude-haiku-4-5"));
+    assert_eq!(ids.len(), 17); // 14 canonical models plus three aliases
+}
+
+#[test]
+fn current_claude_models_match_provider_limits_and_pricing() {
+    for (id, context, output, input_price, output_price) in [
+        ("claude-fable-5", 1_000_000, 128_000, 10.0, 50.0),
+        ("claude-opus-4-8", 1_000_000, 128_000, 5.0, 25.0),
+        ("claude-sonnet-5", 1_000_000, 128_000, 3.0, 15.0),
+        ("claude-haiku-4-5-20251001", 200_000, 64_000, 1.0, 5.0),
+    ] {
+        let info = get_claude_model(id).unwrap();
+        assert_eq!(info.context_window, context, "{id}");
+        assert_eq!(info.max_output, output, "{id}");
+        assert_float_eq(info.input_cost_per_million, input_price);
+        assert_float_eq(info.output_cost_per_million, output_price);
+        assert!(info.supports_tools, "{id}");
+        assert!(info.supports_images, "{id}");
+    }
+    assert_eq!(DEFAULT_MODEL, "claude-sonnet-5");
+}
+
+#[test]
+fn pre_46_aliases_resolve_without_duplicate_picker_rows() {
+    assert_eq!(
+        get_claude_model("claude-haiku-4-5").unwrap().short_name,
+        "Haiku 4.5"
+    );
+    let models = all_claude_models_api_json();
+    let haiku = models
+        .iter()
+        .find(|model| model["id"] == "claude-haiku-4-5-20251001")
+        .unwrap();
+    assert_eq!(haiku["aliasIds"], serde_json::json!(["claude-haiku-4-5"]));
+    assert!(!models.iter().any(|model| model["id"] == "claude-haiku-4-5"));
 }
 
 // -- SystemPromptBlock --
@@ -401,15 +440,15 @@ fn to_api_json_opus_46() {
     assert!(j["reasoningLevels"].is_array());
     assert_eq!(j["defaultReasoningLevel"], "high");
     assert_eq!(j["recommended"], false);
-    assert_eq!(j["isRetiredGeneration"], false);
+    assert_eq!(j["isRetiredGeneration"], true);
     assert!(j["releaseDate"].is_string());
     assert!(j["sortOrder"].is_number());
 }
 
 #[test]
 fn to_api_json_no_reasoning() {
-    let m = get_claude_model("claude-opus-4-5-20251101").unwrap();
-    let j = m.to_api_json("claude-opus-4-5-20251101");
+    let m = get_claude_model("claude-sonnet-4-5-20250929").unwrap();
+    let j = m.to_api_json("claude-sonnet-4-5-20250929");
     assert_eq!(j["supportsReasoning"], false);
     assert!(j.get("reasoningLevels").is_none());
     assert!(j.get("defaultReasoningLevel").is_none());
@@ -420,7 +459,7 @@ fn to_api_json_retired() {
     let m = get_claude_model("claude-3-7-sonnet-20250219").unwrap();
     let j = m.to_api_json("claude-3-7-sonnet-20250219");
     assert_eq!(j["isDeprecated"], true);
-    assert_eq!(j["deprecationDate"], "2025-10-01");
+    assert_eq!(j["deprecationDate"], "2026-02-19");
     assert_eq!(j["isRetiredGeneration"], true);
 }
 
@@ -435,12 +474,13 @@ fn to_api_json_not_retired_no_field() {
 #[test]
 fn all_claude_models_api_json_sorted() {
     let models = all_claude_models_api_json();
-    assert_eq!(models.len(), 11);
-    assert_eq!(models[0]["id"], "claude-opus-4-7");
+    assert_eq!(models.len(), 14);
+    assert_eq!(models[0]["id"], "claude-fable-5");
     assert_eq!(models[0]["sortOrder"], 0);
-    assert_eq!(models[1]["id"], "claude-opus-4-6");
-    assert_eq!(models[10]["id"], "claude-3-haiku-20240307");
-    assert_eq!(models[10]["sortOrder"], 10);
+    assert_eq!(models[1]["id"], "claude-opus-4-8");
+    assert_eq!(models[2]["id"], "claude-sonnet-5");
+    assert_eq!(models[13]["id"], "claude-3-haiku-20240307");
+    assert_eq!(models[13]["sortOrder"], 41);
 }
 
 #[test]
@@ -460,13 +500,13 @@ fn get_claude_model_opus_4_7_tools() {
     assert!(info.supports_adaptive_thinking);
     assert!(!info.supports_thinking_beta_headers);
     assert!(info.supports_effort);
-    assert_eq!(info.default_reasoning_level, Some("xhigh"));
+    assert_eq!(info.default_reasoning_level, Some("high"));
     assert_eq!(info.thinking_display, Some("summarized"));
     assert_eq!(info.input_cost_per_million, 5.0);
     assert_eq!(info.output_cost_per_million, 25.0);
-    assert!(info.recommended);
-    assert!(!info.retired_generation);
-    assert_eq!(info.sort_order, 0);
+    assert!(!info.recommended);
+    assert!(info.retired_generation);
+    assert_eq!(info.sort_order, 10);
 }
 
 #[test]
@@ -490,8 +530,8 @@ fn to_api_json_opus_4_7_exposes_xhigh() {
     let m = get_claude_model("claude-opus-4-7").unwrap();
     let j = m.to_api_json("claude-opus-4-7");
     assert_eq!(j["id"], "claude-opus-4-7");
-    assert_eq!(j["recommended"], true);
-    assert_eq!(j["defaultReasoningLevel"], "xhigh");
+    assert_eq!(j["recommended"], false);
+    assert_eq!(j["defaultReasoningLevel"], "high");
     let levels = j["reasoningLevels"].as_array().unwrap();
     assert!(levels.iter().any(|v| v == "xhigh"));
 }

@@ -17,6 +17,43 @@ fn default_model_exists() {
 }
 
 #[test]
+fn gpt_56_family_matches_current_provider_contracts() {
+    for (id, input, output, cached) in [
+        ("gpt-5.6-sol", 5.0, 30.0, 0.50),
+        ("gpt-5.6-terra", 2.50, 15.0, 0.25),
+        ("gpt-5.6-luna", 1.0, 6.0, 0.10),
+    ] {
+        let platform = get_openai_model_profile(id, OpenAIAuthPath::PlatformApiKey)
+            .unwrap()
+            .1;
+        let codex = get_openai_model_profile(id, OpenAIAuthPath::ChatGptCodex)
+            .unwrap()
+            .1;
+        assert_eq!(platform.context_window, 1_050_000, "{id}");
+        assert_eq!(platform.max_output, 128_000, "{id}");
+        assert_eq!(codex.context_window, 272_000, "{id}");
+        assert_eq!(codex.max_context_window, Some(1_050_000), "{id}");
+        assert_eq!(platform.default_reasoning_level, "medium", "{id}");
+        assert!(platform.reasoning_levels.contains(&"none"), "{id}");
+        assert!(platform.reasoning_levels.contains(&"max"), "{id}");
+        assert!(!codex.reasoning_levels.contains(&"none"), "{id}");
+        assert!(codex.reasoning_levels.contains(&"max"), "{id}");
+        assert_float_eq(platform.input_cost_per_million, input);
+        assert_float_eq(platform.output_cost_per_million, output);
+        assert_eq!(platform.cache_read_cost_per_million, Some(cached));
+    }
+    assert!(get_openai_model("gpt-5.6-terra").unwrap().recommended);
+}
+
+#[test]
+fn gpt_56_alias_resolves_to_sol_without_rewriting_requests() {
+    let model = get_openai_model("openai/gpt-5.6").unwrap();
+    assert_eq!(model.id, "gpt-5.6-sol");
+    assert_eq!(canonical_openai_model_id("gpt-5.6"), Some("gpt-5.6-sol"));
+    assert_eq!(openai_request_model_id("gpt-5.6"), "gpt-5.6");
+}
+
+#[test]
 fn gpt_55_has_distinct_platform_and_codex_profiles() {
     let platform = get_openai_model_profile("gpt-5.5", OpenAIAuthPath::PlatformApiKey)
         .unwrap()
@@ -113,6 +150,9 @@ fn platform_only_models_are_unavailable_on_codex_path() {
 #[test]
 fn codex_catalog_models_use_272k_context() {
     for id in [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
         "gpt-5.5",
         "gpt-5.4",
         "gpt-5.4-mini",
@@ -124,11 +164,12 @@ fn codex_catalog_models_use_272k_context() {
             .1;
         assert_eq!(profile.context_window, 272_000, "{id}");
         assert_eq!(profile.max_output, 128_000, "{id}");
-        assert_eq!(
-            profile.reasoning_levels,
-            &["low", "medium", "high", "xhigh"],
-            "{id}"
-        );
+        let expected: &[&str] = if id.starts_with("gpt-5.6") {
+            &["low", "medium", "high", "xhigh", "max"]
+        } else {
+            &["low", "medium", "high", "xhigh"]
+        };
+        assert_eq!(profile.reasoning_levels, expected, "{id}");
     }
 }
 
@@ -302,10 +343,12 @@ fn gpt_53_codex_not_retired() {
 #[test]
 fn all_openai_models_api_json_sorted() {
     let models = all_openai_models_api_json();
-    assert_eq!(models.len(), 6);
+    assert_eq!(models.len(), 9);
     // First model in each family should have lowest sort_order
-    assert_eq!(models[0]["id"], "gpt-5.5");
+    assert_eq!(models[0]["id"], "gpt-5.6-sol");
     assert_eq!(models[0]["sortOrder"], 0);
+    assert_eq!(models[1]["id"], "gpt-5.6-terra");
+    assert_eq!(models[1]["recommended"], true);
     assert!(models.iter().all(|m| m["apiEndpoint"] == "codex"));
     assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
     assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
@@ -318,7 +361,13 @@ fn all_openai_models_api_json_sorted() {
 #[test]
 fn platform_model_list_uses_platform_profile() {
     let models = all_openai_models_api_json_for_auth_path(OpenAIAuthPath::PlatformApiKey);
-    assert_eq!(models.len(), 40);
+    assert_eq!(models.len(), 43);
+    let sol = models.iter().find(|m| m["id"] == "gpt-5.6-sol").unwrap();
+    assert_eq!(sol["contextWindow"], 1_050_000);
+    assert_eq!(
+        sol["reasoningLevels"].as_array().unwrap().last().unwrap(),
+        "max"
+    );
     let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
     assert_eq!(gpt55["contextWindow"], 1_050_000);
     assert_eq!(gpt55["apiEndpoint"], "platform");
@@ -355,6 +404,10 @@ fn model_unknown_returns_none() {
 #[test]
 fn all_model_ids_contains_expected() {
     let ids = all_openai_model_ids();
+    assert!(ids.contains(&"gpt-5.6"));
+    assert!(ids.contains(&"gpt-5.6-sol"));
+    assert!(ids.contains(&"gpt-5.6-terra"));
+    assert!(ids.contains(&"gpt-5.6-luna"));
     assert!(ids.contains(&"gpt-5.5"));
     assert!(ids.contains(&"gpt-5.5-2026-04-23"));
     assert!(ids.contains(&"gpt-5.4-nano"));

@@ -23,6 +23,10 @@
 //! - Context-window, max-output, reasoning, and verbosity defaults are selected
 //!   from the active auth-path profile. The shared model-only registry is only
 //!   a conservative default for call sites without credential context.
+//! - GPT-5.6 Sol, Terra, and Luna expose the provider's common 1.05M Platform
+//!   context, 128K output ceiling, and `max` reasoning effort. The ChatGPT
+//!   Codex path retains a conservative 272K default while advertising the
+//!   larger opt-in ceiling.
 //! - `model.list` surfaces streaming-capable models for the active auth path.
 //!   Provider-retired OpenAI models stay visible with replacement metadata, but
 //!   `model.switch` rejects them so new runs do not select unavailable IDs.

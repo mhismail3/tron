@@ -110,7 +110,7 @@ mod tests {
     fn missing_file_uses_compiled_defaults() {
         let root = tempfile::tempdir().unwrap();
         let settings = load_settings_from_path(&root.path().join("settings.toml")).unwrap();
-        assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
+        assert_eq!(settings.server.default_model, "claude-sonnet-5");
         assert_eq!(settings.server.heartbeat_interval_ms, 30_000);
     }
 
@@ -122,7 +122,17 @@ mod tests {
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.server.heartbeat_interval_ms, 45_000);
-        assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
+        assert_eq!(settings.server.default_model, "claude-sonnet-5");
+    }
+
+    #[test]
+    fn persisted_model_selection_survives_compiled_default_refresh() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("settings.toml");
+        std::fs::write(&path, "[server]\ndefaultModel = \"gpt-5.5\"\n").unwrap();
+
+        let settings = load_settings_from_path(&path).unwrap();
+        assert_eq!(settings.server.default_model, "gpt-5.5");
     }
 
     #[test]

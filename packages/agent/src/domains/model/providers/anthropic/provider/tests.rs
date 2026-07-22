@@ -371,6 +371,45 @@ fn thinking_config_adaptive_opus_4_7_opts_in_to_summarized() {
 }
 
 #[test]
+fn thinking_config_fable_5_stays_adaptive_when_disable_is_requested() {
+    let mut cfg = api_key_config();
+    cfg.model = "claude-fable-5".into();
+    let provider = AnthropicProvider::new(cfg);
+    let options = ProviderStreamOptions {
+        enable_thinking: Some(false),
+        ..Default::default()
+    };
+    let config = provider.build_thinking_config(&options).unwrap();
+    assert_eq!(config["type"], "adaptive");
+    assert_eq!(config["display"], "summarized");
+}
+
+#[test]
+fn thinking_config_sonnet_5_encodes_explicit_disable() {
+    let mut cfg = api_key_config();
+    cfg.model = "claude-sonnet-5".into();
+    let provider = AnthropicProvider::new(cfg);
+    let options = ProviderStreamOptions {
+        enable_thinking: Some(false),
+        ..Default::default()
+    };
+    let config = provider.build_thinking_config(&options).unwrap();
+    assert_eq!(config, serde_json::json!({ "type": "disabled" }));
+}
+
+#[test]
+fn thinking_config_sonnet_5_defaults_to_visible_adaptive_thinking() {
+    let mut cfg = api_key_config();
+    cfg.model = "claude-sonnet-5".into();
+    let provider = AnthropicProvider::new(cfg);
+    let config = provider
+        .build_thinking_config(&ProviderStreamOptions::default())
+        .unwrap();
+    assert_eq!(config["type"], "adaptive");
+    assert_eq!(config["display"], "summarized");
+}
+
+#[test]
 fn thinking_config_budget_older_model() {
     let mut cfg = api_key_config();
     cfg.model = "claude-sonnet-4-5-20250929".into();

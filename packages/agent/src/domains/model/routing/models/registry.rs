@@ -684,11 +684,17 @@ mod tests {
         assert!(ids.contains(&GPT_4_1));
         assert!(ids.contains(&O3));
         assert!(ids.contains(&GPT_OSS_120B));
+        assert!(ids.contains(&GEMINI_3_6_FLASH));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
         assert!(ids.contains(&GEMMA4_E4B));
-        // Total = 11 Anthropic + 82 OpenAI ids/aliases + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 118
-        assert_eq!(ids.len(), 118);
+        let provider_total = all_claude_model_ids().len()
+            + all_openai_model_ids().len()
+            + all_gemini_model_ids().len()
+            + all_minimax_model_ids().len()
+            + all_kimi_model_ids().len()
+            + all_ollama_model_ids().len();
+        assert_eq!(ids.len(), provider_total);
     }
 }

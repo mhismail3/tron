@@ -90,9 +90,11 @@ pub struct OpenAIModelInfo {
 }
 
 const REASONING_NONE_TO_XHIGH: &[&str] = &["none", "low", "medium", "high", "xhigh"];
+const REASONING_NONE_TO_MAX: &[&str] = &["none", "low", "medium", "high", "xhigh", "max"];
 const REASONING_NONE_TO_HIGH: &[&str] = &["none", "low", "medium", "high"];
 const REASONING_MINIMAL_TO_HIGH: &[&str] = &["minimal", "low", "medium", "high"];
 const REASONING_LOW_TO_XHIGH: &[&str] = &["low", "medium", "high", "xhigh"];
+const REASONING_LOW_TO_MAX: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 const REASONING_MEDIUM_TO_XHIGH: &[&str] = &["medium", "high", "xhigh"];
 const REASONING_LOW_TO_HIGH: &[&str] = &["low", "medium", "high"];
 const REASONING_HIGH_ONLY: &[&str] = &["high"];

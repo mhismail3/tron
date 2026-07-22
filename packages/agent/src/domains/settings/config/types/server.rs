@@ -30,7 +30,7 @@ impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             heartbeat_interval_ms: 30_000,
-            default_model: "claude-sonnet-4-6".to_string(),
+            default_model: "claude-sonnet-5".to_string(),
             default_workspace: None,
             tailscale_ip: None,
         }
@@ -86,7 +86,7 @@ mod tests {
     fn server_defaults() {
         let s = ServerSettings::default();
         assert_eq!(s.heartbeat_interval_ms, 30_000);
-        assert_eq!(s.default_model, "claude-sonnet-4-6");
+        assert_eq!(s.default_model, "claude-sonnet-5");
         assert!(s.default_workspace.is_none());
         // tailscaleIp defaults absent (populated by installer scripts).
         assert!(s.tailscale_ip.is_none());

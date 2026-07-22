@@ -105,14 +105,16 @@ fn api_url_api_key_custom_base() {
 // ── Generation config ─────────────────────────────────────────────
 
 #[test]
-fn gen_config_gemini3_forces_temperature_1() {
+fn gen_config_gemini3_omits_deprecated_sampling_parameters() {
     let provider = GoogleProvider::new(oauth_config());
     let options = ProviderStreamOptions {
         temperature: Some(0.7),
         ..Default::default()
     };
     let gc = provider.build_generation_config(&options);
-    assert_eq!(gc.temperature, Some(1.0));
+    assert!(gc.temperature.is_none());
+    assert!(gc.top_p.is_none());
+    assert!(gc.top_k.is_none());
 }
 
 #[test]
@@ -161,7 +163,7 @@ fn thinking_config_gemini3_uses_level() {
     let opts = ProviderStreamOptions::default();
     let tc = provider.build_thinking_config(true, &opts).unwrap();
     assert_eq!(tc.include_thoughts, Some(true));
-    assert_eq!(tc.thinking_level.as_deref(), Some("HIGH"));
+    assert_eq!(tc.thinking_level.as_deref(), Some("high"));
     assert!(tc.thinking_budget.is_none());
 }
 
@@ -173,12 +175,13 @@ fn thinking_config_gemini3_custom_level() {
     let provider = GoogleProvider::new(config);
     let opts = ProviderStreamOptions::default();
     let tc = provider.build_thinking_config(true, &opts).unwrap();
-    assert_eq!(tc.thinking_level.as_deref(), Some("LOW"));
+    assert_eq!(tc.thinking_level.as_deref(), Some("low"));
 }
 
 #[test]
 fn thinking_config_gemini3_per_request_level_overrides_config() {
     let mut config = oauth_config();
+    config.model = "gemini-3.1-pro-preview".into();
     config.thinking_level =
         Some(crate::domains::model::providers::google::types::GeminiThinkingLevel::Low);
     let provider = GoogleProvider::new(config);
@@ -187,7 +190,7 @@ fn thinking_config_gemini3_per_request_level_overrides_config() {
         ..Default::default()
     };
     let tc = provider.build_thinking_config(true, &opts).unwrap();
-    assert_eq!(tc.thinking_level.as_deref(), Some("THINKING_MEDIUM"));
+    assert_eq!(tc.thinking_level.as_deref(), Some("medium"));
 }
 
 #[test]
@@ -197,7 +200,7 @@ fn thinking_config_gemini25_uses_budget() {
     let tc = provider.build_thinking_config(false, &opts).unwrap();
     assert_eq!(tc.include_thoughts, Some(true));
     assert!(tc.thinking_level.is_none());
-    assert_eq!(tc.thinking_budget, Some(10_000));
+    assert_eq!(tc.thinking_budget, Some(-1));
 }
 
 #[test]
@@ -224,26 +227,34 @@ fn thinking_config_gemini25_per_request_budget_overrides_config() {
 }
 
 #[test]
-fn thinking_config_none_for_non_thinking_model() {
+fn thinking_config_gemini25_maps_shared_reasoning_level_to_budget() {
+    let provider = GoogleProvider::new(api_key_config());
+    let opts = ProviderStreamOptions {
+        thinking_level: Some("THINKING_MEDIUM".into()),
+        ..Default::default()
+    };
+    let tc = provider.build_thinking_config(false, &opts).unwrap();
+    assert_eq!(tc.thinking_budget, Some(8_192));
+}
+
+#[test]
+fn thinking_config_gemini25_flash_lite_defaults_off() {
     let mut config = api_key_config();
     config.model = "gemini-2.5-flash-lite".into();
     let provider = GoogleProvider::new(config);
     let opts = ProviderStreamOptions::default();
-    let tc = provider.build_thinking_config(false, &opts);
-    assert!(tc.is_none());
+    let tc = provider.build_thinking_config(false, &opts).unwrap();
+    assert_eq!(tc.thinking_budget, Some(0));
 }
 
 #[test]
-fn thinking_config_none_for_gemini3_flash() {
+fn thinking_config_gemini3_flash_uses_current_high_default() {
     let mut config = api_key_config();
     config.model = "gemini-3-flash-preview".into();
     let provider = GoogleProvider::new(config);
     let opts = ProviderStreamOptions::default();
-    let tc = provider.build_thinking_config(true, &opts);
-    assert!(
-        tc.is_none(),
-        "gemini-3-flash-preview should not send thinkingConfig"
-    );
+    let tc = provider.build_thinking_config(true, &opts).unwrap();
+    assert_eq!(tc.thinking_level.as_deref(), Some("high"));
 }
 
 // ── System instruction ────────────────────────────────────────────
@@ -364,7 +375,7 @@ fn build_gen_config_includes_thinking_for_gemini3() {
     let tc = gc
         .thinking_config
         .expect("thinking config should be present for gemini-3.1-pro");
-    assert_eq!(tc.thinking_level.as_deref(), Some("HIGH"));
+    assert_eq!(tc.thinking_level.as_deref(), Some("high"));
     assert!(tc.thinking_budget.is_none());
     assert_eq!(tc.include_thoughts, Some(true));
 }
@@ -379,17 +390,20 @@ fn build_gen_config_includes_thinking_for_gemini25() {
         .thinking_config
         .expect("thinking config should be present for gemini-2.5-pro");
     assert!(tc.thinking_level.is_none());
-    assert_eq!(tc.thinking_budget, Some(10_000));
+    assert_eq!(tc.thinking_budget, Some(-1));
     assert_eq!(tc.include_thoughts, Some(true));
 }
 
 #[test]
-fn build_gen_config_no_thinking_for_non_thinking_model() {
+fn build_gen_config_includes_thinking_for_gemini3_flash() {
     let mut config = api_key_config();
     config.model = "gemini-3-flash-preview".into();
     let provider = GoogleProvider::new(config);
     let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-    assert!(gc.thinking_config.is_none());
+    assert_eq!(
+        gc.thinking_config.unwrap().thinking_level.as_deref(),
+        Some("high")
+    );
 }
 
 #[test]
@@ -414,7 +428,7 @@ fn api_key_body_thinking_nested_not_top_level() {
     );
     assert_eq!(
         body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
-        "HIGH"
+        "high"
     );
     // thinkingConfig MUST NOT be at top level (this was the bug)
     assert!(
@@ -451,7 +465,7 @@ fn oauth_body_thinking_nested_not_top_level() {
 }
 
 #[test]
-fn api_key_body_no_thinking_for_flash() {
+fn api_key_body_uses_thinking_for_gemini3_flash() {
     let mut config = api_key_config();
     config.model = "gemini-3-flash-preview".into();
     let provider = GoogleProvider::new(config);
@@ -466,7 +480,33 @@ fn api_key_body_no_thinking_for_flash() {
     let body = provider.build_request_body(&context, &gc);
 
     assert!(body.get("thinkingConfig").is_none());
-    assert!(body["generationConfig"].get("thinkingConfig").is_none());
+    assert_eq!(
+        body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+        "high"
+    );
+}
+
+#[test]
+fn current_gemini3_request_drops_trailing_model_prefill() {
+    let mut config = oauth_config();
+    config.model = "gemini-3.6-flash".into();
+    let provider = GoogleProvider::new(config);
+    let context = Context {
+        system_prompt: None,
+        messages: vec![
+            crate::shared::protocol::messages::Message::user("question"),
+            crate::shared::protocol::messages::Message::assistant("prefill"),
+        ]
+        .into(),
+        tools: None,
+        working_directory: None,
+        server_origin: None,
+    };
+    let config = provider.build_generation_config(&ProviderStreamOptions::default());
+    let body = provider.build_request_body(&context, &config);
+    let contents = body["contents"].as_array().unwrap();
+    assert_eq!(contents.len(), 1);
+    assert_eq!(contents[0]["role"], "user");
 }
 
 // ── parse_api_error (via shared crate::domains::model::providers::shared::error_parsing) ─────────────

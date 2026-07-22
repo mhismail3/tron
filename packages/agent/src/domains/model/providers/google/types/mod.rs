@@ -30,14 +30,14 @@ pub enum GeminiThinkingLevel {
 }
 
 impl GeminiThinkingLevel {
-    /// Convert to the uppercase string format the Gemini API expects.
+    /// Convert to the lowercase enum spelling used by the Gemini REST API.
     #[must_use]
     pub fn to_api_string(&self) -> &'static str {
         match self {
-            Self::Minimal => "MINIMAL",
-            Self::Low => "LOW",
-            Self::Medium => "MEDIUM",
-            Self::High => "HIGH",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
         }
     }
 }
@@ -322,12 +322,12 @@ pub struct SystemPart {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThinkingConfig {
-    /// Thinking level for Gemini 3 (uppercase: `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`).
+    /// Thinking level for Gemini 3 (`minimal`, `low`, `medium`, `high`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
-    /// Thinking budget in tokens for Gemini 2.5 (0-32768).
+    /// Thinking budget in tokens for Gemini 2.5 (`-1` selects dynamic thinking).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_budget: Option<u32>,
+    pub thinking_budget: Option<i32>,
     /// Whether to include thoughts in the response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_thoughts: Option<bool>,
@@ -434,7 +434,8 @@ pub struct GeminiApiError {
 mod models;
 
 pub use models::{
-    all_gemini_model_ids, all_gemini_models_api_json, get_gemini_model, is_gemini_3_model,
+    GeminiModelInfo, all_gemini_model_ids, all_gemini_models_api_json, get_gemini_model,
+    is_gemini_3_model,
 };
 
 /// Default API base URL (used for both API key and OAuth authentication).

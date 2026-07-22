@@ -173,7 +173,7 @@ mod tests {
         let (_dir, runtime) = seeded_runtime();
         let current = runtime.current();
 
-        assert_eq!(current.settings.server.default_model, "claude-sonnet-4-6");
+        assert_eq!(current.settings.server.default_model, "claude-sonnet-5");
         assert!(!current.source_hash.is_empty());
         assert!(!runtime.path.exists());
     }
@@ -208,7 +208,7 @@ mod tests {
             runtime.current().settings.server.default_model,
             "reload-test-model"
         );
-        assert_eq!(before.settings.server.default_model, "claude-sonnet-4-6");
+        assert_eq!(before.settings.server.default_model, "claude-sonnet-5");
         assert!(!Arc::ptr_eq(&before, &reloaded));
     }
 
