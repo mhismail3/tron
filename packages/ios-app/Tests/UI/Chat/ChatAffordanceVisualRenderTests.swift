@@ -139,10 +139,11 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                 InputBar(
                     state: state,
                     config: InputBarConfig(
+                        contextPercentage: 68,
                         currentModelInfo: nil,
                         readOnly: false
                     ),
-                    actions: InputBarActions()
+                    actions: InputBarActions(onContextTap: {})
                 )
             }
             .padding(.bottom, 20)

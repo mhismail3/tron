@@ -331,6 +331,8 @@ The composer owns:
 - camera, photo, and file pickers;
 - prepared attachment ids and encoded-size preflight against
   `hello.maxMessageSize`;
+- the compact server-derived context progress ring and its Session Context
+  presentation;
 - the trailing send/stop action.
 
 The primitive client has no fixed microphone capture or transcription stack.
@@ -346,9 +348,17 @@ prompt cannot disconnect the client or erase retryable content.
 
 Compaction and clear are direct server-owned session boundaries. Live events
 and reconstruction project the same typed token counts, reason, summary, and
-turn counts into timeline pills. Tapping a completed compaction opens only its
-event detail; iOS has no parallel context-control repository, resource audit
-sheet, hidden prompt memory editor, or Session Briefing surface.
+turn counts into timeline pills. Tapping a completed compaction opens its event
+detail.
+
+The composer context ring and minimal Session Context sheet consume only
+existing session truth: current context tokens, selected-model window,
+remaining capacity, accumulated model traffic and cost, automatic-compaction
+status, the existing model catalog/switch operation, and `session::fork`.
+Session actions are disabled while disconnected, compacting, or running a turn.
+There is no parallel context-control repository, resource/action audit,
+memory editor, or manual compact/clear façade. Those controls may appear only
+after the core exposes real production operations for them.
 
 ## Settings Parity
 

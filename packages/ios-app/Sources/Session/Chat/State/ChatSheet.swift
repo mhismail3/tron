@@ -75,6 +75,7 @@ struct LocalErrorDetailData: Equatable, Hashable {
 enum ChatSheet: Identifiable, Equatable {
     // Settings & Info
     case settings
+    case sessionContext
 
     case compactionDetail(CompactionDetailData)
 
@@ -91,6 +92,8 @@ enum ChatSheet: Identifiable, Equatable {
         switch self {
         case .settings:
             return "settings"
+        case .sessionContext:
+            return "sessionContext"
         case .compactionDetail:
             return "compaction"
         case .thinkingDetail:
@@ -111,6 +114,8 @@ enum ChatSheet: Identifiable, Equatable {
     static func == (lhs: ChatSheet, rhs: ChatSheet) -> Bool {
         switch (lhs, rhs) {
         case (.settings, .settings):
+            return true
+        case (.sessionContext, .sessionContext):
             return true
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2

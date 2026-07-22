@@ -60,6 +60,11 @@ final class SheetCoordinator {
         present(.settings)
     }
 
+    /// Show the session's current context telemetry and supported controls.
+    func showSessionContext() {
+        present(.sessionContext)
+    }
+
     /// Show compaction detail sheet
     func showCompactionDetail(
         tokensBefore: Int,

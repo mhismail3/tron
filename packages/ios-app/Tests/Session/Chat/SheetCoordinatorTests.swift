@@ -72,6 +72,12 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .settings)
     }
 
+    func testShowSessionContext() {
+        let coordinator = SheetCoordinator()
+        coordinator.showSessionContext()
+        XCTAssertEqual(coordinator.activeSheet, .sessionContext)
+    }
+
     func testShowThinkingDetail() {
         let coordinator = SheetCoordinator()
         coordinator.showThinkingDetail("Thinking")

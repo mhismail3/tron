@@ -72,6 +72,15 @@ struct InputBar: View {
 
                 inputField
 
+                if let onContextTap = actions.onContextTap {
+                    ContextProgressButton(
+                        contextPercentage: config.contextPercentage,
+                        modelName: config.currentModelInfo?.formattedModelName,
+                        isCompacting: config.isCompacting,
+                        onTap: onContextTap
+                    )
+                }
+
                 if !config.readOnly {
                     ComposerTrailingButton(
                         showStop: showStop,
@@ -321,6 +330,7 @@ extension Notification.Name {
         InputBar(
             state: previewState,
             config: InputBarConfig(
+                contextPercentage: 42,
                 currentModelInfo: nil,
                 inputHistory: nil,
                 readOnly: false

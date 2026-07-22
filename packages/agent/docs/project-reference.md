@@ -989,9 +989,12 @@ runs and inbox items; model calls retain the compact default.
 
 Compaction is a direct durable session boundary. Context clearing is a live
 transport event; the resulting context size is reflected by later session/token
-truth rather than an unwritten `context.cleared` storage row. The client renders
-both without a parallel context-control resource client or Session Briefing
-sheet.
+truth rather than an unwritten `context.cleared` storage row. The iOS composer
+projects that same token truth as a context ring. Its minimal Session Context
+sheet shows used/remaining/window tokens, session usage and cost, current-model
+selection through `model::switch`, automatic-compaction status, and forking
+through `session::fork`. It has no parallel context-control resource client,
+resource/action audit, memory editor, or fabricated manual compact/clear API.
 
 Settings exposes the Logs sheet in every iOS build configuration from its toolbar.
 While connected, Tron automatically ingests deduplicated client logs into the

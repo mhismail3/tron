@@ -16,6 +16,14 @@ struct ChatSheetTests {
         #expect(sheet.id == "settings")
     }
 
+    @Test("Session Context sheet has consistent id")
+    func testSessionContextSheetId() {
+        let sheet = ChatSheet.sessionContext
+
+        #expect(sheet.id == "sessionContext")
+        #expect(sheet == .sessionContext)
+    }
+
     @Test("Compaction detail has consistent id")
     func testCompactionDetailId() {
         let data1 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
@@ -55,6 +63,7 @@ struct ChatSheetTests {
 
         let sheets: [ChatSheet] = [
             .settings,
+            .sessionContext,
             .compactionDetail(compactionData),
             .thinkingDetail("content"),
             .toolInvocationDetail(toolData),
@@ -252,6 +261,15 @@ struct SheetCoordinatorTests {
         coordinator.showSettings()
 
         #expect(coordinator.activeSheet == .settings)
+    }
+
+    @Test("showSessionContext creates Session Context sheet")
+    func testShowSessionContextCreatesCorrectSheet() {
+        let coordinator = SheetCoordinator()
+
+        coordinator.showSessionContext()
+
+        #expect(coordinator.activeSheet == .sessionContext)
     }
 
     @Test("showCompactionDetail creates compaction sheet with data")

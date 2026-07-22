@@ -28,6 +28,25 @@ struct ChatSheetContent: View {
             }
                 .environment(\.dependencies, dependencies)
 
+        case .sessionContext:
+            SessionContextSheet(
+                contextState: viewModel.contextState,
+                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
+                currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
+                reasoningLevel: viewModel.inputBarState.reasoningLevel,
+                isConnected: dependencies.interactionPolicy.isConnected,
+                isAgentActive: viewModel.agentPhase.isActive,
+                isCompacting: viewModel.isCompacting,
+                isFork: eventStoreManager.sessions.first(where: { $0.id == sessionId })?.isFork == true,
+                modelRepository: dependencies.modelRepository,
+                onSelectModel: { model in
+                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                },
+                onFork: {
+                    try await eventStoreManager.forkSession(sessionId)
+                }
+            )
+
         case .compactionDetail(let data):
             CompactionDetailSheet(
                 tokensBefore: data.tokensBefore,

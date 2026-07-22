@@ -15,6 +15,7 @@ extension ChatView {
                         isConnected: services.connection.connectionState.isConnected,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         placeholderShowsProgress: !initialLoadComplete,
+                        contextPercentage: viewModel.contextState.contextPercentage,
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
                         readOnly: !(interactionPolicy?.isConnected ?? false),
@@ -40,7 +41,8 @@ extension ChatView {
                         onAttachmentError: { title, message in
                             viewModel.appendLocalError(dedupKey: "attachment.error.\(title)", title: title, message: message)
                         },
-                        onHistoryNavigate: { newText in viewModel.inputText = newText }
+                        onHistoryNavigate: { newText in viewModel.inputText = newText },
+                        onContextTap: { sheetCoordinator.showSessionContext() }
                     )
                 )
                 .id(sessionId)

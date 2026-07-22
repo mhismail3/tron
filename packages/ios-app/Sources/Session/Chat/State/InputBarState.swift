@@ -105,6 +105,8 @@ struct InputBarConfig {
     let placeholderText: String
     /// Whether the placeholder represents a shell-owned loading state.
     let placeholderShowsProgress: Bool
+    /// Server-derived percentage of the selected model's context window in use.
+    let contextPercentage: Int
 
     // MARK: - Model / Attachments
     let currentModelInfo: ModelInfo?
@@ -135,6 +137,7 @@ struct InputBarConfig {
         isConnected: Bool = true,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
+        contextPercentage: Int = 0,
         currentModelInfo: ModelInfo? = nil,
         inputHistory: InputHistoryStore? = nil,
         readOnly: Bool = false,
@@ -145,6 +148,7 @@ struct InputBarConfig {
         self.isConnected = isConnected
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress
+        self.contextPercentage = contextPercentage
         self.currentModelInfo = currentModelInfo
         self.inputHistory = inputHistory
         self.readOnly = readOnly
@@ -165,13 +169,17 @@ struct InputBarActions {
     // MARK: - History
     let onHistoryNavigate: ((String) -> Void)?
 
+    // MARK: - Session Context
+    let onContextTap: (() -> Void)?
+
     init(
         onSend: @escaping () -> Void = {},
         onAbort: @escaping () -> Void = {},
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
         onAttachmentError: @escaping (String, String) -> Void = { _, _ in },
-        onHistoryNavigate: ((String) -> Void)? = nil
+        onHistoryNavigate: ((String) -> Void)? = nil,
+        onContextTap: (() -> Void)? = nil
     ) {
         self.onSend = onSend
         self.onAbort = onAbort
@@ -179,5 +187,6 @@ struct InputBarActions {
         self.onRemoveAttachment = onRemoveAttachment
         self.onAttachmentError = onAttachmentError
         self.onHistoryNavigate = onHistoryNavigate
+        self.onContextTap = onContextTap
     }
 }
