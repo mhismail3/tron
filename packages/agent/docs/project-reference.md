@@ -920,6 +920,56 @@ fall back to the generic console. Work Ledger is therefore ready for ordinary
 field use; the next guided capability is the Research suite, not an additional
 kernel abstraction.
 
+### Guided Research Search proof
+
+The first Research-suite component was likewise authored from natural
+language by Tron in an ordinary `gpt-5.5` session. It is the profile-owned
+`research-search` command worker and projects the typed
+`worker_research_search` tool. Its immutable presentation envelope identifies
+Research suite contract version 1, component role `search`, and a non-primary
+suite member; clients therefore use the generic console until the complete
+four-worker Research experience exists.
+
+The contract accepts one bounded query plus optional result limit,
+include/exclude domains, publication window, Brave freshness/language/country,
+and the provider-neutral `fast`, `balanced`, or `deep` mode. Exa maps those
+modes to its current `fast`, `auto`, and `deep` search types. When both optional
+`provider-brave` and `provider-exa` bindings exist, the worker dispatches both
+requests concurrently, normalizes their different response shapes, merges
+canonical URLs, preserves per-provider ranks and request provenance, and
+returns deterministic combined ordering. One-provider failures retain useful
+results from the other provider. With neither binding configured, the command
+returns a successful typed `unavailable` result naming both missing logical
+bindings and makes no network request; absence of an optional provider is not
+worker failure.
+
+Guided inspection caught and corrected a first-version contract defect before
+the component advanced: the worker initially looked for informal credential
+environment names instead of the kernel-owned
+`TRON_SECRET_PROVIDER_BRAVE`/`TRON_SECRET_PROVIDER_EXA` projection. A second
+immutable version now uses only those names, maps current Exa modes, enforces
+Brave's 400-character/50-word query ceiling, and includes delayed local
+endpoints whose elapsed-time assertion distinguishes concurrent from sequential
+dispatch. This demonstrates that immutable provenance is evidence, not an
+excuse to accept the first generated bundle.
+
+Acceptance evidence for the corrected component covers:
+
+- deterministic Brave and Exa parsing without live credentials;
+- concurrent dual-provider dispatch, canonical-URL deduplication, stable
+  ranking, and secret-value redaction;
+- one-provider failure degradation, malformed-input handling, and the current
+  profile's actionable no-credential result;
+- same-session direct-tool projection and a healthy durable run;
+- retained-version rollback to the first bundle and restoration to the
+  corrected bundle; and
+- activation and invocation of the corrected version after a server restart.
+
+The Search component is therefore independently proven, while live result
+quality remains intentionally unclaimed until at least one real Brave or Exa
+credential is configured. Source Review, Citation, and the Research coordinator
+remain separate guided workers and have not been fabricated by this component.
+
 ### Prior inventory coverage evidence
 
 The following detail is retained only to cross-check the family map above.
