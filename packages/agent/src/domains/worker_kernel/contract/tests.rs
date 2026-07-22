@@ -2,6 +2,7 @@ use super::*;
 use crate::domains::worker_kernel::types::{
     BUNDLE_SCHEMA, SourceProvenance, WorkerBundle, WorkerDependency, WorkerRunner, WorkerTrigger,
 };
+use crate::engine::DedupeScope;
 
 #[test]
 fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
@@ -28,6 +29,58 @@ fn engine_surface_snapshot_is_client_introspection_not_model_vocabulary() {
             .as_object()
             .is_some_and(|properties| !properties.contains_key("tools"))
     );
+}
+
+#[test]
+fn profile_owned_worker_mutations_do_not_require_a_session() {
+    let definitions = function_definitions().expect("worker-kernel contracts");
+    for function_id in [
+        "worker_kernel::upsert",
+        "worker_kernel::invoke",
+        "worker_kernel::cancel",
+        "worker_kernel::stop",
+        "worker_kernel::disable",
+        "worker_kernel::enable",
+        "worker_kernel::retire",
+        "worker_kernel::purge",
+        "worker_kernel::rollback",
+        "worker_kernel::webhook_rotate",
+        "worker_kernel::stop_all",
+    ] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        assert_eq!(
+            definition
+                .idempotency
+                .as_ref()
+                .map(|contract| contract.dedupe_scope),
+            Some(DedupeScope::Profile),
+            "{function_id} must work from the profile-level Engine console"
+        );
+    }
+
+    for function_id in [
+        "worker_kernel::filesystem_write",
+        "worker_kernel::filesystem_edit",
+        "worker_kernel::process_run",
+        "worker_kernel::web_fetch",
+        "worker_kernel::session_set_title",
+    ] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("missing {function_id}"));
+        assert_eq!(
+            definition
+                .idempotency
+                .as_ref()
+                .map(|contract| contract.dedupe_scope),
+            Some(DedupeScope::Session),
+            "{function_id} must retain causal session-scoped replay"
+        );
+    }
 }
 
 #[test]

@@ -165,6 +165,12 @@ evidence into the engine, but those observations do not become permission
 gates. Fixed kernel tools are always model-callable, enabled worker tools are
 published dynamically, and dispatch starts with the server.
 
+Fixed worker creation, invocation, cancellation, lifecycle, webhook, and
+stop-all mutations are profile-owned and deduplicate across the profile. They
+therefore work from the profile-level Engine console without a fabricated chat
+session. Session actuators, host mutations, and direct worker tools used inside
+an agent turn retain session-scoped causal replay.
+
 Operational control remains explicit without disabling the architecture:
 per-worker stop/disable and profile-wide stop-all cancel active execution,
 stop resident services, and block new dispatch while retaining canonical

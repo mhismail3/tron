@@ -500,9 +500,30 @@ fn spec(
         .response_schema(response_schema(function))
         .description(description);
     if effect.requires_idempotency() {
-        contract = contract.idempotency(IdempotencyContract::session());
+        contract = contract.idempotency(if profile_owned_worker_operation(function) {
+            IdempotencyContract::profile()
+        } else {
+            IdempotencyContract::session()
+        });
     }
     contract.build()
+}
+
+fn profile_owned_worker_operation(function: &str) -> bool {
+    matches!(
+        function,
+        "worker_kernel::upsert"
+            | "worker_kernel::invoke"
+            | "worker_kernel::cancel"
+            | "worker_kernel::stop"
+            | "worker_kernel::disable"
+            | "worker_kernel::enable"
+            | "worker_kernel::retire"
+            | "worker_kernel::purge"
+            | "worker_kernel::rollback"
+            | "worker_kernel::webhook_rotate"
+            | "worker_kernel::stop_all"
+    )
 }
 
 #[cfg(test)]
