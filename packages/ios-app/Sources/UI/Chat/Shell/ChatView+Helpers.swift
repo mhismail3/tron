@@ -112,6 +112,26 @@ extension ChatView {
             return
         }
 
+        // Worker sessions are audit artifacts, not resumable conversations.
+        // Their useful reading order starts with the task and proceeds forward.
+        // Reusing the interactive chat bottom-settle path can place a medium
+        // sheet below its transcript until the user manually scrolls upward.
+        if presentationMode == .workerAudit {
+            positionScrollAtTop()
+            guard await layoutDelay(milliseconds: 50) else { return }
+            guard isCurrent(ticket), !Task.isCancelled else { return }
+            positionScrollAtTop()
+            guard await layoutDelay(milliseconds: 50) else { return }
+            guard isCurrent(ticket), !Task.isCancelled else { return }
+            viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
+            initialLoadComplete = true
+            logger.debug(
+                "[INIT] Worker audit loaded with \(viewModel.messages.count) top-aligned messages",
+                category: .session
+            )
+            return
+        }
+
         if !(await waitForInitialScrollGeometry()) {
             logger.warning("[INIT] scroll geometry did not become ready before reveal; continuing with bounded reveal", category: .ui)
         }
@@ -235,6 +255,16 @@ extension ChatView {
             animated: animated,
             animation: animation
         )
+    }
+
+    private func positionScrollAtTop() {
+        guard let scrollProxy else { return }
+        scrollCoordinator.appWillPositionScroll()
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            scrollProxy.scrollTo("top", anchor: .top)
+        }
     }
 
     private func positionScrollAtBottom(

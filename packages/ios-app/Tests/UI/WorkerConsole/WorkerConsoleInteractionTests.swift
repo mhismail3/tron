@@ -97,6 +97,14 @@ struct WorkerConsoleInteractionTests {
             contentsOf: root.appendingPathComponent("Sources/UI/Chat/Shell/ChatView.swift"),
             encoding: .utf8
         )
+        let chatHelpers = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+Helpers.swift"),
+            encoding: .utf8
+        )
+        let messageList = try String(
+            contentsOf: root.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+MessageList.swift"),
+            encoding: .utf8
+        )
         let sidebar = try String(
             contentsOf: root.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
             encoding: .utf8
@@ -110,6 +118,9 @@ struct WorkerConsoleInteractionTests {
         #expect(details.contains("presentationMode: .workerAudit"))
         #expect(chat.contains("reconstructReadOnlyTranscript"))
         #expect(chat.contains("if presentationMode == .interactiveSession"))
+        #expect(chatHelpers.contains("if presentationMode == .workerAudit"))
+        #expect(chatHelpers.contains("positionScrollAtTop()"))
+        #expect(messageList.contains(".id(\"top\")"))
         #expect(!sidebar.contains("openWorkerAuditSession"))
         #expect(!content.contains("openWorkerAuditSession"))
     }

@@ -92,6 +92,12 @@ extension ChatView {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        // A stable first-content target lets read-only worker
+                        // transcripts opt out of interactive chat's bottom reveal.
+                        Color.clear
+                            .frame(height: 1)
+                            .id("top")
+
                         if viewModel.hasMoreMessages {
                             topAutoloadSentinel
                                 .id("topAutoloadSentinel")

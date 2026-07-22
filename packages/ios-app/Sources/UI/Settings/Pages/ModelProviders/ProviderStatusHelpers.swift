@@ -61,7 +61,7 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
 
 enum ProviderCredentialStatusAction {
     static let title = "Clear"
-    static let icon = "xmark"
+    static let icon = "xmark.circle.fill"
     static let confirmationTitle = "Clear credential?"
     static let confirmationButtonTitle = "Clear"
 }
@@ -111,27 +111,28 @@ struct ProviderApiKeyPromptDraft: Equatable, Sendable {
     }
 }
 
-enum ProviderCredentialClearPillStyle {
-    static let fontSize = TronTypography.sizeSM
-    static let horizontalPadding: CGFloat = 8
-    static let verticalPadding: CGFloat = 4
-    static let backgroundOpacity = 0.12
-    static let borderOpacity = 0.2
+/// One column contract shared by every provider header and detail row.
+///
+/// The leading icon and trailing action widths stay fixed even when their
+/// symbols differ, so provider names, row labels, and controls form two clean
+/// vertical axes instead of drifting with intrinsic icon sizes.
+enum ProviderSettingsRowLayout {
+    static let spacing: CGFloat = 8
+    static let leadingIconWidth: CGFloat = 20
+    static let trailingActionWidth: CGFloat = 44
+    static let circularActionDiameter: CGFloat = 30
 }
 
-struct ProviderCredentialClearPillLabel: View {
+struct ProviderCredentialClearCircleLabel: View {
     var body: some View {
         Image(systemName: ProviderCredentialStatusAction.icon)
-            .font(TronTypography.sans(size: ProviderCredentialClearPillStyle.fontSize, weight: .semibold))
+            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
             .foregroundStyle(.tronError)
-            .padding(.horizontal, ProviderCredentialClearPillStyle.horizontalPadding)
-            .padding(.vertical, ProviderCredentialClearPillStyle.verticalPadding)
-            .background(.tronError.opacity(ProviderCredentialClearPillStyle.backgroundOpacity), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(.tronError.opacity(ProviderCredentialClearPillStyle.borderOpacity), lineWidth: 1)
-            }
-            .contentShape(Capsule())
+            .frame(
+                width: ProviderSettingsRowLayout.circularActionDiameter,
+                height: ProviderSettingsRowLayout.circularActionDiameter
+            )
+            .contentShape(Circle())
     }
 }
 

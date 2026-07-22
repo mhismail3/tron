@@ -11,11 +11,11 @@ struct ProviderCredentialRow: View {
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(isActive ? .tronEmerald : .tronTextMuted)
-                .frame(width: 18)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
 
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -35,9 +35,10 @@ struct ProviderCredentialRow: View {
             Button {
                 showDeleteConfirm = true
             } label: {
-                ProviderCredentialClearPillLabel()
+                ProviderCredentialClearCircleLabel()
             }
             .buttonStyle(.plain)
+            .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
             .accessibilityLabel("\(ProviderCredentialStatusAction.title) \(label)")
             .confirmationDialog(ProviderCredentialStatusAction.confirmationTitle, isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button(ProviderCredentialStatusAction.confirmationButtonTitle, role: .destructive) {

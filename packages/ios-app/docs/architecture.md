@@ -294,8 +294,10 @@ owns both navigation and every evidence renderer. It provides:
   sheets, and bounded load-more
   access to the complete profile ledger;
 - a read-only worker-session transcript sheet launched from run-detail toolbar
-  actions, while reserved worker child sessions remain excluded from ordinary
-  Home navigation and the active interactive session remains unchanged;
+  actions; audit transcripts deterministically reveal from their first message
+  instead of inheriting interactive chat's bottom-opening policy, while
+  reserved worker child sessions remain excluded from ordinary Home navigation
+  and the active interactive session remains unchanged;
 - stop current work without disabling the worker, enable/disable, retirement,
   exact run cancellation, and confirmation-backed archive-then-purge whose
   result retains the recovery archive path and checksum.
@@ -496,6 +498,12 @@ catalog cache and one coalesced in-flight request. Opening Providers therefore
 does not repeat live Ollama discovery; explicit refresh still bypasses cached
 truth, while endpoint changes cancel and disown any prior-endpoint request
 before loading the new endpoint.
+
+Provider cards share one leading-icon and trailing-action column contract.
+Provider names and row labels therefore remain left-aligned across differing
+brand symbols, while add, clear, refresh, disclosure, and endpoint-save controls
+share a stable trailing axis. Destructive credential controls are circular like
+the corresponding add controls rather than variable-width pills.
 
 Compact mutually exclusive controls use one shared liquid-glass button style.
 Dashboard tabs, color-mode choices, and text/code font choices share selected

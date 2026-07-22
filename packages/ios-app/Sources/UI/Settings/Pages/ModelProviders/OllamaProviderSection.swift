@@ -55,15 +55,19 @@ struct OllamaProviderSection: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ProviderSettingsRowLayout.spacing) {
             Image("IconOllama")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .foregroundStyle(.tronAmber)
-                .frame(width: 20, height: 20)
+                .frame(
+                    width: ProviderSettingsRowLayout.leadingIconWidth,
+                    height: ProviderSettingsRowLayout.leadingIconWidth
+                )
             Text("Ollama")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
+                .multilineTextAlignment(.leading)
             if reachable == true {
                 Image(systemName: "checkmark.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -78,12 +82,16 @@ struct OllamaProviderSection: View {
                         .controlSize(.small)
                         .tint(.tronAmber)
                 } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronAmber)
                 }
             }
             .buttonStyle(.plain)
+            .frame(
+                width: ProviderSettingsRowLayout.trailingActionWidth,
+                height: ProviderSettingsRowLayout.circularActionDiameter
+            )
             .disabled(isRefreshing)
             .accessibilityLabel("Refresh Ollama models")
         }
@@ -92,11 +100,11 @@ struct OllamaProviderSection: View {
     }
 
     private var statusRow: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: statusIcon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(statusColor)
-                .frame(width: 18)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
             VStack(alignment: .leading, spacing: 2) {
                 Text(statusTitle)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -105,7 +113,9 @@ struct OllamaProviderSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Color.clear
+                .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
@@ -145,17 +155,21 @@ struct OllamaProviderSection: View {
 
     private var endpointEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+            HStack(spacing: ProviderSettingsRowLayout.spacing) {
                 Image(systemName: "network")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronAmber)
-                    .frame(width: 18)
+                    .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
                 Text("Endpoint")
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear
+                    .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: ProviderSettingsRowLayout.spacing) {
+                Color.clear
+                    .frame(width: ProviderSettingsRowLayout.leadingIconWidth, height: 1)
                 TextField("http://localhost:11434", text: $endpointDraft)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -171,6 +185,7 @@ struct OllamaProviderSection: View {
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(.tronAmber)
+                .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
                 .disabled(!endpointIsValid || endpointDraft == baseUrl)
             }
         }
@@ -197,11 +212,11 @@ struct OllamaProviderSection: View {
     }
 
     private func installedModelRow(_ model: ModelInfo) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: "cpu")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronAmber)
-                .frame(width: 18)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.formattedModelName)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -211,7 +226,9 @@ struct OllamaProviderSection: View {
                     .foregroundStyle(.tronTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Color.clear
+                .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -230,11 +247,11 @@ struct OllamaProviderSection: View {
 
     private func guidanceCard(icon: String, title: String, detail: String) -> some View {
         SettingsCard(accent: .tronAmber) {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: ProviderSettingsRowLayout.spacing) {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronAmber)
-                    .frame(width: 18)
+                    .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -243,7 +260,9 @@ struct OllamaProviderSection: View {
                         .foregroundStyle(.tronTextSecondary)
                         .textSelection(.enabled)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear
+                    .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)

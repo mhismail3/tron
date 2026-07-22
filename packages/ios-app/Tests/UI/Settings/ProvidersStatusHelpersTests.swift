@@ -83,17 +83,17 @@ struct ProviderStatusHelpersTests {
     @Test("credential status rows use explicit clear action copy")
     func credentialStatusRowsUseExplicitClearActionCopy() {
         #expect(ProviderCredentialStatusAction.title == "Clear")
-        #expect(ProviderCredentialStatusAction.icon == "xmark")
+        #expect(ProviderCredentialStatusAction.icon == "xmark.circle.fill")
         #expect(ProviderCredentialStatusAction.confirmationTitle == "Clear credential?")
         #expect(ProviderCredentialStatusAction.confirmationButtonTitle == "Clear")
     }
 
-    @Test("credential clear action uses compact pill styling")
-    func credentialClearActionUsesCompactPillStyling() {
-        #expect(ProviderCredentialClearPillStyle.fontSize == TronTypography.sizeSM)
-        #expect(ProviderCredentialClearPillStyle.horizontalPadding == 8)
-        #expect(ProviderCredentialClearPillStyle.verticalPadding == 4)
-        #expect(ProviderCredentialClearPillStyle.backgroundOpacity == 0.12)
+    @Test("provider rows share stable leading and trailing columns")
+    func providerRowsShareStableLeadingAndTrailingColumns() {
+        #expect(ProviderSettingsRowLayout.spacing == 8)
+        #expect(ProviderSettingsRowLayout.leadingIconWidth == 20)
+        #expect(ProviderSettingsRowLayout.trailingActionWidth == 44)
+        #expect(ProviderSettingsRowLayout.circularActionDiameter == 30)
     }
 
     @Test("API key prompt uses native alert presentation")

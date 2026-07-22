@@ -168,11 +168,23 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         let content = try source(pathComponents: [
             "Sources", "UI", "Settings", "Pages", "ModelProviders", "ModelProviderSection.swift",
         ])
+        let credentialRow = try source(pathComponents: [
+            "Sources", "UI", "Settings", "Pages", "ModelProviders", "ProviderCredentialRow.swift",
+        ])
+        let ollama = try source(pathComponents: [
+            "Sources", "UI", "Settings", "Pages", "ModelProviders", "OllamaProviderSection.swift",
+        ])
 
         XCTAssertTrue(content.contains("ProviderSectionHeader("))
         XCTAssertTrue(content.contains("Menu {"))
         XCTAssertTrue(content.contains("plus.circle.fill"))
         XCTAssertTrue(content.contains("SettingsRowDivider()"))
+        XCTAssertTrue(content.contains("ProviderSettingsRowLayout.leadingIconWidth"))
+        XCTAssertTrue(content.contains("ProviderSettingsRowLayout.trailingActionWidth"))
+        XCTAssertTrue(credentialRow.contains("ProviderCredentialClearCircleLabel()"))
+        XCTAssertTrue(credentialRow.contains("ProviderSettingsRowLayout.trailingActionWidth"))
+        XCTAssertTrue(ollama.contains("arrow.clockwise.circle.fill"))
+        XCTAssertTrue(ollama.contains(".frame(width: ProviderSettingsRowLayout.trailingActionWidth)"))
     }
 
     func testEngineCoreUsesAlwaysVisibleCompactRowsAndSeparateDetailSheet() throws {

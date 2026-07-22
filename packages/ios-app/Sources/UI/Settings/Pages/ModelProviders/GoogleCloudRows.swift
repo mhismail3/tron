@@ -27,11 +27,11 @@ struct GoogleCloudRows: View {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack {
+                HStack(spacing: ProviderSettingsRowLayout.spacing) {
                     Image(systemName: "gearshape.2")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
+                        .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Google Cloud")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -40,10 +40,11 @@ struct GoogleCloudRows: View {
                             .font(TronTypography.sans(size: TronTypography.sizeSM))
                             .foregroundStyle(isConfigured ? .tronSuccess : .tronTextMuted)
                     }
-                    Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(.tronTextMuted)
+                        .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
                 }
                 .contentShape(Rectangle())
             }
@@ -89,11 +90,11 @@ struct GoogleCloudRows: View {
     }
 
     private func fieldRow(icon: String, label: String, placeholder: String, text: Binding<String>, secure: Bool) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextSecondary)
@@ -177,11 +178,11 @@ struct GoogleCloudRows: View {
     }
 
     private func savedRow(icon: String, label: String, value: String, valueColor: Color) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextSecondary)

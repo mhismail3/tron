@@ -92,11 +92,11 @@ struct ModelProviderSection: View {
     }
 
     private var emptyStatusRow: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: "circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextMuted.opacity(0.45))
-                .frame(width: 18)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Not connected")
@@ -107,8 +107,10 @@ struct ModelProviderSection: View {
                     .foregroundStyle(.tronTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
+            Color.clear
+                .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
@@ -151,11 +153,12 @@ struct ProviderSectionHeader: View {
     let onSelect: (ProviderAuthActionItem) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ProviderSettingsRowLayout.spacing) {
             providerIcon
             Text(provider.displayName)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
+                .multilineTextAlignment(.leading)
             if isConfigured {
                 Image(systemName: "checkmark.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -175,9 +178,13 @@ struct ProviderSectionHeader: View {
                 Image(systemName: "plus.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                     .foregroundStyle(provider.color)
-                    .frame(width: 30, height: 30)
+                    .frame(
+                        width: ProviderSettingsRowLayout.circularActionDiameter,
+                        height: ProviderSettingsRowLayout.circularActionDiameter
+                    )
                     .contentShape(Circle())
             }
+            .frame(width: ProviderSettingsRowLayout.trailingActionWidth)
             .accessibilityLabel("Add \(provider.displayName) credential")
         }
         .padding(.horizontal, 12)
@@ -190,13 +197,19 @@ struct ProviderSectionHeader: View {
             Image(systemName: systemIcon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(provider.color)
-                .frame(width: 20, height: 20)
+                .frame(
+                    width: ProviderSettingsRowLayout.leadingIconWidth,
+                    height: ProviderSettingsRowLayout.leadingIconWidth
+                )
         } else {
             Image(provider.assetIcon)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .foregroundStyle(provider.color)
-                .frame(width: 20, height: 20)
+                .frame(
+                    width: ProviderSettingsRowLayout.leadingIconWidth,
+                    height: ProviderSettingsRowLayout.leadingIconWidth
+                )
         }
     }
 }
