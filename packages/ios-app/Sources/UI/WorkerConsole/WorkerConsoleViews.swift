@@ -156,13 +156,27 @@ struct WorkerConsoleSheet: View {
                 }
             }
             .sheet(isPresented: selectedWorkerPresented) {
-                if let worker = viewModel.selectedWorker,
-                   WorkerExperienceRoute.resolve(worker) == .workLedger {
-                    WorkLedgerSheet(
-                        consoleViewModel: viewModel,
-                        repository: repository,
-                        connectionState: connectionState
-                    )
+                if let worker = viewModel.selectedWorker {
+                    switch WorkerExperienceRoute.resolve(worker) {
+                    case .workLedger:
+                        WorkLedgerSheet(
+                            consoleViewModel: viewModel,
+                            repository: repository,
+                            connectionState: connectionState
+                        )
+                    case .researchSuite:
+                        ResearchSuiteSheet(
+                            consoleViewModel: viewModel,
+                            repository: repository,
+                            connectionState: connectionState
+                        )
+                    case .genericConsole:
+                        WorkerDetailSheet(
+                            viewModel: viewModel,
+                            repository: repository,
+                            connectionState: connectionState
+                        )
+                    }
                 } else {
                     WorkerDetailSheet(
                         viewModel: viewModel,

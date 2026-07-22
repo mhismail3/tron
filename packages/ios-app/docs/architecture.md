@@ -312,6 +312,28 @@ record context, empty/offline/error states, and recent durable activity. The
 generic console remains the export/import, dependency/link, operational, and
 recovery surface until real use justifies additional native controls.
 
+The second supported contract is the primary `research-suite` version 1
+entrypoint. Its four workers remain independently versioned and independently
+operable; only the coordinator's `primary` presentation binding opens the
+grouped Research experience. `ResearchSuiteViewModel` filters the canonical
+worker inventory by the immutable suite contract, reads bounded full-detail
+runs and inbox rows for every component, and decodes only exact
+`research.report.v1` coordinator outputs. It does not read the coordinator's
+state directory or reconstruct reports from client caches. Malformed canonical
+outputs are visible partial-refresh errors; unrelated outputs are not mistaken
+for reports.
+
+The Research sheet provides aggregate suite health and versions, coordinator
+and specialist run/query history, durable inbox failures, report history,
+claim-to-citation inspection, source/freshness cards, contradictions, evidence
+gaps, limitations, specialist outcomes, and exact JSON export. Every component
+links to an independently loaded generic technical console without changing the
+parent coordinator selection. Engine-owned worker events refresh the dashboard;
+changes to the parent worker/run projection trigger a bounded suite refresh so
+the native view converges on current server truth. Unknown contract versions,
+secondary suite members, and missing bindings retain the generic-console
+fallback.
+
 ## Chat Flow
 
 ```text
@@ -468,7 +490,8 @@ xcodebuild test \
   -only-testing:TronMobileTests/WorkerKernelClientTests \
   -only-testing:TronMobileTests/WorkerConsolePresentationTests \
   -only-testing:TronMobileTests/WorkerConsoleViewModelTests \
-  -only-testing:TronMobileTests/WorkerConsoleVisualContractTests \
+  -only-testing:TronMobileTests/WorkLedgerViewModelTests \
+  -only-testing:TronMobileTests/ResearchSuiteViewModelTests \
   -only-testing:TronMobileTests/SettingsParityTests
 ```
 

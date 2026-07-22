@@ -1217,9 +1217,23 @@ version recovery, restart persistence, and generic-console access. Its current
 limitation is explicit: without Brave or Exa credentials, discovery cannot
 produce live search results, so the accepted cited run used caller-supplied
 official seeds. Semantic synthesis also remains model-fallible within the
-Citation worker's deterministic provenance and relation guard. The next
-Research milestone is the grouped native suite experience, not another
-Coordinator contract revision.
+Citation worker's deterministic provenance and relation guard.
+
+iOS now recognizes only the primary immutable `research-suite` presentation
+contract version 1 as the grouped native Research experience. It reads the
+canonical suite inventory plus bounded full-detail run and inbox contracts; it
+does not inspect worker-owned files. Exact `research.report.v1` coordinator
+outputs provide report history, answer export, claims, claim-linked citations,
+source and freshness metadata, contradictions, evidence gaps, limitations, and
+specialist outcomes. The same surface shows aggregate health, component
+versions, query/run history, and failures, and every component retains a path
+to its separately loaded generic technical console. Secondary components,
+unknown versions, and malformed or absent presentation metadata fall back to
+the generic console. Malformed canonical report output is surfaced as partial
+refresh evidence rather than silently rendered or adopted as client truth.
+This closes the implemented Research UI slice; physical-device field review of
+the presentation remains an operator acceptance step before the broader
+field-confidence gate.
 
 ### Prior inventory coverage evidence
 

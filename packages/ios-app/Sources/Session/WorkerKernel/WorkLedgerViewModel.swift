@@ -2,16 +2,20 @@ import Foundation
 
 enum WorkerExperienceRoute: Equatable {
     case workLedger
+    case researchSuite
     case genericConsole
 
     static func resolve(_ worker: WorkerSummaryDTO) -> Self {
         guard let presentation = worker.presentation,
-              presentation.experienceId == "work-ledger",
               presentation.contractVersion == 1,
               presentation.primary else {
             return .genericConsole
         }
-        return .workLedger
+        switch presentation.experienceId {
+        case "work-ledger": return .workLedger
+        case "research-suite": return .researchSuite
+        default: return .genericConsole
+        }
     }
 }
 

@@ -9,7 +9,7 @@ struct WorkLedgerViewModelTests {
     func experienceRoutingFallsBackForUnknownContracts() {
         #expect(WorkerExperienceRoute.resolve(Self.worker(contractVersion: 1)) == .workLedger)
         #expect(WorkerExperienceRoute.resolve(Self.worker(contractVersion: 2)) == .genericConsole)
-        #expect(WorkerExperienceRoute.resolve(Self.worker(experienceId: "research-suite")) == .genericConsole)
+        #expect(WorkerExperienceRoute.resolve(Self.worker(experienceId: "research-suite")) == .researchSuite)
         #expect(WorkerExperienceRoute.resolve(Self.worker(primary: false)) == .genericConsole)
     }
 
