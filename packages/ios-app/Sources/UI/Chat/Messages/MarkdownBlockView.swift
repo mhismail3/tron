@@ -1,5 +1,15 @@
 import SwiftUI
 
+enum MarkdownListLayout {
+    static let markerWidth: CGFloat = 22
+    static let markerSpacing: CGFloat = 8
+    static let depthIndent: CGFloat = 22
+
+    static func leadingIndent(forDepth depth: Int) -> CGFloat {
+        CGFloat(max(depth, 0)) * depthIndent
+    }
+}
+
 // MARK: - Inline Markdown Helper
 
 /// Parses inline markdown and fixes bold rendering by using explicit variable font weights
@@ -150,17 +160,20 @@ struct MarkdownBlockView: View {
     private func listView(items: [MarkdownListItem]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: MarkdownListLayout.markerSpacing) {
                     Text(markerText(for: item.marker))
                         .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular)))
                         .foregroundStyle(.tronTextSecondary)
-                        .frame(width: 22, alignment: .trailing)
+                        .frame(width: MarkdownListLayout.markerWidth, alignment: .trailing)
                     Text(inlineMarkdown(from: item.content))
                         .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)
                         .lineSpacing(4)
                 }
-                .padding(.leading, 8 + CGFloat(item.depth) * 22)
+                // Root markers begin on the message's leading edge. Only actual
+                // nesting adds indentation, so list depth remains stable for
+                // ordered, unordered, and mixed lists.
+                .padding(.leading, MarkdownListLayout.leadingIndent(forDepth: item.depth))
             }
         }
     }

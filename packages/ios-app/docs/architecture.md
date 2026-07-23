@@ -514,11 +514,11 @@ geometry; headings remain attached to the content they introduce while wider
 inter-section spacing separates each completed card from the next section.
 The worker heading and explanatory line are one compact label block, and worker
 rows do not introduce a separate dashboard visual scale.
-Run detail opens the agent child transcript when one exists and otherwise
-falls back to the originating session chat, always through the same read-only
-sheet so inspecting worker evidence does not navigate away from the current
-context. Fork confirmation is a native animated liquid-glass sheet rather than
-an abrupt dialog overlay.
+Run detail opens a read-only transcript only when the invocation created a
+real agent child session. The originating session remains provenance and never
+masquerades as a worker transcript; command and resident-service runs therefore
+do not show a chat action. Fork confirmation is a native animated liquid-glass
+sheet rather than an abrupt dialog overlay.
 Session actions are disabled while disconnected, compacting, or running a turn.
 There is no parallel context-control repository, resource/action audit,
 memory editor, or manual compact/clear façade. Those controls may appear only

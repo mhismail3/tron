@@ -177,6 +177,19 @@ final class MarkdownBlockParserTests: XCTestCase {
         XCTAssertEqual(items.map(\.content), ["Parent", "Nested bullet", "Nested ordered", "Sibling"])
     }
 
+    func testListLayoutStartsAtMessageLeadingEdgeAndIndentsOnlyByDepth() {
+        XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: 0), 0)
+        XCTAssertEqual(
+            MarkdownListLayout.leadingIndent(forDepth: 1),
+            MarkdownListLayout.depthIndent
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.leadingIndent(forDepth: 2),
+            MarkdownListLayout.depthIndent * 2
+        )
+        XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: -1), 0)
+    }
+
     func testIndentedContinuationStaysWithOwningListItem() {
         let text = "- Item with\n    wrapped continuation\n- Next"
         let blocks = MarkdownBlockParser.parse(text)

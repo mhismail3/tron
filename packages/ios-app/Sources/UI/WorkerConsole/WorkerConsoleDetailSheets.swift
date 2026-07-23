@@ -2,40 +2,28 @@ import SwiftUI
 
 enum WorkerRunTranscriptDestination: Equatable {
     case workerSession(String)
-    case originSession(String)
 
-    static func resolve(
-        agentSessionId: String?,
-        originSessionId: String?
-    ) -> WorkerRunTranscriptDestination? {
-        if let agentSessionId, !agentSessionId.isEmpty {
+    static func resolve(agentSessionId: String?) -> WorkerRunTranscriptDestination? {
+        if let agentSessionId = agentSessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !agentSessionId.isEmpty {
             return .workerSession(agentSessionId)
-        }
-        if let originSessionId, !originSessionId.isEmpty {
-            return .originSession(originSessionId)
         }
         return nil
     }
 
     var sessionId: String {
         switch self {
-        case let .workerSession(sessionId), let .originSession(sessionId):
+        case let .workerSession(sessionId):
             sessionId
         }
     }
 
     var title: String {
-        switch self {
-        case .workerSession: "Worker Session"
-        case .originSession: "Session Chat"
-        }
+        "Worker Session"
     }
 
     var accessibilityLabel: String {
-        switch self {
-        case .workerSession: "Open worker session"
-        case .originSession: "Open session chat"
-        }
+        "Open worker session"
     }
 }
 
@@ -217,10 +205,7 @@ struct WorkerRunDetailSheet: View {
     @State private var confirmCancel = false
 
     private var transcriptDestination: WorkerRunTranscriptDestination? {
-        WorkerRunTranscriptDestination.resolve(
-            agentSessionId: run.agentSessionId,
-            originSessionId: run.originSessionId
-        )
+        WorkerRunTranscriptDestination.resolve(agentSessionId: run.agentSessionId)
     }
 
     private var color: Color {

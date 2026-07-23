@@ -3,29 +3,21 @@ import Testing
 @testable import TronMobile
 
 struct WorkerConsoleInteractionTests {
-    @Test("Worker run transcript prefers the child session and falls back to the originating chat")
+    @Test("Worker run transcript exists only for a real child agent session")
     func workerRunTranscriptResolution() {
         #expect(
-            WorkerRunTranscriptDestination.resolve(
-                agentSessionId: "child-session",
-                originSessionId: "origin-session"
-            ) == .workerSession("child-session")
+            WorkerRunTranscriptDestination.resolve(agentSessionId: "child-session")
+                == .workerSession("child-session")
         )
         #expect(
-            WorkerRunTranscriptDestination.resolve(
-                agentSessionId: nil,
-                originSessionId: "origin-session"
-            ) == .originSession("origin-session")
+            WorkerRunTranscriptDestination.resolve(agentSessionId: nil) == nil
         )
         #expect(
-            WorkerRunTranscriptDestination.resolve(
-                agentSessionId: "",
-                originSessionId: ""
-            ) == nil
+            WorkerRunTranscriptDestination.resolve(agentSessionId: "  ") == nil
         )
         #expect(
-            WorkerRunTranscriptDestination.originSession("origin-session").title
-                == "Session Chat"
+            WorkerRunTranscriptDestination.workerSession("child-session").title
+                == "Worker Session"
         )
         #expect(
             WorkerRunTranscriptDestination.workerSession("child-session").accessibilityLabel
