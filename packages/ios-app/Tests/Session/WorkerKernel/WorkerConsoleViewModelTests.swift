@@ -174,6 +174,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
         return EngineIntrospectionSnapshotDTO(
             dispatchStopped: false,
             activeEngineHooks: [],
+            activeClientActions: [],
             fixedTools: [],
             surface: AgentToolSurfaceDTO(
                 catalogRevision: 42,

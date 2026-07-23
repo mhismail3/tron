@@ -55,6 +55,11 @@ pub struct WorkerBundle {
     /// binding or permission transition.
     #[serde(default)]
     pub engine_hooks: Vec<WorkerEngineHook>,
+    /// Optional native-client actions implemented by this immutable version.
+    /// The client owns only capture/presentation; the selected worker owns the
+    /// typed transformation and all higher-level policy.
+    #[serde(default)]
+    pub client_actions: Vec<WorkerClientAction>,
     #[serde(default)]
     pub routing: WorkerRouting,
     /// Optional immutable binding to a supported native or declarative worker
@@ -108,6 +113,30 @@ impl WorkerEngineHook {
             Self::InboxContext => "inbox_context",
             Self::SessionTitle => "session_title",
             Self::WorkerRelevance => "worker_relevance",
+        }
+    }
+}
+
+/// Stable native-client seams that may be fulfilled by normal workers.
+///
+/// These are deliberately narrower than presentation metadata: each action
+/// has one kernel-validated input/output contract and one active owner. A
+/// client never needs to inspect worker files or invent worker-specific
+/// payloads to use the action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerClientAction {
+    SpeechTranscription,
+}
+
+impl WorkerClientAction {
+    pub const fn all() -> &'static [Self] {
+        &[Self::SpeechTranscription]
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SpeechTranscription => "speech_transcription",
         }
     }
 }

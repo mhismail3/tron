@@ -13,6 +13,7 @@ use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 
 mod activation;
 mod agent;
+mod client_actions;
 mod command;
 mod coordination;
 mod hooks;
@@ -49,6 +50,7 @@ fn command_bundle(command: Vec<String>) -> WorkerBundle {
             checksum: None,
         }],
         engine_hooks: Vec::new(),
+        client_actions: Vec::new(),
         routing: Default::default(),
         presentation: None,
     }
@@ -172,6 +174,7 @@ print(json.dumps({
                 checksum: None,
             }],
             engine_hooks: Vec::new(),
+            client_actions: Vec::new(),
             routing: super::super::types::WorkerRouting {
                 intents: vec!["recent research".to_owned(), "last 30 days".to_owned()],
                 examples: vec!["What changed in persistent workers in the last month?".to_owned()],

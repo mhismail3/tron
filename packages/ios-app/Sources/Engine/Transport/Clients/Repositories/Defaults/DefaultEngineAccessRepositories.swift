@@ -292,6 +292,21 @@ final class DefaultWorkerKernelRepository: WorkerKernelRepository {
         )
     }
 
+    func invokeWorkerFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await client.invokeWorker(
+            workerId: workerId,
+            input: input,
+            idempotencyKey: idempotencyKey,
+            originSessionId: originSessionId,
+            mode: .wait
+        )
+    }
+
     func enqueueWorker(
         workerId: String,
         input: AnyCodable,

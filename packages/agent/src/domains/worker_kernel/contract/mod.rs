@@ -302,7 +302,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
         .response_schema(json!({
             "type":"object",
             "additionalProperties":false,
-            "required":["dispatchStopped","activeEngineHooks","fixedTools","surface","workers"],
+            "required":["dispatchStopped","activeEngineHooks","activeClientActions","fixedTools","surface","workers"],
             "properties":{
                 "dispatchStopped":{"type":"boolean"},
                 "activeEngineHooks":{
@@ -313,6 +313,19 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                         "required":["hook","workerId","workerVersion"],
                         "properties":{
                             "hook":{"type":"string"},
+                            "workerId":{"type":"string"},
+                            "workerVersion":{"type":"string"}
+                        }
+                    }
+                },
+                "activeClientActions":{
+                    "type":"array",
+                    "items":{
+                        "type":"object",
+                        "additionalProperties":false,
+                        "required":["action","workerId","workerVersion"],
+                        "properties":{
+                            "action":{"type":"string"},
                             "workerId":{"type":"string"},
                             "workerVersion":{"type":"string"}
                         }

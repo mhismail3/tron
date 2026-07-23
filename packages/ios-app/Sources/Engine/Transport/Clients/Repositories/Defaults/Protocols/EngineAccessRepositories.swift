@@ -296,6 +296,12 @@ protocol WorkerKernelRepository: AnyObject {
         input: AnyCodable,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerInvocationDTO
+    func invokeWorkerFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO
     func enqueueWorker(
         workerId: String,
         input: AnyCodable,
@@ -342,6 +348,19 @@ protocol WorkerKernelRepository: AnyObject {
 }
 
 extension WorkerKernelRepository {
+    func invokeWorkerFromSession(
+        workerId: String,
+        input: AnyCodable,
+        originSessionId _: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerInvocationDTO {
+        try await invokeWorker(
+            workerId: workerId,
+            input: input,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func workerRuns(workerId: String?, limit: UInt64) async throws -> WorkerRunsResultDTO {
         try await workerRuns(
             workerId: workerId,

@@ -769,12 +769,14 @@ owners of agent-run termination.
 
 Authenticated clients may call `engine::surface_snapshot` with optional session
 invocation context. The typed response returns the same provider-neutral surface
-evidence plus three operational inventories:
+evidence plus operational inventories:
 
 - all 29 fixed tools with their exact schemas, revisions, effect/risk,
   primitive group, and model exposure;
 - every published direct worker tool, including its promoted/projected state,
   selection reason, relevance evidence, and immutable worker version;
+- current healthy engine-hook and native-client-action owners, including the
+  immutable version that a client may invoke through the ordinary worker path;
 - canonical engine worker summaries and stop-all state.
 
 The selected `surface.tools` array is the exact next provider projection; the
@@ -1483,9 +1485,12 @@ these bullets as one tool apiece.
   browser control, authenticated sites, crawling policy, and research strategy
   must be real workers.
 - **Transcription and speech:** transcribe, status, model preload, language
-  detection, diarization, and audio preprocessing. If mobile audio cannot be
-  reached through existing authenticated transport, add one narrow typed media
-  actuator and keep transcription policy in workers.
+  detection, diarization, and audio preprocessing. The native client owns
+  bounded microphone capture and WAV encoding. A healthy worker may declare
+  the kernel-validated `speech_transcription` client action; the authenticated
+  client sends that recording through the ordinary durable dispatcher and
+  inserts its typed `text` result into the draft. Model choice, dependencies,
+  recognition, and cleanup remain entirely worker-owned.
 - **Devices and notifications:** device list/inspect, send, list, inspect, mark
   read, and mark all read. Delivery scheduling and message policy belong in
   workers. A concrete mobile-delivery use case may justify a narrow

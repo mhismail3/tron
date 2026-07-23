@@ -300,6 +300,7 @@ fn canonical_bundle_with_absent_optional_fields_round_trips_through_upsert_schem
             checksum: None,
         }],
         engine_hooks: Vec::new(),
+        client_actions: Vec::new(),
         routing: Default::default(),
         presentation: None,
     };

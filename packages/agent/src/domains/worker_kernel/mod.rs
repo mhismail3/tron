@@ -116,10 +116,11 @@
 //! failures remain pending Attention and can enter later relevant context.
 //! The authenticated `engine::surface_snapshot` read returns the selected
 //! surface revision/hash/counts, every published worker's projection status,
-//! the complete fixed-tool inventory, and canonical engine worker summaries;
-//! exact provider contracts are not duplicated into the client response. It is
-//! not itself model vocabulary and reports executable runtime facts rather than
-//! a separately maintained description of the source tree.
+//! active engine-hook and native-client-action ownership, the complete
+//! fixed-tool inventory, and canonical engine worker summaries; exact provider
+//! contracts are not duplicated into the client response. It is not itself
+//! model vocabulary and reports executable runtime facts rather than a
+//! separately maintained description of the source tree.
 //! Fixed inventory is always model-callable. Worker-first operation is the
 //! engine architecture rather than an editable mode or secondary lifecycle.
 //! Explicit discovery and automatic projection use one worker-owned relevance

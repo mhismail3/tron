@@ -11,6 +11,8 @@
 //! terminal completion so admission never becomes an execution side channel.
 //! Agent child-session activity is projected only as bounded, redacted stage
 //! labels; raw child content remains in its canonical audit session.
+//! `client_actions` selects the current healthy worker for narrow native
+//! capture/presentation seams without creating a second execution path.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,13 +35,15 @@ use super::process::{MAX_PROCESS_CAPTURE_BYTES, ProcessTree};
 use super::types::{
     ActiveWorker, InvocationRecord, InvokeRequest, MAX_CAUSAL_DEPTH, MAX_ENGINE_CONCURRENCY,
     MAX_INVOCATION_SECONDS, MAX_WORKER_CONCURRENCY, PreparedWorker, PurgeOutcome, UpsertOutcome,
-    WorkerBundle, WorkerCommand, WorkerDependency, WorkerEngineHook, WorkerRunner, WorkerTrigger,
+    WorkerBundle, WorkerClientAction, WorkerCommand, WorkerDependency, WorkerEngineHook,
+    WorkerRunner, WorkerTrigger,
 };
 use support::*;
 
 mod activation;
 mod admission;
 pub(crate) use admission::WorkerInputContractError;
+mod client_actions;
 mod dispatch;
 mod events;
 mod hooks;
@@ -243,6 +247,7 @@ impl WorkerRuntime {
         Ok(json!({
             "dispatchStopped": self.store.stop_all()?,
             "activeEngineHooks": self.engine_hook_inventory()?,
+            "activeClientActions": self.client_action_inventory()?,
             "fixedTools": fixed_tools,
             "surface": {
                 "catalogRevision": surface.catalog_revision,

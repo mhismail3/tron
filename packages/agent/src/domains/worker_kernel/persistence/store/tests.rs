@@ -28,6 +28,7 @@ fn bundle() -> WorkerBundle {
             checksum: None,
         }],
         engine_hooks: Vec::new(),
+        client_actions: Vec::new(),
         routing: Default::default(),
         presentation: None,
     }

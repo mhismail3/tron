@@ -69,6 +69,7 @@ final class WorkerKernelClient: EngineDomainClient {
         workerId: String,
         input: AnyCodable,
         idempotencyKey: EngineIdempotencyKey,
+        originSessionId: String? = nil,
         mode: WorkerInvocationMode = .wait
     ) async throws -> WorkerInvocationDTO {
         try await invokeWrite(
@@ -79,7 +80,8 @@ final class WorkerKernelClient: EngineDomainClient {
                 idempotencyKey: idempotencyKey.rawValue,
                 mode: mode
             ),
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            context: optionalSessionInvocationContext(originSessionId)
         )
     }
 

@@ -14,6 +14,13 @@ context_summary input is a closed object requiring messages:array(max 256) of cl
 inbox_context input is a closed object requiring query:string and items:array(max 32) of closed {inboxId,invocationId,workerId,workerName,workerDescription,severity,triggerKind,resultPreview,createdAt} strings; output is a closed object requiring consumedInboxIds:unique string array(max 32) and narrative:string. \
 worker_relevance input is a closed object requiring query:string(max 12000) and candidates:array(max 256) of closed worker summaries with workerId,name,description,intents,examples,provenance,completedRuns,updatedAt, and permitting originWorkerId:string; output is a closed object requiring rankings:array(max 256) of closed {workerId:string(min 1),score:integer(0..1000000000),reason?:string}.";
 
+const CLIENT_ACTION_AUTHORING_CONTRACT: &str = "\
+Optional native-client actions activated atomically with this version. No separate binding, private endpoint, or client-specific installation is required. \
+The bundle inputSchema and outputSchema are authoritative; do not inspect Tron databases, auth stores, binaries, runtime files, or private server endpoints to discover these contracts. \
+speech_transcription input is a closed object requiring audioBase64:string(min 1), mimeType:string(min 1), and fileName:string(min 1). The iOS client supplies a mono PCM WAV recording as base64 with mimeType audio/wav. \
+speech_transcription output is a closed object requiring text:string. It may additionally return language:string, durationSeconds:number(min 0), processingTimeMs:number(min 0), model:string, device:string, computeType:string, and cleanupMode:string. \
+The worker owns decoding, speech recognition, model/dependency choice, text cleanup, and optional metadata. The client owns microphone permission, bounded capture, WAV encoding, durable invocation, and inserting the returned text into the draft.";
+
 pub(super) fn worker_bundle_schema() -> Value {
     let command = json!({
         "type":"object",
@@ -192,6 +199,12 @@ pub(super) fn worker_bundle_schema() -> Value {
                 "uniqueItems":true,
                 "description":ENGINE_HOOK_AUTHORING_CONTRACT,
                 "items":{"type":"string","enum":["context_summary","inbox_context","session_title","worker_relevance"]}
+            },
+            "clientActions":{
+                "type":"array",
+                "uniqueItems":true,
+                "description":CLIENT_ACTION_AUTHORING_CONTRACT,
+                "items":{"type":"string","enum":["speech_transcription"]}
             },
             "provenance":{
                 "type":"array","minItems":1,

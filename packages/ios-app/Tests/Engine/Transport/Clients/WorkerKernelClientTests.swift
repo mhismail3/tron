@@ -110,6 +110,13 @@ struct WorkerKernelClientTests {
                         workerVersion: "v-summary"
                     )
                 ],
+                activeClientActions: [
+                    ClientActionOwnerDTO(
+                        action: "speech_transcription",
+                        workerId: "speech-worker",
+                        workerVersion: "speech-v1"
+                    )
+                ],
                 fixedTools: [
                     EngineSurfaceToolDTO(
                         modelName: "filesystem_read",
@@ -162,6 +169,7 @@ struct WorkerKernelClientTests {
         #expect(snapshot.surface.availableWorkers.first?.projected == true)
         #expect(snapshot.fixedTools.first?.primitiveGroup == "host")
         #expect(snapshot.activeEngineHooks.first?.workerId == "summary-worker")
+        #expect(snapshot.activeClientActions.first?.workerId == "speech-worker")
         #expect(snapshot.workers.first?.workerId == "research")
     }
 
