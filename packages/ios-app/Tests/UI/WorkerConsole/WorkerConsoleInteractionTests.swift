@@ -97,7 +97,10 @@ struct WorkerConsoleInteractionTests {
         )
 
         #expect(!shell.contains("case overview = \"Overview\""))
-        #expect(shell.contains("selectedSection: EngineDashboardSection = .core"))
+        #expect(shell.contains("selectedSection: EngineDashboardSection = .workers"))
+        let workersCase = try #require(shell.range(of: "case workers = \"Workers\""))
+        let coreCase = try #require(shell.range(of: "case core = \"Core\""))
+        #expect(workersCase.lowerBound < coreCase.lowerBound)
         #expect(shell.contains("engineHookSummary"))
         #expect(!shell.contains("overviewContent"))
         #expect(!dashboard.contains("struct EngineSurfaceCard"))

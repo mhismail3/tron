@@ -141,6 +141,20 @@ final class NewSessionFlowTests: XCTestCase {
         }
     }
 
+    func testWorkspaceSelectorUsesCurrentPathAsHeadTruncatedSheetTitle() throws {
+        let source = try String(
+            contentsOf: iosAppRoot()
+                .appendingPathComponent("Sources/UI/Chat/Sheets/WorkspaceSelector.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("Text(sheetTitle)"))
+        XCTAssertTrue(source.contains("currentPath.abbreviatingHomeDirectory"))
+        XCTAssertTrue(source.contains(".truncationMode(.head)"))
+        XCTAssertTrue(source.contains("Current folder, \\(sheetTitle)"))
+        XCTAssertFalse(source.contains("locationSection"))
+    }
+
     func testWorkspaceSelectorActionsShareTheShortcutPillPresentation() throws {
         let source = try String(
             contentsOf: iosAppRoot()

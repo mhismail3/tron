@@ -54,23 +54,42 @@ struct EngineSettingsOwnershipTests {
     @Test("main settings danger row exposes durable account actions")
     func mainSettingsDangerRowExposesDurableAccountActions() {
         #expect(SettingsDangerZoneAction.order == [
+            .stopAllWorkers,
             .archiveAllSessions,
             .resetAllSettings,
         ])
+        #expect(SettingsDangerZoneAction.stopAllWorkers.isEnabled(
+            hasSessions: false,
+            workerDispatchReady: true,
+            serverSettingsReady: false,
+            serverSettingsUnavailable: false,
+            isInProgress: false
+        ))
+        #expect(
+            SettingsDangerZoneAction.stopAllWorkers.displayTitle(workersStopped: false)
+                == "Stop All Workers"
+        )
+        #expect(
+            SettingsDangerZoneAction.stopAllWorkers.displayTitle(workersStopped: true)
+                == "Resume All Workers"
+        )
         #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
             hasSessions: true,
+            workerDispatchReady: false,
             serverSettingsReady: false,
             serverSettingsUnavailable: true,
             isInProgress: false
         ) == false)
         #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
             hasSessions: true,
+            workerDispatchReady: false,
             serverSettingsReady: false,
             serverSettingsUnavailable: false,
             isInProgress: false
         ))
         #expect(SettingsDangerZoneAction.resetAllSettings.isEnabled(
             hasSessions: false,
+            workerDispatchReady: false,
             serverSettingsReady: false,
             serverSettingsUnavailable: true,
             isInProgress: true

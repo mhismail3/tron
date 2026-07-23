@@ -164,16 +164,20 @@ enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
 }
 
 enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
+    case stopAllWorkers
     case archiveAllSessions
     case resetAllSettings
 
     static let order: [Self] = [
+        .stopAllWorkers,
         .archiveAllSessions,
         .resetAllSettings,
     ]
 
     var title: String {
         switch self {
+        case .stopAllWorkers:
+            return "Stop All Workers"
         case .archiveAllSessions:
             return "Archive All Sessions"
         case .resetAllSettings:
@@ -183,6 +187,8 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
 
     var icon: String {
         switch self {
+        case .stopAllWorkers:
+            return "stop.fill"
         case .archiveAllSessions:
             return "archivebox"
         case .resetAllSettings:
@@ -192,16 +198,27 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
 
     func isEnabled(
         hasSessions: Bool,
+        workerDispatchReady: Bool,
         serverSettingsReady: Bool,
         serverSettingsUnavailable: Bool,
         isInProgress: Bool
     ) -> Bool {
         switch self {
+        case .stopAllWorkers:
+            return workerDispatchReady && !isInProgress
         case .archiveAllSessions:
             return hasSessions && !serverSettingsUnavailable && !isInProgress
         case .resetAllSettings:
             return true
         }
+    }
+
+    func displayTitle(workersStopped: Bool) -> String {
+        self == .stopAllWorkers && workersStopped ? "Resume All Workers" : title
+    }
+
+    func displayIcon(workersStopped: Bool) -> String {
+        self == .stopAllWorkers && workersStopped ? "play.fill" : icon
     }
 }
 

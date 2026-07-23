@@ -267,7 +267,8 @@ fill and press response as the navigation affordance; trailing chevrons are
 intentionally omitted throughout the dashboard and its nested sheets. It
 provides:
 
-- Core, Workers, and Activity modes in one compact cockpit; the always-visible
+- Workers, Core, and Activity modes in one compact cockpit, with Workers as the
+  initial operator view; the always-visible
   summary owns profile-wide fixed/worker/issue counts and any active
   worker-owned engine-policy hooks instead of duplicating them in an Overview
   tab;
@@ -279,7 +280,6 @@ provides:
   schemas, effect, risk, and exposure state;
 - every published worker's profile-global availability to agents, without
   leaking unnamed session promotion or queryless relevance diagnostics;
-- engine stop-all/resume with an explanation that queued work remains durable;
 - worker list with explicit runner type, health, active hash prefix, trigger
   count, and successful-run evidence; compact metadata groups retain clear
   separation while keeping each icon visually attached to its text;
@@ -446,6 +446,12 @@ returning Home. Popping the destination clears compact selection. This ensures
 the replacement `ChatView` always begins a new reconstruction and live-stream
 lifecycle instead of reusing a cancelled destination shell.
 
+The server-backed workspace browser uses its toolbar title as the current-path
+breadcrumb. The full abbreviated path remains available to accessibility, while
+compact displays truncate from the beginning so the selected folder and nearest
+ancestors stay visible. The browser does not repeat the path as a separate row
+above the folder list.
+
 ## Composer and Attachments
 
 The composer owns:
@@ -518,6 +524,17 @@ brand symbols, while add, clear, refresh, disclosure, and endpoint-save controls
 share a stable trailing axis and the same visible edge inset as the leading
 icons. Destructive credential controls are circular like the corresponding add
 controls rather than variable-width pills.
+
+Ollama uses the same axes: refresh and endpoint-save controls occupy the shared
+trailing slot, reachability and installed count render as one compact status
+line, and the editable endpoint occupies one aligned row rather than a nested
+label-and-field stack.
+
+Profile-wide worker dispatch custody lives in the Settings Danger Zone rather
+than the Engine Dashboard summary. Settings reads the canonical stop-all flag
+from the worker repository and requires confirmation before either pausing all
+dispatch or resuming durable queued work. The dashboard continues to show a
+paused summary state but does not duplicate the mutation control.
 
 Compact mutually exclusive controls use one shared liquid-glass button style.
 Dashboard tabs, color-mode choices, and text/code font choices share selected

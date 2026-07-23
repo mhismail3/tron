@@ -13,6 +13,11 @@ struct SettingsView: View {
     @State private var showLogViewer = false
     @State var showArchiveAllConfirmation = false
     @State var isArchivingAll = false
+    @State var showWorkerDispatchConfirmation = false
+    @State var workersStopped = false
+    @State var workerDispatchLoaded = false
+    @State var isChangingWorkerDispatch = false
+    @State var workerDispatchError: String?
     @State var activePage: SettingsPage?
     @State var cardsVisible = false
     @State private var feedbackMailDraft: FeedbackMailDraft?
@@ -135,18 +140,20 @@ struct SettingsView: View {
         settingsWithSheets
             .task {
                 cardsVisible = true
-                await loadServerSettingsIfAvailable()
+                await loadServerOwnedState()
             }
             .onChange(of: dependencies.activeServerSelectionVersion) {
                 settingsState.clearServerSnapshot()
-                Task { await loadServerSettingsIfAvailable() }
+                clearWorkerDispatchState()
+                Task { await loadServerOwnedState() }
             }
             .onChange(of: connectionRepository.connectionState) { oldState, newState in
                 guard hasPairedServers else { return }
                 if newState.isConnected {
-                    Task { await loadServerSettingsIfAvailable() }
+                    Task { await loadServerOwnedState() }
                 } else if oldState.isConnected {
                     settingsState.clearServerSnapshot()
+                    clearWorkerDispatchState()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
@@ -167,6 +174,14 @@ struct SettingsView: View {
                 Button("Archive All", role: .destructive) { archiveAllSessions() }
             } message: {
                 Text(archiveAllSessionsMessage)
+            }
+            .alert(workerDispatchConfirmationTitle, isPresented: $showWorkerDispatchConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button(workerDispatchConfirmationActionTitle, role: workersStopped ? nil : .destructive) {
+                    setWorkersStopped(!workersStopped)
+                }
+            } message: {
+                Text(workerDispatchConfirmationMessage)
             }
             .alert(
                 feedbackResultMessage ?? "",
@@ -206,7 +221,28 @@ struct SettingsView: View {
         return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
     }
 
+    private var workerDispatchConfirmationTitle: String {
+        workersStopped ? "Resume All Workers?" : "Stop All Workers?"
+    }
+
+    private var workerDispatchConfirmationActionTitle: String {
+        workersStopped ? "Resume All" : "Stop All"
+    }
+
+    private var workerDispatchConfirmationMessage: String {
+        if workersStopped {
+            return "New dispatch will resume and durable queued work can run again."
+        }
+        return "New dispatch will pause, active work will be cancelled, and resident services will stop. Durable queued work stays visible."
+    }
+
     // MARK: - Actions
+
+    func loadServerOwnedState() async {
+        async let settingsLoad: Void = loadServerSettingsIfAvailable()
+        async let dispatchLoad: Void = loadWorkerDispatchStateIfAvailable()
+        _ = await (settingsLoad, dispatchLoad)
+    }
 
     func loadServerSettingsIfAvailable() async {
         guard let activeServer = dependencies.pairedServerStore.activeServer else {
@@ -243,6 +279,62 @@ struct SettingsView: View {
 
     func startOnboarding(prefill server: PairedServer? = nil) {
         launchServerOnboarding(server)
+    }
+
+    func loadWorkerDispatchStateIfAvailable() async {
+        guard let activeServer = dependencies.pairedServerStore.activeServer,
+              connectionRepository.connectionState.isConnected else {
+            clearWorkerDispatchState()
+            return
+        }
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        workerDispatchLoaded = false
+        workerDispatchError = nil
+        do {
+            let snapshot = try await dependencies.workerKernelRepository.workers(includeRetired: false)
+            guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+                  dependencies.activeServerSelectionVersion == selectionVersion else { return }
+            workersStopped = snapshot.stopAll
+            workerDispatchLoaded = true
+        } catch {
+            guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+                  dependencies.activeServerSelectionVersion == selectionVersion else { return }
+            workerDispatchError = error.localizedDescription
+        }
+    }
+
+    func clearWorkerDispatchState() {
+        workersStopped = false
+        workerDispatchLoaded = false
+        workerDispatchError = nil
+        isChangingWorkerDispatch = false
+    }
+
+    private func setWorkersStopped(_ stopped: Bool) {
+        guard workerDispatchLoaded,
+              connectionRepository.connectionState.isConnected,
+              !isChangingWorkerDispatch else { return }
+        let activeServerId = dependencies.pairedServerStore.activeServer?.id
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        isChangingWorkerDispatch = true
+        workerDispatchError = nil
+        Task { @MainActor in
+            defer { isChangingWorkerDispatch = false }
+            do {
+                let result = try await dependencies.workerKernelRepository.setWorkersStopped(
+                    stopped,
+                    idempotencyKey: .userAction(stopped ? "settings.worker.stopAll" : "settings.worker.resumeAll")
+                )
+                guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                      dependencies.activeServerSelectionVersion == selectionVersion else { return }
+                workersStopped = result.stopped
+                workerDispatchLoaded = true
+            } catch {
+                guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                      dependencies.activeServerSelectionVersion == selectionVersion else { return }
+                workerDispatchError = error.localizedDescription
+            }
+        }
     }
 
     private func resetToDefaults() {

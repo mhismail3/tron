@@ -187,6 +187,11 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(credentialRow.contains("alignment: .trailing"))
         XCTAssertTrue(ollama.contains("arrow.clockwise.circle.fill"))
         XCTAssertTrue(ollama.contains("alignment: .trailing"))
+        XCTAssertTrue(ollama.contains("Reachable · \\(installedModels.count) model"))
+        XCTAssertTrue(ollama.contains("HStack(alignment: .center"))
+        XCTAssertTrue(ollama.contains("height: ProviderSettingsRowLayout.circularActionDiameter"))
+        XCTAssertFalse(ollama.contains("private var statusDetail"))
+        XCTAssertFalse(ollama.contains("Text(\"Endpoint\")"))
     }
 
     func testEngineCoreUsesAlwaysVisibleCompactRowsAndSeparateDetailSheet() throws {
@@ -250,7 +255,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
         XCTAssertTrue(
             settingsMain.contains("ForEach(SettingsDangerZoneAction.order, id: \\.self)")
-                && settingsMain.contains("SettingsCard(accent: .tronError)")
+                && settingsMain.contains("SettingsCard(accent: dangerActionAccent(action))")
                 && settingsMain.contains("SettingsSectionHeader(title: \"Danger Zone\")"),
             "Danger Zone actions should render as separate cards rather than one divided table"
         )
@@ -266,6 +271,22 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             settingsMain.contains("chevron.right"),
             "Settings main rows should not show chevrons; the whole card remains the tappable affordance"
         )
+    }
+
+    func testStopAllWorkersLivesInConfirmedSettingsDangerAction() throws {
+        let settingsView = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
+        let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
+        let settingsSupport = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
+        let engine = try source(pathComponents: ["Sources", "UI", "WorkerConsole", "WorkerConsoleViews.swift"])
+
+        XCTAssertTrue(settingsSupport.contains("case stopAllWorkers"))
+        XCTAssertTrue(settingsMain.contains("showWorkerDispatchConfirmation = true"))
+        XCTAssertTrue(settingsView.contains(".alert(workerDispatchConfirmationTitle"))
+        XCTAssertTrue(settingsView.contains("setWorkersStopped(!workersStopped)"))
+        XCTAssertTrue(settingsView.contains("workerKernelRepository.setWorkersStopped("))
+        XCTAssertFalse(engine.contains("confirmStopAll"))
+        XCTAssertFalse(engine.contains("Resume queued work"))
+        XCTAssertFalse(engine.contains("Stop all workers"))
     }
 
     func testSettingsFooterIsPinnedWithoutAFullWidthBackdrop() throws {

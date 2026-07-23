@@ -68,11 +68,6 @@ struct OllamaProviderSection: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
                 .multilineTextAlignment(.leading)
-            if reachable == true {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronSuccess)
-            }
             Spacer()
             Button {
                 Task { await onRefresh() }
@@ -101,25 +96,21 @@ struct OllamaProviderSection: View {
     }
 
     private var statusRow: some View {
-        HStack(alignment: .top, spacing: ProviderSettingsRowLayout.spacing) {
+        HStack(alignment: .center, spacing: ProviderSettingsRowLayout.spacing) {
             Image(systemName: statusIcon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(statusColor)
                 .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(statusTitle)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(statusDetail)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(statusSummary)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Color.clear
                 .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
     }
 
     private var statusIcon: String {
@@ -138,63 +129,45 @@ struct OllamaProviderSection: View {
         }
     }
 
-    private var statusTitle: String {
+    private var statusSummary: String {
         switch reachable {
-        case true: "Reachable"
-        case false: "Not reachable"
+        case true: "Reachable · \(installedModels.count) model\(installedModels.count == 1 ? "" : "s")"
+        case false: "Endpoint unavailable"
         case nil: "Checking endpoint"
         }
     }
 
-    private var statusDetail: String {
-        switch reachable {
-        case true: "\(installedModels.count) installed model\(installedModels.count == 1 ? "" : "s") discovered."
-        case false: models.first?.unavailableReason ?? "The server could not reach this Ollama endpoint."
-        case nil: "Refreshing installed models and capability metadata."
-        }
-    }
-
     private var endpointEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: ProviderSettingsRowLayout.spacing) {
-                Image(systemName: "network")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronAmber)
-                    .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
-                Text("Endpoint")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear
-                    .frame(width: ProviderSettingsRowLayout.trailingActionWidth, height: 1)
-            }
-
-            HStack(spacing: ProviderSettingsRowLayout.spacing) {
-                Color.clear
-                    .frame(width: ProviderSettingsRowLayout.leadingIconWidth, height: 1)
-                TextField("http://localhost:11434", text: $endpointDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(.tronTextMuted.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-
-                Button("Save") {
-                    onSaveEndpoint(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+        HStack(alignment: .center, spacing: ProviderSettingsRowLayout.spacing) {
+            Image(systemName: "network")
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronAmber)
-                .frame(
-                    width: ProviderSettingsRowLayout.trailingActionWidth,
-                    alignment: .trailing
-                )
-                .disabled(!endpointIsValid || endpointDraft == baseUrl)
+                .frame(width: ProviderSettingsRowLayout.leadingIconWidth)
+            TextField("http://localhost:11434", text: $endpointDraft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.tronTextMuted.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityLabel("Ollama endpoint")
+
+            Button("Save") {
+                onSaveEndpoint(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines))
             }
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(.tronAmber)
+            .frame(
+                width: ProviderSettingsRowLayout.trailingActionWidth,
+                height: ProviderSettingsRowLayout.circularActionDiameter,
+                alignment: .trailing
+            )
+            .disabled(!endpointIsValid || endpointDraft == baseUrl)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
     }
 
     @ViewBuilder

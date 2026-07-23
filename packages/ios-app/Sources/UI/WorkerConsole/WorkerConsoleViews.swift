@@ -19,8 +19,8 @@ enum WorkerVersionAction: Equatable {
     }
 }
 private enum EngineDashboardSection: String, CaseIterable {
-    case core = "Core"
     case workers = "Workers"
+    case core = "Core"
     case activity = "Activity"
 }
 
@@ -108,8 +108,7 @@ struct WorkerConsoleSheet: View {
     let repository: any WorkerKernelRepository
     let connectionState: ConnectionState
 
-    @State private var confirmStopAll = false
-    @State private var selectedSection: EngineDashboardSection = .core
+    @State private var selectedSection: EngineDashboardSection = .workers
     @State private var selectedCoreTool: EngineSurfaceToolDTO?
 
     var body: some View {
@@ -188,18 +187,6 @@ struct WorkerConsoleSheet: View {
             .sheet(item: $selectedCoreTool) { tool in
                 EngineCoreToolDetailSheet(tool: tool)
             }
-            .confirmationDialog(
-                "Stop every worker?",
-                isPresented: $confirmStopAll,
-                titleVisibility: .visible
-            ) {
-                Button("Stop all workers", role: .destructive) {
-                    Task { await setStopped(true) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("New dispatch will pause, active work will be cancelled, and resident services will stop. Durable queued work stays visible.")
-            }
             .task { await refresh() }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
@@ -257,29 +244,6 @@ struct WorkerConsoleSheet: View {
                 }
             }
 
-            Button {
-                if viewModel.stopAll {
-                    Task { await setStopped(false) }
-                } else {
-                    confirmStopAll = true
-                }
-            } label: {
-                Label(
-                    viewModel.stopAll ? "Resume queued work" : "Stop all workers",
-                    systemImage: viewModel.stopAll ? "play.fill" : "stop.fill"
-                )
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(viewModel.stopAll ? .tronEmerald : .tronError)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
-                .contentShape(Capsule())
-                .glassEffect(
-                    .regular.tint((viewModel.stopAll ? Color.tronEmerald : .tronError).opacity(0.16)).interactive(),
-                    in: .capsule
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isMutating || !connectionState.isConnected)
         }
         .padding(14)
         .sectionFill(consoleStatus.color, cornerRadius: 12, subtle: true, interactive: false)
@@ -470,13 +434,6 @@ struct WorkerConsoleSheet: View {
         )
     }
 
-    private func setStopped(_ stopped: Bool) async {
-        await viewModel.setStopAll(
-            stopped,
-            repository: repository,
-            connectionState: connectionState
-        )
-    }
 }
 
 private struct WorkerConsoleRow: View {

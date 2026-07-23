@@ -68,9 +68,12 @@ struct WorkspaceSelector: View {
                 }
 
                 ToolbarItem(placement: .principal) {
-                    Text("Select Workspace")
+                    Text(sheetTitle)
                         .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .accessibilityLabel(sheetTitleAccessibilityLabel)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -111,13 +114,21 @@ struct WorkspaceSelector: View {
                 }
 
                 actionSection
-                locationSection
                 directorySection
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
         .scrollClipDisabled()
+    }
+
+    private var sheetTitle: String {
+        let path = currentPath.abbreviatingHomeDirectory
+        return path.isEmpty ? "Select Workspace" : path
+    }
+
+    private var sheetTitleAccessibilityLabel: String {
+        currentPath.isEmpty ? "Select Workspace" : "Current folder, \(sheetTitle)"
     }
 
     private var quickPathSection: some View {
@@ -137,30 +148,6 @@ struct WorkspaceSelector: View {
             }
             .scrollClipDisabled()
         }
-    }
-
-    private var locationSection: some View {
-        HStack(spacing: 8) {
-            if isNavigating {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.tronEmerald)
-            } else {
-                Image(systemName: "folder.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronEmerald)
-            }
-
-            Text(currentPath.abbreviatingHomeDirectory)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                .foregroundStyle(.tronTextMuted)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Current folder, \(currentPath.abbreviatingHomeDirectory)")
     }
 
     private var actionSection: some View {
