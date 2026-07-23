@@ -80,8 +80,21 @@ struct InputBarConfig {
 
     /// Whether the agent is currently processing (convenience).
     var isProcessing: Bool { agentPhase.isProcessing }
+    /// Native composer capture is active.
+    let isRecording: Bool
+    /// Smoothed normalized microphone energy (0...1).
+    let recordingAudioLevel: Double
+    /// Captured audio is being processed by the speech worker.
+    let isTranscribing: Bool
+    /// A healthy enabled worker owns the validated speech client action.
+    let speechTranscriptionAvailable: Bool
+
+    var showsContextBriefingControl: Bool {
+        !isRecording && !isTranscribing
+    }
+
     func canSend(hasContent: Bool) -> Bool {
-        guard agentPhase.isIdle else { return false }
+        guard agentPhase.isIdle, showsContextBriefingControl else { return false }
         return hasContent && sendBlockReason == nil
     }
 
@@ -135,6 +148,10 @@ struct InputBarConfig {
         agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
         isConnected: Bool = true,
+        isRecording: Bool = false,
+        recordingAudioLevel: Double = 0,
+        isTranscribing: Bool = false,
+        speechTranscriptionAvailable: Bool = false,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
         contextPercentage: Int = 0,
@@ -146,6 +163,10 @@ struct InputBarConfig {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
         self.isConnected = isConnected
+        self.isRecording = isRecording
+        self.recordingAudioLevel = min(max(recordingAudioLevel, 0), 1)
+        self.isTranscribing = isTranscribing
+        self.speechTranscriptionAvailable = speechTranscriptionAvailable
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress
         self.contextPercentage = contextPercentage
@@ -166,6 +187,9 @@ struct InputBarActions {
     let onAddAttachment: (Attachment) -> Void
     let onRemoveAttachment: (Attachment) -> Void
     let onAttachmentError: (String, String) -> Void
+    /// Starts or stops the native capture actuator. The captured audio is
+    /// routed through the current speech worker by the chat view model.
+    let onMicTap: () -> Void
     // MARK: - History
     let onHistoryNavigate: ((String) -> Void)?
 
@@ -178,6 +202,7 @@ struct InputBarActions {
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
         onAttachmentError: @escaping (String, String) -> Void = { _, _ in },
+        onMicTap: @escaping () -> Void = {},
         onHistoryNavigate: ((String) -> Void)? = nil,
         onContextTap: (() -> Void)? = nil
     ) {
@@ -186,6 +211,7 @@ struct InputBarActions {
         self.onAddAttachment = onAddAttachment
         self.onRemoveAttachment = onRemoveAttachment
         self.onAttachmentError = onAttachmentError
+        self.onMicTap = onMicTap
         self.onHistoryNavigate = onHistoryNavigate
         self.onContextTap = onContextTap
     }

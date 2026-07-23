@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-22 for the worker-first POC.
+> Last verified: 2026-07-23 for the worker-first POC.
 
 ## Overview
 
@@ -518,15 +518,24 @@ The composer owns:
 
 - text and successful-send recent-input history;
 - camera, photo, and file pickers;
+- native bounded microphone permission, mono PCM capture, metering, and WAV
+  encoding when a healthy worker owns the `speech_transcription` client action;
 - prepared attachment ids and encoded-size preflight against
   `hello.maxMessageSize`;
 - the compact server-derived context progress ring and its Session Context
   presentation;
-- the trailing send/stop action.
+- the trailing send/stop/record action.
 
-The primitive client has no fixed microphone capture or transcription stack.
-If speech input proves useful, Tron must author, activate, and exercise it as a
-worker instead of adding another permanent product subsystem.
+The microphone stack is a narrow native actuator, not a transcription
+subsystem. The engine publishes at most one current healthy owner for the
+kernel-validated `speech_transcription` client action. Only then does the
+composer show its mic. Tapping it records a temporary WAV, invokes that worker
+through the ordinary durable worker API with the originating session, deletes
+the temporary file after loading, and inserts the worker's typed `text` result
+into the draft. Worker lifecycle polling refreshes ownership without reopening
+the chat. Model choice, recognition dependencies, language policy, cleanup, and
+quality remain worker-owned; the app has no fixed recognizer, transcription
+setting, or private transcription endpoint.
 
 Attachment conversion commits before submission. Pending photo-picker objects
 remain with the conversion owner and are not treated as sendable attachments.

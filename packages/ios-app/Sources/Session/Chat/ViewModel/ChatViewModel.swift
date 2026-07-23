@@ -27,6 +27,15 @@ final class ChatViewModel {
     var hasMoreMessages = false
     /// Whether currently loading more messages
     var isLoadingMoreMessages = false
+    /// Native composer capture state. Recognition is supplied by the active
+    /// worker that owns the `speech_transcription` client action.
+    var isRecording = false
+    var recordingAudioLevel: Double = 0
+    var isTranscribing = false
+    var speechTranscriptionOwner: ClientActionOwnerDTO?
+    var isSpeechTranscriptionAvailable: Bool {
+        speechTranscriptionOwner != nil
+    }
     // MARK: - Input State (delegated to InputBarState)
 
     /// Text input - delegated to inputBarState
@@ -164,6 +173,16 @@ final class ChatViewModel {
     let connectionCoordinator = ConnectionCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
+    /// Coordinates the native capture → durable speech-worker → draft path.
+    let speechTranscriptionCoordinator = ChatSpeechTranscriptionCoordinator()
+    /// Native capture owns permission, recording, metering, and WAV encoding.
+    let micRecorder = ComposerMicRecorder()
+    @ObservationIgnored
+    var speechTranscriptionTask: Task<Void, Never>?
+    @ObservationIgnored
+    var speechTranscriptionTaskGeneration: UInt64 = 0
+    @ObservationIgnored
+    var speechWorkerMonitorTask: Task<Void, Never>?
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     /// Message identities for tool invocations in the live current turn.
@@ -246,8 +265,14 @@ final class ChatViewModel {
         self.eventStoreManager = eventStoreManager
         self.photoPickerDataLoader = photoPickerDataLoader
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
+        micRecorder.onFinish = { [weak self] url, success in
+            self?.handleRecordingFinished(url: url, success: success)
+        }
         setupBindings()
         setupEventProcessingCallbacks()
+        if services.connection.connectionState.isConnected {
+            startSpeechTranscriptionMonitoring()
+        }
     }
 
     @ObservationIgnored
@@ -259,6 +284,13 @@ final class ChatViewModel {
 
         observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
             guard let self else { return }
+
+            if state.isConnected {
+                startSpeechTranscriptionMonitoring()
+            } else {
+                cancelRecording()
+                stopSpeechTranscriptionMonitoring()
+            }
 
             if case .disconnected = state {
                 // A matched Stop remains pending across transport loss. Only
@@ -276,6 +308,14 @@ final class ChatViewModel {
 
         observationTasks.append(Self.observeLoop({ inputBarState.selectedImages }) { [weak self] images in
             self?.startSelectedImageProcessing(images)
+        })
+
+        let micRecorder = micRecorder
+        observationTasks.append(Self.observeLoop({ micRecorder.isRecording }) { [weak self] isRecording in
+            self?.isRecording = isRecording
+        })
+        observationTasks.append(Self.observeLoop({ micRecorder.audioLevel }) { [weak self] audioLevel in
+            self?.recordingAudioLevel = audioLevel
         })
 
     }
@@ -324,6 +364,9 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             selectedImageTask?.cancel()
+            speechTranscriptionTask?.cancel()
+            speechWorkerMonitorTask?.cancel()
+            micRecorder.cancelRecording()
         }
     }
 

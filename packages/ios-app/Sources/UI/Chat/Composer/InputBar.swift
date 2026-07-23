@@ -47,6 +47,14 @@ struct InputBar: View {
         )
     }
 
+    private var micDisabled: Bool {
+        if config.isRecording { return false }
+        return config.readOnly
+            || config.agentPhase.isActive
+            || config.isTranscribing
+            || !config.isConnected
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -72,7 +80,8 @@ struct InputBar: View {
 
                 inputField
 
-                if let onContextTap = actions.onContextTap {
+                if config.showsContextBriefingControl,
+                   let onContextTap = actions.onContextTap {
                     ContextProgressButton(
                         contextPercentage: config.contextPercentage,
                         modelName: config.currentModelInfo?.formattedModelName,
@@ -85,8 +94,16 @@ struct InputBar: View {
                     ComposerTrailingButton(
                         showStop: showStop,
                         canSend: canSend,
+                        canRecord: config.speechTranscriptionAvailable,
+                        isRecording: config.isRecording,
+                        isTranscribing: config.isTranscribing,
+                        micDisabled: micDisabled,
                         onSend: actions.onSend,
                         onAbort: actions.onAbort,
+                        onMicTap: {
+                            isFocused = false
+                            actions.onMicTap()
+                        },
                         buttonSize: actionButtonSize
                     )
                     .help(config.sendBlockReason?.description ?? "")
@@ -220,8 +237,20 @@ struct InputBar: View {
                 }
         }
         .frame(minHeight: actionButtonSize)
+        .overlay(alignment: .trailing) {
+            if config.isRecording {
+                GeometryReader { geometry in
+                    RecordingLevelWaveform(level: config.recordingAudioLevel)
+                        .frame(width: max(52, geometry.size.width * 0.22), height: 24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
         .animation(.easeOut(duration: 0.18), value: config.placeholderText)
         .animation(.easeOut(duration: 0.18), value: config.placeholderShowsProgress)
+        .animation(.easeOut(duration: 0.18), value: config.isRecording)
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {

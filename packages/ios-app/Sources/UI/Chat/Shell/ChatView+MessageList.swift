@@ -13,6 +13,10 @@ extension ChatView {
                         agentPhase: viewModel.agentPhase,
                         isCompacting: viewModel.isCompacting,
                         isConnected: services.connection.connectionState.isConnected,
+                        isRecording: viewModel.isRecording,
+                        recordingAudioLevel: viewModel.recordingAudioLevel,
+                        isTranscribing: viewModel.isTranscribing,
+                        speechTranscriptionAvailable: viewModel.isSpeechTranscriptionAvailable,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         placeholderShowsProgress: !initialLoadComplete,
                         contextPercentage: viewModel.contextState.contextPercentage,
@@ -41,6 +45,7 @@ extension ChatView {
                         onAttachmentError: { title, message in
                             viewModel.appendLocalError(dedupKey: "attachment.error.\(title)", title: title, message: message)
                         },
+                        onMicTap: viewModel.toggleRecording,
                         onHistoryNavigate: { newText in viewModel.inputText = newText },
                         onContextTap: { sheetCoordinator.showSessionContext() }
                     )

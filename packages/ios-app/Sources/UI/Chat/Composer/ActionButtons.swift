@@ -104,16 +104,49 @@ struct ComposerAttachmentButton: View {
 
 enum ComposerTrailingMode: Equatable {
     case stopAgent
+    case stopRecording
+    case transcribing
     case send
+    case record
 
-    init(showStop: Bool) {
-        self = showStop ? .stopAgent : .send
+    init(
+        showStop: Bool,
+        canSend: Bool,
+        canRecord: Bool,
+        isRecording: Bool,
+        isTranscribing: Bool
+    ) {
+        if showStop {
+            self = .stopAgent
+        } else if isRecording {
+            self = .stopRecording
+        } else if isTranscribing {
+            self = .transcribing
+        } else if canSend || !canRecord {
+            self = .send
+        } else {
+            self = .record
+        }
     }
 
     var accessibilityLabel: String {
         switch self {
         case .stopAgent: return "Stop agent"
+        case .stopRecording: return "Stop recording"
+        case .transcribing: return "Transcribing"
         case .send: return "Send message"
+        case .record: return "Record voice input"
+        }
+    }
+
+    func accessibilityHint(micDisabled: Bool) -> String {
+        switch self {
+        case .transcribing:
+            return "Wait for transcription to finish."
+        case .record where micDisabled:
+            return "Voice input is unavailable while the agent is active or disconnected."
+        case .stopAgent, .stopRecording, .send, .record:
+            return ""
         }
     }
 }
@@ -121,16 +154,36 @@ enum ComposerTrailingMode: Equatable {
 struct ComposerTrailingButton: View {
     let showStop: Bool
     let canSend: Bool
+    let canRecord: Bool
+    let isRecording: Bool
+    let isTranscribing: Bool
+    let micDisabled: Bool
     let onSend: () -> Void
     let onAbort: () -> Void
+    let onMicTap: () -> Void
     let buttonSize: CGFloat
 
     private var mode: ComposerTrailingMode {
-        ComposerTrailingMode(showStop: showStop)
+        ComposerTrailingMode(
+            showStop: showStop,
+            canSend: canSend,
+            canRecord: canRecord,
+            isRecording: isRecording,
+            isTranscribing: isTranscribing
+        )
     }
 
     private var isDisabled: Bool {
-        mode == .send && !canSend
+        switch mode {
+        case .transcribing:
+            return true
+        case .record:
+            return micDisabled
+        case .send:
+            return !canSend
+        case .stopAgent, .stopRecording:
+            return false
+        }
     }
 
     private var accessibilityLabel: String {
@@ -141,13 +194,21 @@ struct ComposerTrailingButton: View {
         Button(action: performAction) {
             Group {
                 switch mode {
-                case .stopAgent:
+                case .stopAgent, .stopRecording:
                     Image(systemName: "stop.fill")
                         .font(TronTypography.buttonSM)
                         .foregroundStyle(.red)
+                case .transcribing:
+                    ProgressView()
+                        .tint(.tronEmerald)
+                        .scaleEffect(0.8)
                 case .send:
                     Image(systemName: "arrow.up.circle.fill")
                         .font(TronTypography.button)
+                        .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                case .record:
+                    Image(systemName: "mic.fill")
+                        .font(TronTypography.buttonSM)
                         .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                 }
             }
@@ -159,15 +220,23 @@ struct ComposerTrailingButton: View {
         .contentTransition(.symbolEffect(.replace))
         .animation(.easeInOut(duration: 0.2), value: showStop)
         .animation(.easeInOut(duration: 0.2), value: canSend)
+        .animation(.easeInOut(duration: 0.2), value: canRecord)
+        .animation(.easeInOut(duration: 0.2), value: isRecording)
+        .animation(.easeInOut(duration: 0.2), value: isTranscribing)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(mode.accessibilityHint(micDisabled: micDisabled))
     }
 
     private func performAction() {
         switch mode {
         case .stopAgent:
             onAbort()
+        case .stopRecording, .record:
+            onMicTap()
         case .send:
             onSend()
+        case .transcribing:
+            break
         }
     }
 

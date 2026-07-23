@@ -267,4 +267,46 @@ struct WorkerKernelClientTests {
         ])
         #expect(!functions.contains { $0.hasPrefix("worker_lifecycle::") })
     }
+
+    @Test("Session-origin worker invocation carries authenticated session context")
+    func sessionOriginInvocationCarriesSessionContext() async throws {
+        let transport = connectedTransport()
+        let client = WorkerKernelClient(transport: transport)
+        let key = EngineIdempotencyKey.userAction("speech-transcription-test")
+
+        transport.writeHandler = { functionId, payload, receivedKey, options in
+            #expect(functionId.rawValue == "worker_kernel::invoke")
+            #expect((payload as? WorkerInvokeRequestDTO)?.workerId == "speech-worker")
+            #expect(receivedKey == key)
+            #expect(options.context?.sessionId == "session-voice")
+            return WorkerInvocationDTO(
+                invocationId: "run-voice",
+                workerId: "speech-worker",
+                workerVersion: "v1",
+                status: "completed",
+                input: AnyCodable(["audioBase64": "AA==", "mimeType": "audio/wav", "fileName": "voice.wav"]),
+                output: AnyCodable(["text": "hello"]),
+                error: nil,
+                idempotencyKey: key.rawValue,
+                traceId: "trace-voice",
+                causalDepth: 0,
+                triggerKind: "manual",
+                originSessionId: "session-voice",
+                agentSessionId: nil,
+                attemptCount: 1,
+                createdAt: "2026-07-23T12:00:00Z",
+                startedAt: "2026-07-23T12:00:00Z",
+                completedAt: "2026-07-23T12:00:01Z"
+            )
+        }
+
+        let invocation = try await client.invokeWorker(
+            workerId: "speech-worker",
+            input: AnyCodable(["audioBase64": "AA==", "mimeType": "audio/wav", "fileName": "voice.wav"]),
+            idempotencyKey: key,
+            originSessionId: "session-voice"
+        )
+
+        #expect(invocation.output?.dictionaryValue?["text"] as? String == "hello")
+    }
 }

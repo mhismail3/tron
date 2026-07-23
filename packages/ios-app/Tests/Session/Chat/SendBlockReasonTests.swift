@@ -106,4 +106,22 @@ final class SendBlockReasonTests: XCTestCase {
         XCTAssertNil(c.sendBlockReason,
                      "processing alone does not produce an async block reason; the active input bar shows Stop instead of Send")
     }
+
+    func testCaptureLifecycleOwnsComposerUntilTranscriptionFinishes() {
+        let recording = InputBarConfig(
+            isRecording: true,
+            recordingAudioLevel: 2,
+            speechTranscriptionAvailable: true
+        )
+        XCTAssertFalse(recording.showsContextBriefingControl)
+        XCTAssertFalse(recording.canSend(hasContent: true))
+        XCTAssertEqual(recording.recordingAudioLevel, 1)
+
+        let transcribing = InputBarConfig(
+            isTranscribing: true,
+            speechTranscriptionAvailable: true
+        )
+        XCTAssertFalse(transcribing.showsContextBriefingControl)
+        XCTAssertFalse(transcribing.canSend(hasContent: true))
+    }
 }

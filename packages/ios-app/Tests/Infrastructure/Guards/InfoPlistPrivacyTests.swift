@@ -12,6 +12,14 @@ struct InfoPlistPrivacyTests {
         #expect(message.contains("Tailscale"))
     }
 
+    @Test("declares microphone use for worker-backed voice input")
+    func declaresMicrophoneUseForWorkerBackedVoiceInput() throws {
+        let plist = try Self.sourceInfoPlist()
+        let message = try #require(plist["NSMicrophoneUsageDescription"] as? String)
+        #expect(message.contains("voice input"))
+        #expect(message.contains("speech transcription worker"))
+    }
+
     private static func sourceInfoPlist() throws -> [String: Any] {
         let plistURL = try iosAppRoot().appendingPathComponent("Sources/Info.plist")
         let data = try Data(contentsOf: plistURL)
