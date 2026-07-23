@@ -466,6 +466,7 @@ async fn execute_tool_via_engine(
         .map(|worker| worker.worker_version.clone());
     let mut causal_context = with_agent_working_directory(base_context, &working_directory)
         .with_advertised_function(target.function.revision, worker_version)
+        .with_model_tool_invocation_id(invocation_id.to_owned())
         .with_trigger_depth(worker_causal_depth)
         .with_session_id(session_id.to_owned())
         .with_idempotency_key(idempotency_key);

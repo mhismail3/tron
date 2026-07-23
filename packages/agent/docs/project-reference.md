@@ -80,6 +80,17 @@ persistence format. Function definitions and setup-only policy types therefore
 do not carry inert serialization contracts; durable idempotency and stream
 records retain their explicit codecs.
 
+The provider's model-tool invocation id is carried transiently in causal
+context when a projected worker is called. The durable worker runtime binds
+that id to the resulting worker invocation only for the life of the call.
+Command and resident-service workers report queued, running, and typed-result
+validation phases. Agent workers additionally map bounded child turn and child
+tool stage labels back to the exact originating chip. These progress updates
+are redacted and live-only: child prompts, child output, arguments, secrets,
+and file contents remain in their canonical owners. The bridge is removed at
+terminal completion and does not affect worker routing, idempotency, durable
+recovery, permission, or authority.
+
 ### Primitive admission rule
 
 A fixed model tool is admitted only when it passes one of two tests:
@@ -1593,7 +1604,11 @@ unwritten storage contracts:
 | context | `compact.boundary` |
 
 The `tool.invocation.*` names describe generic provider tool-call
-conversation evidence.
+conversation evidence. `tool.invocation.progress` and
+`tool.invocation.output` are transient, monotonically sequenced live updates
+correlated to the exact provider call. The durable
+`tool.invocation.started`/`tool.invocation.completed` pair remains the
+reconstruction and terminal source of truth.
 
 ## iOS Client
 

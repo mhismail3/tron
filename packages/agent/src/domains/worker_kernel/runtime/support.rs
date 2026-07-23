@@ -1,8 +1,9 @@
 //! Stateless execution support for the durable worker runtime.
 //!
 //! This module owns bounded process/HTTP I/O, artifact copying and hashing,
-//! typed event projection, output normalization, and secret redaction. It owns
-//! no mutable runtime state; [`WorkerRuntime`] remains the single coordinator.
+//! typed event projection (including transient model-tool progress), output
+//! normalization, and secret redaction. It owns no mutable runtime state;
+//! [`WorkerRuntime`] remains the single coordinator.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -14,24 +15,156 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
-use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::engine::{InProcessFunctionHandler, Invocation};
-use crate::shared::protocol::events::TronEvent;
+use crate::shared::protocol::events::{BaseEvent, ToolEventIdentity, TronEvent};
 
 use super::super::process::{
     MAX_PROCESS_CAPTURE_BYTES, ProcessTree, trusted_local_command_path, wait_with_bounded_output,
 };
 use super::super::types::{ActiveWorker, InvocationRecord, InvokeRequest, WorkerCommand};
-use super::WorkerRuntime;
+use super::{ModelToolProgressTarget, WorkerRuntime};
+
+fn readable_activity_label(value: &str) -> String {
+    let words = value
+        .split(['_', '-', '.'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let joined = words.join(" ");
+    let mut characters = joined.chars();
+    let Some(first) = characters.next() else {
+        return "worker step".to_owned();
+    };
+    format!("{}{}", first.to_uppercase(), characters.as_str())
+}
+
+impl WorkerRuntime {
+    pub(super) fn emit_model_tool_progress(
+        &self,
+        worker_invocation_id: &str,
+        message: impl Into<String>,
+        percent: Option<f64>,
+    ) {
+        let Some(target) = self.model_tool_progress.get(worker_invocation_id) else {
+            return;
+        };
+        let base = BaseEvent::now(&target.session_id).with_trace_context(
+            Some(target.trace_id.clone()),
+            target.root_invocation_id.clone(),
+        );
+        let event = TronEvent::ToolInvocationProgress {
+            base,
+            invocation_id: target.invocation_id.clone(),
+            tool_name: Some(target.tool_name.clone()),
+            message: Some(
+                crate::shared::foundation::redaction::redact_sensitive_content(&message.into()),
+            ),
+            percent,
+            tool_identity: ToolEventIdentity {
+                trace_id: Some(target.trace_id.clone()),
+                root_invocation_id: target.root_invocation_id.clone(),
+                ..ToolEventIdentity::default()
+            },
+        };
+        let _ = self.orchestrator.emit_transient_session_event(event);
+    }
+
+    pub(super) fn emit_model_tool_output(
+        &self,
+        worker_invocation_id: &str,
+        update: impl Into<String>,
+    ) {
+        let Some(target) = self.model_tool_progress.get(worker_invocation_id) else {
+            return;
+        };
+        let update = crate::shared::foundation::redaction::redact_sensitive_content(&update.into());
+        let event = TronEvent::ToolInvocationOutput {
+            base: BaseEvent::now(&target.session_id).with_trace_context(
+                Some(target.trace_id.clone()),
+                target.root_invocation_id.clone(),
+            ),
+            invocation_id: target.invocation_id.clone(),
+            update,
+        };
+        let _ = self.orchestrator.emit_transient_session_event(event);
+    }
+
+    pub(super) fn observe_agent_model_tool_progress(
+        &self,
+        worker_invocation_id: &str,
+        event: &TronEvent,
+    ) {
+        match event {
+            TronEvent::AgentStart { .. } => {
+                let worker_name = self
+                    .model_tool_progress
+                    .get(worker_invocation_id)
+                    .map(|target| target.worker_name.clone())
+                    .unwrap_or_else(|| "Agent worker".to_owned());
+                self.emit_model_tool_progress(
+                    worker_invocation_id,
+                    format!("{worker_name} agent started"),
+                    Some(0.1),
+                );
+                self.emit_model_tool_output(worker_invocation_id, format!("Started {worker_name}"));
+            }
+            TronEvent::TurnStart { .. } => {
+                self.emit_model_tool_progress(
+                    worker_invocation_id,
+                    "Planning and executing the delegated work",
+                    Some(0.18),
+                );
+            }
+            TronEvent::ToolInvocationStarted { tool_name, .. } => {
+                let label = readable_activity_label(tool_name);
+                self.emit_model_tool_progress(worker_invocation_id, format!("Using {label}"), None);
+                self.emit_model_tool_output(worker_invocation_id, format!("Started {label}"));
+            }
+            TronEvent::ToolInvocationCompleted {
+                tool_name,
+                is_error,
+                ..
+            } => {
+                let label = readable_activity_label(tool_name);
+                let outcome = if is_error.unwrap_or(false) {
+                    format!("{label} reported an issue")
+                } else {
+                    format!("Finished {label}")
+                };
+                self.emit_model_tool_progress(worker_invocation_id, outcome.clone(), None);
+                self.emit_model_tool_output(worker_invocation_id, outcome);
+            }
+            TronEvent::ResponseComplete {
+                has_tool_invocations,
+                ..
+            } if !has_tool_invocations => {
+                self.emit_model_tool_progress(
+                    worker_invocation_id,
+                    "Preparing the typed worker result",
+                    Some(0.84),
+                );
+            }
+            TronEvent::AgentEnd { .. } => {
+                self.emit_model_tool_progress(
+                    worker_invocation_id,
+                    "Validating the typed worker result",
+                    Some(0.92),
+                );
+            }
+            _ => {}
+        }
+    }
+}
 
 pub(super) async fn wait_for_agent_terminal(
-    orchestrator: &Orchestrator,
+    runtime: &WorkerRuntime,
     events: &mut tokio::sync::broadcast::Receiver<TronEvent>,
     session_id: &str,
+    worker_invocation_id: &str,
 ) -> Result<Option<String>, String> {
     loop {
         match events.recv().await {
             Ok(event) if event.session_id() == session_id => {
+                runtime.observe_agent_model_tool_progress(worker_invocation_id, &event);
                 if let TronEvent::AgentEnd { error, .. } = event {
                     return Ok(error);
                 }
@@ -43,7 +176,7 @@ pub(super) async fn wait_for_agent_terminal(
                 // emitted and cannot be recovered from this lossy channel.
                 // Fail explicitly instead of waiting until the two-hour worker
                 // ceiling with no producer left to wake this receiver.
-                if orchestrator.get_run_id(session_id).is_none() {
+                if runtime.orchestrator.get_run_id(session_id).is_none() {
                     return Err(format!(
                         "agent event stream missed terminal status after lagging by {skipped} events"
                     ));
@@ -71,19 +204,44 @@ impl InProcessFunctionHandler for DynamicWorkerHandler {
             .idempotency_key
             .clone()
             .unwrap_or_else(|| format!("manual:{}", invocation.id));
-        let record = self
-            .runtime
-            .invoke(InvokeRequest {
-                worker_id: self.worker_id.clone(),
-                input: invocation.payload,
-                idempotency_key,
-                trace_id,
-                causal_depth: depth,
-                trigger_kind: "manual".to_owned(),
-                origin_session_id: invocation.causal_context.session_id.clone(),
-            })
-            .await
-            .map_err(crate::engine::EngineError::HandlerFailed)?;
+        let request = InvokeRequest {
+            worker_id: self.worker_id.clone(),
+            input: invocation.payload,
+            idempotency_key,
+            trace_id: trace_id.clone(),
+            causal_depth: depth,
+            trigger_kind: "manual".to_owned(),
+            origin_session_id: invocation.causal_context.session_id.clone(),
+        };
+        let progress_target = invocation
+            .causal_context
+            .model_tool_invocation_id()
+            .zip(invocation.causal_context.session_id.as_deref())
+            .map(|(provider_invocation_id, session_id)| {
+                let summary = self.runtime.store.summary(&self.worker_id).ok().flatten();
+                ModelToolProgressTarget {
+                    session_id: session_id.to_owned(),
+                    invocation_id: provider_invocation_id.to_owned(),
+                    tool_name: summary.as_ref().map_or_else(
+                        || self.worker_id.clone(),
+                        |summary| summary.tool_name.clone(),
+                    ),
+                    worker_name: summary
+                        .as_ref()
+                        .map_or_else(|| self.worker_id.clone(), |summary| summary.name.clone()),
+                    trace_id,
+                    root_invocation_id: invocation
+                        .causal_context
+                        .parent_invocation_id
+                        .as_ref()
+                        .map(|id| id.as_str().to_owned()),
+                }
+            });
+        let record = match progress_target {
+            Some(target) => self.runtime.invoke_from_model_tool(request, target).await,
+            None => self.runtime.invoke(request).await,
+        }
+        .map_err(crate::engine::EngineError::HandlerFailed)?;
         if record.status != "completed" {
             return Err(crate::engine::EngineError::HandlerFailed(
                 record

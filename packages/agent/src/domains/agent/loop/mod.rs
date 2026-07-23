@@ -29,6 +29,10 @@
 //! identity) as presentation evidence. Clients can therefore render useful
 //! live execution experiences without inferring architecture from tool names
 //! or owning a second catalog.
+//! The provider's invocation id also travels transiently through causal context
+//! so a durable worker invocation can stream bounded, redacted execution phases
+//! back to the one model-tool chip that requested it. This correlation never
+//! participates in routing, idempotency, persistence, or authorization.
 //! Turn starts, ends, and failures are persisted before their matching live
 //! broadcast, and each surface shares the durable row sequence. User
 //! cancellation is terminalized by the active turn runner, which owns the

@@ -460,10 +460,13 @@ collections never expand inline and displace the summary.
 
 Running calls retain the same sheet identity and update from canonical
 `tool.invocation.progress`, `tool.invocation.output`, and terminal lifecycle
-events. Agent workers receive an explicit progress surface with elapsed time,
+events. The server correlates each transient update to the exact provider call:
+command and service workers report phases of their durable execution, while
+agent workers additionally expose bounded, redacted child-turn and child-tool
+stage labels. Agent workers receive an explicit progress surface with elapsed time,
 current stage, structured progress, and bounded streamed output when the
-server reports it. The client does not poll worker storage or invent a second
-execution state.
+server reports it. The client does not poll worker storage, infer progress from
+tool names, or invent a second execution state.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 

@@ -234,6 +234,22 @@ impl Orchestrator {
         self.broadcast.subscribe()
     }
 
+    /// Emit an ephemeral session event through the canonical live stream.
+    ///
+    /// Active sessions share the same monotonic counter used by durable turn
+    /// events, so transient worker progress cannot reorder a later terminal
+    /// row. Sessions without an initialized counter still receive the event;
+    /// this preserves diagnostic visibility without manufacturing durable
+    /// sequence state.
+    pub(crate) fn emit_transient_session_event(&self, event: TronEvent) -> usize {
+        let session_id = event.session_id().to_owned();
+        if let Some(counter) = self.sequence_counters.get(&session_id) {
+            self.broadcast.emit_sequenced(event, counter.value())
+        } else {
+            self.broadcast.emit(event)
+        }
+    }
+
     /// Get the turn accumulator map (for session resume catch-up).
     pub fn turn_accumulators(&self) -> &Arc<TurnAccumulatorMap> {
         &self.turn_accumulators

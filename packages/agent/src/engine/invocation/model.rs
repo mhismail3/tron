@@ -33,6 +33,12 @@ pub struct CausalContext {
     /// Persistent worker that owns an agent execution crossing engine-owned
     /// internal transport hops.
     origin_worker_id: Option<String>,
+    /// Provider/model tool-call id that originated this engine invocation.
+    ///
+    /// This is transient observation metadata used to correlate live progress
+    /// with the exact conversation chip. It is never an authorization,
+    /// routing, persistence, or idempotency input.
+    model_tool_invocation_id: Option<String>,
     /// Function revision advertised to the model that produced this call.
     advertised_function_revision: Option<FunctionRevision>,
     /// Immutable worker version advertised with the projected worker tool.
@@ -55,6 +61,7 @@ impl CausalContext {
             idempotency_key: None,
             working_directory: None,
             origin_worker_id: None,
+            model_tool_invocation_id: None,
             advertised_function_revision: None,
             advertised_worker_version: None,
             trigger_depth: 0,
@@ -117,6 +124,20 @@ impl CausalContext {
                 .then(|| self.actor_id.as_str().strip_prefix("worker:"))
                 .flatten()
         })
+    }
+
+    /// Preserve the originating provider/model tool-call id for live
+    /// presentation correlation.
+    #[must_use]
+    pub fn with_model_tool_invocation_id(mut self, invocation_id: impl Into<String>) -> Self {
+        self.model_tool_invocation_id = Some(invocation_id.into());
+        self
+    }
+
+    /// Read the originating provider/model tool-call id.
+    #[must_use]
+    pub fn model_tool_invocation_id(&self) -> Option<&str> {
+        self.model_tool_invocation_id.as_deref()
     }
 
     /// Pin execution to the exact function and worker versions advertised to

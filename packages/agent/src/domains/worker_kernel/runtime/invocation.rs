@@ -87,6 +87,16 @@ impl WorkerRuntime {
             TraceId::new(queued.trace_id.clone()).ok(),
         )
         .await;
+        let worker_name = worker.summary.name.clone();
+        self.emit_model_tool_progress(
+            &queued.invocation_id,
+            format!("Running {worker_name}"),
+            Some(0.08),
+        );
+        self.emit_model_tool_output(
+            &queued.invocation_id,
+            format!("Worker execution started: {worker_name}"),
+        );
 
         let timed = tokio::time::timeout(
             Duration::from_secs(MAX_INVOCATION_SECONDS),
@@ -100,6 +110,13 @@ impl WorkerRuntime {
             () = worker_stop.cancelled() => Err(self.worker_cancelled_error(&queued.worker_id, false)),
             () = invocation_stop.cancelled() => Err("worker invocation cancelled explicitly".to_owned()),
         };
+        if execution.is_ok() {
+            self.emit_model_tool_progress(
+                &queued.invocation_id,
+                "Validating the typed worker result",
+                Some(0.94),
+            );
+        }
         if invocation_stop.is_cancelled() {
             return self
                 .store
@@ -453,8 +470,13 @@ impl WorkerRuntime {
         if let Some(error) = outcome.error {
             return Err(format!("start agent worker: {error}"));
         }
-        let terminal_error =
-            wait_for_agent_terminal(&self.orchestrator, &mut agent_events, &session_id).await?;
+        let terminal_error = wait_for_agent_terminal(
+            self,
+            &mut agent_events,
+            &session_id,
+            &invocation.invocation_id,
+        )
+        .await?;
         agent_run_guard.disarm();
         if let Some(error) = terminal_error {
             return Err(format!("agent worker failed: {error}"));

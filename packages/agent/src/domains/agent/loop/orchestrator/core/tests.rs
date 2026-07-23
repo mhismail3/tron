@@ -421,6 +421,27 @@ fn current_sequence_reads_without_increment() {
     assert_eq!(orch.current_sequence("s1"), Some(2));
 }
 
+#[tokio::test]
+async fn transient_session_events_share_the_live_sequence_counter() {
+    let orch = make_orchestrator();
+    orch.init_sequence_counter("s1", 7);
+    let mut events = orch.subscribe();
+
+    let delivered = orch.emit_transient_session_event(TronEvent::ToolInvocationProgress {
+        base: BaseEvent::now("s1"),
+        invocation_id: "provider-call-1".to_owned(),
+        tool_name: Some("worker_example".to_owned()),
+        message: Some("Working".to_owned()),
+        percent: Some(0.5),
+        tool_identity: Default::default(),
+    });
+
+    assert_eq!(delivered, 1);
+    let event = events.recv().await.unwrap();
+    assert_eq!(event.sequence(), Some(8));
+    assert_eq!(orch.current_sequence("s1"), Some(8));
+}
+
 #[test]
 fn init_counter_simulates_server_restart() {
     // Simulates: server restarts, queries MAX(sequence) = 42 from DB, inits counter at 42

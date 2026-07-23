@@ -71,6 +71,32 @@ impl WorkerRuntime {
         self.execute_queued(queued).await
     }
 
+    /// Invoke a worker on behalf of one live provider/model tool call.
+    ///
+    /// Durable admission and execution are identical to [`Self::invoke`].
+    /// The additional target is a transient presentation bridge only: it lets
+    /// the runtime stream exact progress back to the awaiting conversation
+    /// chip without putting client state into the durable worker schema.
+    pub(super) async fn invoke_from_model_tool(
+        self: &Arc<Self>,
+        request: InvokeRequest,
+        target: ModelToolProgressTarget,
+    ) -> Result<InvocationRecord, String> {
+        let (queued, replayed) = self.enqueue_request(request)?;
+        if replayed && queued.status != "queued" {
+            return Ok(queued);
+        }
+        let invocation_id = queued.invocation_id.clone();
+        self.model_tool_progress
+            .insert(invocation_id.clone(), target);
+        let _progress_bridge = RemoveModelToolProgressOnDrop {
+            runtime: Arc::clone(self),
+            worker_invocation_id: invocation_id.clone(),
+        };
+        self.emit_model_tool_progress(&invocation_id, "Queued for worker execution", Some(0.02));
+        self.execute_queued(queued).await
+    }
+
     pub fn enqueue(&self, request: InvokeRequest) -> Result<InvocationRecord, String> {
         self.enqueue_request(request).map(|(record, _)| record)
     }

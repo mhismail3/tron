@@ -177,6 +177,10 @@ async fn direct_tool_uses_typed_payload_and_agent_context() {
         Some(crate::engine::FunctionRevision(1))
     );
     assert_eq!(invocation.causal_context.advertised_worker_version(), None);
+    assert_eq!(
+        invocation.causal_context.model_tool_invocation_id(),
+        Some("direct-call")
+    );
     assert!(
         invocation
             .causal_context

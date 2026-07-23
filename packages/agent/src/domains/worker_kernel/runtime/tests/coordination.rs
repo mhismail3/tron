@@ -1,4 +1,167 @@
 use super::*;
+use crate::shared::protocol::events::TronEvent;
+
+#[tokio::test]
+async fn model_tool_worker_invocation_streams_correlated_live_progress() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec!["sh".to_owned(), "-c".to_owned(), "cat".to_owned()]),
+            None,
+        )
+        .await
+        .unwrap();
+    runtime
+        .orchestrator
+        .init_sequence_counter("session-live", 0);
+    let mut events = runtime.orchestrator.subscribe();
+    let worker_id = outcome.worker.worker_id.clone();
+    let record = runtime
+        .invoke_from_model_tool(
+            request(&worker_id, json!({"value":"hello"}), "live-progress"),
+            ModelToolProgressTarget {
+                session_id: "session-live".to_owned(),
+                invocation_id: "provider-call-live".to_owned(),
+                tool_name: outcome.worker.tool_name,
+                worker_name: outcome.worker.name,
+                trace_id: "trace-live-progress".to_owned(),
+                root_invocation_id: Some("root-live".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(record.status, "completed");
+    let mut progress: Vec<String> = Vec::new();
+    let mut output: Vec<String> = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        match event {
+            TronEvent::ToolInvocationProgress {
+                invocation_id,
+                message,
+                ..
+            } if invocation_id == "provider-call-live" => {
+                progress.push(message.unwrap_or_default());
+            }
+            TronEvent::ToolInvocationOutput {
+                invocation_id,
+                update,
+                ..
+            } if invocation_id == "provider-call-live" => output.push(update),
+            _ => {}
+        }
+    }
+    assert!(progress.iter().any(|message| message.contains("Queued")));
+    assert!(progress.iter().any(|message| message.contains("Running")));
+    assert!(
+        progress
+            .iter()
+            .any(|message| message.contains("Validating"))
+    );
+    assert!(output.iter().any(|message| message.contains("started")));
+    assert!(runtime.model_tool_progress.is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_model_tool_wait_drops_its_transient_progress_bridge() {
+    let (runtime, _home) = test_runtime(None);
+    let outcome = runtime
+        .upsert(
+            command_bundle(vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "sleep 30; cat".to_owned(),
+            ]),
+            None,
+        )
+        .await
+        .unwrap();
+    let invocation = tokio::spawn({
+        let runtime = Arc::clone(&runtime);
+        async move {
+            runtime
+                .invoke_from_model_tool(
+                    request(
+                        &outcome.worker.worker_id,
+                        json!({"value":"hello"}),
+                        "cancel-live-progress",
+                    ),
+                    ModelToolProgressTarget {
+                        session_id: "session-live".to_owned(),
+                        invocation_id: "provider-call-cancelled".to_owned(),
+                        tool_name: outcome.worker.tool_name,
+                        worker_name: outcome.worker.name,
+                        trace_id: "trace-live-progress".to_owned(),
+                        root_invocation_id: None,
+                    },
+                )
+                .await
+        }
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime.model_tool_progress.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    invocation.abort();
+    let _ = invocation.await;
+
+    assert!(runtime.model_tool_progress.is_empty());
+    runtime.set_stop_all(true).await.unwrap();
+}
+
+#[tokio::test]
+async fn agent_worker_child_steps_update_only_the_originating_tool_chip() {
+    let (runtime, _home) = test_runtime(None);
+    runtime
+        .orchestrator
+        .init_sequence_counter("session-agent", 0);
+    let mut events = runtime.orchestrator.subscribe();
+    runtime.model_tool_progress.insert(
+        "worker-run-agent".to_owned(),
+        ModelToolProgressTarget {
+            session_id: "session-agent".to_owned(),
+            invocation_id: "provider-call-agent".to_owned(),
+            tool_name: "worker_general_delegate".to_owned(),
+            worker_name: "General Delegate".to_owned(),
+            trace_id: "trace-agent".to_owned(),
+            root_invocation_id: None,
+        },
+    );
+
+    runtime.observe_agent_model_tool_progress(
+        "worker-run-agent",
+        &TronEvent::ToolInvocationStarted {
+            base: crate::shared::protocol::events::BaseEvent::now("child-session"),
+            invocation_id: "child-tool-call".to_owned(),
+            tool_name: "filesystem_read".to_owned(),
+            arguments: None,
+            tool_identity: Default::default(),
+        },
+    );
+
+    let progress = events.recv().await.unwrap();
+    let output = events.recv().await.unwrap();
+    assert!(matches!(
+        progress,
+        TronEvent::ToolInvocationProgress {
+            invocation_id,
+            message: Some(message),
+            ..
+        } if invocation_id == "provider-call-agent" && message == "Using Filesystem read"
+    ));
+    assert!(matches!(
+        output,
+        TronEvent::ToolInvocationOutput {
+            invocation_id,
+            update,
+            ..
+        } if invocation_id == "provider-call-agent" && update == "Started Filesystem read"
+    ));
+}
 
 #[tokio::test]
 async fn causal_ceiling_rejects_before_persisting_an_invocation() {

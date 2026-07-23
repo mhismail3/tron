@@ -6,8 +6,11 @@
 //! duplicating state. `support` owns stateless bounded I/O, artifact integrity,
 //! projection, normalization, and redaction. Scenario tests live in `tests`.
 //! `admission` owns schema-checked durable enqueue, idempotent replay, and
-//! observational waits; `invocation` owns claimed delivery, concurrency, and
+//! observational waits plus the transient bridge to an originating model-tool
+//! chip; `invocation` owns claimed delivery, concurrency, progress phases, and
 //! terminal completion so admission never becomes an execution side channel.
+//! Agent child-session activity is projected only as bounded, redacted stage
+//! labels; raw child content remains in its canonical audit session.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -62,6 +65,41 @@ struct ResidentProcess {
     ready: bool,
     consecutive_health_failures: u8,
     runtime_root: Option<PathBuf>,
+}
+
+/// Transient bridge from one durable worker invocation to the exact
+/// provider/model tool chip that is awaiting it.
+///
+/// The bridge is deliberately in memory: durable worker state owns recovery,
+/// while a live conversation owns only progress presentation for its current
+/// call. Restarted delivery remains correct without reviving a stale chip.
+#[derive(Clone, Debug)]
+struct ModelToolProgressTarget {
+    session_id: String,
+    invocation_id: String,
+    tool_name: String,
+    worker_name: String,
+    trace_id: String,
+    root_invocation_id: Option<String>,
+}
+
+/// Removes a live model-tool bridge even when its awaiting future is cancelled.
+///
+/// The durable worker run may continue or recover independently; a provider
+/// chip that no longer has an awaiting turn must never remain retained by the
+/// process-local presentation map.
+struct RemoveModelToolProgressOnDrop {
+    runtime: Arc<WorkerRuntime>,
+    worker_invocation_id: String,
+}
+
+impl Drop for RemoveModelToolProgressOnDrop {
+    fn drop(&mut self) {
+        let _ = self
+            .runtime
+            .model_tool_progress
+            .remove(&self.worker_invocation_id);
+    }
 }
 
 const RESIDENT_HEALTH_FAILURE_LIMIT: u8 = 3;
@@ -119,6 +157,7 @@ pub struct WorkerRuntime {
     worker_limits: DashMap<String, Arc<Semaphore>>,
     inflight: DashSet<String>,
     invocation_stops: DashMap<String, CancellationToken>,
+    model_tool_progress: DashMap<String, ModelToolProgressTarget>,
     worker_stops: DashMap<String, CancellationToken>,
     execution_stop: Mutex<CancellationToken>,
     residents: DashMap<String, Arc<Mutex<ResidentProcess>>>,
@@ -164,6 +203,7 @@ impl WorkerRuntime {
             worker_limits: DashMap::new(),
             inflight: DashSet::new(),
             invocation_stops: DashMap::new(),
+            model_tool_progress: DashMap::new(),
             worker_stops: DashMap::new(),
             execution_stop: Mutex::new(CancellationToken::new()),
             residents: DashMap::new(),

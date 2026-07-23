@@ -206,6 +206,11 @@
 //! in the canonical session event store under a reserved worker classification:
 //! ordinary chat lists exclude them, exact audit reads remain available, and no
 //! second delegation database exists.
+//! A live model-tool invocation may hold one transient correlation bridge to
+//! its durable worker run. Command and service runners publish queued, running,
+//! and validation phases; agent runners additionally project bounded child-turn
+//! and child-tool stage labels. The bridge is removed at terminal completion
+//! and never changes durable delivery, recovery, routing, or authority.
 //! Presentation metadata is immutable worker-version identity. It binds a
 //! worker to a versioned native/declarative experience and optional suite role;
 //! unsupported or absent bindings remain operable through the generic console.
