@@ -46,6 +46,9 @@ struct ToolEvidencePresentation: Equatable {
         data: ToolInvocationData,
         display: ToolInvocationDisplayModel
     ) -> String {
+        if let workerName = ToolInvocationSurface(identity: data.identity).workerName?.nilIfEmpty {
+            return workerName
+        }
         if let title = ToolPresentation.presentationString("title", for: data.identity)
             ?? ToolPresentation.presentationString("displayName", for: data.identity)
             ?? ToolPresentation.presentationString("chipTitle", for: data.identity) {

@@ -135,7 +135,7 @@ extension ChatViewModel {
             if let msg = result.message { invocation.progressMessage = msg }
             if let pct = result.percent { invocation.progressPercent = pct }
             if !result.identity.isEmpty {
-                invocation.identity = result.identity
+                invocation.identity = invocation.identity.merging(result.identity)
             }
             updateMessage(at: index) { message in
                 message.content = .toolInvocation(invocation)

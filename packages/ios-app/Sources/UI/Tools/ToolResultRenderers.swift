@@ -12,35 +12,201 @@ struct ToolResultRenderer: View {
     }
 
     var body: some View {
-        if let details, let pretty = Self.prettyJSON(details), !pretty.isEmpty {
-            ToolInvocationCodeBlock(text: pretty)
-        } else if looksLikeJSON(content), let pretty = Self.prettyJSONString(content) {
-            ToolInvocationCodeBlock(text: pretty)
+        if let document = ToolStructuredDocument.result(content: content, details: details) {
+            ToolStructuredDocumentView(document: document, tint: tint)
         } else {
-            ToolInvocationCodeBlock(text: content)
+            ToolReadableResultText(text: content, tint: tint)
+        }
+    }
+}
+
+struct ToolStructuredDocumentView: View {
+    let document: ToolStructuredDocument
+    let tint: TintedColors
+
+    var body: some View {
+        ToolStructuredValueView(value: document.root, tint: tint, depth: 0)
+    }
+}
+
+private struct ToolStructuredValueView: View {
+    let value: ToolStructuredValue
+    let tint: TintedColors
+    let depth: Int
+
+    private let visibleLimit = 8
+    private let depthLimit = 3
+
+    var body: some View {
+        switch value {
+        case .object(let fields):
+            objectView(fields)
+        case .array(let values):
+            arrayView(values)
+        case .string(let string):
+            scalarText(string)
+        case .number(let number):
+            scalarText(number)
+        case .boolean(let bool):
+            scalarText(bool ? "Yes" : "No")
+        case .null:
+            scalarText("Not set", secondary: true)
         }
     }
 
-    private func looksLikeJSON(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("{") || trimmed.hasPrefix("[")
+    private func objectView(_ fields: [ToolStructuredField]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(fields.prefix(visibleLimit)).indices, id: \.self) { index in
+                if index > 0 {
+                    Divider()
+                        .overlay(tint.accent.opacity(0.12))
+                }
+                ToolStructuredFieldView(
+                    field: fields[index],
+                    tint: tint,
+                    depth: depth,
+                    depthLimit: depthLimit
+                )
+            }
+            if fields.count > visibleLimit {
+                moreRow(count: fields.count - visibleLimit)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private static func prettyJSON(_ value: [String: AnyCodable]) -> String? {
-        let raw = value.mapValues(\.value)
-        guard JSONSerialization.isValidJSONObject(raw),
-              let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys])
-        else { return nil }
-        return String(data: data, encoding: .utf8)
+    private func arrayView(_ values: [ToolStructuredValue]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if values.isEmpty {
+                scalarText("None", secondary: true)
+            } else {
+                ForEach(Array(values.prefix(visibleLimit)).indices, id: \.self) { index in
+                    ToolStructuredArrayItemView(
+                        index: index,
+                        value: values[index],
+                        tint: tint,
+                        depth: depth,
+                        depthLimit: depthLimit
+                    )
+                }
+                if values.count > visibleLimit {
+                    moreRow(count: values.count - visibleLimit)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private static func prettyJSONString(_ text: String) -> String? {
-        guard let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              JSONSerialization.isValidJSONObject(object),
-              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
-        else { return nil }
-        return String(data: pretty, encoding: .utf8)
+    private func scalarText(_ text: String, secondary: Bool = false) -> some View {
+        Text(text)
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+            .foregroundStyle(secondary ? tint.subtle : .tronTextPrimary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func moreRow(count: Int) -> some View {
+        Text("\(count) more \(count == 1 ? "item" : "items") in raw details")
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(tint.subtle)
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ToolStructuredFieldView: View {
+    let field: ToolStructuredField
+    let tint: TintedColors
+    let depth: Int
+    let depthLimit: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(ToolPresentation.humanizeToolId(field.key))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(tint.subtle)
+
+            if depth >= depthLimit, field.value.containsNestedValues {
+                Text("Additional structured detail is available in the raw result.")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(tint.body)
+            } else {
+                ToolStructuredValueView(value: field.value, tint: tint, depth: depth + 1)
+            }
+        }
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ToolStructuredArrayItemView: View {
+    let index: Int
+    let value: ToolStructuredValue
+    let tint: TintedColors
+    let depth: Int
+    let depthLimit: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if let title = itemTitle {
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(2)
+            } else {
+                Text("Item \(index + 1)")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(tint.subtle)
+            }
+
+            if depth >= depthLimit, value.containsNestedValues {
+                Text("Additional structured detail is available in the raw result.")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(tint.body)
+            } else {
+                ToolStructuredValueView(value: value, tint: tint, depth: depth + 1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(tint.accent.opacity(0.07))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(tint.accent.opacity(0.14), lineWidth: 1)
+                }
+        }
+    }
+
+    private var itemTitle: String? {
+        guard case .object(let fields) = value else { return nil }
+        let preferredKeys = ["title", "name", "label", "summary", "id"]
+        for key in preferredKeys {
+            guard let value = fields.first(where: { $0.key == key })?.value else { continue }
+            switch value {
+            case .string(let text), .number(let text):
+                return text.truncated(to: 100)
+            case .boolean, .null, .object, .array:
+                continue
+            }
+        }
+        return nil
+    }
+}
+
+struct ToolReadableResultText: View {
+    let text: String
+    let tint: TintedColors
+
+    var body: some View {
+        Text(text)
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+            .foregroundStyle(tint.body)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

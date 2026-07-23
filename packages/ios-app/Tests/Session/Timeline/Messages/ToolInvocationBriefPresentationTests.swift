@@ -18,11 +18,132 @@ final class ToolInvocationBriefPresentationTests: XCTestCase {
 
         XCTAssertEqual(brief.title, "Worker List")
         XCTAssertTrue(brief.narrative.contains("completed"))
-        XCTAssertTrue(brief.narrative.contains("returned"))
+        XCTAssertFalse(brief.narrative.contains("{"))
         XCTAssertTrue(brief.resultBody?.contains("Listed 0 persistent workers") == true)
         XCTAssertFalse(brief.narrative.contains("019f3b2f"))
         XCTAssertTrue(brief.evidenceRows.contains { $0.label == "Trace ref" && $0.value == "019f3b2f…0c4f" })
         XCTAssertTrue(brief.technicalRows.contains { $0.label == "Trace" && $0.value.contains("019f3b2f") })
+    }
+
+    func testSurfaceClassificationUsesOnlyEngineOwnedContractMetadata() {
+        let workerIdentity = ToolIdentity(
+            toolName: "worker_work_ledger",
+            presentationHints: [
+                "surfaceKind": "worker",
+                "workerId": "work-ledger",
+                "workerName": "Work Ledger",
+                "workerVersion": "version-2",
+                "runnerKind": "agent"
+            ]
+        )
+        let coreIdentity = ToolIdentity(
+            toolName: "process_run",
+            presentationHints: [
+                "surfaceKind": "core",
+                "primitiveGroup": "host"
+            ]
+        )
+
+        XCTAssertEqual(
+            ToolInvocationSurface(identity: workerIdentity),
+            .worker(
+                .init(
+                    id: "work-ledger",
+                    name: "Work Ledger",
+                    version: "version-2",
+                    runnerKind: "agent"
+                )
+            )
+        )
+        XCTAssertEqual(
+            ToolInvocationSurface(identity: workerIdentity).displayKind,
+            "Agent worker"
+        )
+        XCTAssertEqual(
+            ToolEvidencePresentation(
+                data: testToolInvocation(identity: workerIdentity)
+            ).title,
+            "Work Ledger"
+        )
+        XCTAssertEqual(ToolInvocationSurface(identity: coreIdentity), .core(group: "host"))
+        XCTAssertEqual(
+            ToolInvocationSurface(identity: ToolIdentity(toolName: "worker_looks_like_one")),
+            .unknown
+        )
+    }
+
+    func testPartialLifecycleIdentityDoesNotEraseWorkerPresentationContract() {
+        let started = ToolIdentity(
+            toolName: "worker_general_delegate",
+            traceId: "trace-start",
+            presentationHints: [
+                "surfaceKind": "worker",
+                "workerId": "general-delegate",
+                "workerName": "General Delegate",
+                "runnerKind": "agent"
+            ]
+        )
+        let completed = ToolIdentity(
+            toolName: "worker_general_delegate",
+            rootInvocationId: "root-completed"
+        )
+
+        let merged = started.merging(completed)
+
+        XCTAssertEqual(merged.traceId, "trace-start")
+        XCTAssertEqual(merged.rootInvocationId, "root-completed")
+        XCTAssertEqual(ToolInvocationSurface(identity: merged).workerName, "General Delegate")
+        XCTAssertTrue(ToolInvocationSurface(identity: merged).isAgentWorker)
+    }
+
+    func testStructuredWorkerResultPreservesTypedNestedValues() throws {
+        let invocation = testToolInvocation(
+            arguments: #"{"action":"list_goals","status":"all"}"#,
+            result: #"""
+            {
+              "action": "list_goals",
+              "goals": [
+                {
+                  "id": "goal-1",
+                  "title": "Restore workers",
+                  "active": true,
+                  "completedAt": null
+                }
+              ],
+              "count": 1
+            }
+            """#
+        )
+
+        let request = try XCTUnwrap(ToolStructuredDocument.request(from: invocation))
+        let result = try XCTUnwrap(ToolStructuredDocument.result(from: invocation))
+
+        XCTAssertEqual(
+            request.root,
+            .object([
+                .init(key: "action", value: .string("list_goals")),
+                .init(key: "status", value: .string("all"))
+            ])
+        )
+        XCTAssertEqual(
+            result.root,
+            .object([
+                .init(key: "action", value: .string("list_goals")),
+                .init(key: "count", value: .number("1")),
+                .init(
+                    key: "goals",
+                    value: .array([
+                        .object([
+                            .init(key: "active", value: .boolean(true)),
+                            .init(key: "completedAt", value: .null),
+                            .init(key: "id", value: .string("goal-1")),
+                            .init(key: "title", value: .string("Restore workers"))
+                        ])
+                    ])
+                )
+            ])
+        )
+        XCTAssertNil(ToolStructuredDocument.result(content: "plain result", details: nil))
     }
 
     func testSchemaFailureRedactsOpaqueIdsAtTopLevelAndGivesNextStep() {

@@ -21,11 +21,17 @@ final class ToolInvocationDetailViewTests: XCTestCase {
 
         XCTAssertTrue(source.contains("ToolEvidencePresentation(data: data)"))
         XCTAssertTrue(source.contains("ToolInvocationBriefPresentation(data: data)"))
+        XCTAssertTrue(source.contains("ToolStructuredDocumentView"))
+        XCTAssertTrue(source.contains("progressSection"))
+        XCTAssertTrue(source.contains("ToolProgressJourneyView"))
         XCTAssertTrue(source.contains("ToolRowsDetailLink"))
         XCTAssertTrue(source.contains("ToolRawDetailLink"))
         XCTAssertTrue(source.contains("ToolRowsDetailSheet"))
+        XCTAssertTrue(source.contains(#""Raw request""#))
+        XCTAssertTrue(source.contains(#""Raw result""#))
         XCTAssertFalse(source.contains("DisclosureGroup"))
         XCTAssertFalse(source.contains("ForEach(evidence.sections)"))
+        XCTAssertFalse(source.contains("ToolInvocationCodeBlock(text: body)"))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Target""#))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Action""#))
         XCTAssertFalse(source.contains(#"ToolDetailSection(title: "Runtime Details""#))
@@ -146,7 +152,11 @@ final class ToolInvocationDetailViewTests: XCTestCase {
             durationMs: 86,
             identity: ToolIdentity(
                 toolName: "process_run",
-                traceId: "trace-process"
+                traceId: "trace-process",
+                presentationHints: [
+                    "surfaceKind": "core",
+                    "primitiveGroup": "host"
+                ]
             )
         )
     }

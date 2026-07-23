@@ -412,6 +412,18 @@ struct ToolInvocationDetailSheet: View {
     private var brief: ToolInvocationBriefPresentation {
         ToolInvocationBriefPresentation(data: data)
     }
+    private var surface: ToolInvocationSurface {
+        ToolInvocationSurface(identity: data.identity)
+    }
+    private var structuredRequest: ToolStructuredDocument? {
+        ToolStructuredDocument.request(from: data)
+    }
+    private var structuredResult: ToolStructuredDocument? {
+        ToolStructuredDocument.result(from: data)
+    }
+    private var isActive: Bool {
+        data.status == .generating || data.status == .running
+    }
     private var accent: Color {
         ToolPresentation.statusColor(
             for: data.status,
@@ -429,6 +441,11 @@ struct ToolInvocationDetailSheet: View {
         ) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 20) {
+                    if isActive {
+                        progressSection
+                            .sheetSection()
+                    }
+
                     whatHappenedSection
                         .sheetSection()
 
@@ -437,13 +454,18 @@ struct ToolInvocationDetailSheet: View {
                             .sheetSection()
                     }
 
-                    if !brief.resultRows.isEmpty || brief.resultBody != nil {
+                    if !brief.resultRows.isEmpty || brief.resultBody != nil || structuredResult != nil {
                         resultSection
                             .sheetSection()
                     }
 
-                    if !brief.requestRows.isEmpty {
-                        rowsSection(title: "Request", rows: brief.requestRows, accent: accent)
+                    if !brief.requestRows.isEmpty || structuredRequest != nil {
+                        requestSection
+                            .sheetSection()
+                    }
+
+                    if !data.artifacts.isEmpty {
+                        artifactsSection
                             .sheetSection()
                     }
 
@@ -454,6 +476,86 @@ struct ToolInvocationDetailSheet: View {
                 .padding(.bottom, 28)
             }
         }
+    }
+
+    private var progressSection: some View {
+        ToolDetailSection(title: surface.progressTitle, accent: accent, tint: tint) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(currentProgressMessage)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                            .foregroundStyle(.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(progressSupportText)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                            .foregroundStyle(tint.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    TimelineView(.periodic(from: data.startedAt ?? data.generatedAt ?? Date(), by: 0.25)) { context in
+                        Text(data.formattedElapsed(at: context.date) ?? "Running")
+                            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(tint.accent)
+                            .monospacedDigit()
+                    }
+                }
+
+                if let progressFraction {
+                    ProgressView(value: progressFraction)
+                        .tint(tint.accent)
+                        .accessibilityLabel("Worker progress")
+                        .accessibilityValue("\(Int((progressFraction * 100).rounded())) percent")
+                } else {
+                    ProgressView()
+                        .tint(tint.accent)
+                        .controlSize(.small)
+                }
+
+                ToolProgressJourneyView(steps: display.progressSteps, tint: tint)
+
+                if let liveOutput = data.logs.last?.nilIfEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Latest output")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(tint.subtle)
+                        ToolReadableResultText(
+                            text: String(liveOutput.suffix(1_600)),
+                            tint: tint
+                        )
+                    }
+                    .padding(10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(tint.accent.opacity(0.07))
+                    }
+                }
+            }
+        }
+    }
+
+    private var currentProgressMessage: String {
+        data.progressMessage?.nilIfEmpty
+            ?? (surface.isAgentWorker ? "Agent worker is running" : "\(brief.title) is running")
+    }
+
+    private var progressSupportText: String {
+        if surface.isAgentWorker {
+            return "Current steps and streamed output update here as the child agent reports them."
+        }
+        if surface.isWorker {
+            return "Durable worker status and output update here from the canonical invocation stream."
+        }
+        return "Execution status updates here from the canonical tool lifecycle."
+    }
+
+    private var progressFraction: Double? {
+        guard let percent = data.progressPercent, percent.isFinite else { return nil }
+        let fraction = percent > 1 ? percent / 100 : percent
+        return min(max(fraction, 0), 1)
     }
 
     private var whatHappenedSection: some View {
@@ -501,13 +603,41 @@ struct ToolInvocationDetailSheet: View {
     }
 
     private var resultSection: some View {
-        ToolDetailSection(title: "Result", accent: accent, tint: tint) {
+        ToolDetailSection(title: surface.resultTitle, accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 12) {
                 if !brief.resultRows.isEmpty {
                     ToolMetricStrip(rows: brief.resultRows, tint: tint)
                 }
-                if let body = brief.resultBody {
-                    ToolInvocationCodeBlock(text: body)
+                if let structuredResult {
+                    ToolStructuredDocumentView(document: structuredResult, tint: tint)
+                } else if let body = brief.resultBody {
+                    ToolReadableResultText(text: body, tint: tint)
+                }
+            }
+        }
+    }
+
+    private var requestSection: some View {
+        ToolDetailSection(
+            title: surface.isWorker ? "Worker input" : "Request",
+            accent: accent,
+            tint: tint
+        ) {
+            if surface.isWorker, let structuredRequest {
+                ToolStructuredDocumentView(document: structuredRequest, tint: tint)
+            } else if !brief.requestRows.isEmpty {
+                ToolInlineRows(rows: brief.requestRows, tint: tint)
+            } else if let structuredRequest {
+                ToolStructuredDocumentView(document: structuredRequest, tint: tint)
+            }
+        }
+    }
+
+    private var artifactsSection: some View {
+        ToolDetailSection(title: "Artifacts", accent: .tronPurple, tint: tint) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(data.artifacts, id: \.id) { artifact in
+                    ToolArtifactRow(artifact: artifact)
                 }
             }
         }
@@ -525,8 +655,12 @@ struct ToolInvocationDetailSheet: View {
                     ToolRowsDetailLink(title: "Technical refs", rows: brief.technicalRows, tint: evidenceTint)
                 }
 
-                if let rawPayload = brief.rawPayload {
-                    ToolRawDetailLink(title: "Raw payload", text: rawPayload, tint: evidenceTint)
+                if let rawRequest = brief.rawRequest {
+                    ToolRawDetailLink(title: "Raw request", text: rawRequest, tint: evidenceTint)
+                }
+
+                if let rawResult = brief.rawResult {
+                    ToolRawDetailLink(title: "Raw result", text: rawResult, tint: evidenceTint)
                 }
             }
         }

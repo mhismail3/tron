@@ -72,7 +72,7 @@ final class ToolInvocationCoordinator {
                 existing.payloadJSON = pluginResult.arguments
                 existing.status = .running
                 existing.startedAt = existing.startedAt ?? eventTimestamp
-                existing.identity = pluginResult.identity
+                existing.identity = existing.identity.merging(pluginResult.identity)
                 context.updateMessage(at: existingIndex) { message in
                     message.content = .toolInvocation(existing)
                 }

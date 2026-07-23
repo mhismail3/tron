@@ -442,12 +442,28 @@ client-invented terminal state.
 
 The event cache is reconstruction support, not an authority source. Live and
 stored paths both project the same typed server events into `ChatMessage`.
-Provider direct-tool calls render through generic invocation/result chips;
-“tool” in those UI type names means a provider tool call. Direct typed command vectors render as a
-readable command while the technical detail retains their exact JSON evidence.
-Unbounded raw payloads and technical-reference collections open nested detail
-sheets rather than expanding inside the invocation sheet and displacing its
-summary.
+Provider direct-tool calls use one lifecycle chip, while their detail
+presentation is classified by immutable engine-owned metadata as either a core
+primitive or a projected worker tool. The client never infers worker identity
+from a tool-name prefix. Partial progress and completion events merge into the
+first authoritative identity observation so late events cannot erase the
+worker, version, runner, or primitive-group contract.
+
+The detail sheet is action-first rather than a generic JSON viewer. It shows a
+plain-language outcome and status first; schema-valid worker request/result
+objects become bounded typed forms; core primitives use concise operation rows;
+and artifacts, evidence, technical references, raw request, and raw result move
+through progressive disclosure into nested sheets. Direct typed command
+vectors render as a readable command while the technical detail retains their
+exact JSON evidence. Unbounded raw payloads and technical-reference
+collections never expand inline and displace the summary.
+
+Running calls retain the same sheet identity and update from canonical
+`tool.invocation.progress`, `tool.invocation.output`, and terminal lifecycle
+events. Agent workers receive an explicit progress surface with elapsed time,
+current stage, structured progress, and bounded streamed output when the
+server reports it. The client does not poll worker storage or invent a second
+execution state.
 Failure presentation classifies current schema and policy errors from their
 server evidence without inventing authorization state or retry policy.
 

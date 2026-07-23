@@ -19,6 +19,8 @@ struct ToolInvocationBriefPresentation: Equatable {
     let issue: Issue?
     let evidenceRows: [ToolDisplayRow]
     let technicalRows: [ToolDisplayRow]
+    let rawRequest: String?
+    let rawResult: String?
     let rawPayload: String?
 
     init(data: ToolInvocationData) {
@@ -35,7 +37,7 @@ struct ToolInvocationBriefPresentation: Equatable {
         self.title = title
         self.subtitle = subtitle
         self.headline = Self.headline(for: data.status, title: title, issue: issue)
-        self.narrative = Self.narrative(for: data, title: title, issue: issue, resultBody: resultBody)
+        self.narrative = Self.narrative(for: data, title: title, issue: issue)
         self.factRows = Self.factRows(from: data, display: display)
         self.requestRows = requestRows
         self.resultRows = resultRows
@@ -43,7 +45,9 @@ struct ToolInvocationBriefPresentation: Equatable {
         self.issue = issue
         self.evidenceRows = evidenceRows
         self.technicalRows = display.technicalRows
-        self.rawPayload = [display.prettyArguments, display.prettyResult]
+        self.rawRequest = display.prettyArguments
+        self.rawResult = display.prettyResult
+        self.rawPayload = [self.rawRequest, self.rawResult]
             .compactMap { $0?.nilIfEmpty }
             .joined(separator: "\n\n")
             .nilIfEmpty
@@ -109,8 +113,7 @@ struct ToolInvocationBriefPresentation: Equatable {
     private static func narrative(
         for data: ToolInvocationData,
         title: String,
-        issue: Issue?,
-        resultBody: String?
+        issue: Issue?
     ) -> String {
         if let issue {
             if let nextStep = issue.nextStep {
@@ -120,12 +123,25 @@ struct ToolInvocationBriefPresentation: Equatable {
         }
         switch data.status {
         case .generating, .running:
-            return "Tron is using \(title) and will attach the result when the engine finishes."
-        case .success:
-            if let result = resultBody?.lines.first?.trimmed.nilIfEmpty {
-                return "Tron completed \(title) and returned: \(safeTopLevelText(result, limit: 180))"
+            switch ToolInvocationSurface(identity: data.identity) {
+            case .worker(let worker) where worker.runnerKind == "agent":
+                return "\(title) is working in a durable agent session. Live engine updates appear below until its typed result is ready."
+            case .worker:
+                return "\(title) is running as a durable worker. Live engine updates appear below until its typed result is ready."
+            case .core:
+                return "Tron is using the \(title) core primitive. Live execution evidence appears below until it finishes."
+            case .unknown:
+                return "Tron is using \(title). Live execution evidence appears below until it finishes."
             }
-            return "Tron completed \(title) and recorded engine evidence for this invocation."
+        case .success:
+            switch ToolInvocationSurface(identity: data.identity) {
+            case .worker:
+                return "\(title) completed and returned a schema-validated worker result."
+            case .core:
+                return "Tron completed the \(title) core operation."
+            case .unknown:
+                return "Tron completed \(title) successfully."
+            }
         case .error, .unavailable:
             return "\(title) did not complete. Open the issue and evidence sections for the safe failure details."
         }
@@ -136,7 +152,11 @@ struct ToolInvocationBriefPresentation: Equatable {
         display: ToolInvocationDisplayModel
     ) -> [ToolDisplayRow] {
         var rows = [
-            ToolDisplayRow(label: "Status", value: display.statusText)
+            ToolDisplayRow(label: "Status", value: display.statusText),
+            ToolDisplayRow(
+                label: "Type",
+                value: ToolInvocationSurface(identity: data.identity).displayKind
+            )
         ]
         if let duration = data.formattedDuration {
             rows.append(ToolDisplayRow(label: "Duration", value: duration))
@@ -148,11 +168,18 @@ struct ToolInvocationBriefPresentation: Equatable {
         from data: ToolInvocationData,
         display: ToolInvocationDisplayModel
     ) -> [ToolDisplayRow] {
-        var rows: [ToolDisplayRow] = []
-        if let target = display.targetId?.nilIfEmpty {
-            rows.append(ToolDisplayRow(label: "Target", value: target))
+        var rows: [ToolDisplayRow] = display.requestRows.filter {
+            !$0.isTechnical && !["Target", "Operation", "Action"].contains($0.label)
         }
-        rows.append(contentsOf: display.requestRows.filter { !$0.isTechnical && $0.label != "Target" })
+        if let target = display.targetId?.nilIfEmpty {
+            rows.insert(
+                ToolDisplayRow(
+                    label: "Action",
+                    value: ToolPresentation.humanizeToolId(target)
+                ),
+                at: 0
+            )
+        }
         return deduplicate(rows)
             .map { row in ToolDisplayRow(label: row.label, value: safeTopLevelText(row.value, limit: 180)) }
             .filter { !$0.value.isEmpty }

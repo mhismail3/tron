@@ -82,7 +82,7 @@ extension ChatViewModel {
                 invocation.errorClassification = data.failure.map(ToolErrorClassification.init(failure:))
                 invocation.progressMessage = nil
                 invocation.progressPercent = nil
-                invocation.identity = data.identity
+                invocation.identity = invocation.identity.merging(data.identity)
                 updateMessage(at: index) { message in
                     message.content = .toolInvocation(invocation)
                 }

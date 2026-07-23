@@ -36,7 +36,7 @@ extension ToolInvocationDisplayModel {
         if rows.isEmpty {
             append("Payload", payloadSummary ?? query)
         }
-        append("Operation", target)
+        append("Action", target.map(ToolPresentation.humanizeToolId))
         append("Intent", firstString(["intent"], in: arguments))
         append("Reason", firstString(["reason"], in: arguments))
         if let targetArguments = targetArguments(from: arguments) {
@@ -71,7 +71,8 @@ extension ToolInvocationDisplayModel {
 
         let alreadyShown = Set([
             "command", "cmd", "shellCommand", "executionMode", "mode", "query", "q", "searchQuery", "pattern", "glob",
-            "name", "url", "apiUrl", "endpoint", "path", "filePath", "cwd", "code", "intent", "reason", "why"
+            "name", "url", "apiUrl", "endpoint", "path", "filePath", "cwd", "code", "intent", "reason", "why",
+            "action", "operation", "target"
         ])
         let extraRows = payload
             .filter { key, value in
