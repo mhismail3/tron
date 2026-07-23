@@ -169,6 +169,7 @@ struct WorkerConsoleInteractionTests {
 
         #expect(shell.contains("title: \"Worker runs\""))
         #expect(shell.contains("title: \"Attention\""))
+        #expect(shell.contains("label: \"Unhealthy\""))
         #expect(shell.contains("Text(\"Open delivery audit\")"))
         #expect(detail.contains("private var attention: some View"))
         #expect(detail.contains("private var inboxAudit: some View"))
@@ -180,7 +181,6 @@ struct WorkerConsoleInteractionTests {
 
     private func iosAppRoot(filePath: String = #filePath) -> URL {
         URL(fileURLWithPath: filePath)
-            .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()

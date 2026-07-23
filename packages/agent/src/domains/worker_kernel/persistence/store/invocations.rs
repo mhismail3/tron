@@ -5,6 +5,23 @@ use super::*;
 const MAX_INBOX_CONTEXT_CANDIDATES: u32 = 200;
 const MAX_INBOX_RESULT_PREVIEW_BYTES: usize = 4_096;
 
+// INVARIANT: attention is a live projection over immutable evidence. A
+// successful activation or rollback is verified recovery; merely toggling an
+// existing failed worker back on is not. Resolved errors remain in the inbox
+// audit and invocation ledger but cannot stay in operator Attention or be
+// injected into a later agent context.
+const UNRESOLVED_INBOX_ERROR_SQL: &str = "
+    i.severity='error'
+    AND NOT EXISTS (
+        SELECT 1
+        FROM worker_health recovery
+        WHERE recovery.worker_id=i.worker_id
+          AND recovery.status='healthy'
+          AND recovery.source IN ('activation','rollback')
+          AND recovery.recorded_at>i.created_at
+    )
+";
+
 fn inbox_context_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let result_json = row.get::<_, String>(4)?;
     Ok(json!({
@@ -521,25 +538,26 @@ impl WorkerStore {
         offset: u32,
     ) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
+        let attention_sql = format!(
+            "({UNRESOLVED_INBOX_ERROR_SQL})
+             OR (i.severity!='error'
+                 AND i.context_attached=0
+                 AND COALESCE(r.trigger_kind,'system')!='manual')"
+        );
         let mut statement = connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
                         i.context_attached,i.created_at,COALESCE(r.trigger_kind,'system'),
                         CASE WHEN r.invocation_id IS NULL THEN 0 ELSE 1 END,
-                        CASE WHEN i.severity='error' OR r.invocation_id IS NULL
-                                  OR (i.context_attached=0
-                                      AND COALESCE(r.trigger_kind,'system')!='manual')
-                             THEN 1 ELSE 0 END
+                        CASE WHEN {attention_sql} THEN 1 ELSE 0 END
                  FROM worker_inbox i
                  LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                  WHERE (?1 IS NULL OR i.worker_id=?1)
                     AND (?2 IS NULL OR i.context_attached=?2)
                     AND (?3 IS NULL OR i.severity=?3)
-                    AND (?4=0 OR i.severity='error' OR r.invocation_id IS NULL
-                         OR (i.context_attached=0
-                             AND COALESCE(r.trigger_kind,'system')!='manual'))
-                 ORDER BY i.created_at DESC LIMIT ?5 OFFSET ?6",
-            )
+                    AND (?4=0 OR {attention_sql})
+                 ORDER BY i.created_at DESC LIMIT ?5 OFFSET ?6"
+            ))
             .map_err(|error| error.to_string())?;
         statement
             .query_map(
@@ -600,15 +618,16 @@ impl WorkerStore {
     pub fn pending_inbox_context_candidates(&self, limit: u32) -> Result<Vec<Value>, String> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
                         i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
                  FROM worker_inbox i
                  LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                  JOIN workers w ON w.worker_id=i.worker_id
                  WHERE i.context_attached=0
-                 ORDER BY i.created_at DESC LIMIT ?1",
-            )
+                   AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))
+                 ORDER BY i.created_at DESC LIMIT ?1"
+            ))
             .map_err(|error| error.to_string())?;
         statement
             .query_map(
@@ -631,12 +650,16 @@ impl WorkerStore {
         for inbox_id in inbox_ids {
             let candidate = transaction
                 .query_row(
-                    "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
+                    &format!(
+                        "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
                             i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
                      FROM worker_inbox i
                      LEFT JOIN worker_invocations r ON r.invocation_id=i.invocation_id
                      JOIN workers w ON w.worker_id=i.worker_id
-                     WHERE i.inbox_id=?1 AND i.context_attached=0",
+                     WHERE i.inbox_id=?1
+                       AND i.context_attached=0
+                       AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))"
+                    ),
                     [inbox_id],
                     inbox_context_candidate,
                 )
@@ -664,8 +687,10 @@ impl WorkerStore {
     }
 
     /// Claim notable pending background results for transient prompt attachment.
-    /// Errors are always notable; successful manual calls are already visible
-    /// to their caller and are intentionally omitted.
+    /// Unresolved errors are always notable; verified recovery removes them
+    /// from transient context without deleting their audit evidence. Successful
+    /// manual calls are already visible to their caller and are intentionally
+    /// omitted.
     pub fn take_notable_pending(
         &self,
         relevance_query: Option<&str>,
@@ -678,7 +703,7 @@ impl WorkerStore {
         let query_terms = relevance_query.map(terms).unwrap_or_default();
         let candidates = {
             let mut statement = transaction
-                .prepare(
+                .prepare(&format!(
                     "SELECT i.inbox_id,i.invocation_id,i.worker_id,i.severity,i.result_json,
                             i.created_at,COALESCE(r.trigger_kind,'system'),w.name,w.description
                      FROM worker_inbox i
@@ -686,8 +711,9 @@ impl WorkerStore {
                      JOIN workers w ON w.worker_id=i.worker_id
                      WHERE i.context_attached=0
                         AND (i.severity!='info' OR COALESCE(r.trigger_kind,'system')!='manual')
-                     ORDER BY i.created_at DESC LIMIT 200",
-                )
+                        AND (i.severity!='error' OR ({UNRESOLVED_INBOX_ERROR_SQL}))
+                     ORDER BY i.created_at DESC LIMIT 200"
+                ))
                 .map_err(|error| error.to_string())?;
             statement
                 .query_map([], |row| {

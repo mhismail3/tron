@@ -50,7 +50,7 @@ struct WorkerConsoleDashboardBand: View {
                     HStack(spacing: 8) {
                         metric("Core", viewModel.coreToolCount)
                         metric("Workers", viewModel.enabledCount)
-                        metric("Issues", viewModel.attentionCount)
+                        metric("Unhealthy", viewModel.unhealthyWorkerCount)
                     }
                 }
 
@@ -74,18 +74,18 @@ struct WorkerConsoleDashboardBand: View {
     }
 
     private var summarySymbol: String {
-        viewModel.attentionCount > 0 ? "exclamationmark.triangle" : "bolt.horizontal.circle"
+        viewModel.unhealthyWorkerCount > 0 ? "exclamationmark.triangle" : "bolt.horizontal.circle"
     }
 
     private var summaryColor: Color {
-        viewModel.attentionCount > 0 ? .tronWarning : .tronEmerald
+        viewModel.unhealthyWorkerCount > 0 ? .tronWarning : .tronEmerald
     }
 
     private var summaryDetail: String {
         if viewModel.stopAll { return "Dispatch is paused; durable work remains queued." }
         if viewModel.workers.isEmpty { return "Core ready; create persistent workers conversationally." }
-        if viewModel.attentionCount > 0 {
-            return "\(viewModel.attentionCount) worker\(viewModel.attentionCount == 1 ? " needs" : "s need") review."
+        if viewModel.unhealthyWorkerCount > 0 {
+            return "\(viewModel.unhealthyWorkerCount) worker\(viewModel.unhealthyWorkerCount == 1 ? " needs" : "s need") review."
         }
         return "Core primitives and persistent workers are ready."
     }
@@ -239,7 +239,7 @@ struct WorkerConsoleSheet: View {
                 summaryDivider
                 summaryMetric(value: viewModel.enabledCount, label: "Workers")
                 summaryDivider
-                summaryMetric(value: viewModel.attentionCount, label: "Issues")
+                summaryMetric(value: viewModel.unhealthyWorkerCount, label: "Unhealthy")
             }
 
             if !viewModel.activeEngineHooks.isEmpty {
@@ -425,7 +425,7 @@ struct WorkerConsoleSheet: View {
         if viewModel.stopAll {
             return ("Dispatch paused", "Queued work is durable and ready to resume.", "pause.circle", .tronWarning)
         }
-        if viewModel.attentionCount > 0 {
+        if viewModel.unhealthyWorkerCount > 0 {
             return ("Needs review", "A worker reported non-healthy server state.", "exclamationmark.triangle", .tronWarning)
         }
         if viewModel.workers.isEmpty {

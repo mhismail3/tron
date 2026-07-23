@@ -480,9 +480,13 @@ do not move irrelevant history into model context. `detail: "full"` is an
 explicit operator path capped at 20 records and 8 KiB per retained value; the
 response reports content truncation and a `nextOffset` when older records remain.
 The Engine Activity UI treats runs as the primary execution ledger. Its
-Attention projection contains only failures, system-only records, and pending
-non-manual outcomes; it does not repeat routine successful manual runs. The
-complete inbox remains available through an explicit audit sheet, where
+Attention projection contains only unresolved failures and pending non-manual
+outcomes; it does not repeat routine successful manual runs. A later verified
+healthy activation or rollback resolves every older failure for that worker in
+the live Attention and agent-context projections. Merely enabling the failed
+version is not recovery evidence. Resolution never edits or deletes the failed
+run or delivery record: both remain in the complete inbox available through an
+explicit audit sheet, where
 `contextAttached` truthfully describes whether a result was attached to a later
 agent context—not whether a human opened the record. Both ledgers page on
 demand, so they remain inspectable without one unbounded transport response.

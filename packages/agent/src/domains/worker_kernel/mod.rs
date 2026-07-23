@@ -81,6 +81,11 @@
 //! explicit operator detail request expands at most twenty records and still
 //! caps each retained input, output, or result, preventing durable history from
 //! becoming an unbounded provider-context or transport payload.
+//! Inbox Attention is derived rather than stored: errors remain active until a
+//! later successfully verified activation or rollback for that worker. A plain
+//! enable toggle is not recovery evidence. Resolved errors remain immutable in
+//! run and delivery audit history but are excluded from active Attention and
+//! future agent-context candidates.
 //! The Engine Dashboard exposes active hook ownership. `context_summary`,
 //! `inbox_context`, and `worker_relevance` are production hooks. Each retains a
 //! narrow deterministic recovery path in the kernel so compaction, background

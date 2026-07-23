@@ -738,6 +738,174 @@ fn notable_inbox_claims_background_results_once_and_keeps_manual_results() {
             .count(),
         1
     );
+    store
+        .rollback(&outcome.worker.worker_id, &outcome.version)
+        .unwrap();
+    assert!(
+        store
+            .inbox_filtered_page(Some(&outcome.worker.worker_id), None, None, true, 10, 0)
+            .unwrap()
+            .is_empty(),
+        "verified recovery must remove the resolved system failure from Attention"
+    );
+    let retained = store
+        .inbox_filtered(Some(&outcome.worker.worker_id), None, None, 10)
+        .unwrap();
+    assert_eq!(retained.len(), 3);
+    assert!(retained.iter().any(|item| {
+        item["result"]["phase"] == "resident_supervision" && item["requiresAttention"] == false
+    }));
+}
+
+#[test]
+fn verified_recovery_resolves_invocation_errors_without_erasing_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkerStore::open_without_snapshot(temp.path().to_path_buf()).unwrap();
+    let mut prepared = store.prepare(bundle(), None).unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let initial = store.publish(prepared).unwrap();
+
+    let (failed, _) = store
+        .begin_invocation(
+            &initial.worker.worker_id,
+            &initial.version,
+            &json!({}),
+            "failed-before-update",
+            "trace-failed-before-update",
+            0,
+            "manual",
+        )
+        .unwrap();
+    assert!(store.claim_running(&failed.invocation_id).unwrap());
+    store
+        .mark_failed(
+            &initial.worker.worker_id,
+            "execution",
+            "invalid typed output",
+        )
+        .unwrap();
+    store
+        .complete_invocation(
+            &failed.invocation_id,
+            &initial.worker.worker_id,
+            Err("invalid typed output"),
+        )
+        .unwrap();
+
+    let attention = store
+        .inbox_filtered_page(Some(&initial.worker.worker_id), None, None, true, 10, 0)
+        .unwrap();
+    assert_eq!(attention.len(), 1);
+    assert_eq!(attention[0]["requiresAttention"], true);
+    assert_eq!(store.pending_inbox_context_candidates(10).unwrap().len(), 1);
+
+    store.set_enabled(&initial.worker.worker_id, true).unwrap();
+    assert_eq!(
+        store
+            .inbox_filtered_page(Some(&initial.worker.worker_id), None, None, true, 10, 0,)
+            .unwrap()
+            .len(),
+        1,
+        "an unverified enable toggle cannot resolve a worker failure"
+    );
+
+    let mut updated = bundle();
+    updated.description = "Research a topic across recent verified sources".to_owned();
+    let mut prepared = store
+        .prepare(updated, Some(&initial.worker.worker_id))
+        .unwrap();
+    store.finalize(&mut prepared).unwrap();
+    let activated = store.publish(prepared).unwrap();
+    assert_ne!(activated.version, initial.version);
+    assert!(
+        store
+            .inbox_filtered_page(Some(&initial.worker.worker_id), None, None, true, 10, 0,)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .pending_inbox_context_candidates(10)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .take_notable_pending(Some("recent research"), 10)
+            .unwrap()
+            .is_empty()
+    );
+    let retained = store
+        .inbox_filtered(Some(&initial.worker.worker_id), None, None, 10)
+        .unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0]["severity"], "error");
+    assert_eq!(retained[0]["requiresAttention"], false);
+    assert_eq!(
+        store
+            .invocation(&failed.invocation_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        "failed"
+    );
+
+    let (failed_after_update, _) = store
+        .begin_invocation(
+            &activated.worker.worker_id,
+            &activated.version,
+            &json!({}),
+            "failed-before-rollback",
+            "trace-failed-before-rollback",
+            0,
+            "manual",
+        )
+        .unwrap();
+    assert!(
+        store
+            .claim_running(&failed_after_update.invocation_id)
+            .unwrap()
+    );
+    store
+        .mark_failed(
+            &activated.worker.worker_id,
+            "execution",
+            "regressed typed output",
+        )
+        .unwrap();
+    store
+        .complete_invocation(
+            &failed_after_update.invocation_id,
+            &activated.worker.worker_id,
+            Err("regressed typed output"),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .inbox_filtered_page(Some(&activated.worker.worker_id), None, None, true, 10, 0,)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    store
+        .rollback(&activated.worker.worker_id, &initial.version)
+        .unwrap();
+    assert!(
+        store
+            .inbox_filtered_page(Some(&activated.worker.worker_id), None, None, true, 10, 0,)
+            .unwrap()
+            .is_empty()
+    );
+    let retained = store
+        .inbox_filtered(Some(&activated.worker.worker_id), None, None, 10)
+        .unwrap();
+    assert_eq!(retained.len(), 2);
+    assert!(
+        retained
+            .iter()
+            .all(|item| item["requiresAttention"] == false)
+    );
 }
 
 #[test]

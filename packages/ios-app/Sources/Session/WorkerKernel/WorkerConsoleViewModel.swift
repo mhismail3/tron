@@ -42,7 +42,7 @@ final class WorkerConsoleViewModel {
         workers.filter { $0.enabled && !$0.retired }.count
     }
 
-    var attentionCount: Int {
+    var unhealthyWorkerCount: Int {
         workers.filter {
             WorkerConsolePresentation.status(for: $0).kind == .needsAttention
         }.count

@@ -17,6 +17,7 @@ struct WorkerConsoleViewModelTests {
         #expect(viewModel.workers.map(\.workerId) == ["research"])
         #expect(viewModel.healthyCount == 1)
         #expect(viewModel.enabledCount == 1)
+        #expect(viewModel.unhealthyWorkerCount == 0)
         #expect(repository.snapshotSessionIds.count == 1)
         #expect(repository.snapshotSessionIds[0] == nil)
         #expect(viewModel.availableWorkerTools.map(\.workerId) == ["research"])
@@ -44,6 +45,24 @@ struct WorkerConsoleViewModelTests {
         await viewModel.setEnabled(false, repository: repository, connectionState: .connected)
         #expect(repository.enabledMutations == [false])
         #expect(viewModel.selectedWorker?.enabled == false)
+    }
+
+    @Test("Engine health count describes current worker state, not delivery attention")
+    func engineHealthCountIsCurrentWorkerState() async {
+        let repository = MockWorkerKernelRepository()
+        repository.health = "failed"
+        let viewModel = WorkerConsoleViewModel()
+
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.unhealthyWorkerCount == 1)
+        #expect(viewModel.activityAttention.count == 1)
+
+        repository.health = "healthy"
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.unhealthyWorkerCount == 0)
+        #expect(viewModel.activityAttention.count == 1)
     }
 
     @Test("A retired worker exposes every retained version as a restore action")
@@ -115,6 +134,7 @@ struct WorkerConsoleViewModelTests {
 private final class MockWorkerKernelRepository: WorkerKernelRepository {
     var enabled = true
     var retired = false
+    var health = "healthy"
     var invokedWorkerIds: [String] = []
     var cancelledInvocationIds: [String] = []
     var stoppedWorkerIds: [String] = []
@@ -139,7 +159,7 @@ private final class MockWorkerKernelRepository: WorkerKernelRepository {
             activeVersion: "v1",
             enabled: enabled,
             retired: retired,
-            health: enabled ? "healthy" : "disabled",
+            health: enabled ? health : "disabled",
             triggerCount: 1,
             updatedAt: "2026-07-19T12:00:00Z",
             presentation: nil

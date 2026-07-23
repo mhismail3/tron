@@ -295,10 +295,12 @@ provides:
   retained version (including its last active version);
 - compact recent-run rows that open canonical run-detail sheets with toolbar
   actions; Activity uses runs as the primary execution ledger and shows a
-  separate Attention projection only for failures, system-only records, and
-  pending background outcomes, while an explicit Delivery Audit sheet provides
-  bounded access to every delivery record without duplicating routine manual
-  successes in the timeline;
+  separate Attention projection only for unresolved failures and pending
+  background outcomes. A later verified activation or rollback removes resolved
+  errors from Attention while the explicit Delivery Audit sheet and run ledger
+  retain their immutable evidence. The engine summary labels its independent
+  current-state metric `Unhealthy`, so historical delivery evidence cannot be
+  confused with current worker health;
 - a read-only worker-session transcript sheet launched from run-detail toolbar
   actions; audit transcripts use a read-only native bottom anchor plus a
   bounded LazyVStack settling pass so the newest evidence is visible when the
