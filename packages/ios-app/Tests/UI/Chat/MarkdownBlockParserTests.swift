@@ -180,14 +180,53 @@ final class MarkdownBlockParserTests: XCTestCase {
     func testListLayoutStartsAtMessageLeadingEdgeAndIndentsOnlyByDepth() {
         XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: 0), 0)
         XCTAssertEqual(
+            MarkdownListLayout.contentLeadingIndent(forDepth: 0),
+            MarkdownListLayout.markerWidth + MarkdownListLayout.markerSpacing
+        )
+        XCTAssertEqual(
             MarkdownListLayout.leadingIndent(forDepth: 1),
             MarkdownListLayout.depthIndent
+        )
+        XCTAssertEqual(
+            MarkdownListLayout.leadingIndent(forDepth: 1),
+            MarkdownListLayout.contentLeadingIndent(forDepth: 0),
+            "A child marker should begin exactly where its parent text begins"
         )
         XCTAssertEqual(
             MarkdownListLayout.leadingIndent(forDepth: 2),
             MarkdownListLayout.depthIndent * 2
         )
         XCTAssertEqual(MarkdownListLayout.leadingIndent(forDepth: -1), 0)
+    }
+
+    func testCommonIndentWidthsProduceTheSameSemanticHierarchy() {
+        for indentation in ["  ", "    ", "\t"] {
+            let text = """
+            - Parent
+            \(indentation)- Child
+            \(indentation)\(indentation)- Grandchild
+            - Sibling
+            """
+            let blocks = MarkdownBlockParser.parse(text)
+            guard case .list(let items) = blocks.first?.kind else {
+                return XCTFail("Expected list for indentation \(indentation.debugDescription)")
+            }
+            XCTAssertEqual(items.map(\.depth), [0, 1, 2, 0])
+        }
+    }
+
+    func testChangingIndentWidthDoesNotCreatePhantomLevels() {
+        let text = """
+        - Parent
+            - Four-space child
+          - Two-space sibling child
+        - Sibling
+        """
+        let blocks = MarkdownBlockParser.parse(text)
+        guard case .list(let items) = blocks.first?.kind else {
+            return XCTFail("Expected list")
+        }
+        XCTAssertEqual(items.map(\.depth), [0, 1, 1, 0])
     }
 
     func testIndentedContinuationStaysWithOwningListItem() {

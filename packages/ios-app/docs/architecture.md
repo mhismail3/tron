@@ -479,6 +479,13 @@ short transcript at the top and a long transcript at its latest content. This
 prevents repeated streaming scroll requests from moving an undersized message
 stack between incompatible anchors.
 
+Assistant Markdown lists use the message edge as the marker origin: a root
+bullet or ordered marker is itself flush with neighboring paragraph text, not
+trailing-aligned inside an invisible inset column. Each child marker begins at
+its parent text origin. Two-space, four-space, and tab source indentation are
+normalized into semantic levels so provider formatting differences do not
+change the visible hierarchy.
+
 Compact-width session navigation separates the durable selected session ID from
 the transient presentation identity. Every explicit open receives a fresh
 presentation identity, including a second tap on the same session after

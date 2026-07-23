@@ -3,10 +3,15 @@ import SwiftUI
 enum MarkdownListLayout {
     static let markerWidth: CGFloat = 22
     static let markerSpacing: CGFloat = 8
-    static let depthIndent: CGFloat = 22
+    /// Every nested marker begins where its parent item's text begins.
+    static let depthIndent: CGFloat = markerWidth + markerSpacing
 
     static func leadingIndent(forDepth depth: Int) -> CGFloat {
         CGFloat(max(depth, 0)) * depthIndent
+    }
+
+    static func contentLeadingIndent(forDepth depth: Int) -> CGFloat {
+        leadingIndent(forDepth: depth) + markerWidth + markerSpacing
     }
 }
 
@@ -164,7 +169,9 @@ struct MarkdownBlockView: View {
                     Text(markerText(for: item.marker))
                         .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular)))
                         .foregroundStyle(.tronTextSecondary)
-                        .frame(width: MarkdownListLayout.markerWidth, alignment: .trailing)
+                        // The marker itself—not merely its invisible column—is
+                        // flush with the current hierarchy level.
+                        .frame(width: MarkdownListLayout.markerWidth, alignment: .leading)
                     Text(inlineMarkdown(from: item.content))
                         .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)

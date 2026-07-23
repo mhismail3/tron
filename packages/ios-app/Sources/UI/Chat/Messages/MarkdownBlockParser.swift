@@ -49,6 +49,12 @@ struct MarkdownListItem: Equatable, Hashable {
     var content: String
 }
 
+private struct ParsedMarkdownListLine {
+    let indentColumns: Int
+    let marker: MarkdownListItem.Marker
+    let content: String
+}
+
 // MARK: - Block-Level Markdown Parser
 
 enum MarkdownBlockParser {
@@ -140,14 +146,27 @@ enum MarkdownBlockParser {
             // lists retain hierarchy instead of flattening into top-level rows.
             if parseListItem(line) != nil {
                 var items: [MarkdownListItem] = []
+                var indentationLevels: [Int] = []
+                var lastItemIndentColumns = 0
                 while i < lines.count {
                     let listLine = lines[i]
                     let listTrimmed = listLine.trimmingCharacters(in: .whitespaces)
                     if listTrimmed.isEmpty { break }
-                    if let item = parseListItem(listLine) {
-                        items.append(item)
+                    if let parsed = parseListLine(listLine) {
+                        let depth = normalizedListDepth(
+                            for: parsed.indentColumns,
+                            indentationLevels: &indentationLevels
+                        )
+                        items.append(
+                            MarkdownListItem(
+                                depth: depth,
+                                marker: parsed.marker,
+                                content: parsed.content
+                            )
+                        )
+                        lastItemIndentColumns = parsed.indentColumns
                     } else if !items.isEmpty,
-                              leadingIndentColumns(in: listLine) > items[items.count - 1].depth * 2 {
+                              leadingIndentColumns(in: listLine) > lastItemIndentColumns {
                         items[items.count - 1].content += " " + listTrimmed
                     } else {
                         break
@@ -224,13 +243,21 @@ enum MarkdownBlockParser {
     }
 
     private static func parseListItem(_ line: String) -> MarkdownListItem? {
+        guard let parsed = parseListLine(line) else { return nil }
+        return MarkdownListItem(
+            depth: 0,
+            marker: parsed.marker,
+            content: parsed.content
+        )
+    }
+
+    private static func parseListLine(_ line: String) -> ParsedMarkdownListLine? {
         let columns = leadingIndentColumns(in: line)
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let depth = columns / 2
 
         if ["- ", "* ", "+ "].contains(where: trimmed.hasPrefix) {
-            return MarkdownListItem(
-                depth: depth,
+            return ParsedMarkdownListLine(
+                indentColumns: columns,
                 marker: .unordered,
                 content: String(trimmed.dropFirst(2))
             )
@@ -241,11 +268,42 @@ enum MarkdownBlockParser {
         guard let number = Int(prefix), !prefix.isEmpty else { return nil }
         let afterDot = trimmed.index(after: dotIndex)
         guard afterDot < trimmed.endIndex, trimmed[afterDot] == " " else { return nil }
-        return MarkdownListItem(
-            depth: depth,
+        return ParsedMarkdownListLine(
+            indentColumns: columns,
             marker: .ordered(number),
             content: String(trimmed[trimmed.index(after: afterDot)...])
         )
+    }
+
+    /// Normalize source indentation into semantic hierarchy levels.
+    ///
+    /// Models commonly emit either two spaces, four spaces, or a tab for one
+    /// nested level. Distinct increasing indentation establishes one new level
+    /// regardless of its raw width; returning to a prior width restores that
+    /// level. This avoids visually doubling four-space Markdown indentation.
+    private static func normalizedListDepth(
+        for columns: Int,
+        indentationLevels: inout [Int]
+    ) -> Int {
+        guard let current = indentationLevels.last else {
+            indentationLevels = [columns]
+            return 0
+        }
+
+        if columns > current {
+            indentationLevels.append(columns)
+            return indentationLevels.count - 1
+        }
+
+        while let last = indentationLevels.last, last > columns {
+            indentationLevels.removeLast()
+        }
+        if let exact = indentationLevels.lastIndex(of: columns) {
+            return exact
+        }
+
+        indentationLevels.append(columns)
+        return indentationLevels.count - 1
     }
 
     private static func leadingIndentColumns(in line: String) -> Int {
