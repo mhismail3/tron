@@ -18,7 +18,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
+use super::types::{OutputItemType, ResponsesError, ResponsesSseEvent, SseEventType};
 use crate::domains::model::providers::shared::provider::{ProviderError, ProviderResult};
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::domains::model::providers::{
@@ -108,16 +108,25 @@ fn process_stream_event(event: &ResponsesSseEvent, state: &mut StreamState) -> V
 
 fn provider_terminal_error(event: &ResponsesSseEvent) -> ProviderError {
     let (code, message) = match event.event_type {
-        SseEventType::Failed => event.response.as_ref().and_then(|response| {
-            response
-                .error
-                .as_ref()
-                .map(|error| (error.code.clone(), error.message.clone()))
-        }),
-        SseEventType::Error => Some((
-            event.code.clone(),
-            event.message.clone().unwrap_or_default(),
-        )),
+        SseEventType::Failed => event
+            .response
+            .as_ref()
+            .and_then(|response| response.error.as_ref().map(provider_error_parts)),
+        SseEventType::Error => {
+            let nested = event.error.as_ref().map(provider_error_parts);
+            Some((
+                event
+                    .code
+                    .clone()
+                    .or_else(|| nested.as_ref().and_then(|(code, _)| code.clone())),
+                event
+                    .message
+                    .clone()
+                    .filter(|message| !message.trim().is_empty())
+                    .or_else(|| nested.map(|(_, message)| message))
+                    .unwrap_or_default(),
+            ))
+        }
         _ => None,
     }
     .unwrap_or_else(|| (None, String::new()));
@@ -146,6 +155,13 @@ fn provider_terminal_error(event: &ResponsesSseEvent) -> ProviderError {
         code,
         retryable,
     }
+}
+
+fn provider_error_parts(error: &ResponsesError) -> (Option<String>, String) {
+    (
+        error.code.clone().or_else(|| error.error_type.clone()),
+        error.message.clone(),
+    )
 }
 
 /// Handle `response.output_text.delta` — emit `TextStart` on first delta, then `TextDelta`.

@@ -245,6 +245,9 @@ pub struct ResponsesResponse {
 /// Error details carried by a failed Responses API response.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResponsesError {
+    /// Provider error type when it is distinct from or substitutes for `code`.
+    #[serde(default, rename = "type")]
+    pub error_type: Option<String>,
     /// Provider-specific error code.
     #[serde(default)]
     pub code: Option<String>,
@@ -290,6 +293,9 @@ pub struct ResponsesSseEvent {
     /// Error message on a top-level `error` stream event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Nested error envelope used by some Responses-compatible streaming paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ResponsesError>,
     /// Full response (for `response.completed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<ResponsesResponse>,

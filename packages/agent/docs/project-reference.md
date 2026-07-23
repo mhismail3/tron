@@ -717,6 +717,14 @@ progress differently without parsing model-facing names or maintaining a
 second tool catalog. Result-owned presentation hints may add visual detail
 without erasing the pinned fixed/worker identity.
 
+Exact tool output remains in durable execution evidence. Before any provider
+request, textual tool results larger than 32 KiB are replaced in model context
+by a deterministic prefix/suffix projection carrying the original byte count
+and SHA-256 digest. The same projection is applied to reconstructed history, so
+a previously persisted large process, file, web, or worker result cannot
+repeatedly break a resumed model turn. This provider boundary does not reduce
+the complete operator/audit record.
+
 The provider-visible function description contains only version-stable purpose,
 active version, and provenance. Success evidence lives in a durable, rebuildable
 observation overlay. Completing a run updates that overlay rather than

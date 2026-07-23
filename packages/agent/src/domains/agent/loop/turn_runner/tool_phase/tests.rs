@@ -124,6 +124,35 @@ fn durable_completion_redacts_one_time_credentials_but_leaves_live_result_intact
     assert!(provider_result_text(&result.result).contains(token));
 }
 
+#[test]
+fn oversized_completion_retains_exact_audit_output_and_bounded_model_context() {
+    let invocation = ToolInvocationDraft::new("call-large", "process_run", Map::new());
+    let raw = format!(r#"{{"stdout":"{}","exitCode":0}}"#, "QUFB".repeat(235_000));
+    let result = make_exec_result(ToolResultBody::Text(raw.clone()));
+    let provider_text = super::super::turn_context::project_provider_result_text(
+        &provider_result_text(&result.result),
+    );
+
+    let payload = executed_completion_payload(
+        &invocation,
+        &result,
+        &provider_text,
+        Some("run-large"),
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(payload["content"].as_str(), Some(raw.as_str()));
+    let model_context = payload["modelContextContent"]
+        .as_str()
+        .expect("oversized result should have a separate model projection");
+    assert!(model_context.len() <= super::super::turn_context::MAX_PROVIDER_TOOL_RESULT_BYTES);
+    assert!(model_context.contains("Tron model-context projection"));
+    assert!(model_context.contains(&format!("originalBytes={}", raw.len())));
+    assert_ne!(model_context, raw);
+}
+
 struct PhasePersistenceHarness {
     emitter: Arc<EventEmitter>,
     persister: EventPersister,

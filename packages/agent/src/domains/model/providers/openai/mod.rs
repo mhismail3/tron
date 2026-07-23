@@ -42,9 +42,10 @@
 //!   never sees a partial tool invocation.
 //! - Responses terminal events are exhaustive at the provider boundary:
 //!   `response.completed` and `response.incomplete` finalize canonical output,
-//!   while `response.failed` and top-level `error` preserve provider code and
-//!   message as typed provider failures. A trailing terminal frame is processed
-//!   even when the connection closes without a final newline.
+//!   while `response.failed` and top-level `error` preserve provider code/type
+//!   and message as typed provider failures across both flat and nested error
+//!   envelopes. A trailing terminal frame is processed even when the connection
+//!   closes without a final newline.
 //! - The converter normalises tool results into Responses input items so the
 //!   provider can resume multi-turn tool loops without leaking provider-specific
 //!   payload details into the runtime.

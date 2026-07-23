@@ -4,11 +4,22 @@ use crate::domains::agent::context::context_manager::ContextManager;
 use crate::shared::protocol::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::messages::{Message, ToolResultMessageContent, UserMessageContent};
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use tracing::debug;
 
 const MAX_RELEVANCE_QUERY_CHARS: usize = 12_000;
 const MAX_RELEVANCE_SEGMENT_CHARS: usize = 2_500;
 const MAX_EVOLVING_MESSAGES: usize = 8;
+pub(super) const MAX_PROVIDER_TOOL_RESULT_BYTES: usize = 32 * 1_024;
+
+const PROVIDER_RESULT_PREFIX: &str = "\
+[Tron model-context projection: this tool result was too large to send to the model in full.";
+const PROVIDER_RESULT_GUIDANCE: &str = "\
+ The complete result remains in durable tool evidence. Use a narrower read or a file/worker \
+reference instead of relaying large or binary content through model context.]\n\
+--- retained prefix ---\n";
+const PROVIDER_RESULT_SUFFIX: &str = "\n--- retained suffix ---\n";
 
 pub(super) fn build_turn_context(
     context_manager: &mut ContextManager,
@@ -19,7 +30,7 @@ pub(super) fn build_turn_context(
     context_manager.set_tools(primitive_surface.clone());
 
     let mut context = context_manager.build_base_context();
-    context.messages = context_manager.get_messages_arc();
+    context.messages = project_provider_messages(context_manager.get_messages_arc());
     context.tools = Some(primitive_surface);
     context.server_origin = server_origin.map(String::from);
 
@@ -29,6 +40,126 @@ pub(super) fn build_turn_context(
     );
 
     context
+}
+
+/// Bound textual tool evidence before it crosses any provider boundary.
+///
+/// Exact output stays in the durable completion event. This projection is
+/// deterministic and carries the original digest so a model can recognize
+/// that it is seeing retained evidence rather than the complete result.
+pub(super) fn project_provider_result_text(text: &str) -> String {
+    if text.len() <= MAX_PROVIDER_TOOL_RESULT_BYTES {
+        return text.to_owned();
+    }
+
+    let digest = hex::encode(Sha256::digest(text.as_bytes()));
+    let metadata = format!(" originalBytes={} sha256={digest}.", text.len());
+    let framing_bytes = PROVIDER_RESULT_PREFIX.len()
+        + metadata.len()
+        + PROVIDER_RESULT_GUIDANCE.len()
+        + PROVIDER_RESULT_SUFFIX.len();
+    let retained_budget = MAX_PROVIDER_TOOL_RESULT_BYTES.saturating_sub(framing_bytes);
+    let prefix_budget = retained_budget / 2;
+    let suffix_budget = retained_budget.saturating_sub(prefix_budget);
+    let prefix = utf8_prefix(text, prefix_budget);
+    let suffix = utf8_suffix(text, suffix_budget);
+
+    let projected = format!(
+        "{PROVIDER_RESULT_PREFIX}{metadata}{PROVIDER_RESULT_GUIDANCE}{prefix}\
+         {PROVIDER_RESULT_SUFFIX}{suffix}"
+    );
+    debug_assert!(projected.len() <= MAX_PROVIDER_TOOL_RESULT_BYTES);
+    projected
+}
+
+fn project_provider_messages(messages: Arc<[Message]>) -> Arc<[Message]> {
+    if !messages.iter().any(message_requires_projection) {
+        return messages;
+    }
+
+    messages
+        .iter()
+        .cloned()
+        .map(|message| match message {
+            Message::ToolResult {
+                invocation_id,
+                content,
+                is_error,
+            } => Message::ToolResult {
+                invocation_id,
+                content: project_tool_result_content(content),
+                is_error,
+            },
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
+fn message_requires_projection(message: &Message) -> bool {
+    let Message::ToolResult { content, .. } = message else {
+        return false;
+    };
+    match content {
+        ToolResultMessageContent::Text(text) => text.len() > MAX_PROVIDER_TOOL_RESULT_BYTES,
+        ToolResultMessageContent::Blocks(blocks) => {
+            blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ToolResultContent::Text { text } => Some(text.len()),
+                    ToolResultContent::Image { .. } => None,
+                })
+                .fold(0usize, usize::saturating_add)
+                > MAX_PROVIDER_TOOL_RESULT_BYTES
+        }
+    }
+}
+
+fn project_tool_result_content(content: ToolResultMessageContent) -> ToolResultMessageContent {
+    match content {
+        ToolResultMessageContent::Text(text) => {
+            ToolResultMessageContent::Text(project_provider_result_text(&text))
+        }
+        ToolResultMessageContent::Blocks(blocks) => {
+            let joined_text = blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ToolResultContent::Text { text } => Some(text.as_str()),
+                    ToolResultContent::Image { .. } => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if joined_text.len() <= MAX_PROVIDER_TOOL_RESULT_BYTES {
+                return ToolResultMessageContent::Blocks(blocks);
+            }
+
+            let mut projected = vec![ToolResultContent::Text {
+                text: project_provider_result_text(&joined_text),
+            }];
+            projected.extend(
+                blocks
+                    .into_iter()
+                    .filter(|block| matches!(block, ToolResultContent::Image { .. })),
+            );
+            ToolResultMessageContent::Blocks(projected)
+        }
+    }
+}
+
+fn utf8_prefix(text: &str, max_bytes: usize) -> &str {
+    let mut end = max_bytes.min(text.len());
+    while !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    &text[..end]
+}
+
+fn utf8_suffix(text: &str, max_bytes: usize) -> &str {
+    let mut start = text.len().saturating_sub(max_bytes);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
 }
 
 /// Build a bounded task-intent query from the current user turn and the model's
@@ -199,5 +330,52 @@ mod tests {
         assert!(query.chars().count() <= MAX_RELEVANCE_QUERY_CHARS);
         assert!(!query.contains("secret-binary"));
         assert!(!query.contains("hidden-plan-marker"));
+    }
+
+    #[test]
+    fn oversized_tool_result_projection_is_bounded_deterministic_and_utf8_safe() {
+        let original = format!(
+            "begin:{}:end",
+            "🦌quoted\\content".repeat(MAX_PROVIDER_TOOL_RESULT_BYTES)
+        );
+
+        let first = project_provider_result_text(&original);
+        let second = project_provider_result_text(&original);
+
+        assert_eq!(first, second);
+        assert!(first.len() <= MAX_PROVIDER_TOOL_RESULT_BYTES);
+        assert!(first.contains("Tron model-context projection"));
+        assert!(first.contains(&format!("originalBytes={}", original.len())));
+        assert!(first.contains(&hex::encode(Sha256::digest(original.as_bytes()))));
+        assert!(first.contains("begin:"));
+        assert!(first.contains(":end"));
+        assert!(std::str::from_utf8(first.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn historical_oversized_tool_results_are_projected_before_provider_context() {
+        let oversized = format!("prefix-{}-suffix", "A".repeat(900_000));
+        let messages: Arc<[Message]> = vec![
+            Message::user("transcribe the local fixture"),
+            Message::ToolResult {
+                invocation_id: "call-large".to_owned(),
+                content: ToolResultMessageContent::Text(oversized.clone()),
+                is_error: None,
+            },
+        ]
+        .into();
+
+        let projected = project_provider_messages(messages);
+        let Message::ToolResult { content, .. } = &projected[1] else {
+            panic!("expected tool result");
+        };
+        let ToolResultMessageContent::Text(text) = content else {
+            panic!("expected text result");
+        };
+
+        assert!(text.len() <= MAX_PROVIDER_TOOL_RESULT_BYTES);
+        assert!(text.contains("prefix-"));
+        assert!(text.contains("-suffix"));
+        assert!(!text.contains(&oversized));
     }
 }

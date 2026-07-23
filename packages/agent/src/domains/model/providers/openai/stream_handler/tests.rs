@@ -1065,6 +1065,32 @@ fn vector_store_timeout_is_retryable_stream_api_error() {
 }
 
 #[test]
+fn nested_top_level_error_preserves_provider_details() {
+    let mut state = create_stream_state();
+    let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_request_error",
+            "message": "Function output exceeded the accepted request size."
+        }
+    }))
+    .unwrap();
+
+    let error = process_provider_stream_event(&event, &mut state).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ProviderError::StreamApi {
+            message,
+            code: Some(code),
+            retryable: false,
+        } if code == "invalid_request_error"
+            && message == "Function output exceeded the accepted request size."
+    ));
+}
+
+#[test]
 fn top_level_error_becomes_typed_stream_api_error() {
     let mut state = create_stream_state();
     let event: ResponsesSseEvent = serde_json::from_value(serde_json::json!({

@@ -307,7 +307,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                         &tool_ctx,
                     )
                     .await;
-                    let provider_text = provider_result_text(&result.result);
+                    let provider_text = super::turn_context::project_provider_result_text(
+                        &provider_result_text(&result.result),
+                    );
                     info!(
                         component = "agent.tool",
                         agent_event = "tool_invocation_execute_completed",

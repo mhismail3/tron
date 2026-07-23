@@ -27,9 +27,9 @@ pub(crate) use models::{
 #[cfg(test)]
 pub(crate) use models::{all_openai_models_api_json, canonical_openai_model_id};
 pub(crate) use responses::{
-    MessageContent, OutputItemType, ReasoningConfig, ResponseTextConfig, ResponsesInputItem,
-    ResponsesOutputItem, ResponsesRequest, ResponsesResponse, ResponsesSseEvent,
-    ResponsesToolEntry, SseEventType,
+    MessageContent, OutputItemType, ReasoningConfig, ResponseTextConfig, ResponsesError,
+    ResponsesInputItem, ResponsesOutputItem, ResponsesRequest, ResponsesResponse,
+    ResponsesSseEvent, ResponsesToolEntry, SseEventType,
 };
 #[cfg(test)]
 pub(crate) use responses::{OutputContent, ResponsesUsage};

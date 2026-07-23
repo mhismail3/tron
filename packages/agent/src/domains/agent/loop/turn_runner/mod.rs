@@ -1,10 +1,11 @@
 //! Turn runner — orchestrates a single turn: context → stream → tools → events.
 //!
 //! Tool-result content is the only provider-portable channel back into
-//! the model. Engine/UI/audit metadata stays in `details`, but model-facing
-//! execution evidence is projected into result text by `tool_phase::projection`
-//! so every provider can reason about direct tool results without gaining a
-//! second tool API. Every
+//! the model. Engine/UI/audit metadata stays in `details`. Exact textual output
+//! remains durable while `turn_context` deterministically bounds the
+//! model-facing projection for both newly executed and reconstructed results,
+//! so every provider can reason about direct tool evidence without accepting
+//! unbounded local, web, worker, or binary-derived payloads. Every
 //! provider turn resolves its tool surface from a bounded evolving intent query
 //! containing the current user request, visible assistant plan, tool names and
 //! arguments, and text results; binary data and hidden thinking are excluded.
