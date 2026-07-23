@@ -40,7 +40,7 @@ extension ChatView {
                 )
                 TypewriterText(
                     text: presentationMode == .workerAudit
-                        ? "Worker Session"
+                        ? readOnlyTitle ?? "Worker Session"
                         : presentedSession?.displayTitle ?? "Chat",
                     font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold),
                     color: presentationMode == .workerAudit ? .tronPurple : .tronEmerald

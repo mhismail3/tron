@@ -324,14 +324,9 @@ struct SessionContextSheet: View {
     private var workerActivitySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Workers in this session")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text("Runs started here, including nested work from the same causal trace.")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                }
+                Text("Workers in this session")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
                 Spacer()
                 if isLoadingWorkerRuns, sessionWorkerRuns.isEmpty {
                     ProgressView()
@@ -343,6 +338,11 @@ struct SessionContextSheet: View {
                         .foregroundStyle(.tronCyan)
                 }
             }
+
+            Text("Runs started here, including nested work from the same causal trace.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
 
             if let workerLoadError {
                 Text(workerLoadError)
@@ -527,14 +527,15 @@ private struct SessionWorkerRunRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 9) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: symbol)
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(color)
-                    .frame(width: 18)
+                    .frame(width: 28)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(workerName)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(1)
                     Text(WorkerConsolePresentation.runSummary(run)
@@ -559,10 +560,10 @@ private struct SessionWorkerRunRow: View {
                 }
                 .lineLimit(1)
             }
-            .padding(10)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .sectionFill(color, cornerRadius: 10, subtle: true, interactive: true)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .sectionFill(color, cornerRadius: 12, subtle: true, interactive: true)
         }
         .buttonStyle(.plain)
     }

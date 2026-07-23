@@ -64,6 +64,7 @@ struct ChatView: View {
     let sessionId: String
     let services: ChatSessionServices
     let presentationMode: ChatPresentationMode
+    let readOnlyTitle: String?
     var onToggleSidebar: (() -> Void)?
 
     init(
@@ -71,11 +72,13 @@ struct ChatView: View {
         sessionId: String,
         scrollTarget: Binding<ScrollTarget?> = .constant(nil),
         onToggleSidebar: (() -> Void)? = nil,
-        presentationMode: ChatPresentationMode = .interactiveSession
+        presentationMode: ChatPresentationMode = .interactiveSession,
+        readOnlyTitle: String? = nil
     ) {
         self.sessionId = sessionId
         self.services = services
         self.presentationMode = presentationMode
+        self.readOnlyTitle = readOnlyTitle
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
         _viewModel = State(wrappedValue: ChatViewModel(services: services, sessionId: sessionId))

@@ -72,6 +72,48 @@ struct ModelPickerStateTests {
         }
     }
 
+    // MARK: - Presentation Policy Tests
+
+    @Test("Dark phone medium detent gets a readability backdrop")
+    func darkPhoneMediumDetentGetsReadabilityBackdrop() {
+        #expect(ModelPickerPresentation.readabilityBackdropOpacity(
+            isDark: true,
+            isPhone: true,
+            isMediumDetent: true
+        ) == 0.62)
+        #expect(ModelPickerPresentation.readabilityBackdropOpacity(
+            isDark: true,
+            isPhone: true,
+            isMediumDetent: false
+        ) == 0)
+        #expect(ModelPickerPresentation.readabilityBackdropOpacity(
+            isDark: false,
+            isPhone: true,
+            isMediumDetent: true
+        ) == 0)
+        #expect(ModelPickerPresentation.readabilityBackdropOpacity(
+            isDark: true,
+            isPhone: false,
+            isMediumDetent: true
+        ) == 0)
+    }
+
+    @Test("OpenAI uses a readable neutral accent only in dark mode")
+    func openAIUsesReadableNeutralAccentOnlyInDarkMode() {
+        #expect(ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: "openai-codex",
+            isDark: true
+        ))
+        #expect(!ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: "openai-codex",
+            isDark: false
+        ))
+        #expect(!ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: "anthropic",
+            isDark: true
+        ))
+    }
+
     /// Create test model info
     static func makeModelInfo(
         id: String,

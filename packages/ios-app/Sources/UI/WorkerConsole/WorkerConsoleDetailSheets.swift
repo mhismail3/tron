@@ -1,5 +1,44 @@
 import SwiftUI
 
+enum WorkerRunTranscriptDestination: Equatable {
+    case workerSession(String)
+    case originSession(String)
+
+    static func resolve(
+        agentSessionId: String?,
+        originSessionId: String?
+    ) -> WorkerRunTranscriptDestination? {
+        if let agentSessionId, !agentSessionId.isEmpty {
+            return .workerSession(agentSessionId)
+        }
+        if let originSessionId, !originSessionId.isEmpty {
+            return .originSession(originSessionId)
+        }
+        return nil
+    }
+
+    var sessionId: String {
+        switch self {
+        case let .workerSession(sessionId), let .originSession(sessionId):
+            sessionId
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .workerSession: "Worker Session"
+        case .originSession: "Session Chat"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .workerSession: "Open worker session"
+        case .originSession: "Open session chat"
+        }
+    }
+}
+
 /// Stable sheet destination for unbounded JSON and other technical payloads.
 struct WorkerJSONDetailSheet: View {
     let title: String
@@ -177,6 +216,13 @@ struct WorkerRunDetailSheet: View {
     @State private var showAuditSession = false
     @State private var confirmCancel = false
 
+    private var transcriptDestination: WorkerRunTranscriptDestination? {
+        WorkerRunTranscriptDestination.resolve(
+            agentSessionId: run.agentSessionId,
+            originSessionId: run.originSessionId
+        )
+    }
+
     private var color: Color {
         switch WorkerConsolePresentation.normalized(run.status) {
         case "completed", "succeeded": .tronSuccess
@@ -218,11 +264,11 @@ struct WorkerRunDetailSheet: View {
                     SheetTitle(title: "Worker Run", color: color)
                 }
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    if run.agentSessionId != nil {
+                    if let transcriptDestination {
                         SheetPrimaryActionButton(
                             icon: "text.bubble",
                             accent: .tronPurple,
-                            accessibilityLabel: "Open worker session"
+                            accessibilityLabel: transcriptDestination.accessibilityLabel
                         ) {
                             showAuditSession = true
                         }
@@ -242,8 +288,11 @@ struct WorkerRunDetailSheet: View {
                 }
             }
             .sheet(isPresented: $showAuditSession) {
-                if let sessionId = run.agentSessionId {
-                    WorkerAuditSessionSheet(sessionId: sessionId)
+                if let transcriptDestination {
+                    WorkerAuditSessionSheet(
+                        sessionId: transcriptDestination.sessionId,
+                        title: transcriptDestination.title
+                    )
                 }
             }
             .confirmationDialog(
@@ -316,6 +365,10 @@ struct WorkerRunDetailSheet: View {
                     WorkerMetadataDivider()
                     row("Worker session", sessionId, code: true)
                 }
+                if let sessionId = run.originSessionId {
+                    WorkerMetadataDivider()
+                    row("Origin session", sessionId, code: true)
+                }
                 WorkerMetadataDivider()
                 row("Trace", run.traceId, code: true)
                 WorkerMetadataDivider()
@@ -343,17 +396,19 @@ struct WorkerRunDetailSheet: View {
     }
 }
 
-/// Read-only presentation for an agent-runner child session.
+/// Read-only presentation for a worker child session or the originating chat.
 struct WorkerAuditSessionSheet: View {
     @Environment(\.dependencies) private var dependencies
     let sessionId: String
+    var title: String = "Worker Session"
 
     var body: some View {
         NavigationStack {
             ChatView(
                 services: dependencies.chatSessionServices,
                 sessionId: sessionId,
-                presentationMode: .workerAudit
+                presentationMode: .workerAudit,
+                readOnlyTitle: title
             )
             .id(sessionId)
         }

@@ -6,10 +6,25 @@ enum ModelPickerReasoningVisibility {
     }
 }
 
+enum ModelPickerPresentation {
+    static func readabilityBackdropOpacity(
+        isDark: Bool,
+        isPhone: Bool,
+        isMediumDetent: Bool
+    ) -> Double {
+        isDark && isPhone && isMediumDetent ? 0.62 : 0
+    }
+
+    static func usesHighContrastNeutral(providerId: String, isDark: Bool) -> Bool {
+        isDark && providerId == "openai-codex"
+    }
+}
+
 // MARK: - Provider Section
 
 struct ProviderSection: View {
     let provider: ProviderGroup
+    let accentColor: Color
     let currentModelId: String
     let readOnly: Bool
     let isExpanded: Bool
@@ -25,17 +40,17 @@ struct ProviderSection: View {
                 Image(provider.icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(provider.color)
+                    .foregroundStyle(accentColor)
                     .frame(maxWidth: 22, maxHeight: 22)
                     .frame(width: 26, height: 26)
                 Text(provider.displayName)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(provider.color)
+                    .foregroundStyle(accentColor)
                 Spacer()
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(provider.color.opacity(0.6))
+                    .foregroundStyle(accentColor.opacity(0.75))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
             }
             .padding(12)
@@ -48,7 +63,7 @@ struct ProviderSection: View {
                     ForEach(provider.families) { family in
                         FamilySection(
                             family: family,
-                            providerColor: provider.color,
+                            providerColor: accentColor,
                             currentModelId: currentModelId,
                             readOnly: readOnly,
                             isExpanded: expandedFamilies.contains(family.id),
@@ -71,7 +86,7 @@ struct ProviderSection: View {
             }
         }
         .clipped()
-        .sectionFill(provider.color, interactive: false)
+        .sectionFill(accentColor, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

@@ -509,7 +509,12 @@ automatic-compaction status, the existing model catalog/switch operation, and
 durable originating session. Because causal descendants preserve the root
 session id, this includes direct and nested worker activity while keeping each
 agent runner's hidden child-session id available only in the canonical run
-detail. Fork confirmation is a native animated liquid-glass sheet rather than
+detail. Session sections share the same compact header typography and card
+geometry; worker rows do not introduce a separate dashboard visual scale.
+Run detail opens the agent child transcript when one exists and otherwise
+falls back to the originating session chat, always through the same read-only
+sheet so inspecting worker evidence does not navigate away from the current
+context. Fork confirmation is a native animated liquid-glass sheet rather than
 an abrupt dialog overlay.
 Session actions are disabled while disconnected, compacting, or running a turn.
 There is no parallel context-control repository, resource/action audit,
@@ -544,6 +549,13 @@ catalog cache and one coalesced in-flight request. Opening Providers therefore
 does not repeat live Ollama discovery; explicit refresh still bypasses cached
 truth, while endpoint changes cancel and disown any prior-endpoint request
 before loading the new endpoint.
+
+The phone model picker preserves the translucent liquid-glass medium detent.
+In dark mode only, that detent adds a bounded dark readability underlay so
+content behind the sheet cannot wash out model metadata. The OpenAI neutral
+accent also resolves to the standard high-contrast secondary-text token in
+dark mode. The large detent remains the canonical opaque surface, and light
+mode and iPad presentation retain their existing appearance.
 
 Provider cards share one leading-icon and trailing-action column contract.
 Provider names and row labels therefore remain left-aligned across differing

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Model Picker Sheet
 
@@ -12,12 +13,14 @@ struct ModelPickerSheet: View {
     let onSelect: (ModelInfo) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var expandedProviders: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @State private var expandedDetails: Set<String> = []
     @State private var showReasoningPopover = false
     @State private var pendingModelId: String = ""
     @State private var hasCommitted = false
+    @State private var selectedDetent: PresentationDetent = .medium
 
     private var providerGroups: [ProviderGroup] {
         ModelFilteringService.organizeByProviderFamily(models)
@@ -45,7 +48,7 @@ struct ModelPickerSheet: View {
         guard let model = selectedModelInfo else { return .tronEmerald }
         for group in providerGroups {
             let contains = group.families.contains { $0.models.contains { $0.id == model.id } }
-            if contains { return group.color }
+            if contains { return displayColor(for: group) }
         }
         return .tronEmerald
     }
@@ -58,6 +61,7 @@ struct ModelPickerSheet: View {
                         ForEach(providerGroups) { provider in
                             ProviderSection(
                                 provider: provider,
+                                accentColor: displayColor(for: provider),
                                 currentModelId: pendingModelId.isEmpty ? currentModelId : pendingModelId,
                                 readOnly: readOnly,
                                 isExpanded: expandedProviders.contains(provider.id),
@@ -109,7 +113,20 @@ struct ModelPickerSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .background {
+            Color.tronBackground
+                .opacity(ModelPickerPresentation.readabilityBackdropOpacity(
+                    isDark: colorScheme == .dark,
+                    isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+                    isMediumDetent: selectedDetent == .medium
+                ))
+                .ignoresSafeArea()
+        }
+        .adaptivePresentationDetents(
+            [.medium, .large],
+            selection: $selectedDetent,
+            ipadSizing: .largeForm
+        )
         .onDisappear {
             commitSelection()
         }
@@ -172,6 +189,13 @@ struct ModelPickerSheet: View {
         case "max": return "Max"
         default: return level.capitalized
         }
+    }
+
+    private func displayColor(for provider: ProviderGroup) -> Color {
+        ModelPickerPresentation.usesHighContrastNeutral(
+            providerId: provider.id,
+            isDark: colorScheme == .dark
+        ) ? .tronTextSecondary : provider.color
     }
 
     private func commitSelection() {

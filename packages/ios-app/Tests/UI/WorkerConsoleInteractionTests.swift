@@ -3,6 +3,36 @@ import Testing
 @testable import TronMobile
 
 struct WorkerConsoleInteractionTests {
+    @Test("Worker run transcript prefers the child session and falls back to the originating chat")
+    func workerRunTranscriptResolution() {
+        #expect(
+            WorkerRunTranscriptDestination.resolve(
+                agentSessionId: "child-session",
+                originSessionId: "origin-session"
+            ) == .workerSession("child-session")
+        )
+        #expect(
+            WorkerRunTranscriptDestination.resolve(
+                agentSessionId: nil,
+                originSessionId: "origin-session"
+            ) == .originSession("origin-session")
+        )
+        #expect(
+            WorkerRunTranscriptDestination.resolve(
+                agentSessionId: "",
+                originSessionId: ""
+            ) == nil
+        )
+        #expect(
+            WorkerRunTranscriptDestination.originSession("origin-session").title
+                == "Session Chat"
+        )
+        #expect(
+            WorkerRunTranscriptDestination.workerSession("child-session").accessibilityLabel
+                == "Open worker session"
+        )
+    }
+
     @Test("Engine containers do not use trailing navigation chevrons")
     func engineContainersOmitTrailingChevrons() throws {
         let workerRoot = iosAppRoot().appendingPathComponent("Sources/UI/WorkerConsole")
@@ -136,6 +166,7 @@ struct WorkerConsoleInteractionTests {
 
         #expect(details.contains("WorkerAuditSessionSheet"))
         #expect(details.contains("presentationMode: .workerAudit"))
+        #expect(details.contains("readOnlyTitle: title"))
         #expect(chat.contains("reconstructReadOnlyTranscript"))
         #expect(chat.contains("if presentationMode == .interactiveSession"))
         #expect(chat.contains("if presentationMode == .workerAudit"))
