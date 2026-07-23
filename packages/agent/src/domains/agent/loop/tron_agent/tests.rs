@@ -179,6 +179,18 @@ impl ModelResponder for PersistentAdaptationResponder {
                     .iter()
                     .find(|tool| tool.name == "worker_upsert")
                     .expect("worker_upsert tool schema");
+                for required_guidance in [
+                    "Canonical authoring protocol",
+                    "call worker_upsert once",
+                    "complete authoritative authoring contract",
+                    "Never inspect or modify Tron databases",
+                    "report a concrete engine-contract gap",
+                ] {
+                    assert!(
+                        upsert.description.contains(required_guidance),
+                        "primary agent did not receive worker-authoring guidance: {required_guidance}"
+                    );
+                }
                 let bundle = &upsert.parameters.properties.as_ref().unwrap()["bundle"];
                 assert_eq!(bundle["additionalProperties"], false);
                 assert_eq!(

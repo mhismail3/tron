@@ -187,6 +187,15 @@ internal databases, credential stores, executable strings, runtime files, or
 private transport endpoints. Ordinary temporary source authoring, dependency
 acquisition, and smoke tests remain expected worker-creation work.
 
+The same model-visible operation description owns the canonical protocol for
+every future worker: optionally inspect public worker context, design the
+complete typed bundle from the public schema, author and exercise staged source,
+call one atomic upsert, then verify through the returned identity and public
+worker tools. Database, credential, binary, lock-file, runtime-file, and private
+endpoint inspection are never contract-discovery or activation steps. If the
+public schema cannot express required behavior, the agent reports a concrete
+engine-contract gap instead of guessing or probing for hidden machinery.
+
 All synchronous semantic hooks have a sixty-second lifecycle ceiling. Timeout
 cancels the invocation and disables the hook owner through the same failure
 path as any other post-activation worker error; it cannot hold compaction,
@@ -617,8 +626,9 @@ Fixed kernel operations are direct typed tools. There
 is no wrapper operation field. `worker_upsert` publishes the complete bundle
 schema—including every runner, trigger, dependency lock, named-secret binding,
 test, health check, provenance record, and routing field—to the model. Its tool
-description owns command-runner I/O, automatic checksum locking, and the
-deterministic `files/` and `../dependencies/<name>` layout. The optional
+description owns the ordered public authoring protocol, command-runner I/O,
+automatic checksum locking, and the deterministic `files/` and
+`../dependencies/<name>` layout. The optional
 `sourceDirectory` transport imports an already-authored local tree without
 requiring its contents to be copied through tool JSON.
 

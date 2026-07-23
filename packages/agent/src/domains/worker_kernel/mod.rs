@@ -81,6 +81,12 @@
 //! `worker_upsert` bundle contract. Worker authors never need to inspect
 //! internal databases, auth material, server binaries, or private transport
 //! shapes to discover an engine hook.
+//! The same provider-neutral tool contract owns the complete worker-authoring
+//! protocol for every runner and trigger. It directs agents through public
+//! discovery, staged source, one atomic upsert, and public verification. A
+//! missing public behavior is reported as an engine-contract gap rather than
+//! inferred through database, credential, binary, lock-file, runtime-file, or
+//! private-endpoint inspection.
 //! Inbox policy sees only bounded redacted previews. Its selected ids are
 //! validated against the candidate set and claimed all-or-none before its
 //! narrative enters provider context, so concurrent sessions cannot inject a

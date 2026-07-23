@@ -30,7 +30,7 @@ pub(super) fn worker_bundle_schema() -> Value {
     json!({
         "type":"object",
         "additionalProperties":false,
-        "description":"Complete self-contained persistent worker bundle. No external proposal, installer, binding, or private source documentation is required.",
+        "description":"Complete self-contained persistent worker bundle. This public schema is authoritative: no external proposal, installer, binding, private source documentation, database inspection, binary inspection, or private endpoint discovery is required. If it cannot express required behavior, report an engine-contract gap instead of probing Tron internals.",
         "required":[
             "schemaVersion","name","description","inputSchema","outputSchema",
             "runner","provenance"

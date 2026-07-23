@@ -22,6 +22,18 @@ pub(crate) use manifest::{core_primitive_for_function, core_primitives};
 use response::{open_response, response_schema, worker_id_schema};
 
 const WORKER: &str = "worker_kernel";
+const WORKER_UPSERT_DESCRIPTION: &str = "\
+Create or improve a persistent worker in one atomic validate, test, activate operation. \
+Canonical authoring protocol: (1) use worker_discover, worker_list, or worker_inspect only when existing-worker context is useful; semantic overlap is also checked during upsert; \
+(2) design the complete typed bundle from this public operation schema, including runner, triggers, named-secret bindings, provenance, smoke tests, and health checks; \
+(3) author and exercise source in a temporary directory with the public host tools, then pass sourceDirectory instead of echoing files into the call; \
+(4) call worker_upsert once to import, validate, dependency-lock, smoke-test, atomically publish, activate, and project the direct tool; \
+(5) use the returned worker id/version and public worker tools to verify behavior. \
+This operation description and request schema are the complete authoritative authoring contract. Never inspect or modify Tron databases, auth stores, binaries, runtime files, lock files, or private server endpoints to infer schemas, activate a worker, or discover hidden steps. \
+If a required behavior is absent from the public contract, report a concrete engine-contract gap instead of guessing or probing internals. Inspect external sources and user workspace data only when they are inputs to the worker's useful behavior. \
+Imported source is published as non-executable text: command runners and smoke/health commands use exact argv without shell parsing, start in files/, and must invoke scripts through an explicit interpreter such as python3 or bash. They read typed JSON from stdin and emit JSON on stdout. \
+A fetched dependency <name> is available at ../dependencies/<name>; its optional install command runs inside that dependency directory first. A dependency may omit checksum; worker_upsert fetches it and seals the actual digest into the immutable bundle. \
+Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them. bundle.engineHooks contains the complete authoritative engine-hook contracts.";
 pub(crate) const ENGINE_SURFACE_SNAPSHOT_FUNCTION: &str = "engine::surface_snapshot";
 pub(crate) const CONTEXT_SUMMARY_FUNCTION: &str = "worker_kernel::context_summary";
 pub(crate) const SESSION_TITLE_FUNCTION: &str = "worker_kernel::session_title";
@@ -162,7 +174,7 @@ pub(super) fn function_definitions() -> crate::engine::Result<Vec<FunctionDefini
                 "predecessorWorkerId":{"type":"string"}
             }
         }),
-        "Create or improve a persistent worker in one atomic validate, test, activate operation. Author source in a temporary directory and pass sourceDirectory instead of echoing files into the call. Imported source is published as non-executable text: command runners and smoke/health commands use exact argv without shell parsing, start in files/, and must invoke scripts through an explicit interpreter such as python3 or bash. They read typed JSON from stdin and emit JSON on stdout; fetched dependency <name> is available at ../dependencies/<name>, and its optional install command runs inside that dependency directory first. A dependency may omit checksum; this operation fetches it and seals the actual digest into the immutable bundle. Engine-event input supplies typed defaults; matching top-level event payload keys declared by inputSchema override them. For engine hooks, bundle.engineHooks declares the complete authoritative worker-facing contracts; do not reverse-engineer internal databases, auth stores, binaries, or private endpoints.",
+        WORKER_UPSERT_DESCRIPTION,
     )?);
     specs.push(spec(
         "worker_kernel::discover",

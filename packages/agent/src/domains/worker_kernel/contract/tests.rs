@@ -90,6 +90,23 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
         .into_iter()
         .find(|definition| definition.id.as_str() == "worker_kernel::upsert")
         .expect("worker upsert contract");
+    let description = &upsert.description;
+    for required_guidance in [
+        "Canonical authoring protocol",
+        "worker_discover, worker_list, or worker_inspect",
+        "semantic overlap is also checked during upsert",
+        "author and exercise source in a temporary directory",
+        "call worker_upsert once",
+        "public worker tools to verify behavior",
+        "complete authoritative authoring contract",
+        "Never inspect or modify Tron databases, auth stores, binaries, runtime files, lock files, or private server endpoints",
+        "report a concrete engine-contract gap instead of guessing or probing internals",
+    ] {
+        assert!(
+            description.contains(required_guidance),
+            "missing model-visible worker-authoring guidance: {required_guidance}"
+        );
+    }
     let schema = upsert.request_schema.expect("upsert request schema");
     let bundle = &schema["properties"]["bundle"];
     assert_eq!(bundle["additionalProperties"], false);
@@ -98,6 +115,12 @@ fn upsert_exposes_the_complete_worker_bundle_authoring_schema() {
             .as_str()
             .unwrap_or_default()
             .contains("self-contained")
+    );
+    assert!(
+        bundle["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("report an engine-contract gap instead of probing Tron internals")
     );
     assert!(
         bundle["required"]
